@@ -162,6 +162,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 static_buf.copy_from_slice(bg);
                 desk.compose_static(static_buf, info, time);
                 back.copy_from_slice(static_buf);
+                // Draw the animating window(s) into `back` BEFORE the full blit
+                // so the framebuffer never shows a frame with them missing.
+                // Without this, closing a *visible* window blanks it for one
+                // full-screen blit (a visible blink) before the damage pass
+                // redraws it — the static layer excludes animating windows.
+                let dmg = desk.render_anim_frame(back, static_buf, info, Rect::new(0, 0, 0, 0));
                 framebuffer.buffer_mut()[..n].copy_from_slice(back);
                 {
                     let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
@@ -170,7 +176,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 prev_cursor = desk.cursor();
                 static_valid = true;
                 last_sig = sig;
-                prev_damage = Rect::new(0, 0, 0, 0);
+                prev_damage = dmg;
             }
 
             if tick_changed || cursor_moved {
