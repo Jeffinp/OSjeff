@@ -30,6 +30,10 @@ impl<T> SpinLock<T> {
     }
 
     pub fn lock(&self) -> SpinGuard<'_, T> {
+        // Disable interrupts while the lock is held so a timer preemption can't
+        // switch to a thread that then deadlocks waiting on the same lock.
+        let ints_enabled = x86_64::instructions::interrupts::are_enabled();
+        x86_64::instructions::interrupts::disable();
         while self
             .locked
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -37,12 +41,16 @@ impl<T> SpinLock<T> {
         {
             core::hint::spin_loop();
         }
-        SpinGuard { lock: self }
+        SpinGuard {
+            lock: self,
+            ints_enabled,
+        }
     }
 }
 
 pub struct SpinGuard<'a, T> {
     lock: &'a SpinLock<T>,
+    ints_enabled: bool,
 }
 
 impl<T> core::ops::Deref for SpinGuard<'_, T> {
@@ -61,6 +69,9 @@ impl<T> core::ops::DerefMut for SpinGuard<'_, T> {
 impl<T> Drop for SpinGuard<'_, T> {
     fn drop(&mut self) {
         self.lock.locked.store(false, Ordering::Release);
+        if self.ints_enabled {
+            x86_64::instructions::interrupts::enable();
+        }
     }
 }
 

@@ -101,8 +101,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut last_sig = 0u32;
     let mut prev_damage = Rect::new(0, 0, 0, 0);
 
-    // Animation timestep advanced once per timer tick (PIT runs at 100 Hz).
-    const DT: f32 = 0.08;
+    // Wall-clock animation speed, independent of how often the GUI thread is
+    // scheduled (the timer preempts round-robin across all threads).
+    const DT_PER_TICK: f32 = 0.03;
 
     loop {
         let rt = rtc::now();
@@ -112,12 +113,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             s: rt.s,
         };
 
-        // Pace animation by the hardware timer (100 Hz) instead of loop speed.
+        // Advance animation by real elapsed timer ticks.
         let tick = interrupts::ticks();
-        let tick_changed = tick != last_tick;
+        let tick_delta = tick.saturating_sub(last_tick);
         last_tick = tick;
+        let tick_changed = tick_delta > 0;
         if tick_changed {
-            desk.animate(DT);
+            desk.animate(tick_delta as f32 * DT_PER_TICK);
         }
 
         // Drain all pending PS/2 events.
@@ -208,8 +210,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         was_anim = any_anim;
 
-        // Hand the CPU to the background worker threads (round-robin).
-        sched::yield_now();
+        // No explicit yield: the timer preempts this thread round-robin with the
+        // workers automatically.
     }
 }
 
@@ -280,27 +282,22 @@ fn blit_rect(
     }
 }
 
-// Background worker threads: do a short slice of work, then yield. They exist
-// to demonstrate real concurrent kernel threads (visible in the Task Manager).
+// Background worker threads. They never yield — the timer ISR preempts them —
+// which is exactly what proves the scheduler is preemptive. Visible in the Task
+// Manager with their real accumulated CPU time.
 extern "C" fn worker_a() -> ! {
     let mut acc: u64 = 0;
     loop {
-        for i in 0..400_000u64 {
-            acc = acc.wrapping_add(i);
-        }
+        acc = acc.wrapping_add(1);
         core::hint::black_box(acc);
-        sched::yield_now();
     }
 }
 
 extern "C" fn worker_b() -> ! {
     let mut acc: u64 = 1;
     loop {
-        for i in 1..400_000u64 {
-            acc = acc.wrapping_mul(i | 1);
-        }
+        acc = acc.wrapping_mul(3);
         core::hint::black_box(acc);
-        sched::yield_now();
     }
 }
 
