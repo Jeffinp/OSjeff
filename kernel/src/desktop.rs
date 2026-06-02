@@ -422,56 +422,150 @@ impl Desktop {
 
     // ---- rendering ----
 
+    /// Full recompose of the whole scene into `back`. Used when not animating
+    /// (input/clock changes). The animation path uses the cheaper damage-based
+    /// [`render_anim_frame`] instead.
     pub fn render(&self, back: &mut [u8], info: bootloader_api::info::FrameBufferInfo, time: Time) {
-        let bpp = info.bytes_per_pixel;
-        let scratch: &mut [u8] = unsafe {
-            core::slice::from_raw_parts_mut(
-                core::ptr::addr_of_mut!(SCRATCH) as *mut u8,
-                SCRATCH_BYTES,
-            )
-        };
         let mut c = Canvas::new(back, info);
-
         for i in 0..WIN_COUNT {
             let w = self.order[i];
             if !self.windows[w].visible {
                 continue;
             }
             let focused = self.focused() == Some(w);
-            let anim = self.windows[w].anim;
-            let yoff = anim.map(|a| a.slide(SLIDE_PX) as i32).unwrap_or(0);
-            let mut rect = self.windows[w].rect;
-            rect.y += yoff;
-
-            // Shadows only when settled (not dragging, not animating): keeps drag
-            // fast and avoids shadow "leftovers" during a fade.
-            let shadow = self.drag.is_none() && anim.is_none();
-
-            match anim {
-                Some(a) => {
-                    let x = rect.x.max(0) as usize;
-                    let y = rect.y.max(0) as usize;
-                    let (rw, rh) = (rect.w as usize, rect.h as usize);
-                    if rw * rh * bpp <= scratch.len() {
-                        // Snapshot the backdrop (lower windows + wallpaper), draw
-                        // the window, then fade it toward that snapshot — so the
-                        // window behind shows through instead of the wallpaper.
-                        c.snapshot_region(scratch, x, y, rw, rh);
-                        self.draw_window(&mut c, w, rect, focused, shadow);
-                        let alpha = (a.alpha() * 256.0) as u16;
-                        c.blend_from_local(scratch, x, y, rw, rh, alpha);
-                    } else {
-                        self.draw_window(&mut c, w, rect, focused, shadow);
-                    }
-                }
-                None => self.draw_window(&mut c, w, rect, focused, shadow),
+            let rect = self.window_box(w);
+            match self.windows[w].anim {
+                Some(_) => self.draw_animating(&mut c, w, rect, focused),
+                None => self.draw_window(&mut c, w, rect, focused, self.drag.is_none()),
             }
         }
-
         draw_clock(&mut c, time);
         if let Some((mx, my)) = self.menu {
             self.draw_menu(&mut c, mx, my);
         }
+    }
+
+    /// On-screen rect of window `w`, including its current animation slide.
+    fn window_box(&self, w: usize) -> Rect {
+        let mut r = self.windows[w].rect;
+        if let Some(a) = self.windows[w].anim {
+            r.y += a.slide(SLIDE_PX) as i32;
+        }
+        r
+    }
+
+    /// Draws an animating window: snapshot the backdrop, draw the window (no
+    /// shadow), then fade toward the snapshot so lower windows show through.
+    fn draw_animating(&self, c: &mut Canvas, w: usize, rect: Rect, focused: bool) {
+        let alpha = match self.windows[w].anim {
+            Some(a) => (a.alpha() * 256.0) as u16,
+            None => return,
+        };
+        let scratch = scratch_slice();
+        let x = rect.x.max(0) as usize;
+        let y = rect.y.max(0) as usize;
+        let (rw, rh) = (rect.w as usize, rect.h as usize);
+        if rw * rh * c.bpp() <= scratch.len() {
+            c.snapshot_region(scratch, x, y, rw, rh);
+            self.draw_window(c, w, rect, focused, false);
+            c.blend_from_local(scratch, x, y, rw, rh, alpha);
+        } else {
+            self.draw_window(c, w, rect, focused, false);
+        }
+    }
+
+    /// True while any window is opening or closing.
+    pub fn has_animation(&self) -> bool {
+        (0..WIN_COUNT).any(|w| self.windows[w].visible && self.windows[w].anim.is_some())
+    }
+
+    /// Compact signature of the *static* scene (which windows are visible /
+    /// animating, and their z-order). When it changes, the cached static layer
+    /// must be rebuilt.
+    pub fn anim_signature(&self) -> u32 {
+        let mut s = 0u32;
+        for w in 0..WIN_COUNT {
+            if self.windows[w].visible {
+                s |= 1 << w;
+            }
+            if self.windows[w].anim.is_some() {
+                s |= 1 << (w + 8);
+            }
+        }
+        for (i, &w) in self.order.iter().enumerate() {
+            s |= (w as u32 & 0x3) << (16 + i * 2);
+        }
+        s
+    }
+
+    /// Composes the static layer (non-animating windows + clock) into `buf`,
+    /// which must already contain the wallpaper. Done once per animation.
+    pub fn compose_static(&self, buf: &mut [u8], info: bootloader_api::info::FrameBufferInfo, time: Time) {
+        let mut c = Canvas::new(buf, info);
+        for i in 0..WIN_COUNT {
+            let w = self.order[i];
+            if self.windows[w].visible && self.windows[w].anim.is_none() {
+                let focused = self.focused() == Some(w);
+                self.draw_window(&mut c, w, self.windows[w].rect, focused, true);
+            }
+        }
+        draw_clock(&mut c, time);
+    }
+
+    /// Renders one animation frame using damage tracking: only the rectangle
+    /// covering the animating window(s) (this frame and last) is touched.
+    /// Returns that damage rect (caller blits just this region).
+    pub fn render_anim_frame(
+        &self,
+        back: &mut [u8],
+        static_buf: &[u8],
+        info: bootloader_api::info::FrameBufferInfo,
+        prev_damage: Rect,
+    ) -> Rect {
+        let (sw, sh) = (info.width as i32, info.height as i32);
+
+        // Damage = last frame's region + every animating window's box now.
+        let mut damage = prev_damage;
+        let mut lowest_anim_z = WIN_COUNT;
+        for i in 0..WIN_COUNT {
+            let w = self.order[i];
+            if self.windows[w].visible && self.windows[w].anim.is_some() {
+                damage = damage.union(&self.window_box(w));
+                lowest_anim_z = lowest_anim_z.min(i);
+            }
+        }
+        let damage = damage.clamped_to(sw, sh);
+        if damage.is_empty() {
+            return damage;
+        }
+
+        // Restore the cached static scene over the damaged region.
+        copy_region(back, static_buf, info, damage);
+
+        // Draw the animating windows on top.
+        {
+            let mut c = Canvas::new(back, info);
+            for i in 0..WIN_COUNT {
+                let w = self.order[i];
+                if self.windows[w].visible && self.windows[w].anim.is_some() {
+                    let focused = self.focused() == Some(w);
+                    self.draw_animating(&mut c, w, self.window_box(w), focused);
+                }
+            }
+        }
+
+        // Re-assert any static window that sits above an animating one (so the
+        // animating window doesn't paint over a window that is in front of it).
+        for i in (lowest_anim_z + 1)..WIN_COUNT {
+            let w = self.order[i];
+            if self.windows[w].visible && self.windows[w].anim.is_none() {
+                if let Some(clip) = self.windows[w].rect.intersection(&damage) {
+                    copy_region(back, static_buf, info, clip);
+                }
+            }
+        }
+
+        damage
     }
 
     fn draw_menu(&self, c: &mut Canvas, mx: i32, my: i32) {
@@ -840,6 +934,34 @@ fn draw_clock(c: &mut Canvas, t: Time) {
 fn two(buf: &mut [u8], idx: usize, val: u8) {
     buf[idx] = b'0' + (val / 10) % 10;
     buf[idx + 1] = b'0' + val % 10;
+}
+
+/// Mutable view of the window-compositing scratch buffer.
+fn scratch_slice() -> &'static mut [u8] {
+    unsafe {
+        core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(SCRATCH) as *mut u8, SCRATCH_BYTES)
+    }
+}
+
+/// Copy the rectangle `r` from `src` into `dst` (identical framebuffer layout).
+fn copy_region(dst: &mut [u8], src: &[u8], info: bootloader_api::info::FrameBufferInfo, r: Rect) {
+    let bpp = info.bytes_per_pixel;
+    let stride = info.stride;
+    let x = r.x.max(0) as usize;
+    let y = r.y.max(0) as usize;
+    if x >= info.width || y >= info.height {
+        return;
+    }
+    let x_end = (r.right().max(0) as usize).min(info.width);
+    let y_end = (r.bottom().max(0) as usize).min(info.height);
+    if x_end <= x {
+        return;
+    }
+    let row_len = (x_end - x) * bpp;
+    for row in y..y_end {
+        let off = (row * stride + x) * bpp;
+        dst[off..off + row_len].copy_from_slice(&src[off..off + row_len]);
+    }
 }
 
 /// Right-align `v` as decimal digits in `buf[start..start+width]`.

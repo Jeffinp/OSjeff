@@ -160,14 +160,18 @@ Estado atual: **92 testes**, ~**98% de regiões / ~97% de linhas**.
 
 O compositor evita redesenhar a tela inteira quando dá:
 
+- **Animações por damage tracking + layer cache**: ao animar uma janela, a cena
+  "estática" (wallpaper + janelas paradas, com sombras) é composta **uma vez**
+  num buffer cacheado; cada frame só restaura/redesenha/blita o **retângulo
+  danificado** ao redor da janela animando. Custo O(janela), independente do
+  número de janelas e do tamanho da tela. (Antes, cada frame recompunha as
+  sombras alpha de todas as janelas paradas — travava com várias abertas.)
 - **Cursor por dirty-rect**: mover o mouse só restaura o retângulo antigo do
-  cursor (a partir do back buffer sem cursor) e redesenha o sprite — nada de
-  copiar ~16 MB por movimento. Recompõe a cena cheia só quando ela muda
-  (janela, texto, relógio, animação, menu).
-- **`fill_rect` por linha**: caminho rápido RGB/BGR escreve bytes direto, sem
-  passar pixel a pixel por `put` (bounds + match de formato).
+  cursor e redesenha o sprite — nada de copiar a tela inteira por movimento.
+- **`fill_rect`/`fill_round_rect` por linha**: caminho rápido RGB/BGR escreve
+  bytes por span, sem passar pixel a pixel por `put`.
+- **Animação paceada pelo timer PIT** (100 Hz), não pela velocidade do loop.
 - **Release com LTO**: `opt-level=3`, `lto=true`, `codegen-units=1`.
-- **Animações paceadas por TSC** (`rdtsc`), sem depender de timer interrupt.
 
 ## Gravar em hardware real (pen drive)
 

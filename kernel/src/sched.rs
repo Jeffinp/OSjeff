@@ -64,7 +64,13 @@ pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) -> usize {
     // Build the initial stack so the first switch "returns" into `entry`:
     //   [rsp -> r15=0, r14=0, r13=0, r12=0, rbx=0, rbp=0, entry]
     // The switch routine pops the six callee-saved regs then `ret`s.
-    let entry_slot = (top & !0xF) - 8; // ret leaves rsp 16-aligned
+    //
+    // The SysV ABI requires rsp ≡ 8 (mod 16) at a function's entry (i.e. the
+    // stack is 16-aligned *before* the call pushes the return address). After
+    // our `ret` pops `entry`, rsp == entry_slot + 8, so entry_slot must be
+    // 16-aligned. Getting this wrong faults on the first SSE (movaps) access —
+    // tolerated by TCG but a #GP under hardware virtualization (WHPX).
+    let entry_slot = (top & !0xF) - 16; // 16-aligned
     let rsp = entry_slot - 8 * 6;
     unsafe {
         (entry_slot as *mut u64).write(entry as usize as u64);

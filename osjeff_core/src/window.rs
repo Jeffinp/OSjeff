@@ -62,6 +62,61 @@ impl Rect {
         let y = self.y.clamp(0, (sh - TITLE_H).max(0));
         (x, y)
     }
+
+    pub fn right(&self) -> i32 {
+        self.x + self.w
+    }
+
+    pub fn bottom(&self) -> i32 {
+        self.y + self.h
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.w <= 0 || self.h <= 0
+    }
+
+    /// Smallest rectangle covering both `self` and `other` (damage-region
+    /// merge: keep a single extents rect instead of many fragments).
+    pub fn union(&self, other: &Rect) -> Rect {
+        if self.is_empty() {
+            return *other;
+        }
+        if other.is_empty() {
+            return *self;
+        }
+        let x = self.x.min(other.x);
+        let y = self.y.min(other.y);
+        let right = self.right().max(other.right());
+        let bottom = self.bottom().max(other.bottom());
+        Rect::new(x, y, right - x, bottom - y)
+    }
+
+    /// Overlap of two rectangles, or `None` if they don't intersect.
+    pub fn intersection(&self, other: &Rect) -> Option<Rect> {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let right = self.right().min(other.right());
+        let bottom = self.bottom().min(other.bottom());
+        if right > x && bottom > y {
+            Some(Rect::new(x, y, right - x, bottom - y))
+        } else {
+            None
+        }
+    }
+
+    /// Clip the rectangle to the `0..sw × 0..sh` screen bounds.
+    pub fn clamped_to(&self, sw: i32, sh: i32) -> Rect {
+        let x = self.x.max(0);
+        let y = self.y.max(0);
+        let right = self.right().min(sw);
+        let bottom = self.bottom().min(sh);
+        Rect::new(x, y, (right - x).max(0), (bottom - y).max(0))
+    }
+
+    /// Grow the rectangle by `m` pixels on every side.
+    pub fn inflated(&self, m: i32) -> Rect {
+        Rect::new(self.x - m, self.y - m, self.w + 2 * m, self.h + 2 * m)
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +173,63 @@ mod tests {
         assert_eq!(r.clamped_pos(1280, 800), (0, 0));
         let r2 = Rect::new(2000, 2000, 400, 300);
         assert_eq!(r2.clamped_pos(1280, 800), (1280 - 400, 800 - TITLE_H));
+    }
+
+    #[test]
+    fn union_covers_both() {
+        let a = Rect::new(10, 10, 20, 20); // [10,30)x[10,30)
+        let b = Rect::new(40, 5, 10, 40); // [40,50)x[5,45)
+        let u = a.union(&b);
+        assert_eq!(u, Rect::new(10, 5, 40, 40)); // [10,50)x[5,45)
+    }
+
+    #[test]
+    fn union_with_empty_is_identity() {
+        let a = Rect::new(10, 10, 20, 20);
+        let empty = Rect::new(0, 0, 0, 0);
+        assert_eq!(a.union(&empty), a);
+        assert_eq!(empty.union(&a), a);
+    }
+
+    #[test]
+    fn intersection_overlap() {
+        let a = Rect::new(0, 0, 30, 30);
+        let b = Rect::new(20, 20, 30, 30);
+        assert_eq!(a.intersection(&b), Some(Rect::new(20, 20, 10, 10)));
+    }
+
+    #[test]
+    fn intersection_disjoint_is_none() {
+        let a = Rect::new(0, 0, 10, 10);
+        let b = Rect::new(20, 20, 10, 10);
+        assert_eq!(a.intersection(&b), None);
+        // touching edges (not overlapping) -> None
+        assert_eq!(a.intersection(&Rect::new(10, 0, 5, 10)), None);
+    }
+
+    #[test]
+    fn clamp_to_screen() {
+        let r = Rect::new(-5, -5, 20, 20); // [-5,15)
+        assert_eq!(r.clamped_to(1280, 800), Rect::new(0, 0, 15, 15));
+        let off = Rect::new(1270, 0, 100, 50);
+        assert_eq!(off.clamped_to(1280, 800), Rect::new(1270, 0, 10, 50));
+        // fully off-screen -> zero area
+        assert!(Rect::new(2000, 0, 10, 10).clamped_to(1280, 800).is_empty());
+    }
+
+    #[test]
+    fn inflate_grows_all_sides() {
+        let r = Rect::new(10, 10, 20, 20);
+        assert_eq!(r.inflated(5), Rect::new(5, 5, 30, 30));
+    }
+
+    #[test]
+    fn right_bottom_empty() {
+        let r = Rect::new(10, 20, 30, 40);
+        assert_eq!(r.right(), 40);
+        assert_eq!(r.bottom(), 60);
+        assert!(!r.is_empty());
+        assert!(Rect::new(0, 0, 0, 5).is_empty());
     }
 
     #[test]

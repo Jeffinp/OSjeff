@@ -24,7 +24,7 @@ use bootloader_api::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use desktop::{Desktop, CURSOR_H, CURSOR_W};
 use fb::Canvas;
-use osjeff_core::Time;
+use osjeff_core::{Rect, Time};
 use ps2::Event;
 
 entry_point!(kernel_main);
@@ -34,6 +34,9 @@ entry_point!(kernel_main);
 const MAX_BYTES: usize = 1920 * 1080 * 4;
 static mut BACK: [u8; MAX_BYTES] = [0; MAX_BYTES];
 static mut BG: [u8; MAX_BYTES] = [0; MAX_BYTES];
+// Cached "everything except the animating window(s)" layer, composed once per
+// animation so each frame only redraws the small damaged region.
+static mut STATIC: [u8; MAX_BYTES] = [0; MAX_BYTES];
 
 // Kernel heap (1 MiB) backing the global allocator, so `alloc` works.
 const HEAP_SIZE: usize = 1024 * 1024;
@@ -54,6 +57,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(BACK) as *mut u8, n) };
     let bg: &mut [u8] =
         unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(BG) as *mut u8, n) };
+    let static_buf: &mut [u8] =
+        unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(STATIC) as *mut u8, n) };
 
     // Initialize the kernel heap so `alloc` works, then smoke-test it.
     unsafe {
@@ -90,6 +95,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut prev_cursor = desk.cursor();
     let mut last_tick = 0u64;
 
+    // Animation fast-path state.
+    let mut was_anim = false;
+    let mut static_valid = false;
+    let mut last_sig = 0u32;
+    let mut prev_damage = Rect::new(0, 0, 0, 0);
+
     // Animation timestep advanced once per timer tick (PIT runs at 100 Hz).
     const DT: f32 = 0.08;
 
@@ -101,17 +112,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             s: rt.s,
         };
 
-        // Pace animation by the hardware timer (100 Hz) instead of loop speed,
-        // since the loop now also time-shares with the worker threads.
+        // Pace animation by the hardware timer (100 Hz) instead of loop speed.
         let tick = interrupts::ticks();
         let tick_changed = tick != last_tick;
         last_tick = tick;
+        if tick_changed {
+            desk.animate(DT);
+        }
 
-        let animating = tick_changed && desk.animate(DT);
-        let mut scene_dirty = animating;
+        // Drain all pending PS/2 events.
+        let mut scene_dirty = false;
         let mut cursor_moved = false;
-
-        // Drain all pending PS/2 events so the cursor stays responsive.
         while let Some(event) = ps2::poll() {
             match event {
                 Event::Mouse(p) => {
@@ -133,41 +144,71 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             scene_dirty = true;
         }
 
-        if scene_dirty {
-            // Full recompose: scene (without cursor) -> back -> framebuffer,
-            // then the cursor as an overlay on top.
-            back.copy_from_slice(bg);
-            desk.render(back, info, time);
-            framebuffer.buffer_mut()[..n].copy_from_slice(back);
-            {
-                let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
-                desk.draw_cursor_overlay(&mut c);
-            }
-            prev_cursor = desk.cursor();
-        } else if cursor_moved {
-            // Cheap path: restore the pixels under the old cursor from `back`
-            // (which holds the cursor-free scene), then draw the cursor at its
-            // new position. No full-screen copy.
-            let (ox, oy) = prev_cursor;
-            blit_rect(
-                framebuffer.buffer_mut(),
-                back,
-                info,
-                ox,
-                oy,
-                CURSOR_W,
-                CURSOR_H,
-                n,
-            );
-            {
-                let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
-                desk.draw_cursor_overlay(&mut c);
-            }
-            prev_cursor = desk.cursor();
-        }
+        let any_anim = desk.has_animation();
 
-        // Hand the CPU to the background worker threads, then come back to the
-        // GUI on the next round-robin turn. The timer keeps pacing animation.
+        if any_anim {
+            // ---- Animation fast-path: cache the static scene, then each frame
+            // only touch the small damaged region around the animating window.
+            let sig = desk.anim_signature();
+            if !static_valid || sig != last_sig || scene_dirty {
+                static_buf.copy_from_slice(bg);
+                desk.compose_static(static_buf, info, time);
+                back.copy_from_slice(static_buf);
+                framebuffer.buffer_mut()[..n].copy_from_slice(back);
+                {
+                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
+                    desk.draw_cursor_overlay(&mut c);
+                }
+                prev_cursor = desk.cursor();
+                static_valid = true;
+                last_sig = sig;
+                prev_damage = Rect::new(0, 0, 0, 0);
+            }
+
+            if tick_changed || cursor_moved {
+                let damage = desk.render_anim_frame(back, static_buf, info, prev_damage);
+                blit_rect(framebuffer.buffer_mut(), back, info, damage.x, damage.y, damage.w, damage.h, n);
+                // Repaint the cursor (the damage blit may have covered it, and the
+                // cursor itself may have moved).
+                let (ox, oy) = prev_cursor;
+                blit_rect(framebuffer.buffer_mut(), back, info, ox, oy, CURSOR_W, CURSOR_H, n);
+                {
+                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
+                    desk.draw_cursor_overlay(&mut c);
+                }
+                prev_cursor = desk.cursor();
+                prev_damage = damage;
+            }
+        } else {
+            static_valid = false;
+            // A finished animation needs one final full recompose to settle.
+            if was_anim {
+                scene_dirty = true;
+            }
+
+            if scene_dirty {
+                back.copy_from_slice(bg);
+                desk.render(back, info, time);
+                framebuffer.buffer_mut()[..n].copy_from_slice(back);
+                {
+                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
+                    desk.draw_cursor_overlay(&mut c);
+                }
+                prev_cursor = desk.cursor();
+            } else if cursor_moved {
+                // Cheap path: restore under the old cursor, draw at the new spot.
+                let (ox, oy) = prev_cursor;
+                blit_rect(framebuffer.buffer_mut(), back, info, ox, oy, CURSOR_W, CURSOR_H, n);
+                {
+                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
+                    desk.draw_cursor_overlay(&mut c);
+                }
+                prev_cursor = desk.cursor();
+            }
+        }
+        was_anim = any_anim;
+
+        // Hand the CPU to the background worker threads (round-robin).
         sched::yield_now();
     }
 }

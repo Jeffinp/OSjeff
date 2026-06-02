@@ -64,6 +64,11 @@ impl<'a> Canvas<'a> {
     }
 
     #[inline]
+    pub fn bpp(&self) -> usize {
+        self.info.bytes_per_pixel
+    }
+
+    #[inline]
     pub fn put(&mut self, x: usize, y: usize, c: Color) {
         if x >= self.info.width || y >= self.info.height {
             return;
