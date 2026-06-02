@@ -69,15 +69,26 @@ só com glue de hardware (pixels, portas, z-order).
 
 ### Windows (recomendado — aceleração WHPX)
 
+`run.ps1` faz tudo: compila o release **dentro do WSL**, copia a imagem e sobe o QEMU.
+
 ```powershell
 cd C:\...\OSjeff
-cargo build --package os --release
-Copy-Item (Get-ChildItem target\release\build\os-*\out\osjeff-bios.img | Select -Last 1) osjeff-bios.img
-.\run.ps1                # WHPX (rápido, quase nativo)
-.\run.ps1 -NoAccel       # software (TCG), fallback
+.\run.ps1              # build release + boot (WHPX, rápido)
+.\run.ps1 -NoAccel    # build release + boot (TCG, software)
+.\run.ps1 -SkipBuild  # só boota a imagem existente
 ```
 
 > Se o PowerShell bloquear o script: `Set-ExecutionPolicy -Scope Process Bypass`.
+
+### Lint (CI)
+
+```bash
+cargo lint-kernel   # clippy do kernel (bare-metal), -D warnings
+cargo lint-host     # clippy de osjeff_core + os, -D warnings
+cargo test-core     # testes
+```
+
+> `cargo clippy` puro falha de propósito: o kernel `no_std` não compila no host.
 
 ### Linux / WSL
 

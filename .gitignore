@@ -6,6 +6,8 @@
 
 # Screenshots / captures
 *.png
+# ...but keep the brand source icon
+!assets/osjeff-icon.png
 
 # Editor / OS cruft
 *.swp
@@ -13,3 +15,4 @@
 
 # Runtime artifacts
 qemu-err.txt
+qlog.txt

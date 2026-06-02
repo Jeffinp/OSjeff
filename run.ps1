@@ -1,23 +1,47 @@
-# Boots OSjeff in QEMU on Windows.
+# Build (release) + run OSjeff in QEMU on Windows.
+#
+# The kernel is compiled inside WSL (cargo/Rust live there), the resulting
+# bootable image is copied next to this script, and QEMU runs on Windows.
+#
 # Usage:
-#   .\run.ps1            # WHPX acceleration (fast), falls back to TCG
-#   .\run.ps1 -NoAccel   # force software emulation (TCG)
-param([switch]$NoAccel)
+#   .\run.ps1              # build release + boot with WHPX acceleration
+#   .\run.ps1 -NoAccel     # build release + boot with software emulation (TCG)
+#   .\run.ps1 -SkipBuild   # skip cargo build, just boot the existing image
+param(
+    [switch]$NoAccel,
+    [switch]$SkipBuild
+)
 
 $ErrorActionPreference = 'Stop'
-
 $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
-$img  = Join-Path $PSScriptRoot 'osjeff-bios.img'
+$img = Join-Path $PSScriptRoot 'osjeff-bios.img'
 
 if (-not (Test-Path $qemu)) { throw "QEMU nao encontrado em $qemu" }
-if (-not (Test-Path $img))  { throw "Imagem nao encontrada: $img (rode 'cargo build --package os --release' e copie a img)" }
 
-$args = @('-m', '256M', '-drive', "format=raw,file=$img")
+if (-not $SkipBuild) {
+    # Translate "C:\path\to" -> "/mnt/c/path/to" for WSL.
+    $drive = $PSScriptRoot.Substring(0, 1).ToLower()
+    $rest = ($PSScriptRoot.Substring(2)) -replace '\\', '/'
+    $wslDir = "/mnt/$drive$rest"
+    Write-Host "Compilando OSjeff (release) em $wslDir ..." -ForegroundColor Cyan
 
-if (-not $NoAccel) {
-    # WHPX = Windows Hypervisor Platform. Massive speedup vs software emulation.
-    $args = @('-accel', 'whpx') + $args
+    # `bash -lc` loads the login profile so cargo/rustup are on PATH.
+    wsl -e bash -lc "cd '$wslDir' && cargo build --package os --release"
+    if ($LASTEXITCODE -ne 0) { throw "cargo build falhou (exit $LASTEXITCODE)" }
+
+    # Copy the freshest generated image to the project root.
+    $built = Get-ChildItem -Path (Join-Path $PSScriptRoot 'target\release\build') `
+        -Recurse -Filter 'osjeff-bios.img' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime | Select-Object -Last 1
+    if (-not $built) { throw "imagem osjeff-bios.img nao encontrada apos o build" }
+    Copy-Item $built.FullName $img -Force
+    Write-Host "Imagem pronta: $img" -ForegroundColor Green
 }
 
+if (-not (Test-Path $img)) { throw "Imagem nao existe: $img (rode sem -SkipBuild)" }
+
+$qargs = @('-m', '256M', '-drive', "format=raw,file=$img")
+if (-not $NoAccel) { $qargs = @('-accel', 'whpx') + $qargs }
+
 Write-Host "Booting OSjeff..." -ForegroundColor Cyan
-& $qemu @args
+& $qemu @qargs

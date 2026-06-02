@@ -8,13 +8,21 @@
 use crate::fb::{Canvas, Color};
 use crate::font;
 use crate::icons::{self, Icon};
+use crate::logo;
+use crate::theme;
 use osjeff_core::window::TITLE_H;
 use osjeff_core::{
     Action, Anim, Editor, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Terminal, Time,
 };
 
-const TASKBAR_H: i32 = 48;
 const SLIDE_PX: f32 = 28.0;
+
+// Floating dock geometry.
+const DOCK_ICON: i32 = 40;
+const DOCK_GAP: i32 = 14;
+const DOCK_PAD: i32 = 12;
+const DOCK_COUNT: i32 = 4; // brand + terminal + editor + taskmgr
+const DOCK_MARGIN: i32 = 16; // gap from screen bottom
 
 // Scratch buffer to snapshot the area behind an animating window (largest
 // window + margin). Lets fades composite over real content, not the wallpaper.
@@ -397,14 +405,11 @@ impl Desktop {
     }
 
     fn taskbar_hit(&self, px: i32, py: i32) -> Option<usize> {
-        if py < self.sh - TASKBAR_H {
-            return None;
-        }
-        let icons = taskbar_icon_rects(self.sw, self.sh);
+        let (_, icons) = dock_layout(self.sw, self.sh);
         for (i, r) in icons.iter().enumerate() {
             if r.contains(px, py) {
                 return match i {
-                    0 | 1 => Some(TERM),
+                    0 | 1 => Some(TERM), // brand + terminal
                     2 => Some(EDIT),
                     3 => Some(TASK),
                     _ => None,
@@ -419,7 +424,10 @@ impl Desktop {
     pub fn render(&self, back: &mut [u8], info: bootloader_api::info::FrameBufferInfo, time: Time) {
         let bpp = info.bytes_per_pixel;
         let scratch: &mut [u8] = unsafe {
-            core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(SCRATCH) as *mut u8, SCRATCH_BYTES)
+            core::slice::from_raw_parts_mut(
+                core::ptr::addr_of_mut!(SCRATCH) as *mut u8,
+                SCRATCH_BYTES,
+            )
         };
         let mut c = Canvas::new(back, info);
 
@@ -475,30 +483,31 @@ impl Desktop {
             (my + 6) as usize,
             MENU_W as usize,
             h as usize,
-            10,
-            Color::rgb(0, 0, 0),
-            30,
+            12,
+            theme::SHADOW,
+            34,
         );
         c.fill_round_rect(
             mx as usize,
             my as usize,
             MENU_W as usize,
             h as usize,
-            8,
-            Color::rgb(0xFB, 0xFC, 0xFE),
+            10,
+            theme::WINDOW_BODY,
         );
 
         let item_icons = [Icon::Terminal, Icon::Editor, Icon::TaskMgr];
         for (i, (label, _)) in MENU_ITEMS.iter().enumerate() {
             let iy = my + MENU_PAD + i as i32 * MENU_ITEM_H;
             if menu_item_at(mx, my, self.cursor_x, self.cursor_y) == Some(i) {
-                c.fill_round_rect(
+                c.fill_round_rect_alpha(
                     (mx + 4) as usize,
                     (iy + 2) as usize,
                     (MENU_W - 8) as usize,
                     (MENU_ITEM_H - 4) as usize,
                     6,
-                    Color::rgb(0xDC, 0xE8, 0xFB),
+                    theme::ACCENT,
+                    36,
                 );
             }
             let isz = 20usize;
@@ -509,7 +518,7 @@ impl Desktop {
                 (mx + 40) as usize,
                 (iy + 8) as usize,
                 label,
-                Color::rgb(0x14, 0x1A, 0x28),
+                theme::TEXT,
                 2,
             );
         }
@@ -531,39 +540,52 @@ impl Desktop {
         // Soft drop shadow (two layers). Skipped while dragging/animating so the
         // alpha fill never costs on the hot path.
         if shadow {
-            let black = Color::rgb(0, 0, 0);
-            for &(off, exp, a) in &[(5usize, 4usize, 26u16), (12, 10, 14)] {
+            for &(off, exp, a) in &[(6usize, 4usize, 28u16), (14, 12, 14)] {
                 let sx = x.saturating_sub(exp);
                 let sy = y + off;
-                c.fill_round_rect_alpha(sx, sy, w + exp * 2, h + exp, 12 + exp, black, a);
+                c.fill_round_rect_alpha(sx, sy, w + exp * 2, h + exp, 14 + exp, theme::SHADOW, a);
             }
         }
 
-        c.fill_round_rect(x, y, w, h, 10, Color::rgb(0xF4, 0xF6, 0xFA));
-        let bar = if focused {
-            Color::rgb(0x1F, 0x53, 0xA8)
+        let radius = 12usize;
+        // Body + dark header.
+        c.fill_round_rect(x, y, w, h, radius, theme::WINDOW_BODY);
+        let header = if focused {
+            theme::HEADER
         } else {
-            Color::rgb(0x5A, 0x64, 0x70)
+            theme::HEADER_DIM
         };
-        c.fill_rect(x, y + 6, w, th - 6, bar);
-        c.fill_round_rect(x, y, w, th, 10, bar);
+        c.fill_rect(x, y + radius, w, th - radius, header);
+        c.fill_round_rect(x, y, w, th, radius, header);
+        // Accent top line marks focus (teal) vs unfocused (muted).
+        let accent = if focused {
+            theme::ACCENT
+        } else {
+            theme::TEXT_MUTED
+        };
+        c.fill_round_rect(x + radius, y, w - radius * 2, 3, 1, accent);
+
+        // App indicator dot + title.
+        c.fill_round_rect(x + 12, y + 11, 8, 8, 4, accent);
         font::draw_text(
             c,
-            x + 12,
+            x + 28,
             y + 8,
             self.windows[win].title,
-            Color::rgb(0xFF, 0xFF, 0xFF),
+            theme::HEADER_TEXT,
             2,
         );
 
+        // Close button (circular).
         let cb = r.close_rect();
+        let cbs = cb.w as usize;
         c.fill_round_rect(
             cb.x.max(0) as usize,
             cb.y.max(0) as usize,
-            cb.w as usize,
-            cb.h as usize,
-            4,
-            Color::rgb(0xE8, 0x4C, 0x3D),
+            cbs,
+            cbs,
+            cbs / 2,
+            theme::CLOSE,
         );
 
         match self.windows[win].kind {
@@ -578,7 +600,7 @@ impl Desktop {
         let line_h = 18usize;
         let tx = x + pad;
         let mut ty = y + TITLE_H as usize + 8;
-        let fg = Color::rgb(0x14, 0x1A, 0x2A);
+        let fg = theme::TEXT;
 
         for i in 0..self.term.row_count() {
             font::draw_bytes(c, tx, ty, self.term.row(i), fg, 2);
@@ -589,14 +611,14 @@ impl Desktop {
             tx,
             ty,
             osjeff_core::terminal::PROMPT,
-            Color::rgb(0x0B, 0x55, 0x2B),
+            theme::TERM_PROMPT,
             2,
         );
         let ix = tx + osjeff_core::terminal::PROMPT.len() * font::cell_w(2);
         font::draw_bytes(c, ix, ty, self.term.input(), fg, 2);
         if focused {
             let caret_x = ix + self.term.caret() * font::cell_w(2);
-            c.fill_rect(caret_x, ty, 2, 16, Color::rgb(0x0B, 0x55, 0x2B));
+            c.fill_rect(caret_x, ty, 2, 16, theme::TERM_PROMPT);
         }
     }
 
@@ -605,7 +627,7 @@ impl Desktop {
         let line_h = 16usize;
         let tx = x + pad;
         let top = y + TITLE_H as usize + 6;
-        let fg = Color::rgb(0x12, 0x16, 0x20);
+        let fg = theme::TEXT;
 
         for i in 0..self.editor.rows() {
             font::draw_bytes(c, tx, top + i * line_h, self.editor.line(i), fg, 2);
@@ -614,7 +636,7 @@ impl Desktop {
         if focused {
             let caret_x = tx + cxs * font::cell_w(2);
             let caret_y = top + cys * line_h;
-            c.fill_rect(caret_x, caret_y, 2, 14, Color::rgb(0x1F, 0x53, 0xA8));
+            c.fill_rect(caret_x, caret_y, 2, 14, theme::ACCENT);
         }
 
         let mut status = [b' '; 22];
@@ -625,14 +647,7 @@ impl Desktop {
         if self.editor.dirty() {
             status[14] = b'*';
         }
-        font::draw_bytes(
-            c,
-            tx,
-            y + 350 - 22,
-            &status,
-            Color::rgb(0x55, 0x5E, 0x70),
-            2,
-        );
+        font::draw_bytes(c, tx, y + 350 - 22, &status, theme::TEXT_MUTED, 2);
     }
 
     fn draw_taskmgr(&self, c: &mut Canvas, x: usize, y: usize) {
@@ -641,14 +656,7 @@ impl Desktop {
         let tx = x + pad;
         let mut ty = y + TITLE_H as usize + 6;
 
-        font::draw_text(
-            c,
-            tx,
-            ty,
-            "PID NAME        ST   UP",
-            Color::rgb(0x33, 0x3A, 0x4A),
-            2,
-        );
+        font::draw_text(c, tx, ty, "PID NAME        ST   UP", theme::TEXT_MUTED, 2);
         ty += line_h + 2;
 
         for i in 0..self.procs.len() {
@@ -657,12 +665,14 @@ impl Desktop {
                 None => break,
             };
             if i == self.procs.selected() {
-                c.fill_rect(
+                c.fill_round_rect_alpha(
                     tx - 4,
                     ty - 2,
                     24 * font::cell_w(2),
                     line_h,
-                    Color::rgb(0xD6, 0xE3, 0xFB),
+                    4,
+                    theme::ACCENT,
+                    40,
                 );
             }
             let mut line = [b' '; 27];
@@ -677,12 +687,12 @@ impl Desktop {
             };
             line[17..20].copy_from_slice(st);
             write_uint(&mut line, 21, 6, p.ticks);
-            font::draw_bytes(c, tx, ty, &line, Color::rgb(0x16, 0x1C, 0x2C), 2);
+            font::draw_bytes(c, tx, ty, &line, theme::TEXT, 2);
             ty += line_h;
         }
 
         let footer = "UP/DN  ENTER:open  DEL:end";
-        font::draw_text(c, tx, y + 300 - 24, footer, Color::rgb(0x55, 0x5E, 0x70), 2);
+        font::draw_text(c, tx, y + 300 - 24, footer, theme::TEXT_MUTED, 2);
     }
 
     fn draw_cursor(&self, c: &mut Canvas) {
@@ -716,78 +726,82 @@ fn menu_item_at(mx: i32, my: i32, px: i32, py: i32) -> Option<usize> {
     (i < MENU_ITEMS.len()).then_some(i)
 }
 
-fn taskbar_icon_rects(sw: i32, sh: i32) -> [Rect; 5] {
-    let icon = 32i32;
-    let gap = 12i32;
-    let count = 5i32;
-    let group_w = count * icon + (count - 1) * gap;
-    let bar_y = sh - TASKBAR_H;
-    let mut x = sw / 2 - group_w / 2;
-    let y = bar_y + (TASKBAR_H - icon) / 2;
-    let mut out = [Rect::new(0, 0, icon, icon); 5];
-    for slot in out.iter_mut() {
-        *slot = Rect::new(x, y, icon, icon);
-        x += icon + gap;
+/// The floating dock panel rect and its `DOCK_COUNT` icon slots.
+fn dock_layout(sw: i32, sh: i32) -> (Rect, [Rect; DOCK_COUNT as usize]) {
+    let inner = DOCK_COUNT * DOCK_ICON + (DOCK_COUNT - 1) * DOCK_GAP;
+    let dock_w = inner + DOCK_PAD * 2;
+    let dock_h = DOCK_ICON + DOCK_PAD * 2;
+    let dock_x = sw / 2 - dock_w / 2;
+    let dock_y = sh - dock_h - DOCK_MARGIN;
+    let dock = Rect::new(dock_x, dock_y, dock_w, dock_h);
+
+    let mut icons = [Rect::new(0, 0, DOCK_ICON, DOCK_ICON); DOCK_COUNT as usize];
+    let mut x = dock_x + DOCK_PAD;
+    for slot in icons.iter_mut() {
+        *slot = Rect::new(x, dock_y + DOCK_PAD, DOCK_ICON, DOCK_ICON);
+        x += DOCK_ICON + DOCK_GAP;
     }
-    out
+    (dock, icons)
 }
 
 pub fn paint_background(c: &mut Canvas) {
     let w = c.width();
     let h = c.height();
 
-    // Base vertical gradient.
-    let top = Color::rgb(0x0C, 0x22, 0x47);
-    let bottom = Color::rgb(0x2B, 0x6F, 0xD6);
+    // Indigo gradient backdrop.
     for yy in 0..h {
         let t = ((yy * 255) / h.max(1)) as u16;
-        c.fill_rect(0, yy, w, 1, top.lerp(bottom, t));
+        c.fill_rect(0, yy, w, 1, theme::BG_TOP.lerp(theme::BG_BOTTOM, t));
     }
-
-    // Soft radial glow upper-center for depth.
-    let glow = (w / 2).max(400);
+    // Two soft accent "mesh" blobs (teal top-left, violet bottom-right).
+    let blob = (w / 3).max(360);
+    c.fill_round_rect_alpha(0, 0, blob, blob, blob / 2, theme::GLOW_TEAL, 16);
     c.fill_round_rect_alpha(
-        w / 2 - glow / 2,
-        0usize.saturating_add(h / 6).saturating_sub(glow / 2),
-        glow,
-        glow,
-        glow / 2,
-        Color::rgb(0x5A, 0x9B, 0xFF),
-        22,
-    );
-    // Subtle vignette at the bottom corners.
-    let vig = w / 3;
-    c.fill_round_rect_alpha(0, h - vig / 2, vig, vig, vig / 2, Color::rgb(0, 0, 0), 12);
-    c.fill_round_rect_alpha(
-        w - vig,
-        h - vig / 2,
-        vig,
-        vig,
-        vig / 2,
-        Color::rgb(0, 0, 0),
-        12,
+        w - blob,
+        h - blob,
+        blob,
+        blob,
+        blob / 2,
+        theme::GLOW_VIOLET,
+        16,
     );
 
-    // Floating taskbar with a top highlight line + shadow.
-    let bar_h = TASKBAR_H as usize;
-    let bar_y = h.saturating_sub(bar_h);
-    c.fill_round_rect_alpha(0, bar_y - 8, w, 8, 0, Color::rgb(0, 0, 0), 26);
-    c.fill_rect(0, bar_y, w, bar_h, Color::rgb(0x18, 0x1D, 0x2A));
-    c.fill_rect(0, bar_y, w, 1, Color::rgb(0x3A, 0x46, 0x60));
-    font::draw_text(c, 16, bar_y + 16, "OSJEFF", Color::rgb(0xE6, 0xED, 0xFF), 2);
+    // Brand wordmark top-left.
+    font::draw_text(c, 20, 18, "OSJEFF", theme::HEADER_TEXT, 2);
 
-    // Real app icons.
-    let r = taskbar_icon_rects(w as i32, h as i32);
-    let s = r[0].w as usize;
-    icons::draw(c, Icon::Start, r[0].x as usize, r[0].y as usize, s);
-    icons::draw(c, Icon::Terminal, r[1].x as usize, r[1].y as usize, s);
-    icons::draw(c, Icon::Editor, r[2].x as usize, r[2].y as usize, s);
-    icons::draw(c, Icon::TaskMgr, r[3].x as usize, r[3].y as usize, s);
+    // Floating dock: shadow, panel, icons.
+    let (dock, icons) = dock_layout(w as i32, h as i32);
+    let (dx, dy, dw, dh) = (
+        dock.x as usize,
+        dock.y as usize,
+        dock.w as usize,
+        dock.h as usize,
+    );
+    let radius = dh / 2;
+    c.fill_round_rect_alpha(dx, dy + 8, dw, dh, radius, theme::SHADOW, 38);
+    c.fill_round_rect(dx, dy, dw, dh, radius, theme::DOCK);
+
+    // Slot 0 = real OSJeff logo; the rest are vector app icons.
+    let kinds = [Icon::Brand, Icon::Terminal, Icon::Editor, Icon::TaskMgr];
+    for (i, kind) in kinds.iter().enumerate() {
+        let r = icons[i];
+        if i == 0 && r.w as usize == logo::SIZE_40 {
+            c.draw_rgba(
+                logo::ICON_40,
+                logo::SIZE_40,
+                logo::SIZE_40,
+                r.x as usize,
+                r.y as usize,
+            );
+        } else {
+            icons::draw(c, *kind, r.x as usize, r.y as usize, r.w as usize);
+        }
+    }
 }
 
 fn draw_clock(c: &mut Canvas, t: Time) {
     let w = c.width();
-    let bar_y = c.height().saturating_sub(TASKBAR_H as usize);
+    let h = c.height();
     let mut buf = [b'0'; 8];
     two(&mut buf, 0, t.h);
     buf[2] = b':';
@@ -795,15 +809,17 @@ fn draw_clock(c: &mut Canvas, t: Time) {
     buf[5] = b':';
     two(&mut buf, 6, t.s);
     let clock = unsafe { core::str::from_utf8_unchecked(&buf) };
-    let cw = font::text_width(clock, 2);
-    font::draw_text(
-        c,
-        w - cw - 16,
-        bar_y + 16,
-        clock,
-        Color::rgb(0xE6, 0xED, 0xFF),
-        2,
-    );
+
+    // Pill in the bottom-right corner.
+    let tw = font::text_width(clock, 2);
+    let pad = 14usize;
+    let pw = tw + pad * 2;
+    let ph = 34usize;
+    let px = w - pw - DOCK_MARGIN as usize;
+    let py = h - ph - DOCK_MARGIN as usize;
+    c.fill_round_rect_alpha(px, py + 6, pw, ph, ph / 2, theme::SHADOW, 34);
+    c.fill_round_rect(px, py, pw, ph, ph / 2, theme::DOCK);
+    font::draw_text(c, px + pad, py + 9, clock, theme::HEADER_TEXT, 2);
 }
 
 fn two(buf: &mut [u8], idx: usize, val: u8) {

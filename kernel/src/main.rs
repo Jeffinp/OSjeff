@@ -1,15 +1,19 @@
 #![no_std]
 #![no_main]
 #![allow(static_mut_refs)]
+#![feature(abi_x86_interrupt)]
 
 mod boot;
 mod desktop;
 mod fb;
 mod font;
 mod icons;
+mod interrupts;
 mod io;
+mod logo;
 mod ps2;
 mod rtc;
+mod theme;
 
 use bootloader_api::info::FrameBufferInfo;
 use bootloader_api::{entry_point, BootInfo};
@@ -39,6 +43,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(BACK) as *mut u8, n) };
     let bg: &mut [u8] =
         unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(BG) as *mut u8, n) };
+
+    // Real interrupts: IDT + exception handlers, PIC remap, PIT timer.
+    // Only IRQ0 (timer) is unmasked; input stays on polling.
+    interrupts::init();
 
     // Boot splash: progress tracks real elapsed time (>= 5 seconds).
     run_splash(&mut *framebuffer, &mut *back, info, n);
@@ -168,6 +176,7 @@ fn run_splash(
 
 /// Copy a rectangular region from `src` into `dst` (same framebuffer layout).
 /// Used to restore the background under the moving cursor.
+#[allow(clippy::too_many_arguments)]
 fn blit_rect(
     dst: &mut [u8],
     src: &[u8],

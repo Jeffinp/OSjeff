@@ -1,3 +1,10 @@
 # Artifact dependencies (kernel binary linked into the os builder) need -Z bindeps.
 [unstable]
 bindeps = true
+
+# Clippy must target bare metal for the kernel; the host crates lint normally.
+# `cargo clippy` (no target) fails because the no_std kernel can't unwind on host.
+[alias]
+lint-kernel = "clippy -p kernel --target x86_64-unknown-none -- -D warnings"
+lint-host = "clippy -p osjeff_core -p os --all-targets -- -D warnings"
+test-core = "test -p osjeff_core"

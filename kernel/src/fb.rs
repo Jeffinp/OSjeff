@@ -8,7 +8,7 @@ fn isqrt(n: usize) -> usize {
         return 0;
     }
     let mut x = n;
-    let mut y = (x + 1) / 2;
+    let mut y = x.div_ceil(2);
     while y < x {
         x = y;
         y = (x + n / x) / 2;
@@ -97,6 +97,22 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Alpha-blit a tightly-packed RGBA image (`iw*ih*4` bytes) at `(x0, y0)`.
+    pub fn draw_rgba(&mut self, data: &[u8], iw: usize, ih: usize, x0: usize, y0: usize) {
+        for y in 0..ih {
+            for x in 0..iw {
+                let o = (y * iw + x) * 4;
+                let a = data[o + 3] as u16;
+                if a == 0 {
+                    continue;
+                }
+                let col = Color::rgb(data[o], data[o + 1], data[o + 2]);
+                // Scale 0..255 alpha to the 0..256 range blend_pixel expects.
+                self.blend_pixel(x0 + x, y0 + y, col, a + (a >> 7));
+            }
+        }
+    }
+
     pub fn fill_rect(&mut self, x0: usize, y0: usize, w: usize, h: usize, c: Color) {
         if x0 >= self.info.width || y0 >= self.info.height {
             return;
@@ -156,6 +172,7 @@ impl<'a> Canvas<'a> {
 
     /// Rounded rectangle blended over existing pixels at `alpha` (0..=256).
     /// Used for soft drop shadows and translucent surfaces.
+    #[allow(clippy::too_many_arguments)]
     pub fn fill_round_rect_alpha(
         &mut self,
         x0: usize,
@@ -227,7 +244,15 @@ impl<'a> Canvas<'a> {
     /// Blend the canvas toward a packed region buffer (`w*bpp` stride) at
     /// `alpha` (0..=256). `alpha=0` shows `src` (the backdrop), `256` keeps the
     /// canvas (the window). Inverse of [`snapshot_region`].
-    pub fn blend_from_local(&mut self, src: &[u8], x0: usize, y0: usize, w: usize, h: usize, alpha: u16) {
+    pub fn blend_from_local(
+        &mut self,
+        src: &[u8],
+        x0: usize,
+        y0: usize,
+        w: usize,
+        h: usize,
+        alpha: u16,
+    ) {
         let bpp = self.info.bytes_per_pixel;
         let stride = self.info.stride;
         let a = alpha.min(256);
@@ -239,7 +264,8 @@ impl<'a> Canvas<'a> {
                 let o = (y * stride + x) * bpp;
                 let s = ((y - y0) * w + (x - x0)) * bpp;
                 for k in 0..bpp {
-                    self.buf[o + k] = ((src[s + k] as u16 * ia + self.buf[o + k] as u16 * a) / 256) as u8;
+                    self.buf[o + k] =
+                        ((src[s + k] as u16 * ia + self.buf[o + k] as u16 * a) / 256) as u8;
                 }
             }
         }
