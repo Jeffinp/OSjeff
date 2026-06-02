@@ -10,3 +10,6 @@
 # Editor / OS cruft
 *.swp
 .DS_Store
+
+# Runtime artifacts
+qemu-err.txt

@@ -12,8 +12,9 @@ no framebuffer.
   título, botão fechar, lançar apps pela taskbar
 - **Animações de abertura/fechamento**: fade + slide (easing smoothstep),
   compostas via blend contra o wallpaper, paceadas por TSC (sem timer)
-- **Gerenciador de processos**: tabela de processos (kernel/compositor/apps) com
-  estados Running/Suspended e tempo de CPU acumulado
+- **Gerenciador de processos**: abrir um app spawna um processo (pid novo),
+  fechar a janela encerra (remove da tabela); processos System protegidos;
+  coluna `UP` = uptime em segundos
 - **Terminal** (`OSJEFF SHELL`): histórico com scroll, linha de input com caret
   navegável, comandos `HELP CLS TIME VER ECHO EDIT PS`
 - **Editor** (`OSJEFF EDIT`): texto multi-linha, cursor 2D, inserir/quebrar/juntar
@@ -114,10 +115,26 @@ Estado atual: **60 testes**, ~**98% de regiões / ~97% de linhas**.
 
 ## Usando o sistema
 
-- **Taskbar**: ícone azul abre/foca o terminal; ícone verde abre o editor.
-- **Terminal**: digite `HELP`. `EDIT` abre o editor. `TIME` mostra o relógio.
-- **Editor**: digite normalmente; setas/Home/End navegam; `Esc` fecha o editor.
+- **Botão direito** no desktop: abre menu de contexto (Terminal / Editor / Task
+  Manager) — clique num item para abrir.
+- **Taskbar**: ícone azul = terminal, verde = editor, âmbar = task manager.
+- **Terminal**: `HELP` lista comandos. `EDIT` abre o editor, `PS` o task manager.
+- **Editor**: digite normalmente; setas/Home/End navegam; `Esc` fecha.
+- **Task Manager**: ↑/↓ seleciona, `Enter` foca/abre, `Del` encerra (apps).
 - **Janelas**: arraste pela barra de título; clique para focar; bolinha vermelha fecha.
+
+## Performance
+
+O compositor evita redesenhar a tela inteira quando dá:
+
+- **Cursor por dirty-rect**: mover o mouse só restaura o retângulo antigo do
+  cursor (a partir do back buffer sem cursor) e redesenha o sprite — nada de
+  copiar ~16 MB por movimento. Recompõe a cena cheia só quando ela muda
+  (janela, texto, relógio, animação, menu).
+- **`fill_rect` por linha**: caminho rápido RGB/BGR escreve bytes direto, sem
+  passar pixel a pixel por `put` (bounds + match de formato).
+- **Release com LTO**: `opt-level=3`, `lto=true`, `codegen-units=1`.
+- **Animações paceadas por TSC** (`rdtsc`), sem depender de timer interrupt.
 
 ## Gravar em hardware real (pen drive)
 

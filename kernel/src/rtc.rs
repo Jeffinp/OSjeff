@@ -1,9 +1,15 @@
-//! Reads wall-clock time from the CMOS RTC (UTC). Polling, no interrupts.
+//! Reads wall-clock time from the CMOS RTC. Polling, no interrupts.
+//!
+//! The RTC under QEMU reports UTC; [`TZ_OFFSET_HOURS`] shifts it to local time
+//! (default -3, Brasília).
 
 use crate::io::{inb, outb};
 
 const ADDR: u16 = 0x70;
 const DATA: u16 = 0x71;
+
+/// Hours to add to UTC for local time. Brasília = -3.
+pub const TZ_OFFSET_HOURS: i32 = -3;
 
 fn read_reg(reg: u8) -> u8 {
     outb(ADDR, reg);
@@ -48,5 +54,7 @@ pub fn now() -> Time {
         }
     }
 
-    Time { h, m, s }
+    // Apply the timezone offset (UTC -> local) with day wraparound.
+    let local = (h as i32 + TZ_OFFSET_HOURS).rem_euclid(24) as u8;
+    Time { h: local, m, s }
 }

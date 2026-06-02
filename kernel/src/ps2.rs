@@ -56,6 +56,7 @@ pub struct Packet {
     pub dx: i32,
     pub dy: i32,
     pub left: bool,
+    pub right: bool,
 }
 
 pub struct KeyEvent {
@@ -131,6 +132,7 @@ pub fn poll() -> Option<Event> {
                     dx,
                     dy,
                     left: flags & 0x01 != 0,
+                    right: flags & 0x02 != 0,
                 }));
             }
         }

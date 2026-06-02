@@ -2,6 +2,20 @@
 
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 
+/// Integer square root (floor). Used to inset rounded-rectangle corner rows.
+fn isqrt(n: usize) -> usize {
+    if n == 0 {
+        return 0;
+    }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
 #[derive(Clone, Copy)]
 pub struct Color {
     pub r: u8,
@@ -83,28 +97,6 @@ impl<'a> Canvas<'a> {
         }
     }
 
-    /// Blend a rectangular region toward another buffer of identical layout.
-    /// `alpha` in `0..=256`: 0 = fully `src` (e.g. the wallpaper), 256 = keep
-    /// what is already drawn. Used to fade windows in/out against the desktop.
-    pub fn blend_region(&mut self, src: &[u8], x0: usize, y0: usize, w: usize, h: usize, alpha: u16) {
-        let bpp = self.info.bytes_per_pixel;
-        let stride = self.info.stride;
-        let a = alpha.min(256);
-        let ia = 256 - a;
-        let x_end = (x0 + w).min(self.info.width);
-        let y_end = (y0 + h).min(self.info.height);
-        for y in y0..y_end {
-            for x in x0..x_end {
-                let o = (y * stride + x) * bpp;
-                for k in 0..bpp {
-                    let cur = self.buf[o + k] as u16;
-                    let bg = src[o + k] as u16;
-                    self.buf[o + k] = ((bg * ia + cur * a) / 256) as u8;
-                }
-            }
-        }
-    }
-
     pub fn fill_rect(&mut self, x0: usize, y0: usize, w: usize, h: usize, c: Color) {
         if x0 >= self.info.width || y0 >= self.info.height {
             return;
@@ -138,8 +130,50 @@ impl<'a> Canvas<'a> {
                 o += bpp;
             }
         }
-        return;
-        #[allow(unreachable_code)]
+    }
+
+    /// Blend a solid color into one pixel. `alpha` in `0..=256`
+    /// (0 = unchanged, 256 = fully `c`). Format-aware.
+    #[inline]
+    pub fn blend_pixel(&mut self, x: usize, y: usize, c: Color, alpha: u16) {
+        if x >= self.info.width || y >= self.info.height {
+            return;
+        }
+        let a = alpha.min(256);
+        let ia = 256 - a;
+        let bpp = self.info.bytes_per_pixel;
+        let o = (y * self.info.stride + x) * bpp;
+        let (c0, c1, c2) = match self.info.pixel_format {
+            PixelFormat::Rgb => (c.r, c.g, c.b),
+            PixelFormat::Bgr => (c.b, c.g, c.r),
+            _ => return,
+        };
+        let mix = |dst: u8, src: u8| ((dst as u16 * ia + src as u16 * a) / 256) as u8;
+        self.buf[o] = mix(self.buf[o], c0);
+        self.buf[o + 1] = mix(self.buf[o + 1], c1);
+        self.buf[o + 2] = mix(self.buf[o + 2], c2);
+    }
+
+    /// Rounded rectangle blended over existing pixels at `alpha` (0..=256).
+    /// Used for soft drop shadows and translucent surfaces.
+    pub fn fill_round_rect_alpha(
+        &mut self,
+        x0: usize,
+        y0: usize,
+        w: usize,
+        h: usize,
+        r: usize,
+        c: Color,
+        alpha: u16,
+    ) {
+        let r = r.min(w / 2).min(h / 2);
+        for y in 0..h {
+            for x in 0..w {
+                if self.inside_round(x, y, w, h, r) {
+                    self.blend_pixel(x0 + x, y0 + y, c, alpha);
+                }
+            }
+        }
     }
 
     /// Rounded rectangle (filled). `r` = corner radius in pixels.
@@ -153,10 +187,59 @@ impl<'a> Canvas<'a> {
         c: Color,
     ) {
         let r = r.min(w / 2).min(h / 2);
+        // Per-row spans: corner rows inset by the circle, middle rows full
+        // width. Each span is one fast `fill_rect` instead of per-pixel `put`.
         for y in 0..h {
-            for x in 0..w {
-                if self.inside_round(x, y, w, h, r) {
-                    self.put(x0 + x, y0 + y, c);
+            let inset = if r == 0 {
+                0
+            } else if y < r {
+                let dy = r - y; // 1..=r
+                r - isqrt(r * r - dy * dy)
+            } else if y >= h - r {
+                let dy = y - (h - 1 - r); // 0..=r
+                r - isqrt(r.saturating_mul(r).saturating_sub(dy * dy))
+            } else {
+                0
+            };
+            if w > 2 * inset {
+                self.fill_rect(x0 + inset, y0 + y, w - 2 * inset, 1, c);
+            }
+        }
+    }
+
+    /// Copy a `w x h` region of the canvas into a tightly-packed buffer
+    /// (`w*bpp` stride). Used to snapshot what is behind a window before it is
+    /// composited, so a fade blends toward the real backdrop, not the wallpaper.
+    pub fn snapshot_region(&self, dst: &mut [u8], x0: usize, y0: usize, w: usize, h: usize) {
+        let bpp = self.info.bytes_per_pixel;
+        let stride = self.info.stride;
+        let x_end = (x0 + w).min(self.info.width);
+        let y_end = (y0 + h).min(self.info.height);
+        for y in y0..y_end {
+            for x in x0..x_end {
+                let o = (y * stride + x) * bpp;
+                let d = ((y - y0) * w + (x - x0)) * bpp;
+                dst[d..d + bpp].copy_from_slice(&self.buf[o..o + bpp]);
+            }
+        }
+    }
+
+    /// Blend the canvas toward a packed region buffer (`w*bpp` stride) at
+    /// `alpha` (0..=256). `alpha=0` shows `src` (the backdrop), `256` keeps the
+    /// canvas (the window). Inverse of [`snapshot_region`].
+    pub fn blend_from_local(&mut self, src: &[u8], x0: usize, y0: usize, w: usize, h: usize, alpha: u16) {
+        let bpp = self.info.bytes_per_pixel;
+        let stride = self.info.stride;
+        let a = alpha.min(256);
+        let ia = 256 - a;
+        let x_end = (x0 + w).min(self.info.width);
+        let y_end = (y0 + h).min(self.info.height);
+        for y in y0..y_end {
+            for x in x0..x_end {
+                let o = (y * stride + x) * bpp;
+                let s = ((y - y0) * w + (x - x0)) * bpp;
+                for k in 0..bpp {
+                    self.buf[o + k] = ((src[s + k] as u16 * ia + self.buf[o + k] as u16 * a) / 256) as u8;
                 }
             }
         }

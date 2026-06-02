@@ -240,7 +240,7 @@ impl Terminal {
             self.println(b"OSJEFF 0.2 - Rust bare metal");
         } else if token == b"TIME" {
             let mut out = [0u8; 12];
-            out[..4].copy_from_slice(b"UTC ");
+            out[..4].copy_from_slice(b"Now ");
             two(&mut out, 4, time.h);
             out[6] = b':';
             two(&mut out, 7, time.m);
@@ -437,7 +437,7 @@ mod tests {
         let mut t = Terminal::new();
         type_str(&mut t, "TIME");
         t.on_key(Key::Enter, Time { h: 5, m: 9, s: 7 });
-        assert_eq!(last_row(&t), b"UTC 05:09:07");
+        assert_eq!(last_row(&t), b"Now 05:09:07");
     }
 
     #[test]

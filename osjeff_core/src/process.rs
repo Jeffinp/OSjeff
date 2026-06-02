@@ -210,7 +210,11 @@ mod tests {
     #[test]
     fn spawn_caps_name_length() {
         let mut t = ProcessTable::new();
-        let pid = t.spawn(b"a-very-long-process-name", ProcKind::App, ProcState::Running);
+        let pid = t.spawn(
+            b"a-very-long-process-name",
+            ProcKind::App,
+            ProcState::Running,
+        );
         assert!(pid.is_some());
         assert_eq!(t.at(0).unwrap().name().len(), NAME_CAP);
     }
@@ -221,7 +225,9 @@ mod tests {
         for _ in 0..MAX_PROC {
             assert!(t.spawn(b"p", ProcKind::App, ProcState::Running).is_some());
         }
-        assert!(t.spawn(b"overflow", ProcKind::App, ProcState::Running).is_none());
+        assert!(t
+            .spawn(b"overflow", ProcKind::App, ProcState::Running)
+            .is_none());
         assert_eq!(t.len(), MAX_PROC);
     }
 

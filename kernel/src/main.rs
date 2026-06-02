@@ -2,16 +2,19 @@
 #![no_main]
 #![allow(static_mut_refs)]
 
+mod boot;
 mod desktop;
 mod fb;
 mod font;
+mod icons;
 mod io;
 mod ps2;
 mod rtc;
 
+use bootloader_api::info::FrameBufferInfo;
 use bootloader_api::{entry_point, BootInfo};
 use core::panic::PanicInfo;
-use desktop::Desktop;
+use desktop::{Desktop, CURSOR_H, CURSOR_W};
 use fb::Canvas;
 use osjeff_core::Time;
 use ps2::Event;
@@ -37,6 +40,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let bg: &mut [u8] =
         unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(BG) as *mut u8, n) };
 
+    // Boot splash: progress tracks real elapsed time (>= 5 seconds).
+    run_splash(&mut *framebuffer, &mut *back, info, n);
+
     // Static layer painted once.
     {
         let mut c = Canvas::new(bg, info);
@@ -46,6 +52,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     ps2::init();
     let mut desk = Desktop::new(info.width as i32, info.height as i32);
     let mut last_sec = 0xFFu8; // force first render
+    let mut prev_cursor = desk.cursor();
 
     // Animation timestep per rendered frame, and the per-frame pacing delay
     // (~6ms) that keeps transitions visible without a timer interrupt.
@@ -60,34 +67,132 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             s: rt.s,
         };
 
-        // Advance window open/close animations.
         let animating = desk.animate(DT);
+        let mut scene_dirty = animating;
+        let mut cursor_moved = false;
 
         // Drain all pending PS/2 events so the cursor stays responsive.
-        let mut dirty = animating;
         while let Some(event) = ps2::poll() {
-            dirty |= match event {
-                Event::Mouse(p) => desk.handle_mouse(p.dx, p.dy, p.left),
-                Event::Key(k) => desk.handle_key(k.scan_code, k.extended, k.pressed, time),
-            };
+            match event {
+                Event::Mouse(p) => {
+                    let r = desk.handle_mouse(p.dx, p.dy, p.left, p.right);
+                    scene_dirty |= r.scene_dirty;
+                    cursor_moved |= r.cursor_moved;
+                }
+                Event::Key(k) => {
+                    if desk.handle_key(k.scan_code, k.extended, k.pressed, time) {
+                        scene_dirty = true;
+                    }
+                }
+            }
         }
 
         if rt.s != last_sec {
             last_sec = rt.s;
             desk.tick_processes();
-            dirty = true;
-        }
-        if !dirty {
-            continue;
+            scene_dirty = true;
         }
 
-        back.copy_from_slice(bg);
-        desk.render(back, bg, info, time);
+        if scene_dirty {
+            // Full recompose: scene (without cursor) -> back -> framebuffer,
+            // then the cursor as an overlay on top.
+            back.copy_from_slice(bg);
+            desk.render(back, info, time);
+            framebuffer.buffer_mut()[..n].copy_from_slice(back);
+            {
+                let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
+                desk.draw_cursor_overlay(&mut c);
+            }
+            prev_cursor = desk.cursor();
+            if animating {
+                io::delay_cycles(FRAME_CYCLES);
+            }
+        } else if cursor_moved {
+            // Cheap path: restore the pixels under the old cursor from `back`
+            // (which holds the cursor-free scene), then draw the cursor at its
+            // new position. No full-screen copy.
+            let (ox, oy) = prev_cursor;
+            blit_rect(
+                framebuffer.buffer_mut(),
+                back,
+                info,
+                ox,
+                oy,
+                CURSOR_W,
+                CURSOR_H,
+                n,
+            );
+            {
+                let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
+                desk.draw_cursor_overlay(&mut c);
+            }
+            prev_cursor = desk.cursor();
+        }
+    }
+}
+
+fn secs_of_day(t: rtc::Time) -> u32 {
+    t.h as u32 * 3600 + t.m as u32 * 60 + t.s as u32
+}
+
+/// Plays the boot splash, driving the progress bar from real elapsed RTC time
+/// so it always lasts at least 5 seconds regardless of CPU speed.
+fn run_splash(
+    framebuffer: &mut bootloader_api::info::FrameBuffer,
+    back: &mut [u8],
+    info: FrameBufferInfo,
+    n: usize,
+) {
+    let start = secs_of_day(rtc::now());
+    let mut prev_el = 0u32;
+    let mut frac = 0.0f32;
+    loop {
+        let el = (secs_of_day(rtc::now()) + 86_400 - start) % 86_400;
+        if el != prev_el {
+            frac = 0.0;
+            prev_el = el;
+        }
+        let p = ((el as f32) + frac.min(0.99)) / 5.0;
+        {
+            let mut c = Canvas::new(back, info);
+            boot::draw_splash(&mut c, p);
+        }
         framebuffer.buffer_mut()[..n].copy_from_slice(back);
+        io::delay_cycles(20_000_000);
+        frac += 0.06;
+        if el >= 5 {
+            break;
+        }
+    }
+}
 
-        // Pace animation frames so transitions aren't instant under WHPX.
-        if animating {
-            io::delay_cycles(FRAME_CYCLES);
+/// Copy a rectangular region from `src` into `dst` (same framebuffer layout).
+/// Used to restore the background under the moving cursor.
+fn blit_rect(
+    dst: &mut [u8],
+    src: &[u8],
+    info: FrameBufferInfo,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    n: usize,
+) {
+    let bpp = info.bytes_per_pixel;
+    let stride = info.stride;
+    let x = x.max(0) as usize;
+    let y = y.max(0) as usize;
+    if x >= info.width || y >= info.height {
+        return;
+    }
+    let x_end = (x + w as usize).min(info.width);
+    let y_end = (y + h as usize).min(info.height);
+    let row_len = (x_end - x) * bpp;
+    for row in y..y_end {
+        let off = (row * stride + x) * bpp;
+        let end = off + row_len;
+        if end <= n {
+            dst[off..end].copy_from_slice(&src[off..end]);
         }
     }
 }
