@@ -1,0 +1,1 @@
+/mnt/c/Users/jefer/OneDrive/Documentos/Projects/expo/OSjeff/target/x86_64-unknown-none/debug/kernel: /mnt/c/Users/jefer/OneDrive/Documentos/Projects/expo/OSjeff/kernel/src/fb.rs /mnt/c/Users/jefer/OneDrive/Documentos/Projects/expo/OSjeff/kernel/src/main.rs

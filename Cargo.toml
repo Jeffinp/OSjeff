@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["kernel", "os"]
+
+# Bare-metal: abort on panic, no unwinding tables.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

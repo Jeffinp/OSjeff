@@ -1,0 +1,3 @@
+# Artifact dependencies (kernel binary linked into the os builder) need -Z bindeps.
+[unstable]
+bindeps = true

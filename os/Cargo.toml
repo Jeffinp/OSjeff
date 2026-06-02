@@ -1,0 +1,14 @@
+[package]
+name = "os"
+version = "0.1.0"
+edition = "2021"
+
+# The kernel is built for bare metal and embedded by the build script.
+# Artifact deps consumed in build.rs must live under [build-dependencies].
+[build-dependencies]
+bootloader = "0.11"
+
+[build-dependencies.kernel]
+path = "../kernel"
+artifact = "bin"
+target = "x86_64-unknown-none"
