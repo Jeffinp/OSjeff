@@ -32,11 +32,17 @@ entry_point!(kernel_main);
 // Render buffers sized for up to 1920x1080x4. BACK is the compositing target;
 // BG caches the static wallpaper so it is never recomputed per frame.
 const MAX_BYTES: usize = 1920 * 1080 * 4;
-static mut BACK: [u8; MAX_BYTES] = [0; MAX_BYTES];
-static mut BG: [u8; MAX_BYTES] = [0; MAX_BYTES];
+
+// 64-byte aligned so the framebuffer fast paths can reinterpret rows as `[u32]`
+// (one 32-bit store per pixel, vectorized) without an unaligned cast.
+#[repr(C, align(64))]
+struct AlignedBuf([u8; MAX_BYTES]);
+
+static mut BACK: AlignedBuf = AlignedBuf([0; MAX_BYTES]);
+static mut BG: AlignedBuf = AlignedBuf([0; MAX_BYTES]);
 // Cached "everything except the animating window(s)" layer, composed once per
 // animation so each frame only redraws the small damaged region.
-static mut STATIC: [u8; MAX_BYTES] = [0; MAX_BYTES];
+static mut STATIC: AlignedBuf = AlignedBuf([0; MAX_BYTES]);
 
 // Kernel heap (1 MiB) backing the global allocator, so `alloc` works.
 const HEAP_SIZE: usize = 1024 * 1024;
@@ -237,8 +243,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         was_anim = any_anim;
 
-        // No explicit yield: the timer preempts this thread round-robin with the
-        // workers automatically.
+        // Idle until the next interrupt instead of busy-spinning. The timer
+        // (250 Hz) wakes us to step animations and the per-second clock; the
+        // keyboard/mouse IRQs wake us immediately on input. This paces frames to
+        // the tick rate and stops the compositor from burning a full core — a
+        // real system halts when it has nothing to draw. (The demo workers still
+        // spin without yielding, which is what proves preemption.)
+        x86_64::instructions::hlt();
     }
 }
 
@@ -338,6 +349,18 @@ fn heap_smoke_test() {
     }
     let sum: u32 = v.iter().sum();
     core::hint::black_box(sum);
+    drop(v);
+
+    // Fragmentation check: churn many small allocations, free them, then demand
+    // a block larger than any single freed chunk. This only succeeds if the
+    // allocator coalesced the freed regions back together.
+    let mut chunks: Vec<Vec<u8>> = Vec::new();
+    for _ in 0..256 {
+        chunks.push(alloc::vec![0u8; 1024]);
+    }
+    drop(chunks); // frees ~256 KiB in scattered chunks
+    let big: Vec<u8> = alloc::vec![7u8; 200 * 1024];
+    core::hint::black_box(big.len());
 }
 
 fn halt() -> ! {

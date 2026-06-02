@@ -39,6 +39,16 @@ pub fn fit_region(
     Some((alloc_start, excess))
 }
 
+/// True when the free region `[a_start, a_start + a_size)` ends exactly where
+/// `b_start` begins — i.e. the two are contiguous and can be merged into one.
+/// Overflow-safe (a wrapping end can never legitimately touch `b_start`).
+pub const fn regions_adjacent(a_start: usize, a_size: usize, b_start: usize) -> bool {
+    match a_start.checked_add(a_size) {
+        Some(end) => end == b_start,
+        None => false,
+    }
+}
+
 /// Normalize a requested `(size, align)` so every allocation is at least large
 /// enough — and aligned enough — to host a free-list node once freed.
 pub fn adjust_request(
@@ -116,6 +126,27 @@ mod tests {
     #[test]
     fn fit_overflow_is_safe() {
         assert_eq!(fit_region(usize::MAX - 4, 8, 16, 1, 16), None);
+    }
+
+    #[test]
+    fn adjacent_regions_merge() {
+        // [0,64) ends at 64, where [64,..) begins -> adjacent.
+        assert!(regions_adjacent(0, 64, 64));
+        assert!(regions_adjacent(4096, 16, 4112));
+    }
+
+    #[test]
+    fn non_adjacent_regions_dont_merge() {
+        // Gap between end (63) and next start (64).
+        assert!(!regions_adjacent(0, 63, 64));
+        // Overlap / out of order.
+        assert!(!regions_adjacent(0, 100, 64));
+        assert!(!regions_adjacent(128, 16, 64));
+    }
+
+    #[test]
+    fn adjacent_overflow_is_safe() {
+        assert!(!regions_adjacent(usize::MAX - 4, 8, 0));
     }
 
     #[test]

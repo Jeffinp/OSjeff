@@ -8,7 +8,7 @@ use core::cell::UnsafeCell;
 use core::mem;
 use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
-use osjeff_core::heap::{adjust_request, fit_region};
+use osjeff_core::heap::{adjust_request, fit_region, regions_adjacent};
 
 // ---- minimal spin lock ----
 
@@ -119,14 +119,51 @@ impl LinkedListAllocator {
         self.add_free_region(start, size);
     }
 
+    /// Insert a freed region into the address-sorted free list and coalesce it
+    /// with any physically adjacent neighbours. Without coalescing, repeated
+    /// alloc/free of mixed sizes would fragment the heap permanently — large
+    /// requests would fail even with plenty of (scattered) free memory.
     unsafe fn add_free_region(&mut self, addr: usize, size: usize) {
         debug_assert_eq!(osjeff_core::heap::align_up(addr, node_align()), addr);
         debug_assert!(size >= node_size());
-        let mut node = FreeNode::new(size);
-        node.next = self.head.next.take();
+
         let node_ptr = addr as *mut FreeNode;
-        node_ptr.write(node);
-        self.head.next = Some(&mut *node_ptr);
+        node_ptr.write(FreeNode::new(size));
+
+        // Walk the sorted list to the last node whose start is below `addr`
+        // (the head is a sentinel with start = &head, size 0, so it never
+        // coalesces with a real region).
+        let mut prev: *mut FreeNode = &mut self.head;
+        while let Some(next) = (*prev).next.as_ref() {
+            if next.start_addr() < addr {
+                prev = (*prev).next.as_deref_mut().unwrap() as *mut FreeNode;
+            } else {
+                break;
+            }
+        }
+
+        // Link the new node in between `prev` and `prev.next`.
+        (*node_ptr).next = (*prev).next.take();
+        (*prev).next = Some(&mut *node_ptr);
+
+        // Merge forward (node + successor), then backward (prev + node). Order
+        // matters: collapsing the successor first lets a three-way gap close.
+        Self::merge_with_next(node_ptr);
+        Self::merge_with_next(prev);
+    }
+
+    /// If `node` ends exactly where its successor begins, absorb the successor.
+    unsafe fn merge_with_next(node: *mut FreeNode) {
+        let n = &mut *node;
+        let adjacent = match n.next.as_deref() {
+            Some(next) => regions_adjacent(n.start_addr(), n.size, next.start_addr()),
+            None => false,
+        };
+        if adjacent {
+            let next = n.next.take().unwrap();
+            n.size += next.size;
+            n.next = next.next.take();
+        }
     }
 
     /// Remove and return the first region that fits, plus the chosen start.

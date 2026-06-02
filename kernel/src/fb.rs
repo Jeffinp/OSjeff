@@ -68,6 +68,19 @@ impl<'a> Canvas<'a> {
         self.info.bytes_per_pixel
     }
 
+    /// Pack a color into a native-endian 32-bit pixel for the 4-byte-per-pixel
+    /// formats. `None` for layouts we can't pack (grayscale / unknown), which
+    /// fall back to the byte path. The padding byte is left 0.
+    #[inline]
+    fn pack32(&self, c: Color) -> Option<u32> {
+        let (b0, b1, b2) = match self.info.pixel_format {
+            PixelFormat::Rgb => (c.r, c.g, c.b),
+            PixelFormat::Bgr => (c.b, c.g, c.r),
+            _ => return None,
+        };
+        Some(u32::from_le_bytes([b0, b1, b2, 0]))
+    }
+
     #[inline]
     pub fn put(&mut self, x: usize, y: usize, c: Color) {
         if x >= self.info.width || y >= self.info.height {
@@ -126,9 +139,36 @@ impl<'a> Canvas<'a> {
         let stride = self.info.stride;
         let x_end = (x0 + w).min(self.info.width);
         let y_end = (y0 + h).min(self.info.height);
+        if x_end <= x0 || y_end <= y0 {
+            return;
+        }
+        let count = x_end - x0;
 
-        // Fast path: 3-byte RGB/BGR ordering written directly per row, skipping
-        // the per-pixel bounds check + format match that `put` performs.
+        // Fastest path: 4-byte pixels written 32 bits at a time. One store per
+        // pixel instead of three, which the backend lowers to `rep stosd` / SSE.
+        // The render buffers are 64-byte aligned and rows start on a 4-byte
+        // boundary, so `align_to_mut::<u32>` yields no scalar prefix/suffix.
+        if bpp == 4 {
+            if let Some(packed) = self.pack32(c) {
+                for y in y0..y_end {
+                    let o = (y * stride + x0) * 4;
+                    let row = &mut self.buf[o..o + count * 4];
+                    let (pre, mid, suf) = unsafe { row.align_to_mut::<u32>() };
+                    if pre.is_empty() && suf.is_empty() {
+                        mid.fill(packed);
+                    } else {
+                        let b = packed.to_ne_bytes();
+                        for (i, px) in row.iter_mut().enumerate() {
+                            *px = b[i & 3];
+                        }
+                    }
+                }
+                return;
+            }
+        }
+
+        // 3-byte RGB/BGR ordering written directly per row, skipping the
+        // per-pixel bounds check + format match that `put` performs.
         let order = match self.info.pixel_format {
             PixelFormat::Rgb => Some((c.r, c.g, c.b)),
             PixelFormat::Bgr => Some((c.b, c.g, c.r)),

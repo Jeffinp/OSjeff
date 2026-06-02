@@ -28,7 +28,9 @@ const DOCK_MARGIN: i32 = 16; // gap from screen bottom
 // Scratch buffer to snapshot the area behind an animating window (largest
 // window + margin). Lets fades composite over real content, not the wallpaper.
 const SCRATCH_BYTES: usize = 640 * 440 * 4;
-static mut SCRATCH: [u8; SCRATCH_BYTES] = [0; SCRATCH_BYTES];
+#[repr(C, align(64))]
+struct AlignedScratch([u8; SCRATCH_BYTES]);
+static mut SCRATCH: AlignedScratch = AlignedScratch([0; SCRATCH_BYTES]);
 
 const TERM: usize = 0;
 const EDIT: usize = 1;
