@@ -9,7 +9,7 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-99%20passing-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-142%20passing-success?style=for-the-badge)
 ![Clippy](https://img.shields.io/badge/clippy-%2DD%20warnings-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
@@ -39,7 +39,7 @@ Não é um app rodando sobre um SO — é o SO. Cada peça abaixo foi construíd
 | **Heap allocator** | [`kernel/src/allocator.rs`](kernel/src/allocator.rs) | Free-list linkada + spin lock como `#[global_allocator]` → habilita `Vec`/`String`/`Box` |
 | **Interrupções de hardware** | [`kernel/src/interrupts.rs`](kernel/src/interrupts.rs) | IDT, handlers de exceção, PIC 8259 remapeado, timer PIT, input por IRQ |
 | **Compositor por damage tracking** | [`kernel/src/desktop.rs`](kernel/src/desktop.rs) | Cacheia a camada estática e só redesenha o retângulo danificado — custo O(janela) |
-| **Lógica pura testável** | [`osjeff_core/`](osjeff_core/) | Toda decisão (parser, editor, keymap, geometria, allocator) testada no host: **99 testes, ~98% de cobertura** |
+| **Lógica pura testável** | [`osjeff_core/`](osjeff_core/) | Toda decisão (parser, editor, keymap, geometria, allocator, filesystem) testada no host: **142 testes, ~98% de cobertura** |
 
 ---
 
@@ -187,18 +187,21 @@ sudo dd if=osjeff-bios.img of=/dev/sdX bs=4M status=progress && sync
 Toda a lógica vive em `osjeff_core` e é testada no host:
 
 ```bash
-cargo test-core                          # 99 testes
+cargo test-core                          # 142 testes
 cargo llvm-cov -p osjeff_core --summary-only  # cobertura (~98%)
 cargo lint-kernel                        # clippy bare-metal, -D warnings
 cargo lint-host                          # clippy host, -D warnings
 ```
 
-| Módulo (core) | Cobertura |
-|---|---|
-| keymap · window · anim · heap | 100% |
-| terminal | 97% |
-| editor | 96% |
-| process | 99% |
+**142 testes**, ~98% de cobertura de linhas no `osjeff_core`:
+
+| Módulo (core) | Testes | Cobertura |
+|---|---|---|
+| anim · window · heap · keymap | 56 | ~100% |
+| fs | 10 | 99% |
+| terminal · process | 37 | ~98% |
+| editor | 23 | 96% |
+| calc · clipboard | 23 | ~95% |
 
 > `cargo clippy` puro falha **de propósito**: o kernel `no_std` não compila no
 > host (sem unwinding). Por isso os aliases acima escopam o alvo correto.
@@ -210,14 +213,16 @@ cargo lint-host                          # clippy host, -D warnings
 ```
 OSjeff/
 ├── osjeff_core/        # lib no_std + testável (cargo test)
-│   └── src/{keymap,terminal,editor,window,anim,process,heap}.rs
+│   └── src/{keymap,terminal,editor,calc,window,anim,process,heap,clipboard,fs}.rs
 ├── kernel/             # no_std, x86_64-unknown-none
 │   └── src/
 │       ├── main.rs        # entry point + loop do compositor
 │       ├── interrupts.rs  # IDT · exceções · PIC · PIT · input IRQ
 │       ├── sched.rs       # scheduler preemptivo + context switch (asm)
+│       ├── switch.s       # troca de contexto em assembly puro
 │       ├── allocator.rs   # heap (GlobalAlloc) + spin lock
 │       ├── desktop.rs     # window manager + compositor + apps
+│       ├── ata.rs · power.rs  # disco (filesystem) + reboot/shutdown
 │       ├── fb.rs · font.rs · icons.rs · logo.rs · boot.rs
 │       └── io.rs · ps2.rs · rtc.rs · theme.rs
 ├── os/                 # builder: gera imagem + roda QEMU

@@ -30,7 +30,7 @@ hardware — e o `unsafe` fica isolado e auditável.
 ```mermaid
 flowchart LR
     subgraph host["cargo test (host, std)"]
-        T["99 testes unitários"]
+        T["142 testes unitários"]
     end
     subgraph prod["kernel (no_std, bare metal)"]
         K["glue de hardware"]
@@ -225,15 +225,46 @@ roteia input para a janela com foco e desenha tudo. A *lógica* dos apps é pura
 testada em `osjeff_core`:
 
 - **`terminal`** — histórico em ring, linha de input com caret navegável, parser
-  de comandos (`HELP`, `CLS`, `TIME`, `VER`, `ECHO`, `EDIT`, `PS`).
+  de comandos (`HELP`, `CLS`, `TIME`, `VER`, `ECHO`, `EDIT`, `PS`, e os de
+  arquivo `LS`/`CAT`/`SAVE`/`LOAD`/`RM`).
 - **`editor`** — buffer de texto multi-linha, cursor 2D, inserir/quebrar/juntar
-  linhas, navegação.
+  linhas, navegação, `set_text` para carregar um arquivo.
+- **`calc`** — calculadora de 4 operações (semântica infix), com formatador
+  decimal que evita intrínsecos de float do `std`.
+- **`clipboard`** — buffer de texto compartilhado (Ctrl+C/Ctrl+V entre apps).
 - **`window`** — geometria e hit-testing (título, botão fechar, união/interseção
   de retângulos para o damage).
 
 Abrir um app **spawna um processo** (pid novo); fechar a janela **encerra** o
 processo (removido da tabela). Processos de sistema (kernel/compositor) são
-protegidos.
+protegidos. O **ícone do sistema** abre um painel com todos os apps e os botões
+de **Reiniciar**/**Desligar** (`power.rs`).
+
+---
+
+## 8. Filesystem e persistência
+
+A lógica do filesystem (**`osjeff_core::fs`**, "OJFS") é pura e testada: uma
+imagem de bytes fixa com magic + 16 registros `[used][nome][tamanho][dados]`.
+Operações `format`/`write`/`read`/`remove`/`list` editam a imagem no lugar, sem
+alocação — então rodam idênticas no host (com um array) e no kernel.
+
+```mermaid
+flowchart LR
+    BOOT["boot"] --> RD["ata::read_image"]
+    RD --> CK{"formatado?"}
+    CK -->|sim| USE["usa a imagem do disco"]
+    CK -->|não/sem disco| FMT["fs::format + write_image"]
+    USE --> EDIT["SAVE / RM"]
+    FMT --> EDIT
+    EDIT --> FLUSH["ata::write_image (flush)"]
+```
+
+O kernel mantém a imagem em RAM (cópia alinhada a setor) e a sincroniza com o
+disco via **`ata.rs`** — um driver **ATA PIO** (LBA de 28 bits) no canal IDE
+secundário, separado do disco de boot. Todas as esperas são limitadas: um disco
+ausente devolve `false` em vez de pendurar o boot, e o sistema cai para um
+filesystem só em RAM. Cada `SAVE`/`RM` faz *flush* da imagem inteira (~17 KiB).
 
 ---
 
