@@ -12,6 +12,7 @@ use crate::logo;
 use crate::sched;
 use crate::theme;
 use osjeff_core::window::TITLE_H;
+use osjeff_core::clipboard::{self, Clipboard};
 use osjeff_core::{
     Action, Anim, Calc, Editor, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Terminal,
     Time,
@@ -135,6 +136,7 @@ pub struct Desktop {
     term: Terminal,
     editor: Editor,
     calc: Calc,
+    clipboard: Clipboard,
     keymap: Keymap,
     procs: ProcessTable,
     windows: [Win; WIN_COUNT],
@@ -204,6 +206,7 @@ impl Desktop {
             term: Terminal::new(),
             editor: Editor::new(),
             calc: Calc::new(),
+            clipboard: Clipboard::new(),
             keymap: Keymap::new(),
             procs,
             windows,
@@ -333,6 +336,20 @@ impl Desktop {
         let Some(top) = self.focused() else {
             return false;
         };
+        // Ctrl+C / Ctrl+V are intercepted before the app sees the key.
+        if self.keymap.ctrl() {
+            match key {
+                Key::Char(b'c') | Key::Char(b'C') => {
+                    self.copy_from_focused();
+                    return true;
+                }
+                Key::Char(b'v') | Key::Char(b'V') => {
+                    self.paste_into_focused(time);
+                    return true;
+                }
+                _ => {}
+            }
+        }
         match self.windows[top].kind {
             Kind::Terminal => match self.term.on_key(key, time) {
                 Action::OpenEditor => self.open(EDIT),
@@ -363,6 +380,69 @@ impl Desktop {
             self.calc.backspace();
         } else {
             self.calc.input(k);
+        }
+    }
+
+    /// Copy the focused app's current text (terminal input line / editor current
+    /// line / calculator display) into the shared clipboard.
+    fn copy_from_focused(&mut self) {
+        let Some(top) = self.focused() else {
+            return;
+        };
+        // Snapshot to a local buffer so the immutable borrow of the app ends
+        // before mutably borrowing the clipboard.
+        let mut tmp = [0u8; clipboard::CAP];
+        let n;
+        {
+            let text: &[u8] = match self.windows[top].kind {
+                Kind::Terminal => self.term.input(),
+                Kind::Editor => self.editor.line(self.editor.cursor().1),
+                Kind::Calculator => self.calc.display(),
+                Kind::TaskMgr => &[],
+            };
+            n = text.len().min(clipboard::CAP);
+            tmp[..n].copy_from_slice(&text[..n]);
+        }
+        self.clipboard.set(&tmp[..n]);
+    }
+
+    /// Paste the clipboard into the focused app by replaying its bytes through
+    /// the app's normal key handler (so editor line breaks, etc. just work).
+    fn paste_into_focused(&mut self, time: Time) {
+        let Some(top) = self.focused() else {
+            return;
+        };
+        if self.clipboard.is_empty() {
+            return;
+        }
+        let mut tmp = [0u8; clipboard::CAP];
+        let n = self.clipboard.get().len();
+        tmp[..n].copy_from_slice(self.clipboard.get());
+        let data = &tmp[..n];
+
+        match self.windows[top].kind {
+            Kind::Terminal => {
+                for &b in data {
+                    if b != b'\n' && b != b'\r' {
+                        let _ = self.term.on_key(Key::Char(b), time);
+                    }
+                }
+            }
+            Kind::Editor => {
+                for &b in data {
+                    if b == b'\n' {
+                        self.editor.on_key(Key::Enter);
+                    } else if b != b'\r' {
+                        self.editor.on_key(Key::Char(b));
+                    }
+                }
+            }
+            Kind::Calculator => {
+                for &b in data {
+                    self.calc.input(b);
+                }
+            }
+            Kind::TaskMgr => {}
         }
     }
 

@@ -213,8 +213,8 @@ cargo lint-host                          # host clippy, -D warnings
 - [x] 32-bit render fast path + idle `hlt`
 - [x] Save FPU/SSE state (`fxsave`/`fxrstor`) on context switch
 - [x] Calculator + start panel (apps, restart, shut down)
+- [x] Copy/paste between apps (Ctrl+C / Ctrl+V)
 - [ ] Disk driver + filesystem (persistence)
-- [ ] Copy/paste between apps
 - [ ] Network stack
 
 ---

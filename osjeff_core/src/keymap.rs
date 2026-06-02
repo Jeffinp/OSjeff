@@ -26,6 +26,7 @@ pub enum Key {
 pub struct Keymap {
     shift: bool,
     caps: bool,
+    ctrl: bool,
 }
 
 impl Keymap {
@@ -33,6 +34,7 @@ impl Keymap {
         Self {
             shift: false,
             caps: false,
+            ctrl: false,
         }
     }
 
@@ -46,9 +48,20 @@ impl Keymap {
         self.caps
     }
 
+    /// Current control state (left or right Ctrl held).
+    pub fn ctrl(&self) -> bool {
+        self.ctrl
+    }
+
     /// Process one PS/2 event. Returns the produced key on key-down, or `None`
     /// for modifier changes, key-up, and unmapped codes.
     pub fn process(&mut self, scan: u8, extended: bool, pressed: bool) -> Option<Key> {
+        // Ctrl is scancode 0x1D for both left (normal) and right (extended).
+        if scan == 0x1D {
+            self.ctrl = pressed;
+            return None;
+        }
+
         if !extended {
             match scan {
                 0x2A | 0x36 => {
@@ -191,6 +204,18 @@ mod tests {
         let mut km = Keymap::new();
         km.process(0x36, false, true);
         assert_eq!(down(&mut km, 0x1F), Some(Key::Char(b'S')));
+    }
+
+    #[test]
+    fn ctrl_tracks_press_and_release() {
+        let mut km = Keymap::new();
+        assert!(!km.ctrl());
+        assert_eq!(km.process(0x1D, false, true), None); // left ctrl down
+        assert!(km.ctrl());
+        // The letter still translates; the desktop reads ctrl() to intercept it.
+        assert_eq!(down(&mut km, 0x2E), Some(Key::Char(b'c')));
+        assert_eq!(km.process(0x1D, true, false), None); // right ctrl up (extended)
+        assert!(!km.ctrl());
     }
 
     #[test]

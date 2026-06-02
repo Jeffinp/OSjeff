@@ -240,8 +240,8 @@ OSjeff/
 - [x] Render com fast-path de 32 bits + idle `hlt`
 - [x] Salvar estado FPU/SSE (`fxsave`/`fxrstor`) na troca de contexto
 - [x] Calculadora + painel iniciar (apps, reiniciar, desligar)
+- [x] Copy/paste entre apps (Ctrl+C / Ctrl+V)
 - [ ] Driver de disco + sistema de arquivos (persistência)
-- [ ] Copy/paste entre apps
 - [ ] Pilha de rede
 
 ---
