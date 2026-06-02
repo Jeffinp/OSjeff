@@ -6,6 +6,7 @@
 extern crate alloc;
 
 mod allocator;
+mod ata;
 mod boot;
 mod desktop;
 mod fb;

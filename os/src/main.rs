@@ -19,6 +19,15 @@ fn main() {
     // 128 MiB RAM is plenty for a framebuffer demo.
     qemu.arg("-m").arg("128M");
 
+    // Persistent filesystem disk on the secondary IDE channel (master). Created
+    // blank on first run; the kernel formats it if it holds no filesystem.
+    let fs_img = "osjeff-fs.img";
+    if !std::path::Path::new(fs_img).exists() {
+        std::fs::write(fs_img, vec![0u8; 64 * 1024]).expect("failed to create fs disk image");
+    }
+    qemu.arg("-drive")
+        .arg(format!("format=raw,file={fs_img},if=ide,index=2"));
+
     let status = qemu.status().expect("failed to launch qemu-system-x86_64");
     std::process::exit(status.code().unwrap_or(-1));
 }

@@ -40,12 +40,20 @@ const SCRATCH_BYTES: usize = 640 * 440 * 4;
 struct AlignedScratch([u8; SCRATCH_BYTES]);
 static mut SCRATCH: AlignedScratch = AlignedScratch([0; SCRATCH_BYTES]);
 
-// RAM-backed filesystem image. Formatted at boot; a future ATA driver will load
-// this from / flush it to disk for persistence across reboots.
-static mut DISK: [u8; fs::IMAGE_SIZE] = [0; fs::IMAGE_SIZE];
+// In-memory copy of the filesystem image, loaded from / flushed to the ATA disk
+// (sector-aligned so whole 512-byte sectors transfer cleanly). The fs logic only
+// touches the first `fs::IMAGE_SIZE` bytes; the tail is sector padding.
+const DISK_BYTES: usize = fs::IMAGE_SIZE.div_ceil(512) * 512;
+static mut DISK: [u8; DISK_BYTES] = [0; DISK_BYTES];
 
 fn disk() -> &'static mut [u8] {
-    unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(DISK) as *mut u8, fs::IMAGE_SIZE) }
+    unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(DISK) as *mut u8, DISK_BYTES) }
+}
+
+/// Persist the in-memory filesystem image to the ATA disk (best effort: a no-op
+/// if there is no disk).
+fn flush_disk() {
+    let _ = crate::ata::write_image(disk());
 }
 
 const TERM: usize = 0;
@@ -165,8 +173,13 @@ impl Desktop {
             .spawn(b"shell", ProcKind::App, ProcState::Running)
             .unwrap();
 
-        // Start with a fresh in-RAM filesystem.
-        fs::format(disk());
+        // Load the filesystem from disk. If no disk responds or it holds no
+        // valid filesystem (blank / first boot), format and persist a fresh one.
+        // A missing disk simply leaves us with a RAM-only filesystem.
+        if !crate::ata::read_image(disk()) || !fs::is_formatted(disk()) {
+            fs::format(disk());
+            let _ = crate::ata::write_image(disk());
+        }
 
         let windows = [
             Win {
@@ -442,6 +455,7 @@ impl Desktop {
         let n = self.serialize_editor(&mut buf);
         match fs::write(disk(), f.as_bytes(), &buf[..n]) {
             Ok(()) => {
+                flush_disk();
                 self.editor.mark_clean();
                 self.editor_file = f;
                 self.print_named(b"Saved ", f.as_bytes());
@@ -503,7 +517,10 @@ impl Desktop {
 
     fn fs_remove(&mut self, f: FileName) {
         match fs::remove(disk(), f.as_bytes()) {
-            Ok(()) => self.print_named(b"Removed ", f.as_bytes()),
+            Ok(()) => {
+                flush_disk();
+                self.print_named(b"Removed ", f.as_bytes());
+            }
             Err(e) => self.print_fs_err(e),
         }
     }

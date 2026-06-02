@@ -150,7 +150,7 @@ iretq                      ; restaura RIP/CS/RFLAGS/RSP/SS e continua
 |---|---|---|
 | [`switch.s`](../kernel/src/switch.s) | `push`/`pop`/`iretq` | troca de contexto preemptiva |
 | [`sched.rs`](../kernel/src/sched.rs) | `fxsave`/`fxrstor` | salvar/restaurar estado x87+SSE |
-| [`io.rs`](../kernel/src/io.rs) | `in`/`out`/`rdtsc` | I/O de portas (PIC/PIT/PS2/CMOS) + TSC |
+| [`io.rs`](../kernel/src/io.rs) | `in`/`out` (8/16-bit) / `rdtsc` | I/O de portas (PIC/PIT/PS2/CMOS/ATA) + TSC |
 | [`main.rs`](../kernel/src/main.rs) | `hlt` | dormir a CPU quando ocioso |
 
 ### Nascimento de uma thread

@@ -40,7 +40,16 @@ if (-not $SkipBuild) {
 
 if (-not (Test-Path $img)) { throw "Imagem nao existe: $img (rode sem -SkipBuild)" }
 
-$qargs = @('-m', '256M', '-drive', "format=raw,file=$img")
+# Persistent filesystem disk (secondary IDE master). Created blank on first run;
+# the kernel formats it on first boot and persists files there across reboots.
+$fsImg = Join-Path $PSScriptRoot 'osjeff-fs.img'
+if (-not (Test-Path $fsImg)) {
+    [System.IO.File]::WriteAllBytes($fsImg, (New-Object byte[] (64 * 1024)))
+    Write-Host "Disco de arquivos criado: $fsImg" -ForegroundColor Green
+}
+
+$qargs = @('-m', '256M', '-drive', "format=raw,file=$img",
+    '-drive', "format=raw,file=$fsImg,if=ide,index=2")
 if (-not $NoAccel) { $qargs = @('-accel', 'whpx') + $qargs }
 
 Write-Host "Booting OSjeff..." -ForegroundColor Cyan
