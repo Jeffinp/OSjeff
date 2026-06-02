@@ -10,8 +10,10 @@ no framebuffer.
 - **Kernel bare-metal**: identidade visual própria (dock flutuante, mesh
   wallpaper, sombras, logo), boot splash animado
 - **Interrupções de hardware**: IDT + handlers de exceção, PIC 8259 remapeado,
-  timer PIT a 100 Hz (tick monotônico); exceções fatais travam visível em vez
-  de triple-fault
+  timer PIT a 100 Hz; exceções fatais travam visível em vez de triple-fault
+- **Input dirigido por IRQ**: teclado (IRQ1) e mouse (IRQ12) empurram bytes num
+  ring buffer SPSC; o loop principal usa `hlt` (CPU ~0% quando ocioso) e acorda
+  em qualquer interrupção
 - **Heap allocator** (`alloc`): free-list linkada + spin lock como
   `#[global_allocator]` → `Vec`/`String`/`Box` disponíveis
 - Desktop: dock flutuante, relógio em pill, hora local (UTC-3)
@@ -60,7 +62,7 @@ OSjeff/
 │       ├── interrupts.rs  # IDT + exceções + PIC + timer PIT
 │       ├── allocator.rs   # heap linkada (GlobalAlloc) + spin lock
 │       ├── io.rs          # port I/O (inb/outb/rdtsc)
-│       ├── ps2.rs         # driver PS/2 (mouse + teclado, polling)
+│       ├── ps2.rs         # driver PS/2 (mouse + teclado, dirigido por IRQ)
 │       └── rtc.rs         # relógio CMOS
 └── os/                 # builder: gera imagem booteável (crate `bootloader`) + QEMU
 ```

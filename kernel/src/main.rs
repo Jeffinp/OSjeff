@@ -60,8 +60,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     heap_smoke_test();
 
-    // Real interrupts: IDT + exception handlers, PIC remap, PIT timer.
-    // Only IRQ0 (timer) is unmasked; input stays on polling.
+    // Configure the PS/2 controller BEFORE enabling interrupts, so the init
+    // handshake (config write + mouse ACKs) is read by polling without racing
+    // the IRQ handlers.
+    ps2::init();
+
+    // Real interrupts: IDT + exception handlers, PIC remap, PIT timer, and
+    // IRQ-driven keyboard (IRQ1) + mouse (IRQ12).
     interrupts::init();
 
     // Boot splash: progress tracks real elapsed time (>= 5 seconds).
@@ -73,15 +78,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         desktop::paint_background(&mut c);
     }
 
-    ps2::init();
     let mut desk = Desktop::new(info.width as i32, info.height as i32);
     let mut last_sec = 0xFFu8; // force first render
     let mut prev_cursor = desk.cursor();
 
-    // Animation timestep per rendered frame, and the per-frame pacing delay
-    // (~6ms) that keeps transitions visible without a timer interrupt.
+    // Animation timestep advanced once per wake (the PIT wakes us at 100 Hz).
     const DT: f32 = 0.08;
-    const FRAME_CYCLES: u64 = 18_000_000;
 
     loop {
         let rt = rtc::now();
@@ -128,9 +130,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 desk.draw_cursor_overlay(&mut c);
             }
             prev_cursor = desk.cursor();
-            if animating {
-                io::delay_cycles(FRAME_CYCLES);
-            }
         } else if cursor_moved {
             // Cheap path: restore the pixels under the old cursor from `back`
             // (which holds the cursor-free scene), then draw the cursor at its
@@ -152,6 +151,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
             prev_cursor = desk.cursor();
         }
+
+        // Idle until the next interrupt. The PIT (100 Hz) paces animation frames
+        // and keyboard/mouse IRQs wake us immediately, so CPU drops to ~0 when
+        // idle instead of busy-spinning.
+        x86_64::instructions::hlt();
     }
 }
 
