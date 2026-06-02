@@ -6,8 +6,9 @@
 
 # Screenshots / captures
 *.png
-# ...but keep the brand source icon
+# ...but keep the brand source icon and documentation images
 !assets/osjeff-icon.png
+!docs/img/*.png
 
 # Editor / OS cruft
 *.swp

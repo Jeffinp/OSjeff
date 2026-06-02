@@ -500,7 +500,12 @@ impl Desktop {
 
     /// Composes the static layer (non-animating windows + clock) into `buf`,
     /// which must already contain the wallpaper. Done once per animation.
-    pub fn compose_static(&self, buf: &mut [u8], info: bootloader_api::info::FrameBufferInfo, time: Time) {
+    pub fn compose_static(
+        &self,
+        buf: &mut [u8],
+        info: bootloader_api::info::FrameBufferInfo,
+        time: Time,
+    ) {
         let mut c = Canvas::new(buf, info);
         for i in 0..WIN_COUNT {
             let w = self.order[i];

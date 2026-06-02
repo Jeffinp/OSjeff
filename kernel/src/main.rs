@@ -169,11 +169,29 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
             if tick_changed || cursor_moved {
                 let damage = desk.render_anim_frame(back, static_buf, info, prev_damage);
-                blit_rect(framebuffer.buffer_mut(), back, info, damage.x, damage.y, damage.w, damage.h, n);
+                blit_rect(
+                    framebuffer.buffer_mut(),
+                    back,
+                    info,
+                    damage.x,
+                    damage.y,
+                    damage.w,
+                    damage.h,
+                    n,
+                );
                 // Repaint the cursor (the damage blit may have covered it, and the
                 // cursor itself may have moved).
                 let (ox, oy) = prev_cursor;
-                blit_rect(framebuffer.buffer_mut(), back, info, ox, oy, CURSOR_W, CURSOR_H, n);
+                blit_rect(
+                    framebuffer.buffer_mut(),
+                    back,
+                    info,
+                    ox,
+                    oy,
+                    CURSOR_W,
+                    CURSOR_H,
+                    n,
+                );
                 {
                     let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
                     desk.draw_cursor_overlay(&mut c);
@@ -200,7 +218,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             } else if cursor_moved {
                 // Cheap path: restore under the old cursor, draw at the new spot.
                 let (ox, oy) = prev_cursor;
-                blit_rect(framebuffer.buffer_mut(), back, info, ox, oy, CURSOR_W, CURSOR_H, n);
+                blit_rect(
+                    framebuffer.buffer_mut(),
+                    back,
+                    info,
+                    ox,
+                    oy,
+                    CURSOR_W,
+                    CURSOR_H,
+                    n,
+                );
                 {
                     let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
                     desk.draw_cursor_overlay(&mut c);
