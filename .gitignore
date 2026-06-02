@@ -1,0 +1,12 @@
+# Rust build output
+/target/
+
+# Generated bootable images
+*.img
+
+# Screenshots / captures
+*.png
+
+# Editor / OS cruft
+*.swp
+.DS_Store
