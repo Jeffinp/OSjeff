@@ -9,6 +9,7 @@
 
 pub mod anim;
 pub mod editor;
+pub mod heap;
 pub mod keymap;
 pub mod process;
 pub mod terminal;

@@ -3,6 +3,9 @@
 #![allow(static_mut_refs)]
 #![feature(abi_x86_interrupt)]
 
+extern crate alloc;
+
+mod allocator;
 mod boot;
 mod desktop;
 mod fb;
@@ -31,6 +34,13 @@ const MAX_BYTES: usize = 1920 * 1080 * 4;
 static mut BACK: [u8; MAX_BYTES] = [0; MAX_BYTES];
 static mut BG: [u8; MAX_BYTES] = [0; MAX_BYTES];
 
+// Kernel heap (1 MiB) backing the global allocator, so `alloc` works.
+const HEAP_SIZE: usize = 1024 * 1024;
+static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
+
+#[global_allocator]
+static ALLOCATOR: allocator::LockedHeap = allocator::LockedHeap::new();
+
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let framebuffer = match boot_info.framebuffer.as_mut() {
         Some(fb) => fb,
@@ -43,6 +53,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(BACK) as *mut u8, n) };
     let bg: &mut [u8] =
         unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(BG) as *mut u8, n) };
+
+    // Initialize the kernel heap so `alloc` works, then smoke-test it.
+    unsafe {
+        ALLOCATOR.init(core::ptr::addr_of_mut!(HEAP) as usize, HEAP_SIZE);
+    }
+    heap_smoke_test();
 
     // Real interrupts: IDT + exception handlers, PIC remap, PIT timer.
     // Only IRQ0 (timer) is unmasked; input stays on polling.
@@ -204,6 +220,18 @@ fn blit_rect(
             dst[off..end].copy_from_slice(&src[off..end]);
         }
     }
+}
+
+/// Exercises the heap (alloc, grow, free) once at boot. A broken allocator
+/// would fault or hang here instead of silently corrupting later.
+fn heap_smoke_test() {
+    use alloc::vec::Vec;
+    let mut v: Vec<u32> = Vec::new();
+    for i in 0..1024 {
+        v.push(i);
+    }
+    let sum: u32 = v.iter().sum();
+    core::hint::black_box(sum);
 }
 
 fn halt() -> ! {

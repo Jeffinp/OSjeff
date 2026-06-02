@@ -7,9 +7,16 @@ no framebuffer.
 
 ## Recursos
 
-- Desktop: wallpaper em gradiente, taskbar, relógio em tempo real (RTC/UTC)
+- **Kernel bare-metal**: identidade visual própria (dock flutuante, mesh
+  wallpaper, sombras, logo), boot splash animado
+- **Interrupções de hardware**: IDT + handlers de exceção, PIC 8259 remapeado,
+  timer PIT a 100 Hz (tick monotônico); exceções fatais travam visível em vez
+  de triple-fault
+- **Heap allocator** (`alloc`): free-list linkada + spin lock como
+  `#[global_allocator]` → `Vec`/`String`/`Box` disponíveis
+- Desktop: dock flutuante, relógio em pill, hora local (UTC-3)
 - **Window manager**: múltiplas janelas, foco, z-order, arrastar pela barra de
-  título, botão fechar, lançar apps pela taskbar
+  título, botão fechar, menu de contexto (botão direito), lançar apps pela dock
 - **Animações de abertura/fechamento**: fade + slide (easing smoothstep),
   compostas via blend contra o wallpaper, paceadas por TSC (sem timer)
 - **Gerenciador de processos**: abrir um app spawna um processo (pid novo),
@@ -38,16 +45,23 @@ OSjeff/
 │       ├── editor.rs    # modelo de texto multi-linha + cursor 2D
 │       ├── window.rs    # geometria/hit-testing de janelas
 │       ├── anim.rs      # easing/estado das animações de janela
-│       └── process.rs   # tabela de processos (estados, seleção, ticks)
+│       ├── process.rs   # tabela de processos (estados, seleção, ticks)
+│       └── heap.rs      # matemática do allocator (alinhamento/encaixe)
 ├── kernel/             # no_std, target x86_64-unknown-none (hardware + render)
 │   └── src/
-│       ├── main.rs      # entry point + loop do compositor
-│       ├── desktop.rs   # window manager + render dos apps
-│       ├── fb.rs        # primitivas de framebuffer (pixel/rect/gradiente)
-│       ├── font.rs      # fonte bitmap 8x8
-│       ├── io.rs        # port I/O (inb/outb)
-│       ├── ps2.rs       # driver PS/2 (mouse + teclado, polling)
-│       └── rtc.rs       # relógio CMOS
+│       ├── main.rs        # entry point + loop do compositor
+│       ├── desktop.rs     # window manager + render dos apps
+│       ├── theme.rs       # paleta/identidade visual (cores centralizadas)
+│       ├── fb.rs          # primitivas de framebuffer (pixel/rect/blit/blend)
+│       ├── font.rs        # fonte bitmap 8x8
+│       ├── icons.rs       # ícones de app desenhados
+│       ├── logo.rs        # logo OSJeff (RGBA embutido)
+│       ├── boot.rs        # tela de boot animada
+│       ├── interrupts.rs  # IDT + exceções + PIC + timer PIT
+│       ├── allocator.rs   # heap linkada (GlobalAlloc) + spin lock
+│       ├── io.rs          # port I/O (inb/outb/rdtsc)
+│       ├── ps2.rs         # driver PS/2 (mouse + teclado, polling)
+│       └── rtc.rs         # relógio CMOS
 └── os/                 # builder: gera imagem booteável (crate `bootloader`) + QEMU
 ```
 
@@ -112,7 +126,7 @@ Cobertura (precisa `cargo install cargo-llvm-cov`):
 cargo llvm-cov -p osjeff_core --summary-only
 ```
 
-Estado atual: **60 testes**, ~**98% de regiões / ~97% de linhas**.
+Estado atual: **92 testes**, ~**98% de regiões / ~97% de linhas**.
 
 | Módulo       | Linhas |
 |--------------|--------|
@@ -120,6 +134,9 @@ Estado atual: **60 testes**, ~**98% de regiões / ~97% de linhas**.
 | terminal.rs  | 97%    |
 | editor.rs    | 96%    |
 | window.rs    | 100%   |
+| anim.rs      | 100%   |
+| process.rs   | 99%    |
+| heap.rs      | 100%   |
 
 > O kernel e o `os` ficam fora do `cargo test` (bare-metal / sem testes); por isso
 > os comandos acima são escopados com `-p osjeff_core`.

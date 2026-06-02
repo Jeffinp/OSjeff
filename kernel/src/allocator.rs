@@ -1,0 +1,190 @@
+//! Kernel heap: a linked-list free allocator behind a spin lock, exposed as the
+//! global allocator so `alloc` (Vec/String/Box) works. The fiddly alignment and
+//! region-fit math is in `osjeff_core::heap` (unit-tested); this file is the
+//! thin `unsafe` glue that threads free nodes through the heap memory.
+
+use core::alloc::{GlobalAlloc, Layout};
+use core::cell::UnsafeCell;
+use core::mem;
+use core::ptr;
+use core::sync::atomic::{AtomicBool, Ordering};
+use osjeff_core::heap::{adjust_request, fit_region};
+
+// ---- minimal spin lock ----
+
+pub struct SpinLock<T> {
+    locked: AtomicBool,
+    data: UnsafeCell<T>,
+}
+
+// Safe: access is serialized by the lock; the kernel is single-core and our
+// ISRs never allocate, so there is no re-entrancy.
+unsafe impl<T: Send> Sync for SpinLock<T> {}
+
+impl<T> SpinLock<T> {
+    pub const fn new(value: T) -> Self {
+        Self {
+            locked: AtomicBool::new(false),
+            data: UnsafeCell::new(value),
+        }
+    }
+
+    pub fn lock(&self) -> SpinGuard<'_, T> {
+        while self
+            .locked
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+        SpinGuard { lock: self }
+    }
+}
+
+pub struct SpinGuard<'a, T> {
+    lock: &'a SpinLock<T>,
+}
+
+impl<T> core::ops::Deref for SpinGuard<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        unsafe { &*self.lock.data.get() }
+    }
+}
+
+impl<T> core::ops::DerefMut for SpinGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.lock.data.get() }
+    }
+}
+
+impl<T> Drop for SpinGuard<'_, T> {
+    fn drop(&mut self) {
+        self.lock.locked.store(false, Ordering::Release);
+    }
+}
+
+// ---- linked-list allocator ----
+
+struct FreeNode {
+    size: usize,
+    next: Option<&'static mut FreeNode>,
+}
+
+impl FreeNode {
+    const fn new(size: usize) -> Self {
+        FreeNode { size, next: None }
+    }
+    fn start_addr(&self) -> usize {
+        self as *const Self as usize
+    }
+    fn end_addr(&self) -> usize {
+        self.start_addr() + self.size
+    }
+}
+
+fn node_size() -> usize {
+    mem::size_of::<FreeNode>()
+}
+fn node_align() -> usize {
+    mem::align_of::<FreeNode>()
+}
+
+pub struct LinkedListAllocator {
+    head: FreeNode,
+}
+
+impl LinkedListAllocator {
+    pub const fn new() -> Self {
+        Self {
+            head: FreeNode::new(0),
+        }
+    }
+
+    /// # Safety
+    /// `start..start+size` must be valid, unused, writable memory that lives for
+    /// the rest of the program.
+    pub unsafe fn init(&mut self, start: usize, size: usize) {
+        self.add_free_region(start, size);
+    }
+
+    unsafe fn add_free_region(&mut self, addr: usize, size: usize) {
+        debug_assert_eq!(osjeff_core::heap::align_up(addr, node_align()), addr);
+        debug_assert!(size >= node_size());
+        let mut node = FreeNode::new(size);
+        node.next = self.head.next.take();
+        let node_ptr = addr as *mut FreeNode;
+        node_ptr.write(node);
+        self.head.next = Some(&mut *node_ptr);
+    }
+
+    /// Remove and return the first region that fits, plus the chosen start.
+    fn find_region(&mut self, size: usize, align: usize) -> Option<(&'static mut FreeNode, usize)> {
+        let mut current = &mut self.head;
+        while let Some(ref mut region) = current.next {
+            if let Some((alloc_start, _excess)) =
+                fit_region(region.start_addr(), region.size, size, align, node_size())
+            {
+                let next = region.next.take();
+                let region = current.next.take().unwrap();
+                current.next = next;
+                return Some((region, alloc_start));
+            }
+            current = current.next.as_mut().unwrap();
+        }
+        None
+    }
+
+    fn alloc(&mut self, layout: Layout) -> *mut u8 {
+        let (size, align) =
+            adjust_request(layout.size(), layout.align(), node_size(), node_align());
+        match self.find_region(size, align) {
+            Some((region, alloc_start)) => {
+                let alloc_end = alloc_start + size;
+                let excess = region.end_addr() - alloc_end;
+                if excess > 0 {
+                    unsafe { self.add_free_region(alloc_end, excess) };
+                }
+                alloc_start as *mut u8
+            }
+            None => ptr::null_mut(),
+        }
+    }
+
+    fn dealloc(&mut self, ptr: *mut u8, layout: Layout) {
+        let (size, _align) =
+            adjust_request(layout.size(), layout.align(), node_size(), node_align());
+        unsafe { self.add_free_region(ptr as usize, size) };
+    }
+}
+
+impl Default for LinkedListAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---- global allocator ----
+
+pub struct LockedHeap(SpinLock<LinkedListAllocator>);
+
+impl LockedHeap {
+    pub const fn new() -> Self {
+        Self(SpinLock::new(LinkedListAllocator::new()))
+    }
+
+    /// # Safety
+    /// See [`LinkedListAllocator::init`].
+    pub unsafe fn init(&self, start: usize, size: usize) {
+        self.0.lock().init(start, size);
+    }
+}
+
+unsafe impl GlobalAlloc for LockedHeap {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        self.0.lock().alloc(layout)
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        self.0.lock().dealloc(ptr, layout);
+    }
+}
