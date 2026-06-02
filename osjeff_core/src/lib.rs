@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod anim;
+pub mod calc;
 pub mod editor;
 pub mod heap;
 pub mod keymap;
@@ -16,6 +17,7 @@ pub mod terminal;
 pub mod window;
 
 pub use anim::Anim;
+pub use calc::Calc;
 pub use editor::Editor;
 pub use keymap::{Key, Keymap};
 pub use process::{ProcKind, ProcState, Process, ProcessTable};

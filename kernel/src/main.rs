@@ -14,6 +14,7 @@ mod icons;
 mod interrupts;
 mod io;
 mod logo;
+mod power;
 mod ps2;
 mod rtc;
 mod sched;

@@ -136,8 +136,11 @@ sequenceDiagram
   no ISR do timer, CPU por thread no gerenciador
 - **Window manager**: múltiplas janelas, foco, z-order, arrastar, menu de
   contexto (botão direito), animações de abre/fecha com damage tracking
-- **3 apps**: **Terminal** (histórico, comandos), **Editor** (texto multi-linha,
-  cursor 2D) e **Gerenciador de tarefas**
+- **4 apps**: **Terminal** (histórico, comandos), **Editor** (texto multi-linha,
+  cursor 2D), **Gerenciador de tarefas** e **Calculadora** (4 operações, mouse +
+  teclado)
+- **Painel iniciar**: o ícone do sistema abre um menu com todos os apps e botões
+  de **Reiniciar** e **Desligar** (reset via 8042/PCI, poweroff via portas ACPI)
 - **Mouse + teclado PS/2** (Shift, Caps, setas), relógio RTC em hora local
 - **Double buffering** + dirty-rect do cursor → render sem flicker
 - Fonte bitmap 8×8 própria; ícones desenhados; logo embutido como RGBA
@@ -236,6 +239,7 @@ OSjeff/
 - [x] Heap com coalescência de blocos livres
 - [x] Render com fast-path de 32 bits + idle `hlt`
 - [x] Salvar estado FPU/SSE (`fxsave`/`fxrstor`) na troca de contexto
+- [x] Calculadora + painel iniciar (apps, reiniciar, desligar)
 - [ ] Driver de disco + sistema de arquivos (persistência)
 - [ ] Copy/paste entre apps
 - [ ] Pilha de rede

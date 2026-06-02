@@ -13,7 +13,8 @@ use crate::sched;
 use crate::theme;
 use osjeff_core::window::TITLE_H;
 use osjeff_core::{
-    Action, Anim, Editor, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Terminal, Time,
+    Action, Anim, Calc, Editor, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Terminal,
+    Time,
 };
 
 const SLIDE_PX: f32 = 28.0;
@@ -22,8 +23,19 @@ const SLIDE_PX: f32 = 28.0;
 const DOCK_ICON: i32 = 40;
 const DOCK_GAP: i32 = 14;
 const DOCK_PAD: i32 = 12;
-const DOCK_COUNT: i32 = 4; // brand + terminal + editor + taskmgr
+const DOCK_COUNT: i32 = 5; // brand + terminal + editor + taskmgr + calculator
 const DOCK_MARGIN: i32 = 16; // gap from screen bottom
+
+// Calculator keypad: the input byte for each cell (0x08 = backspace). Duplicate
+// cells (`0` spanning two columns, `=` spanning two rows) map to the same byte;
+// the draw code merges them visually.
+const CALC_KEYS: [[u8; 4]; 5] = [
+    *b"C\x08/*",
+    *b"789-",
+    *b"456+",
+    *b"123=",
+    *b"00.=",
+];
 
 // Scratch buffer to snapshot the area behind an animating window (largest
 // window + margin). Lets fades composite over real content, not the wallpaper.
@@ -35,7 +47,8 @@ static mut SCRATCH: AlignedScratch = AlignedScratch([0; SCRATCH_BYTES]);
 const TERM: usize = 0;
 const EDIT: usize = 1;
 const TASK: usize = 2;
-const WIN_COUNT: usize = 3;
+const CALC: usize = 3;
+const WIN_COUNT: usize = 4;
 
 /// Cursor sprite bounding box (used by the dirty-rect overlay path).
 pub const CURSOR_W: i32 = 10;
@@ -45,8 +58,38 @@ pub const CURSOR_H: i32 = 16;
 const MENU_W: i32 = 220;
 const MENU_ITEM_H: i32 = 32;
 const MENU_PAD: i32 = 6;
-const MENU_ITEMS: [(&str, usize); 3] =
-    [("Terminal", TERM), ("Editor", EDIT), ("Task Manager", TASK)];
+const MENU_ITEMS: [(&str, usize); 4] = [
+    ("Terminal", TERM),
+    ("Editor", EDIT),
+    ("Task Manager", TASK),
+    ("Calculator", CALC),
+];
+
+// Start panel (system icon → all apps + power).
+const START_W: i32 = 240;
+const START_ROW_H: i32 = 38;
+const START_PAD: i32 = 10;
+const START_GAP: i32 = 12; // divider gap before the power rows
+const START_APPS: [(&str, usize); 4] = [
+    ("Terminal", TERM),
+    ("Editor", EDIT),
+    ("Task Manager", TASK),
+    ("Calculator", CALC),
+];
+
+/// An entry in the start panel.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StartItem {
+    App(usize),
+    Reboot,
+    Shutdown,
+}
+
+/// What a dock icon click triggers.
+enum DockAction {
+    Start,
+    Open(usize),
+}
 
 /// What changed after a mouse packet, so the caller can pick the cheap
 /// cursor-only repaint vs a full scene recompose.
@@ -60,6 +103,7 @@ enum Kind {
     Terminal,
     Editor,
     TaskMgr,
+    Calculator,
 }
 
 struct Win {
@@ -90,12 +134,14 @@ pub struct Desktop {
     sh: i32,
     term: Terminal,
     editor: Editor,
+    calc: Calc,
     keymap: Keymap,
     procs: ProcessTable,
     windows: [Win; WIN_COUNT],
     order: [usize; WIN_COUNT], // back -> front
     drag: Option<Drag>,
     menu: Option<(i32, i32)>,
+    start_open: bool,
     cursor_x: i32,
     cursor_y: i32,
     prev_left: bool,
@@ -141,6 +187,15 @@ impl Desktop {
                 anim: None,
                 pid: 0,
             },
+            Win {
+                rect: Rect::new(470, 150, 300, 420),
+                visible: false,
+                kind: Kind::Calculator,
+                title: "CALCULATOR",
+                proc_name: b"calc",
+                anim: None,
+                pid: 0,
+            },
         ];
 
         Self {
@@ -148,12 +203,14 @@ impl Desktop {
             sh,
             term: Terminal::new(),
             editor: Editor::new(),
+            calc: Calc::new(),
             keymap: Keymap::new(),
             procs,
             windows,
-            order: [TASK, EDIT, TERM], // terminal focused
+            order: [TASK, CALC, EDIT, TERM], // terminal focused
             drag: None,
             menu: None,
+            start_open: false,
             cursor_x: sw / 2,
             cursor_y: sh / 2,
             prev_left: false,
@@ -290,8 +347,23 @@ impl Desktop {
                 }
             }
             Kind::TaskMgr => self.task_key(key),
+            Kind::Calculator => match key {
+                Key::Char(b) => self.calc.input(b),
+                Key::Enter => self.calc.input(b'='),
+                Key::Backspace => self.calc.backspace(),
+                Key::Esc => self.request_close(CALC),
+                _ => {}
+            },
         }
         true
+    }
+
+    fn calc_input(&mut self, k: u8) {
+        if k == 0x08 {
+            self.calc.backspace();
+        } else {
+            self.calc.input(k);
+        }
     }
 
     fn task_key(&mut self, key: Key) {
@@ -339,7 +411,19 @@ impl Desktop {
         }
 
         if left_pressed {
-            if let Some((mx, my)) = self.menu {
+            if self.start_open {
+                // Resolve a click on the open start panel (app / power / dismiss).
+                match start_item_at(self.sw, self.sh, cx, cy) {
+                    Some(StartItem::App(w)) => {
+                        self.start_open = false;
+                        self.open(w);
+                    }
+                    Some(StartItem::Reboot) => crate::power::reboot(),
+                    Some(StartItem::Shutdown) => crate::power::shutdown(),
+                    None => self.start_open = false,
+                }
+                scene = true;
+            } else if let Some((mx, my)) = self.menu {
                 // A click while the menu is open selects an item or dismisses it.
                 if let Some(i) = menu_item_at(mx, my, cx, cy) {
                     self.open(MENU_ITEMS[i].1);
@@ -359,11 +443,18 @@ impl Desktop {
                             grab_dx: cx - rect.x,
                             grab_dy: cy - rect.y,
                         });
+                    } else if self.windows[w].kind == Kind::Calculator {
+                        if let Some(k) = calc_button_at(rect, cx, cy) {
+                            self.calc_input(k);
+                        }
                     }
                 }
                 scene = true;
-            } else if let Some(app) = self.taskbar_hit(cx, cy) {
-                self.open(app);
+            } else if let Some(action) = self.dock_hit(cx, cy) {
+                match action {
+                    DockAction::Start => self.start_open = !self.start_open,
+                    DockAction::Open(app) => self.open(app),
+                }
                 scene = true;
             }
         }
@@ -387,8 +478,9 @@ impl Desktop {
             }
         }
 
-        // While the menu is open, movement must repaint for hover highlight.
-        if self.menu.is_some() && cursor_moved {
+        // While the menu or start panel is open, movement must repaint for the
+        // hover highlight.
+        if (self.menu.is_some() || self.start_open) && cursor_moved {
             scene = true;
         }
 
@@ -407,14 +499,16 @@ impl Desktop {
         (mx, my)
     }
 
-    fn taskbar_hit(&self, px: i32, py: i32) -> Option<usize> {
+    fn dock_hit(&self, px: i32, py: i32) -> Option<DockAction> {
         let (_, icons) = dock_layout(self.sw, self.sh);
         for (i, r) in icons.iter().enumerate() {
             if r.contains(px, py) {
                 return match i {
-                    0 | 1 => Some(TERM), // brand + terminal
-                    2 => Some(EDIT),
-                    3 => Some(TASK),
+                    0 => Some(DockAction::Start), // system icon → start panel
+                    1 => Some(DockAction::Open(TERM)),
+                    2 => Some(DockAction::Open(EDIT)),
+                    3 => Some(DockAction::Open(TASK)),
+                    4 => Some(DockAction::Open(CALC)),
                     _ => None,
                 };
             }
@@ -444,6 +538,9 @@ impl Desktop {
         draw_clock(&mut c, time);
         if let Some((mx, my)) = self.menu {
             self.draw_menu(&mut c, mx, my);
+        }
+        if self.start_open {
+            self.draw_start(&mut c);
         }
     }
 
@@ -598,7 +695,7 @@ impl Desktop {
             theme::WINDOW_BODY,
         );
 
-        let item_icons = [Icon::Terminal, Icon::Editor, Icon::TaskMgr];
+        let item_icons = [Icon::Terminal, Icon::Editor, Icon::TaskMgr, Icon::Calculator];
         for (i, (label, _)) in MENU_ITEMS.iter().enumerate() {
             let iy = my + MENU_PAD + i as i32 * MENU_ITEM_H;
             if menu_item_at(mx, my, self.cursor_x, self.cursor_y) == Some(i) {
@@ -694,6 +791,135 @@ impl Desktop {
             Kind::Terminal => self.draw_terminal(c, x, y, focused),
             Kind::Editor => self.draw_editor(c, x, y, focused),
             Kind::TaskMgr => self.draw_taskmgr(c, x, y),
+            Kind::Calculator => self.draw_calculator(c, r, focused),
+        }
+    }
+
+    fn draw_calculator(&self, c: &mut Canvas, r: Rect, _focused: bool) {
+        let x = r.x.max(0) as usize;
+        let y = r.y.max(0) as usize;
+        let w = r.w as usize;
+        let pad = 14usize;
+
+        // Display panel: dark box, result right-aligned in accent.
+        let dx = x + pad;
+        let dy = y + TITLE_H as usize + 12;
+        let dw = w - pad * 2;
+        let dh = 48usize;
+        c.fill_round_rect(dx, dy, dw, dh, 8, Color::rgb(0x0E, 0x16, 0x28));
+        let disp = self.calc.display();
+        let dscale = 3usize;
+        let tw = disp.len() * font::cell_w(dscale);
+        let tx = if tw + 16 < dw { dx + dw - tw - 16 } else { dx + 10 };
+        let color = if self.calc.is_error() {
+            theme::CLOSE
+        } else {
+            theme::ACCENT
+        };
+        font::draw_bytes(c, tx, dy + (dh - 7 * dscale) / 2, disp, color, dscale);
+
+        // Keypad.
+        let (gx, gy, cw, ch, gap) = calc_layout(r);
+        let pending = self.calc.operator();
+        for (row, keys) in CALC_KEYS.iter().enumerate() {
+            for (col, &k) in keys.iter().enumerate() {
+                // Skip the cells absorbed by a spanning button.
+                if (row == 4 && col == 1) || (row == 4 && col == 3) {
+                    continue;
+                }
+                let mut bw = cw;
+                let mut bh = ch;
+                if row == 4 && col == 0 {
+                    bw = cw * 2 + gap; // wide "0"
+                }
+                if row == 3 && col == 3 {
+                    bh = ch * 2 + gap; // tall "="
+                }
+                let bx = gx + col as i32 * (cw + gap);
+                let by = gy + row as i32 * (ch + gap);
+                let (bg, fg) = key_style(k, pending);
+                c.fill_round_rect(bx as usize, by as usize, bw as usize, bh as usize, 8, bg);
+                let label = key_label(&k);
+                let lscale = 3usize;
+                let lw = label.len() * font::cell_w(lscale);
+                let lx = bx as usize + (bw as usize).saturating_sub(lw) / 2;
+                let ly = by as usize + (bh as usize).saturating_sub(7 * lscale) / 2;
+                font::draw_bytes(c, lx, ly, label, fg, lscale);
+            }
+        }
+    }
+
+    fn draw_start(&self, c: &mut Canvas) {
+        let (sx, sy) = start_origin(self.sw, self.sh);
+        let h = start_height();
+        // Shadow + panel.
+        c.fill_round_rect_alpha(
+            (sx + 5) as usize,
+            (sy + 10) as usize,
+            START_W as usize,
+            h as usize,
+            16,
+            theme::SHADOW,
+            40,
+        );
+        c.fill_round_rect(sx as usize, sy as usize, START_W as usize, h as usize, 14, theme::DOCK);
+
+        let hovered = start_item_at(self.sw, self.sh, self.cursor_x, self.cursor_y);
+        let top = sy + START_PAD;
+        let app_icons = [Icon::Terminal, Icon::Editor, Icon::TaskMgr, Icon::Calculator];
+
+        for (i, (label, win)) in START_APPS.iter().enumerate() {
+            let ry = top + i as i32 * START_ROW_H;
+            if hovered == Some(StartItem::App(*win)) {
+                start_row_highlight(c, sx, ry, theme::ACCENT);
+            }
+            icons::draw(
+                c,
+                app_icons[i],
+                (sx + START_PAD) as usize,
+                (ry + (START_ROW_H - 24) / 2) as usize,
+                24,
+            );
+            font::draw_text(
+                c,
+                (sx + START_PAD + 36) as usize,
+                (ry + (START_ROW_H - 14) / 2) as usize,
+                label,
+                theme::HEADER_TEXT,
+                2,
+            );
+        }
+
+        // Divider, then power actions.
+        let pwr_top = top + START_APPS.len() as i32 * START_ROW_H + START_GAP;
+        c.fill_rect(
+            (sx + START_PAD) as usize,
+            (pwr_top - START_GAP / 2) as usize,
+            (START_W - START_PAD * 2) as usize,
+            1,
+            theme::DOCK_EDGE,
+        );
+        let power = [(StartItem::Reboot, "Reiniciar"), (StartItem::Shutdown, "Desligar")];
+        for (i, (item, label)) in power.iter().enumerate() {
+            let ry = pwr_top + i as i32 * START_ROW_H;
+            if hovered == Some(*item) {
+                start_row_highlight(c, sx, ry, theme::CLOSE);
+            }
+            icons::draw(
+                c,
+                Icon::Power,
+                (sx + START_PAD) as usize,
+                (ry + (START_ROW_H - 24) / 2) as usize,
+                24,
+            );
+            font::draw_text(
+                c,
+                (sx + START_PAD + 36) as usize,
+                (ry + (START_ROW_H - 14) / 2) as usize,
+                label,
+                theme::HEADER_TEXT,
+                2,
+            );
         }
     }
 
@@ -860,6 +1086,114 @@ fn dock_layout(sw: i32, sh: i32) -> (Rect, [Rect; DOCK_COUNT as usize]) {
     (dock, icons)
 }
 
+/// Keypad geometry for a calculator window: grid origin, cell size and gap.
+/// Shared by drawing and hit-testing so they always agree.
+fn calc_layout(r: Rect) -> (i32, i32, i32, i32, i32) {
+    let pad = 14;
+    let gap = 8;
+    let disp_h = 48;
+    let gx = r.x + pad;
+    let gy = r.y + TITLE_H + 12 + disp_h + 12;
+    let grid_w = r.w - pad * 2;
+    let grid_h = r.bottom() - gy - pad;
+    let cw = (grid_w - gap * 3) / 4;
+    let ch = (grid_h - gap * 4) / 5;
+    (gx, gy, cw, ch, gap)
+}
+
+/// The keypad byte under `(px, py)` in calculator window `r`, if any. Spanning
+/// buttons map through their duplicate cells in [`CALC_KEYS`].
+fn calc_button_at(r: Rect, px: i32, py: i32) -> Option<u8> {
+    let (gx, gy, cw, ch, gap) = calc_layout(r);
+    if cw <= 0 || ch <= 0 {
+        return None;
+    }
+    for (row, keys) in CALC_KEYS.iter().enumerate() {
+        for (col, &k) in keys.iter().enumerate() {
+            let bx = gx + col as i32 * (cw + gap);
+            let by = gy + row as i32 * (ch + gap);
+            if px >= bx && px < bx + cw && py >= by && py < by + ch {
+                return Some(k);
+            }
+        }
+    }
+    None
+}
+
+/// Label bytes for a keypad cell (`<` for the backspace sentinel).
+fn key_label(k: &u8) -> &[u8] {
+    if *k == 0x08 {
+        b"<"
+    } else {
+        core::slice::from_ref(k)
+    }
+}
+
+/// Background/foreground for a keypad button; the pending operator is inverted.
+fn key_style(k: u8, pending: Option<u8>) -> (Color, Color) {
+    match k {
+        b'=' => (theme::ACCENT_2, theme::WHITE),
+        b'C' => (theme::CLOSE, theme::WHITE),
+        0x08 => (theme::HEADER, theme::HEADER_TEXT),
+        b'+' | b'-' | b'*' | b'/' => {
+            if pending == Some(k) {
+                (theme::WHITE, theme::ACCENT)
+            } else {
+                (theme::ACCENT, theme::WHITE)
+            }
+        }
+        _ => (theme::WINDOW_BODY, theme::TEXT), // digits + dot
+    }
+}
+
+fn start_height() -> i32 {
+    START_PAD * 2 + (START_APPS.len() as i32 + 2) * START_ROW_H + START_GAP
+}
+
+/// Top-left of the start panel, centered above the dock's system icon.
+fn start_origin(sw: i32, sh: i32) -> (i32, i32) {
+    let (_dock, icons) = dock_layout(sw, sh);
+    let brand = icons[0];
+    let x = (brand.x + DOCK_ICON / 2 - START_W / 2).clamp(8, (sw - START_W - 8).max(8));
+    let y = brand.y - start_height() - 12;
+    (x, y)
+}
+
+/// The start-panel item under `(px, py)`, if any.
+fn start_item_at(sw: i32, sh: i32, px: i32, py: i32) -> Option<StartItem> {
+    let (sx, sy) = start_origin(sw, sh);
+    if px < sx + START_PAD || px >= sx + START_W - START_PAD {
+        return None;
+    }
+    let top = sy + START_PAD;
+    for (i, (_label, win)) in START_APPS.iter().enumerate() {
+        let ry = top + i as i32 * START_ROW_H;
+        if py >= ry && py < ry + START_ROW_H {
+            return Some(StartItem::App(*win));
+        }
+    }
+    let pwr_top = top + START_APPS.len() as i32 * START_ROW_H + START_GAP;
+    for (i, item) in [StartItem::Reboot, StartItem::Shutdown].iter().enumerate() {
+        let ry = pwr_top + i as i32 * START_ROW_H;
+        if py >= ry && py < ry + START_ROW_H {
+            return Some(*item);
+        }
+    }
+    None
+}
+
+fn start_row_highlight(c: &mut Canvas, sx: i32, ry: i32, color: Color) {
+    c.fill_round_rect_alpha(
+        (sx + 5) as usize,
+        (ry + 2) as usize,
+        (START_W - 10) as usize,
+        (START_ROW_H - 4) as usize,
+        8,
+        color,
+        36,
+    );
+}
+
 pub fn paint_background(c: &mut Canvas) {
     let w = c.width();
     let h = c.height();
@@ -898,7 +1232,13 @@ pub fn paint_background(c: &mut Canvas) {
     c.fill_round_rect(dx, dy, dw, dh, radius, theme::DOCK);
 
     // Slot 0 = real OSJeff logo; the rest are vector app icons.
-    let kinds = [Icon::Brand, Icon::Terminal, Icon::Editor, Icon::TaskMgr];
+    let kinds = [
+        Icon::Brand,
+        Icon::Terminal,
+        Icon::Editor,
+        Icon::TaskMgr,
+        Icon::Calculator,
+    ];
     for (i, kind) in kinds.iter().enumerate() {
         let r = icons[i];
         if i == 0 && r.w as usize == logo::SIZE_40 {

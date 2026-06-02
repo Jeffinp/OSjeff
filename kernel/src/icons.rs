@@ -11,6 +11,8 @@ pub enum Icon {
     Terminal,
     Editor,
     TaskMgr,
+    Calculator,
+    Power,
 }
 
 pub fn draw(c: &mut Canvas, icon: Icon, x: usize, y: usize, size: usize) {
@@ -19,6 +21,8 @@ pub fn draw(c: &mut Canvas, icon: Icon, x: usize, y: usize, size: usize) {
         Icon::Terminal => terminal(c, x, y, size),
         Icon::Editor => editor(c, x, y, size),
         Icon::TaskMgr => taskmgr(c, x, y, size),
+        Icon::Calculator => calculator(c, x, y, size),
+        Icon::Power => power(c, x, y, size),
     }
 }
 
@@ -80,6 +84,58 @@ fn editor(c: &mut Canvas, x: usize, y: usize, size: usize) {
     }
     let f = size / 5;
     c.fill_round_rect(x + size - pad - f, y + pad, f, f, 2, theme::ACCENT);
+}
+
+fn calculator(c: &mut Canvas, x: usize, y: usize, size: usize) {
+    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x1B, 0x24, 0x3A));
+    let pad = (size / 6).max(2);
+    let gap = (size / 12).max(1);
+    // Screen.
+    c.fill_round_rect(x + pad, y + pad, size - pad * 2, size / 5, 2, theme::ACCENT);
+    // 3x3 keypad.
+    let gy = y + pad + size / 5 + gap;
+    let cell = ((size - pad * 2).saturating_sub(2 * gap) / 3).max(1);
+    for r in 0..3 {
+        for col in 0..3 {
+            let bx = x + pad + col * (cell + gap);
+            let by = gy + r * (cell + gap);
+            let fill = if r == 2 && col == 2 {
+                theme::ACCENT_2
+            } else {
+                theme::WINDOW_BODY
+            };
+            c.fill_round_rect(bx, by, cell, cell, 2, fill);
+        }
+    }
+}
+
+fn power(c: &mut Canvas, x: usize, y: usize, size: usize) {
+    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x2A, 0x12, 0x18));
+    let col = theme::CLOSE;
+    let cx = x + size / 2;
+    let cy = y + size / 2;
+    let r = (size / 3).max(3);
+    // Ring: filled disc punched hollow with the tile color.
+    c.fill_round_rect(cx - r, cy - r, 2 * r, 2 * r, r, col);
+    let inner = r.saturating_sub((size / 12).max(2));
+    c.fill_round_rect(
+        cx - inner,
+        cy - inner,
+        2 * inner,
+        2 * inner,
+        inner,
+        Color::rgb(0x2A, 0x12, 0x18),
+    );
+    // Top break + power bar.
+    let bw = (size / 10).max(2);
+    c.fill_rect(cx - bw / 2, y + size / 6, bw, size / 3, col);
+    c.fill_rect(
+        cx - bw / 2 - 1,
+        y + size / 6,
+        bw + 2,
+        (size / 12).max(2),
+        Color::rgb(0x2A, 0x12, 0x18),
+    );
 }
 
 fn taskmgr(c: &mut Canvas, x: usize, y: usize, size: usize) {

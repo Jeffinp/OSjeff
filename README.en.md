@@ -135,8 +135,10 @@ sequenceDiagram
   the timer ISR, per-thread CPU in the task manager
 - **Window manager**: multiple windows, focus, z-order, dragging, right-click
   context menu, open/close animations with damage tracking
-- **3 apps**: **Terminal** (history, commands), **Editor** (multi-line text, 2D
-  cursor) and **Task Manager**
+- **4 apps**: **Terminal** (history, commands), **Editor** (multi-line text, 2D
+  cursor), **Task Manager** and **Calculator** (4 functions, mouse + keyboard)
+- **Start panel**: the system icon opens a menu with every app plus **Restart**
+  and **Shut down** (reset via 8042/PCI, poweroff via ACPI ports)
 - **PS/2 mouse + keyboard** (Shift, Caps, arrows), RTC clock in local time
 - **Double buffering** + cursor dirty-rect → flicker-free rendering
 - Own 8×8 bitmap font; hand-drawn icons; logo embedded as RGBA
@@ -210,6 +212,7 @@ cargo lint-host                          # host clippy, -D warnings
 - [x] Free-block coalescing heap
 - [x] 32-bit render fast path + idle `hlt`
 - [x] Save FPU/SSE state (`fxsave`/`fxrstor`) on context switch
+- [x] Calculator + start panel (apps, restart, shut down)
 - [ ] Disk driver + filesystem (persistence)
 - [ ] Copy/paste between apps
 - [ ] Network stack

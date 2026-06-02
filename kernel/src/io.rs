@@ -18,6 +18,13 @@ pub fn outb(port: u16, value: u8) {
     }
 }
 
+#[inline]
+pub fn outw(port: u16, value: u16) {
+    unsafe {
+        asm!("out dx, ax", in("dx") port, in("ax") value, options(nomem, nostack, preserves_flags));
+    }
+}
+
 /// Read the CPU timestamp counter (cycle count since reset).
 #[inline]
 pub fn rdtsc() -> u64 {
