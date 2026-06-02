@@ -13,7 +13,11 @@
 ![Clippy](https://img.shields.io/badge/clippy-%2DD%20warnings-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
-<img src="docs/img/desktop.png" alt="Desktop do OSJeff" width="760">
+**🇧🇷 Português** · [🇺🇸 English](README.en.md)
+
+<img src="docs/img/demo.gif" alt="OSJeff em ação: abrir editor, digitar, fechar" width="760">
+
+<sub>Boot → abrir o editor (animação) → digitar → fechar (animação) — tudo num kernel próprio.</sub>
 
 </div>
 
