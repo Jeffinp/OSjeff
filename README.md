@@ -235,7 +235,7 @@ OSjeff/
 - [x] Compositor por damage tracking
 - [x] Heap com coalescência de blocos livres
 - [x] Render com fast-path de 32 bits + idle `hlt`
-- [ ] Salvar estado FPU/SSE (`fxsave`/`fxrstor`) na troca de contexto
+- [x] Salvar estado FPU/SSE (`fxsave`/`fxrstor`) na troca de contexto
 - [ ] Driver de disco + sistema de arquivos (persistência)
 - [ ] Copy/paste entre apps
 - [ ] Pilha de rede

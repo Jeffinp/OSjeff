@@ -209,7 +209,7 @@ cargo lint-host                          # host clippy, -D warnings
 - [x] Damage-tracking compositor
 - [x] Free-block coalescing heap
 - [x] 32-bit render fast path + idle `hlt`
-- [ ] Save FPU/SSE state (`fxsave`/`fxrstor`) on context switch
+- [x] Save FPU/SSE state (`fxsave`/`fxrstor`) on context switch
 - [ ] Disk driver + filesystem (persistence)
 - [ ] Copy/paste between apps
 - [ ] Network stack

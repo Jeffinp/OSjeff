@@ -101,47 +101,18 @@ pub fn read_input() -> Option<u16> {
 
 // ---- ISRs ----
 
-/// Naked timer ISR: save the full interrupted register state, pick the next
-/// thread, restore its state, and `iretq` into it (preemptive context switch).
-#[unsafe(naked)]
-extern "C" fn timer_isr() {
-    core::arch::naked_asm!(
-        "push rax",
-        "push rbx",
-        "push rcx",
-        "push rdx",
-        "push rsi",
-        "push rdi",
-        "push rbp",
-        "push r8",
-        "push r9",
-        "push r10",
-        "push r11",
-        "push r12",
-        "push r13",
-        "push r14",
-        "push r15",
-        "mov rdi, rsp", // arg0 = current stack pointer
-        "call {schedule}",
-        "mov rsp, rax", // switch to the next thread's stack
-        "pop r15",
-        "pop r14",
-        "pop r13",
-        "pop r12",
-        "pop r11",
-        "pop r10",
-        "pop r9",
-        "pop r8",
-        "pop rbp",
-        "pop rdi",
-        "pop rsi",
-        "pop rdx",
-        "pop rcx",
-        "pop rbx",
-        "pop rax",
-        "iretq",
-        schedule = sym timer_schedule,
-    );
+// The preemptive context switch is hand-written x86_64 assembly in `switch.s`,
+// assembled here via `global_asm!`. It defines the `timer_isr` symbol installed
+// in the IDT for IRQ0 and tail-calls `timer_schedule` (the Rust half below).
+core::arch::global_asm!(
+    include_str!("switch.s"),
+    schedule = sym timer_schedule,
+);
+
+extern "C" {
+    /// Naked timer ISR entry (see `switch.s`): saves the interrupted context,
+    /// switches stacks to the next thread, and `iretq`s into it.
+    fn timer_isr();
 }
 
 /// Rust half of the timer ISR: advance the clock, round-robin to the next

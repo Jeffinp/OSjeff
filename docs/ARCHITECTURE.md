@@ -121,17 +121,37 @@ seguro levaria a thread seguinte a um deadlock ao tentar alocar.
 
 O coração do multitarefa. O timer **força** a troca de thread, sem cooperação.
 
-### A troca de contexto (ISR naked)
+### A troca de contexto (assembly puro — [`kernel/src/switch.s`](../kernel/src/switch.s))
+
+A única coisa que **não dá para escrever em Rust**: trocar a pilha sob os próprios
+pés e retornar em outra thread. Por isso vive num arquivo de assembly dedicado,
+montado via `global_asm!(include_str!("switch.s"))`. Ele define o símbolo
+`timer_isr` instalado na IDT para a IRQ0 e chama a metade Rust (`timer_schedule`).
 
 ```asm
 ; em cada tick do timer (IRQ0):
 push rax ... push r15      ; salva todos os GP regs na pilha da thread atual
 mov rdi, rsp               ; arg0 = rsp atual
-call switch_current        ; salva rsp, round-robin, retorna rsp da próxima
+call timer_schedule        ; salva rsp, fxsave/fxrstor, round-robin, retorna próxima
 mov rsp, rax               ; troca para a pilha da próxima thread
 pop r15 ... pop rax        ; restaura os regs dela
 iretq                      ; restaura RIP/CS/RFLAGS/RSP/SS e continua
 ```
+
+> **Estado FPU/SSE.** Os `push`/`pop` acima salvam só os registradores de uso
+> geral. Os registradores de ponto flutuante/SSE (`xmm0..15`, `MXCSR`) são salvos
+> à parte por `timer_schedule`, com `fxsave`/`fxrstor` numa área de 512 bytes
+> (alinhada a 16) por thread — senão uma thread preemptada no meio de uma operação
+> SSE teria seu estado corrompido por outra.
+
+#### Onde mais há assembly
+
+| Arquivo | Instruções | Necessidade |
+|---|---|---|
+| [`switch.s`](../kernel/src/switch.s) | `push`/`pop`/`iretq` | troca de contexto preemptiva |
+| [`sched.rs`](../kernel/src/sched.rs) | `fxsave`/`fxrstor` | salvar/restaurar estado x87+SSE |
+| [`io.rs`](../kernel/src/io.rs) | `in`/`out`/`rdtsc` | I/O de portas (PIC/PIT/PS2/CMOS) + TSC |
+| [`main.rs`](../kernel/src/main.rs) | `hlt` | dormir a CPU quando ocioso |
 
 ### Nascimento de uma thread
 

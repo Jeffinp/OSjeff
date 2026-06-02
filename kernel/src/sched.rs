@@ -16,6 +16,29 @@ use x86_64::registers::segmentation::{Segment, CS, SS};
 const STACK_SIZE: usize = 64 * 1024;
 const MAX_THREADS: usize = 8;
 
+/// 512-byte, 16-byte-aligned save area for `fxsave`/`fxrstor` (x87 + SSE state:
+/// xmm0..15, MXCSR, FPU control/status). One per thread so float/SSE registers
+/// survive preemption — without this, a thread preempted mid-SSE would have its
+/// `xmm`/`MXCSR` clobbered by another thread.
+#[repr(C, align(16))]
+struct FxArea([u8; 512]);
+
+impl FxArea {
+    /// Allocate a save area seeded with the *current* (valid) FPU/SSE state, so
+    /// a thread's first `fxrstor` loads a sane MXCSR/control word rather than
+    /// garbage (a bad MXCSR reserved bit would `#GP` on restore).
+    fn seeded() -> Box<FxArea> {
+        let mut area = Box::new(FxArea([0u8; 512]));
+        unsafe {
+            core::arch::asm!(
+                "fxsave [{}]", in(reg) area.0.as_mut_ptr(),
+                options(nostack, preserves_flags),
+            );
+        }
+        area
+    }
+}
+
 /// Index of the running thread (read by the Task Manager).
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
 /// CPU ticks credited per thread slot.
@@ -25,6 +48,15 @@ struct Thread {
     name: &'static str,
     rsp: u64,
     _stack: Box<[u8]>, // owns the stack (empty for the boot thread)
+    fpu: Box<FxArea>,  // x87/SSE save area, swapped on context switch
+}
+
+impl Thread {
+    #[inline]
+    fn fpu_ptr(&self) -> *mut u8 {
+        // Box gives a stable, 16-byte-aligned address (FxArea is align(16)).
+        &*self.fpu as *const FxArea as *mut u8
+    }
 }
 
 struct Scheduler {
@@ -40,6 +72,7 @@ pub fn init() {
         name: "compositor",
         rsp: 0, // captured on the first preemption
         _stack: Vec::new().into_boxed_slice(),
+        fpu: FxArea::seeded(),
     };
     unsafe {
         SCHED = Some(Scheduler {
@@ -85,6 +118,7 @@ pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
         name,
         rsp,
         _stack: stack,
+        fpu: FxArea::seeded(),
     });
 }
 
@@ -97,6 +131,18 @@ pub extern "C" fn switch_current(rsp: u64) -> u64 {
         None => return rsp,
     };
     let cur = s.current;
+
+    // Save the outgoing thread's x87/SSE state. This must run before any xmm
+    // use: the path from ISR entry to here (GP-reg pushes, integer scheduler
+    // glue) touches no SSE register, so the interrupted thread's xmm/MXCSR are
+    // still live here and captured intact.
+    unsafe {
+        core::arch::asm!(
+            "fxsave [{}]", in(reg) s.threads[cur].fpu_ptr(),
+            options(nostack, preserves_flags),
+        );
+    }
+
     s.threads[cur].rsp = rsp;
     if cur < MAX_THREADS {
         TICKS[cur].fetch_add(1, Ordering::Relaxed);
@@ -104,11 +150,21 @@ pub extern "C" fn switch_current(rsp: u64) -> u64 {
 
     let n = s.threads.len();
     if n < 2 {
-        return rsp;
+        return rsp; // single thread: nothing to restore, state unchanged
     }
     let next = (cur + 1) % n;
     s.current = next;
     CURRENT.store(next, Ordering::Relaxed);
+
+    // Load the incoming thread's x87/SSE state. Nothing below uses xmm before
+    // the ISR `iretq`s into that thread, so its registers resume correctly.
+    unsafe {
+        core::arch::asm!(
+            "fxrstor [{}]", in(reg) s.threads[next].fpu_ptr(),
+            options(nostack, readonly, preserves_flags),
+        );
+    }
+
     s.threads[next].rsp
 }
 
