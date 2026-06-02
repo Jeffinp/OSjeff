@@ -141,6 +141,9 @@ sequenceDiagram
   teclado)
 - **Painel iniciar**: o ícone do sistema abre um menu com todos os apps e botões
   de **Reiniciar** e **Desligar** (reset via 8042/PCI, poweroff via portas ACPI)
+- **Filesystem OJFS** (em RAM): editor salva/carrega arquivos; terminal com
+  `LS`, `CAT`, `SAVE`, `LOAD`, `RM`; **Ctrl+S** no editor
+- **Copy/paste** entre apps com **Ctrl+C / Ctrl+V**
 - **Mouse + teclado PS/2** (Shift, Caps, setas), relógio RTC em hora local
 - **Double buffering** + dirty-rect do cursor → render sem flicker
 - Fonte bitmap 8×8 própria; ícones desenhados; logo embutido como RGBA
@@ -241,7 +244,8 @@ OSjeff/
 - [x] Salvar estado FPU/SSE (`fxsave`/`fxrstor`) na troca de contexto
 - [x] Calculadora + painel iniciar (apps, reiniciar, desligar)
 - [x] Copy/paste entre apps (Ctrl+C / Ctrl+V)
-- [ ] Driver de disco + sistema de arquivos (persistência)
+- [x] Filesystem OJFS + comandos de arquivo (em RAM)
+- [ ] Driver de disco ATA (persistência entre reboots)
 - [ ] Pilha de rede
 
 ---

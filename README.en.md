@@ -139,6 +139,9 @@ sequenceDiagram
   cursor), **Task Manager** and **Calculator** (4 functions, mouse + keyboard)
 - **Start panel**: the system icon opens a menu with every app plus **Restart**
   and **Shut down** (reset via 8042/PCI, poweroff via ACPI ports)
+- **OJFS filesystem** (in RAM): the editor saves/loads files; terminal `LS`,
+  `CAT`, `SAVE`, `LOAD`, `RM`; **Ctrl+S** in the editor
+- **Copy/paste** between apps with **Ctrl+C / Ctrl+V**
 - **PS/2 mouse + keyboard** (Shift, Caps, arrows), RTC clock in local time
 - **Double buffering** + cursor dirty-rect → flicker-free rendering
 - Own 8×8 bitmap font; hand-drawn icons; logo embedded as RGBA
@@ -214,7 +217,8 @@ cargo lint-host                          # host clippy, -D warnings
 - [x] Save FPU/SSE state (`fxsave`/`fxrstor`) on context switch
 - [x] Calculator + start panel (apps, restart, shut down)
 - [x] Copy/paste between apps (Ctrl+C / Ctrl+V)
-- [ ] Disk driver + filesystem (persistence)
+- [x] OJFS filesystem + file commands (in RAM)
+- [ ] ATA disk driver (persistence across reboots)
 - [ ] Network stack
 
 ---

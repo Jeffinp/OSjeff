@@ -11,11 +11,12 @@ use crate::icons::{self, Icon};
 use crate::logo;
 use crate::sched;
 use crate::theme;
-use osjeff_core::window::TITLE_H;
 use osjeff_core::clipboard::{self, Clipboard};
+use osjeff_core::fs;
+use osjeff_core::window::TITLE_H;
 use osjeff_core::{
-    Action, Anim, Calc, Editor, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Terminal,
-    Time,
+    Action, Anim, Calc, Editor, FileName, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect,
+    Terminal, Time,
 };
 
 const SLIDE_PX: f32 = 28.0;
@@ -30,13 +31,7 @@ const DOCK_MARGIN: i32 = 16; // gap from screen bottom
 // Calculator keypad: the input byte for each cell (0x08 = backspace). Duplicate
 // cells (`0` spanning two columns, `=` spanning two rows) map to the same byte;
 // the draw code merges them visually.
-const CALC_KEYS: [[u8; 4]; 5] = [
-    *b"C\x08/*",
-    *b"789-",
-    *b"456+",
-    *b"123=",
-    *b"00.=",
-];
+const CALC_KEYS: [[u8; 4]; 5] = [*b"C\x08/*", *b"789-", *b"456+", *b"123=", *b"00.="];
 
 // Scratch buffer to snapshot the area behind an animating window (largest
 // window + margin). Lets fades composite over real content, not the wallpaper.
@@ -44,6 +39,14 @@ const SCRATCH_BYTES: usize = 640 * 440 * 4;
 #[repr(C, align(64))]
 struct AlignedScratch([u8; SCRATCH_BYTES]);
 static mut SCRATCH: AlignedScratch = AlignedScratch([0; SCRATCH_BYTES]);
+
+// RAM-backed filesystem image. Formatted at boot; a future ATA driver will load
+// this from / flush it to disk for persistence across reboots.
+static mut DISK: [u8; fs::IMAGE_SIZE] = [0; fs::IMAGE_SIZE];
+
+fn disk() -> &'static mut [u8] {
+    unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(DISK) as *mut u8, fs::IMAGE_SIZE) }
+}
 
 const TERM: usize = 0;
 const EDIT: usize = 1;
@@ -144,6 +147,7 @@ pub struct Desktop {
     drag: Option<Drag>,
     menu: Option<(i32, i32)>,
     start_open: bool,
+    editor_file: FileName,
     cursor_x: i32,
     cursor_y: i32,
     prev_left: bool,
@@ -160,6 +164,9 @@ impl Desktop {
         let shell_pid = procs
             .spawn(b"shell", ProcKind::App, ProcState::Running)
             .unwrap();
+
+        // Start with a fresh in-RAM filesystem.
+        fs::format(disk());
 
         let windows = [
             Win {
@@ -214,6 +221,7 @@ impl Desktop {
             drag: None,
             menu: None,
             start_open: false,
+            editor_file: FileName::parse(b"notes.txt").unwrap(),
             cursor_x: sw / 2,
             cursor_y: sh / 2,
             prev_left: false,
@@ -336,7 +344,7 @@ impl Desktop {
         let Some(top) = self.focused() else {
             return false;
         };
-        // Ctrl+C / Ctrl+V are intercepted before the app sees the key.
+        // Ctrl+C / Ctrl+V / Ctrl+S are intercepted before the app sees the key.
         if self.keymap.ctrl() {
             match key {
                 Key::Char(b'c') | Key::Char(b'C') => {
@@ -347,15 +355,18 @@ impl Desktop {
                     self.paste_into_focused(time);
                     return true;
                 }
+                Key::Char(b's') | Key::Char(b'S') => {
+                    self.save_editor_file();
+                    return true;
+                }
                 _ => {}
             }
         }
         match self.windows[top].kind {
-            Kind::Terminal => match self.term.on_key(key, time) {
-                Action::OpenEditor => self.open(EDIT),
-                Action::OpenTasks => self.open(TASK),
-                Action::None => {}
-            },
+            Kind::Terminal => {
+                let action = self.term.on_key(key, time);
+                self.handle_terminal_action(action);
+            }
             Kind::Editor => {
                 if key == Key::Esc {
                     self.request_close(EDIT);
@@ -381,6 +392,164 @@ impl Desktop {
         } else {
             self.calc.input(k);
         }
+    }
+
+    // ---- filesystem ----
+
+    fn handle_terminal_action(&mut self, action: Action) {
+        match action {
+            Action::OpenEditor => self.open(EDIT),
+            Action::OpenTasks => self.open(TASK),
+            Action::List => self.fs_list(),
+            Action::Save(f) => self.fs_save(f),
+            Action::Load(f) => self.fs_load(f),
+            Action::Cat(f) => self.fs_cat(f),
+            Action::Remove(f) => self.fs_remove(f),
+            Action::None => {}
+        }
+    }
+
+    /// Serialize the editor buffer (lines joined by `\n`) into `out`. Returns the
+    /// byte count written (capped at `out.len()`).
+    fn serialize_editor(&self, out: &mut [u8]) -> usize {
+        let mut n = 0;
+        let rows = self.editor.rows();
+        for i in 0..rows {
+            for &b in self.editor.line(i) {
+                if n < out.len() {
+                    out[n] = b;
+                    n += 1;
+                }
+            }
+            if i + 1 < rows && n < out.len() {
+                out[n] = b'\n';
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// Ctrl+S: save the editor buffer to its current file.
+    fn save_editor_file(&mut self) {
+        if self.focused().map(|w| self.windows[w].kind) != Some(Kind::Editor) {
+            return;
+        }
+        self.fs_save(self.editor_file);
+    }
+
+    fn fs_save(&mut self, f: FileName) {
+        let mut buf = [0u8; fs::MAX_FILE_SIZE];
+        let n = self.serialize_editor(&mut buf);
+        match fs::write(disk(), f.as_bytes(), &buf[..n]) {
+            Ok(()) => {
+                self.editor.mark_clean();
+                self.editor_file = f;
+                self.print_named(b"Saved ", f.as_bytes());
+            }
+            Err(e) => self.print_fs_err(e),
+        }
+    }
+
+    fn fs_load(&mut self, f: FileName) {
+        // Copy the file out of the static disk before touching the editor.
+        let mut buf = [0u8; fs::MAX_FILE_SIZE];
+        let found = match fs::read(disk(), f.as_bytes()) {
+            Some(data) => {
+                let n = data.len();
+                buf[..n].copy_from_slice(data);
+                Some(n)
+            }
+            None => None,
+        };
+        match found {
+            Some(n) => {
+                self.editor.set_text(&buf[..n]);
+                self.editor_file = f;
+                self.open(EDIT);
+                self.print_named(b"Loaded ", f.as_bytes());
+            }
+            None => self.term.println(b"file not found"),
+        }
+    }
+
+    fn fs_cat(&mut self, f: FileName) {
+        let mut buf = [0u8; fs::MAX_FILE_SIZE];
+        let n = match fs::read(disk(), f.as_bytes()) {
+            Some(data) => {
+                let n = data.len();
+                buf[..n].copy_from_slice(data);
+                n
+            }
+            None => {
+                self.term.println(b"file not found");
+                return;
+            }
+        };
+        if n == 0 {
+            self.term.println(b"(empty)");
+            return;
+        }
+        let mut start = 0;
+        for i in 0..n {
+            if buf[i] == b'\n' {
+                self.term.println(&buf[start..i]);
+                start = i + 1;
+            }
+        }
+        if start < n {
+            self.term.println(&buf[start..n]);
+        }
+    }
+
+    fn fs_remove(&mut self, f: FileName) {
+        match fs::remove(disk(), f.as_bytes()) {
+            Ok(()) => self.print_named(b"Removed ", f.as_bytes()),
+            Err(e) => self.print_fs_err(e),
+        }
+    }
+
+    fn fs_list(&mut self) {
+        let d = disk();
+        if fs::count(d) == 0 {
+            self.term.println(b"(no files)");
+            return;
+        }
+        for i in 0..fs::MAX_FILES {
+            if !fs::is_used(d, i) {
+                continue;
+            }
+            let mut line = [b' '; 28];
+            let name = fs::name_at(d, i);
+            let nlen = name.len().min(fs::MAX_NAME);
+            line[..nlen].copy_from_slice(&name[..nlen]);
+            let size = fs::size_at(d, i);
+            write_uint(&mut line, 18, 6, size as u32);
+            self.term.println(&line);
+        }
+    }
+
+    fn print_named(&mut self, prefix: &[u8], name: &[u8]) {
+        let mut line = [b' '; 40];
+        let mut p = 0;
+        for &b in prefix.iter().chain(name.iter()) {
+            if p < line.len() {
+                line[p] = b;
+                p += 1;
+            }
+        }
+        self.term.println(&line[..p]);
+    }
+
+    fn print_fs_err(&mut self, e: fs::FsError) {
+        let msg: &[u8] = match e {
+            fs::FsError::NoSpace => b"error: disk full",
+            fs::FsError::TooBig => b"error: file too big",
+            fs::FsError::NameTooLong => b"error: name too long",
+            fs::FsError::NotFound => b"error: not found",
+            fs::FsError::EmptyName => b"error: empty name",
+            fs::FsError::NotFormatted => b"error: no filesystem",
+        };
+        self.term.println(msg);
     }
 
     /// Copy the focused app's current text (terminal input line / editor current
@@ -775,7 +944,12 @@ impl Desktop {
             theme::WINDOW_BODY,
         );
 
-        let item_icons = [Icon::Terminal, Icon::Editor, Icon::TaskMgr, Icon::Calculator];
+        let item_icons = [
+            Icon::Terminal,
+            Icon::Editor,
+            Icon::TaskMgr,
+            Icon::Calculator,
+        ];
         for (i, (label, _)) in MENU_ITEMS.iter().enumerate() {
             let iy = my + MENU_PAD + i as i32 * MENU_ITEM_H;
             if menu_item_at(mx, my, self.cursor_x, self.cursor_y) == Some(i) {
@@ -890,7 +1064,11 @@ impl Desktop {
         let disp = self.calc.display();
         let dscale = 3usize;
         let tw = disp.len() * font::cell_w(dscale);
-        let tx = if tw + 16 < dw { dx + dw - tw - 16 } else { dx + 10 };
+        let tx = if tw + 16 < dw {
+            dx + dw - tw - 16
+        } else {
+            dx + 10
+        };
         let color = if self.calc.is_error() {
             theme::CLOSE
         } else {
@@ -942,11 +1120,23 @@ impl Desktop {
             theme::SHADOW,
             40,
         );
-        c.fill_round_rect(sx as usize, sy as usize, START_W as usize, h as usize, 14, theme::DOCK);
+        c.fill_round_rect(
+            sx as usize,
+            sy as usize,
+            START_W as usize,
+            h as usize,
+            14,
+            theme::DOCK,
+        );
 
         let hovered = start_item_at(self.sw, self.sh, self.cursor_x, self.cursor_y);
         let top = sy + START_PAD;
-        let app_icons = [Icon::Terminal, Icon::Editor, Icon::TaskMgr, Icon::Calculator];
+        let app_icons = [
+            Icon::Terminal,
+            Icon::Editor,
+            Icon::TaskMgr,
+            Icon::Calculator,
+        ];
 
         for (i, (label, win)) in START_APPS.iter().enumerate() {
             let ry = top + i as i32 * START_ROW_H;
@@ -979,7 +1169,10 @@ impl Desktop {
             1,
             theme::DOCK_EDGE,
         );
-        let power = [(StartItem::Reboot, "Reiniciar"), (StartItem::Shutdown, "Desligar")];
+        let power = [
+            (StartItem::Reboot, "Reiniciar"),
+            (StartItem::Shutdown, "Desligar"),
+        ];
         for (i, (item, label)) in power.iter().enumerate() {
             let ry = pwr_top + i as i32 * START_ROW_H;
             if hovered == Some(*item) {

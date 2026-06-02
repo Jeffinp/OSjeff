@@ -23,12 +23,50 @@ pub struct Time {
     pub s: u8,
 }
 
-/// Side effect requested by the terminal after handling input.
+/// Maximum file-name length carried by a terminal action.
+pub const FNAME_MAX: usize = 16;
+
+/// A fixed-capacity file name parsed from a command argument.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct FileName {
+    bytes: [u8; FNAME_MAX],
+    len: usize,
+}
+
+impl FileName {
+    /// Parse `arg` (already trimmed by the caller) into a name, or `None` if it
+    /// is empty or too long.
+    pub fn parse(arg: &[u8]) -> Option<Self> {
+        let arg = trim(arg);
+        if arg.is_empty() || arg.len() > FNAME_MAX {
+            return None;
+        }
+        let mut bytes = [0u8; FNAME_MAX];
+        bytes[..arg.len()].copy_from_slice(arg);
+        Some(Self {
+            bytes,
+            len: arg.len(),
+        })
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+}
+
+/// Side effect requested by the terminal after handling input. Filesystem
+/// actions are executed by the desktop (which owns the disk) and their output
+/// is printed back via [`Terminal::println`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Action {
     None,
     OpenEditor,
     OpenTasks,
+    List,
+    Save(FileName),
+    Load(FileName),
+    Cat(FileName),
+    Remove(FileName),
 }
 
 pub struct Terminal {
@@ -229,8 +267,18 @@ impl Terminal {
         if token == b"HELP" {
             self.println(b"Commands:");
             self.println(b" HELP CLS TIME VER ECHO");
-            self.println(b" EDIT PS");
-            self.println(b"EDIT=editor  PS=task manager");
+            self.println(b" EDIT PS LS CAT SAVE LOAD RM");
+            self.println(b"LS/CAT/SAVE/LOAD/RM = files");
+        } else if token == b"LS" || token == b"DIR" {
+            return Action::List;
+        } else if token == b"SAVE" {
+            return self.file_action(rest, Action::Save);
+        } else if token == b"LOAD" || token == b"OPEN" {
+            return self.file_action(rest, Action::Load);
+        } else if token == b"CAT" || token == b"TYPE" {
+            return self.file_action(rest, Action::Cat);
+        } else if token == b"RM" || token == b"DEL" {
+            return self.file_action(rest, Action::Remove);
         } else if token == b"PS" || token == b"TASK" {
             self.println(b"Opening task manager...");
             return Action::OpenTasks;
@@ -256,6 +304,18 @@ impl Terminal {
             self.println(b"Unknown command. Type HELP.");
         }
         Action::None
+    }
+
+    /// Parse a single file-name argument into a filesystem action, printing a
+    /// usage hint when it is missing or invalid.
+    fn file_action(&mut self, arg: &[u8], make: fn(FileName) -> Action) -> Action {
+        match FileName::parse(arg) {
+            Some(f) => make(f),
+            None => {
+                self.println(b"usage: <cmd> <name>");
+                Action::None
+            }
+        }
     }
 }
 
@@ -332,6 +392,45 @@ mod tests {
         let t = Terminal::new();
         assert_eq!(t.row_count(), 2);
         assert_eq!(t.row(0), b"OSJEFF shell ready.");
+    }
+
+    #[test]
+    fn ls_returns_list_action() {
+        let mut t = Terminal::new();
+        type_str(&mut t, "ls");
+        assert_eq!(t.on_key(Key::Enter, t0()), Action::List);
+    }
+
+    #[test]
+    fn save_parses_filename() {
+        let mut t = Terminal::new();
+        type_str(&mut t, "save notes.txt");
+        let a = t.on_key(Key::Enter, t0());
+        match a {
+            Action::Save(f) => assert_eq!(f.as_bytes(), b"notes.txt"),
+            _ => panic!("expected Save"),
+        }
+    }
+
+    #[test]
+    fn file_command_without_name_prints_usage() {
+        let mut t = Terminal::new();
+        type_str(&mut t, "cat");
+        assert_eq!(t.on_key(Key::Enter, t0()), Action::None);
+        assert_eq!(last_row(&t), b"usage: <cmd> <name>");
+    }
+
+    #[test]
+    fn load_and_rm_and_cat_actions() {
+        for (cmd, want) in [
+            ("load a", Action::Load(FileName::parse(b"a").unwrap())),
+            ("rm b", Action::Remove(FileName::parse(b"b").unwrap())),
+            ("cat c", Action::Cat(FileName::parse(b"c").unwrap())),
+        ] {
+            let mut t = Terminal::new();
+            type_str(&mut t, cmd);
+            assert_eq!(t.on_key(Key::Enter, t0()), want);
+        }
     }
 
     #[test]
@@ -421,7 +520,7 @@ mod tests {
         type_str(&mut t, "help");
         t.on_key(Key::Enter, t0());
         // case-insensitive: lowercase still matches
-        assert_eq!(t.row(t.row_count() - 1), b"EDIT=editor  PS=task manager");
+        assert_eq!(t.row(t.row_count() - 1), b"LS/CAT/SAVE/LOAD/RM = files");
     }
 
     #[test]

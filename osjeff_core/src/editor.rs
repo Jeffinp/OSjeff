@@ -57,6 +57,40 @@ impl Editor {
         self.dirty
     }
 
+    /// Clear the dirty flag (e.g. just after a successful save).
+    pub fn mark_clean(&mut self) {
+        self.dirty = false;
+    }
+
+    /// Replace the whole buffer with `data`, splitting on `\n` and truncating
+    /// over-long lines / excess rows to the fixed capacity. Used to load a file.
+    pub fn set_text(&mut self, data: &[u8]) {
+        self.text = [[0; COLS]; ROWS];
+        self.len = [0; ROWS];
+        let mut row = 0;
+        for &b in data {
+            if b == b'\n' {
+                if row + 1 >= ROWS {
+                    break; // out of rows: drop the rest
+                }
+                row += 1;
+                continue;
+            }
+            if b == b'\r' {
+                continue;
+            }
+            let l = self.len[row];
+            if l < COLS {
+                self.text[row][l] = b;
+                self.len[row] = l + 1;
+            }
+        }
+        self.rows = row + 1;
+        self.cx = 0;
+        self.cy = 0;
+        self.dirty = false;
+    }
+
     /// Dispatch a key to the matching edit operation.
     pub fn on_key(&mut self, key: Key) {
         match key {
@@ -438,5 +472,27 @@ mod tests {
         e.on_key(Key::Home);
         e.on_key(Key::Backspace); // join line1 into full line0
         assert_eq!(e.line(0).len(), COLS); // capped, not overflowed
+    }
+
+    #[test]
+    fn set_text_splits_lines_and_clears_dirty() {
+        let mut e = Editor::new();
+        e.on_key(Key::Char(b'x'));
+        assert!(e.dirty());
+        e.set_text(b"hello\nworld");
+        assert_eq!(e.rows(), 2);
+        assert_eq!(e.line(0), b"hello");
+        assert_eq!(e.line(1), b"world");
+        assert_eq!(e.cursor(), (0, 0));
+        assert!(!e.dirty());
+    }
+
+    #[test]
+    fn set_text_ignores_carriage_returns() {
+        let mut e = Editor::new();
+        e.set_text(b"a\r\nb");
+        assert_eq!(e.rows(), 2);
+        assert_eq!(e.line(0), b"a");
+        assert_eq!(e.line(1), b"b");
     }
 }
