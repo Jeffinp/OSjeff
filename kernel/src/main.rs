@@ -14,9 +14,11 @@ use fb::{Canvas, Color};
 
 entry_point!(kernel_main);
 
-// Back buffer for flicker-free rendering. Sized for up to 1920x1080x4.
+// Render buffers sized for up to 1920x1080x4.
+// BG caches the static wallpaper+taskbar so it's never recomputed per frame.
 const MAX_BYTES: usize = 1920 * 1080 * 4;
 static mut BACK: [u8; MAX_BYTES] = [0; MAX_BYTES];
+static mut BG: [u8; MAX_BYTES] = [0; MAX_BYTES];
 
 struct Window {
     x: i32,
@@ -36,11 +38,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let info = framebuffer.info();
     let len = framebuffer.buffer().len();
 
-    // No heap: render into a fixed static back buffer, then blit.
-    let back: &mut [u8] = unsafe {
-        let ptr = core::ptr::addr_of_mut!(BACK) as *mut u8;
-        core::slice::from_raw_parts_mut(ptr, len.min(MAX_BYTES))
-    };
+    // No heap: render into fixed static buffers, then blit.
+    let n = len.min(MAX_BYTES);
+    let back: &mut [u8] =
+        unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(BACK) as *mut u8, n) };
+    let bg: &mut [u8] =
+        unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(BG) as *mut u8, n) };
+
+    // Paint the static background ONCE (gradient + taskbar + icons).
+    {
+        let mut c = Canvas::new(bg, info);
+        draw_background(&mut c);
+    }
 
     ps2::init();
 
@@ -62,10 +71,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     };
 
     let title_h = 30i32;
+    let mut last_sec = 0xFFu8; // force first render
 
     loop {
-        // --- Input ---
-        if let Some(p) = ps2::poll() {
+        // --- Input: drain ALL pending mouse packets so the cursor keeps up ---
+        let mut dirty = false;
+        while let Some(p) = ps2::poll() {
             cursor_x = (cursor_x + p.dx).clamp(0, sw - 1);
             cursor_y = (cursor_y - p.dy).clamp(0, sh - 1); // mouse Y is inverted
 
@@ -90,26 +101,38 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 win.y = (cursor_y - win.grab_dy).clamp(0, sh - title_h);
             }
             prev_left = p.left;
+            dirty = true;
         }
 
-        // --- Render scene into back buffer ---
+        // Clock ticks once per second.
+        let t = rtc::now();
+        if t.s != last_sec {
+            last_sec = t.s;
+            dirty = true;
+        }
+
+        // Only repaint when something actually changed.
+        if !dirty {
+            continue;
+        }
+
+        // Compose: copy cached background, then draw dynamic layers on top.
+        back.copy_from_slice(bg);
         {
             let mut c = Canvas::new(back, info);
-            draw_desktop(&mut c);
+            draw_clock(&mut c, t);
             draw_window(&mut c, &win, title_h);
             draw_cursor(&mut c, cursor_x as usize, cursor_y as usize);
         }
-
-        // --- Blit back buffer to the real framebuffer ---
-        framebuffer.buffer_mut()[..back.len()].copy_from_slice(back);
+        framebuffer.buffer_mut()[..n].copy_from_slice(back);
     }
 }
 
-fn draw_desktop(c: &mut Canvas) {
+/// Static layer: wallpaper gradient + taskbar + brand + icons. Painted once.
+fn draw_background(c: &mut Canvas) {
     let w = c.width();
     let h = c.height();
 
-    // Wallpaper: vertical blue gradient.
     let top = Color::rgb(0x10, 0x2A, 0x52);
     let bottom = Color::rgb(0x2B, 0x6F, 0xD6);
     for y in 0..h {
@@ -117,15 +140,11 @@ fn draw_desktop(c: &mut Canvas) {
         c.fill_rect(0, y, w, 1, top.lerp(bottom, t));
     }
 
-    // Taskbar.
     let bar_h = 48usize;
     let bar_y = h.saturating_sub(bar_h);
     c.fill_rect(0, bar_y, w, bar_h, Color::rgb(0x20, 0x20, 0x28));
-
-    // Brand on the left.
     font::draw_text(c, 14, bar_y + 16, "OSJEFF", Color::rgb(0xE6, 0xED, 0xFF), 2);
 
-    // Centered icon group: start logo + app icons.
     let icon = 32usize;
     let gap = 12usize;
     let count = 5usize;
@@ -144,9 +163,12 @@ fn draw_desktop(c: &mut Canvas) {
         c.fill_round_rect(x, y, icon, icon, 8, color);
         x += icon + gap;
     }
+}
 
-    // Clock on the right (real time from RTC, UTC).
-    let t = rtc::now();
+/// Dynamic layer: real-time clock on the right of the taskbar (RTC, UTC).
+fn draw_clock(c: &mut Canvas, t: rtc::Time) {
+    let w = c.width();
+    let bar_y = c.height().saturating_sub(48);
     let mut buf = [b'0'; 8]; // "HH:MM:SS"
     write_two(&mut buf, 0, t.h);
     buf[2] = b':';
