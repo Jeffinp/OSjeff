@@ -9,6 +9,7 @@ use crate::fb::{Canvas, Color};
 use crate::font;
 use crate::icons::{self, Icon};
 use crate::logo;
+use crate::sched;
 use crate::theme;
 use osjeff_core::window::TITLE_H;
 use osjeff_core::{
@@ -687,6 +688,20 @@ impl Desktop {
             };
             line[17..20].copy_from_slice(st);
             write_uint(&mut line, 21, 6, p.ticks);
+            font::draw_bytes(c, tx, ty, &line, theme::TEXT, 2);
+            ty += line_h;
+        }
+
+        // Real kernel threads from the scheduler, with live CPU time.
+        ty += 6;
+        font::draw_text(c, tx, ty, "KERNEL THREADS   CPU", theme::ACCENT_2, 2);
+        ty += line_h + 2;
+        for i in 0..sched::thread_count() {
+            let name = sched::thread_name(i).as_bytes();
+            let mut line = [b' '; 24];
+            let n = name.len().min(14);
+            line[..n].copy_from_slice(&name[..n]);
+            write_uint(&mut line, 17, 6, sched::thread_ticks(i) as u32);
             font::draw_bytes(c, tx, ty, &line, theme::TEXT, 2);
             ty += line_h;
         }

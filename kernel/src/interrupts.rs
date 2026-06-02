@@ -79,6 +79,11 @@ fn ring_push(value: u16) {
     RING.tail.store(next, Ordering::Release);
 }
 
+/// Current monotonic timer tick.
+pub fn ticks() -> u64 {
+    TICKS.load(Ordering::Relaxed)
+}
+
 /// Pop one tagged input byte (`SRC_* << 8 | byte`), or `None` if empty.
 pub fn read_input() -> Option<u16> {
     let head = RING.head.load(Ordering::Relaxed);
@@ -94,6 +99,7 @@ pub fn read_input() -> Option<u16> {
 
 extern "x86-interrupt" fn timer(_f: InterruptStackFrame) {
     TICKS.fetch_add(1, Ordering::Relaxed);
+    crate::sched::on_tick(); // credit CPU time to the running thread
     outb(PIC1_CMD, PIC_EOI);
 }
 

@@ -16,6 +16,7 @@ mod io;
 mod logo;
 mod ps2;
 mod rtc;
+mod sched;
 mod theme;
 
 use bootloader_api::info::FrameBufferInfo;
@@ -60,6 +61,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     heap_smoke_test();
 
+    // Kernel scheduler: register the boot context as a thread and spawn a
+    // couple of background workers that run concurrently with the GUI.
+    sched::init();
+    sched::spawn("worker-a", worker_a);
+    sched::spawn("worker-b", worker_b);
+
     // Configure the PS/2 controller BEFORE enabling interrupts, so the init
     // handshake (config write + mouse ACKs) is read by polling without racing
     // the IRQ handlers.
@@ -81,8 +88,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut desk = Desktop::new(info.width as i32, info.height as i32);
     let mut last_sec = 0xFFu8; // force first render
     let mut prev_cursor = desk.cursor();
+    let mut last_tick = 0u64;
 
-    // Animation timestep advanced once per wake (the PIT wakes us at 100 Hz).
+    // Animation timestep advanced once per timer tick (PIT runs at 100 Hz).
     const DT: f32 = 0.08;
 
     loop {
@@ -93,7 +101,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             s: rt.s,
         };
 
-        let animating = desk.animate(DT);
+        // Pace animation by the hardware timer (100 Hz) instead of loop speed,
+        // since the loop now also time-shares with the worker threads.
+        let tick = interrupts::ticks();
+        let tick_changed = tick != last_tick;
+        last_tick = tick;
+
+        let animating = tick_changed && desk.animate(DT);
         let mut scene_dirty = animating;
         let mut cursor_moved = false;
 
@@ -152,10 +166,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             prev_cursor = desk.cursor();
         }
 
-        // Idle until the next interrupt. The PIT (100 Hz) paces animation frames
-        // and keyboard/mouse IRQs wake us immediately, so CPU drops to ~0 when
-        // idle instead of busy-spinning.
-        x86_64::instructions::hlt();
+        // Hand the CPU to the background worker threads, then come back to the
+        // GUI on the next round-robin turn. The timer keeps pacing animation.
+        sched::yield_now();
     }
 }
 
@@ -226,8 +239,32 @@ fn blit_rect(
     }
 }
 
+// Background worker threads: do a short slice of work, then yield. They exist
+// to demonstrate real concurrent kernel threads (visible in the Task Manager).
+extern "C" fn worker_a() -> ! {
+    let mut acc: u64 = 0;
+    loop {
+        for i in 0..400_000u64 {
+            acc = acc.wrapping_add(i);
+        }
+        core::hint::black_box(acc);
+        sched::yield_now();
+    }
+}
+
+extern "C" fn worker_b() -> ! {
+    let mut acc: u64 = 1;
+    loop {
+        for i in 1..400_000u64 {
+            acc = acc.wrapping_mul(i | 1);
+        }
+        core::hint::black_box(acc);
+        sched::yield_now();
+    }
+}
+
 /// Exercises the heap (alloc, grow, free) once at boot. A broken allocator
-/// would fault or hang here instead of silently corrupting later.
+/// would fault or hang instead of silently corrupting later.
 fn heap_smoke_test() {
     use alloc::vec::Vec;
     let mut v: Vec<u32> = Vec::new();
