@@ -261,6 +261,7 @@ name = "kernel"
 version = "0.1.0"
 dependencies = [
  "bootloader_api",
+ "osjeff_core",
 ]
 
 [[package]]
@@ -325,6 +326,10 @@ dependencies = [
  "bootloader",
  "kernel",
 ]
+
+[[package]]
+name = "osjeff_core"
+version = "0.1.0"
 
 [[package]]
 name = "pin-project-lite"

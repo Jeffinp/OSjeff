@@ -21,7 +21,11 @@ impl Color {
             let b = b as u16;
             ((a * (255 - t) + b * t) / 255) as u8
         };
-        Color::rgb(mix(self.r, other.r), mix(self.g, other.g), mix(self.b, other.b))
+        Color::rgb(
+            mix(self.r, other.r),
+            mix(self.g, other.g),
+            mix(self.b, other.b),
+        )
     }
 }
 
@@ -88,7 +92,15 @@ impl<'a> Canvas<'a> {
     }
 
     /// Rounded rectangle (filled). `r` = corner radius in pixels.
-    pub fn fill_round_rect(&mut self, x0: usize, y0: usize, w: usize, h: usize, r: usize, c: Color) {
+    pub fn fill_round_rect(
+        &mut self,
+        x0: usize,
+        y0: usize,
+        w: usize,
+        h: usize,
+        r: usize,
+        c: Color,
+    ) {
         let r = r.min(w / 2).min(h / 2);
         for y in 0..h {
             for x in 0..w {

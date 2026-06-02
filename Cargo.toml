@@ -1,10 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["kernel", "os"]
+members = ["kernel", "os", "osjeff_core"]
 
-# Bare-metal: abort on panic, no unwinding tables.
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
+# NOTE: panic strategy is NOT forced here. The bare-metal target
+# `x86_64-unknown-none` aborts by default, while host `cargo test` for
+# `osjeff_core` needs the default unwinding harness. Keeping the profile
+# untouched lets both work.
