@@ -83,12 +83,63 @@ impl<'a> Canvas<'a> {
         }
     }
 
-    pub fn fill_rect(&mut self, x0: usize, y0: usize, w: usize, h: usize, c: Color) {
-        for y in y0..y0 + h {
-            for x in x0..x0 + w {
-                self.put(x, y, c);
+    /// Blend a rectangular region toward another buffer of identical layout.
+    /// `alpha` in `0..=256`: 0 = fully `src` (e.g. the wallpaper), 256 = keep
+    /// what is already drawn. Used to fade windows in/out against the desktop.
+    pub fn blend_region(&mut self, src: &[u8], x0: usize, y0: usize, w: usize, h: usize, alpha: u16) {
+        let bpp = self.info.bytes_per_pixel;
+        let stride = self.info.stride;
+        let a = alpha.min(256);
+        let ia = 256 - a;
+        let x_end = (x0 + w).min(self.info.width);
+        let y_end = (y0 + h).min(self.info.height);
+        for y in y0..y_end {
+            for x in x0..x_end {
+                let o = (y * stride + x) * bpp;
+                for k in 0..bpp {
+                    let cur = self.buf[o + k] as u16;
+                    let bg = src[o + k] as u16;
+                    self.buf[o + k] = ((bg * ia + cur * a) / 256) as u8;
+                }
             }
         }
+    }
+
+    pub fn fill_rect(&mut self, x0: usize, y0: usize, w: usize, h: usize, c: Color) {
+        if x0 >= self.info.width || y0 >= self.info.height {
+            return;
+        }
+        let bpp = self.info.bytes_per_pixel;
+        let stride = self.info.stride;
+        let x_end = (x0 + w).min(self.info.width);
+        let y_end = (y0 + h).min(self.info.height);
+
+        // Fast path: 3-byte RGB/BGR ordering written directly per row, skipping
+        // the per-pixel bounds check + format match that `put` performs.
+        let order = match self.info.pixel_format {
+            PixelFormat::Rgb => Some((c.r, c.g, c.b)),
+            PixelFormat::Bgr => Some((c.b, c.g, c.r)),
+            _ => None,
+        };
+        let Some((p0, p1, p2)) = order else {
+            for y in y0..y_end {
+                for x in x0..x_end {
+                    self.put(x, y, c);
+                }
+            }
+            return;
+        };
+        for y in y0..y_end {
+            let mut o = (y * stride + x0) * bpp;
+            for _ in x0..x_end {
+                self.buf[o] = p0;
+                self.buf[o + 1] = p1;
+                self.buf[o + 2] = p2;
+                o += bpp;
+            }
+        }
+        return;
+        #[allow(unreachable_code)]
     }
 
     /// Rounded rectangle (filled). `r` = corner radius in pixels.

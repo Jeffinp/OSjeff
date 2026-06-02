@@ -10,10 +10,16 @@ no framebuffer.
 - Desktop: wallpaper em gradiente, taskbar, relógio em tempo real (RTC/UTC)
 - **Window manager**: múltiplas janelas, foco, z-order, arrastar pela barra de
   título, botão fechar, lançar apps pela taskbar
+- **Animações de abertura/fechamento**: fade + slide (easing smoothstep),
+  compostas via blend contra o wallpaper, paceadas por TSC (sem timer)
+- **Gerenciador de processos**: tabela de processos (kernel/compositor/apps) com
+  estados Running/Suspended e tempo de CPU acumulado
 - **Terminal** (`OSJEFF SHELL`): histórico com scroll, linha de input com caret
-  navegável, comandos `HELP CLS TIME VER ECHO EDIT`
+  navegável, comandos `HELP CLS TIME VER ECHO EDIT PS`
 - **Editor** (`OSJEFF EDIT`): texto multi-linha, cursor 2D, inserir/quebrar/juntar
   linhas, navegação por setas/Home/End, status `Ln/Col` + marcador de modificação
+- **Task Manager** (`TASK MANAGER`): lista processos, navega com ↑/↓,
+  Enter foca/abre, Del encerra (apps); processos System são protegidos
 - **Mouse PS/2** (cursor) e **teclado PS/2** (com Shift, Caps Lock, setas, Del)
 - **Double buffering** com fundo cacheado → render sem flicker
 - Fonte bitmap 8x8 própria (maiúsculas, minúsculas, dígitos, símbolos)
@@ -24,12 +30,14 @@ A lógica pura é separada do hardware para ser **testável no host**:
 
 ```
 OSjeff/
-├── osjeff_core/        # lib no_std + testável (cargo test) — 98% de cobertura
+├── osjeff_core/        # lib no_std + testável (cargo test) — ~98% de cobertura
 │   └── src/
 │       ├── keymap.rs    # scancode PS/2 Set 1 -> Key, com shift/caps
 │       ├── terminal.rs  # shell: histórico, input, parser de comandos
 │       ├── editor.rs    # modelo de texto multi-linha + cursor 2D
-│       └── window.rs    # geometria/hit-testing de janelas
+│       ├── window.rs    # geometria/hit-testing de janelas
+│       ├── anim.rs      # easing/estado das animações de janela
+│       └── process.rs   # tabela de processos (estados, seleção, ticks)
 ├── kernel/             # no_std, target x86_64-unknown-none (hardware + render)
 │   └── src/
 │       ├── main.rs      # entry point + loop do compositor

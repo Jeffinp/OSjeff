@@ -47,6 +47,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut desk = Desktop::new(info.width as i32, info.height as i32);
     let mut last_sec = 0xFFu8; // force first render
 
+    // Animation timestep per rendered frame, and the per-frame pacing delay
+    // (~6ms) that keeps transitions visible without a timer interrupt.
+    const DT: f32 = 0.08;
+    const FRAME_CYCLES: u64 = 18_000_000;
+
     loop {
         let rt = rtc::now();
         let time = Time {
@@ -55,8 +60,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             s: rt.s,
         };
 
+        // Advance window open/close animations.
+        let animating = desk.animate(DT);
+
         // Drain all pending PS/2 events so the cursor stays responsive.
-        let mut dirty = false;
+        let mut dirty = animating;
         while let Some(event) = ps2::poll() {
             dirty |= match event {
                 Event::Mouse(p) => desk.handle_mouse(p.dx, p.dy, p.left),
@@ -66,6 +74,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
         if rt.s != last_sec {
             last_sec = rt.s;
+            desk.tick_processes();
             dirty = true;
         }
         if !dirty {
@@ -73,11 +82,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
 
         back.copy_from_slice(bg);
-        {
-            let mut c = Canvas::new(back, info);
-            desk.render(&mut c, time);
-        }
+        desk.render(back, bg, info, time);
         framebuffer.buffer_mut()[..n].copy_from_slice(back);
+
+        // Pace animation frames so transitions aren't instant under WHPX.
+        if animating {
+            io::delay_cycles(FRAME_CYCLES);
+        }
     }
 }
 

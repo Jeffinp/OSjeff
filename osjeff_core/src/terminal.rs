@@ -28,6 +28,7 @@ pub struct Time {
 pub enum Action {
     None,
     OpenEditor,
+    OpenTasks,
 }
 
 pub struct Terminal {
@@ -227,8 +228,12 @@ impl Terminal {
 
         if token == b"HELP" {
             self.println(b"Commands:");
-            self.println(b" HELP CLS TIME VER ECHO EDIT");
-            self.println(b"EDIT opens the text editor.");
+            self.println(b" HELP CLS TIME VER ECHO");
+            self.println(b" EDIT PS");
+            self.println(b"EDIT=editor  PS=task manager");
+        } else if token == b"PS" || token == b"TASK" {
+            self.println(b"Opening task manager...");
+            return Action::OpenTasks;
         } else if token == b"CLS" || token == b"CLEAR" {
             self.clear();
         } else if token == b"VER" || token == b"ABOUT" {
@@ -416,7 +421,7 @@ mod tests {
         type_str(&mut t, "help");
         t.on_key(Key::Enter, t0());
         // case-insensitive: lowercase still matches
-        assert_eq!(t.row(t.row_count() - 1), b"EDIT opens the text editor.");
+        assert_eq!(t.row(t.row_count() - 1), b"EDIT=editor  PS=task manager");
     }
 
     #[test]
@@ -449,6 +454,15 @@ mod tests {
         type_str(&mut t, "EDIT");
         let a = t.on_key(Key::Enter, t0());
         assert_eq!(a, Action::OpenEditor);
+    }
+
+    #[test]
+    fn ps_and_task_return_open_tasks_action() {
+        let mut t = Terminal::new();
+        type_str(&mut t, "PS");
+        assert_eq!(t.on_key(Key::Enter, t0()), Action::OpenTasks);
+        type_str(&mut t, "task");
+        assert_eq!(t.on_key(Key::Enter, t0()), Action::OpenTasks);
     }
 
     #[test]

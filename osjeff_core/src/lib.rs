@@ -7,12 +7,16 @@
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 
+pub mod anim;
 pub mod editor;
 pub mod keymap;
+pub mod process;
 pub mod terminal;
 pub mod window;
 
+pub use anim::Anim;
 pub use editor::Editor;
 pub use keymap::{Key, Keymap};
+pub use process::{ProcKind, ProcState, Process, ProcessTable};
 pub use terminal::{Action, Terminal, Time};
 pub use window::Rect;

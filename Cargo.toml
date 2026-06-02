@@ -6,3 +6,10 @@ members = ["kernel", "os", "osjeff_core"]
 # `x86_64-unknown-none` aborts by default, while host `cargo test` for
 # `osjeff_core` needs the default unwinding harness. Keeping the profile
 # untouched lets both work.
+
+# Release builds the bootable image: optimize hard. LTO + a single codegen
+# unit let the per-pixel/per-frame hot paths inline and vectorize.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
