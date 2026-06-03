@@ -48,8 +48,12 @@ if (-not (Test-Path $fsImg)) {
     Write-Host "Disco de arquivos criado: $fsImg" -ForegroundColor Green
 }
 
+$pcap = Join-Path $PSScriptRoot 'osjeff-net.pcap'
 $qargs = @('-m', '256M', '-drive', "format=raw,file=$img",
-    '-drive', "format=raw,file=$fsImg,if=ide,index=2")
+    '-drive', "format=raw,file=$fsImg,if=ide,index=2",
+    '-netdev', 'user,id=n0',
+    '-device', 'ne2k_isa,netdev=n0,mac=52:54:00:12:34:56',
+    '-object', "filter-dump,id=dump,netdev=n0,file=$pcap")
 if (-not $NoAccel) { $qargs = @('-accel', 'whpx') + $qargs }
 
 Write-Host "Booting OSjeff..." -ForegroundColor Cyan

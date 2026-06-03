@@ -9,7 +9,7 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-142%20passing-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-152%20passing-success?style=for-the-badge)
 ![Clippy](https://img.shields.io/badge/clippy-%2DD%20warnings-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
@@ -39,7 +39,7 @@ Não é um app rodando sobre um SO — é o SO. Cada peça abaixo foi construíd
 | **Heap allocator** | [`kernel/src/allocator.rs`](kernel/src/allocator.rs) | Free-list linkada + spin lock como `#[global_allocator]` → habilita `Vec`/`String`/`Box` |
 | **Interrupções de hardware** | [`kernel/src/interrupts.rs`](kernel/src/interrupts.rs) | IDT, handlers de exceção, PIC 8259 remapeado, timer PIT, input por IRQ |
 | **Compositor por damage tracking** | [`kernel/src/desktop.rs`](kernel/src/desktop.rs) | Cacheia a camada estática e só redesenha o retângulo danificado — custo O(janela) |
-| **Lógica pura testável** | [`osjeff_core/`](osjeff_core/) | Toda decisão (parser, editor, keymap, geometria, allocator, filesystem) testada no host: **142 testes, ~98% de cobertura** |
+| **Lógica pura testável** | [`osjeff_core/`](osjeff_core/) | Toda decisão (parser, editor, keymap, geometria, allocator, filesystem) testada no host: **152 testes, ~98% de cobertura** |
 
 ---
 
@@ -145,6 +145,8 @@ sequenceDiagram
   arquivos que sobrevivem ao reboot; terminal com `LS`, `CAT`, `SAVE`, `LOAD`,
   `RM`; **Ctrl+S** no editor
 - **Copy/paste** entre apps com **Ctrl+C / Ctrl+V**
+- **Rede**: driver NIC **NE2000** + stack **ARP/IPv4/ICMP** — responde a `ping` e
+  se anuncia com ARP gratuito no boot (visível num `.pcap`)
 - **Mouse + teclado PS/2** (Shift, Caps, setas), relógio RTC em hora local
 - **Double buffering** + dirty-rect do cursor → render sem flicker
 - Fonte bitmap 8×8 própria; ícones desenhados; logo embutido como RGBA
@@ -187,18 +189,18 @@ sudo dd if=osjeff-bios.img of=/dev/sdX bs=4M status=progress && sync
 Toda a lógica vive em `osjeff_core` e é testada no host:
 
 ```bash
-cargo test-core                          # 142 testes
+cargo test-core                          # 152 testes
 cargo llvm-cov -p osjeff_core --summary-only  # cobertura (~98%)
 cargo lint-kernel                        # clippy bare-metal, -D warnings
 cargo lint-host                          # clippy host, -D warnings
 ```
 
-**142 testes**, ~98% de cobertura de linhas no `osjeff_core`:
+**152 testes**, ~98% de cobertura de linhas no `osjeff_core`:
 
 | Módulo (core) | Testes | Cobertura |
 |---|---|---|
 | anim · window · heap · keymap | 56 | ~100% |
-| fs | 10 | 99% |
+| fs · net | 20 | ~99% |
 | terminal · process | 37 | ~98% |
 | editor | 23 | 96% |
 | calc · clipboard | 23 | ~95% |
@@ -213,7 +215,7 @@ cargo lint-host                          # clippy host, -D warnings
 ```
 OSjeff/
 ├── osjeff_core/        # lib no_std + testável (cargo test)
-│   └── src/{keymap,terminal,editor,calc,window,anim,process,heap,clipboard,fs}.rs
+│   └── src/{keymap,terminal,editor,calc,window,anim,process,heap,clipboard,fs,net}.rs
 ├── kernel/             # no_std, x86_64-unknown-none
 │   └── src/
 │       ├── main.rs        # entry point + loop do compositor
@@ -222,7 +224,7 @@ OSjeff/
 │       ├── switch.s       # troca de contexto em assembly puro
 │       ├── allocator.rs   # heap (GlobalAlloc) + spin lock
 │       ├── desktop.rs     # window manager + compositor + apps
-│       ├── ata.rs · power.rs  # disco (filesystem) + reboot/shutdown
+│       ├── ata.rs · ne2000.rs · power.rs  # disco + NIC + reboot/shutdown
 │       ├── fb.rs · font.rs · icons.rs · logo.rs · boot.rs
 │       └── io.rs · ps2.rs · rtc.rs · theme.rs
 ├── os/                 # builder: gera imagem + roda QEMU
@@ -252,7 +254,7 @@ OSjeff/
 - [x] Copy/paste entre apps (Ctrl+C / Ctrl+V)
 - [x] Filesystem OJFS + comandos de arquivo
 - [x] Driver de disco ATA PIO (persistência entre reboots)
-- [ ] Pilha de rede
+- [x] Pilha de rede (NE2000 + ARP/IPv4/ICMP, responde ping)
 
 ---
 

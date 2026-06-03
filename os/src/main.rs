@@ -28,6 +28,14 @@ fn main() {
     qemu.arg("-drive")
         .arg(format!("format=raw,file={fs_img},if=ide,index=2"));
 
+    // NE2000 NIC on user-mode (SLIRP) networking, with a packet dump so the
+    // traffic (gratuitous ARP on boot, ARP/ping replies) is visible offline.
+    qemu.arg("-netdev").arg("user,id=n0");
+    qemu.arg("-device")
+        .arg("ne2k_isa,netdev=n0,mac=52:54:00:12:34:56");
+    qemu.arg("-object")
+        .arg("filter-dump,id=dump,netdev=n0,file=osjeff-net.pcap");
+
     let status = qemu.status().expect("failed to launch qemu-system-x86_64");
     std::process::exit(status.code().unwrap_or(-1));
 }

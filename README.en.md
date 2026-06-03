@@ -7,7 +7,7 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-142%20passing-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-152%20passing-success?style=for-the-badge)
 ![Clippy](https://img.shields.io/badge/clippy-%2DD%20warnings-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
@@ -38,7 +38,7 @@ built from scratch:
 | **Heap allocator** | [`kernel/src/allocator.rs`](kernel/src/allocator.rs) | Linked free-list + spin lock as `#[global_allocator]` → enables `Vec`/`String`/`Box` |
 | **Hardware interrupts** | [`kernel/src/interrupts.rs`](kernel/src/interrupts.rs) | IDT, exception handlers, remapped 8259 PIC, PIT timer, IRQ-driven input |
 | **Damage-tracking compositor** | [`kernel/src/desktop.rs`](kernel/src/desktop.rs) | Caches the static layer and only repaints the damaged rectangle — O(window) cost |
-| **Pure, testable logic** | [`osjeff_core/`](osjeff_core/) | Every decision (parser, editor, keymap, geometry, allocator, filesystem) tested on the host: **142 tests, ~98% coverage** |
+| **Pure, testable logic** | [`osjeff_core/`](osjeff_core/) | Every decision (parser, editor, keymap, geometry, allocator, filesystem) tested on the host: **152 tests, ~98% coverage** |
 
 ---
 
@@ -143,6 +143,8 @@ sequenceDiagram
   files that survive reboots; terminal `LS`, `CAT`, `SAVE`, `LOAD`, `RM`;
   **Ctrl+S** in the editor
 - **Copy/paste** between apps with **Ctrl+C / Ctrl+V**
+- **Networking**: an **NE2000** NIC driver + **ARP/IPv4/ICMP** stack — answers
+  `ping` and announces itself with a gratuitous ARP on boot (visible in a `.pcap`)
 - **PS/2 mouse + keyboard** (Shift, Caps, arrows), RTC clock in local time
 - **Double buffering** + cursor dirty-rect → flicker-free rendering
 - Own 8×8 bitmap font; hand-drawn icons; logo embedded as RGBA
@@ -185,18 +187,18 @@ sudo dd if=osjeff-bios.img of=/dev/sdX bs=4M status=progress && sync
 All logic lives in `osjeff_core` and is tested on the host:
 
 ```bash
-cargo test-core                          # 142 tests
+cargo test-core                          # 152 tests
 cargo llvm-cov -p osjeff_core --summary-only  # coverage (~98%)
 cargo lint-kernel                        # bare-metal clippy, -D warnings
 cargo lint-host                          # host clippy, -D warnings
 ```
 
-**142 tests**, ~98% line coverage in `osjeff_core`:
+**152 tests**, ~98% line coverage in `osjeff_core`:
 
 | Module (core) | Tests | Coverage |
 |---|---|---|
 | anim · window · heap · keymap | 56 | ~100% |
-| fs | 10 | 99% |
+| fs · net | 20 | ~99% |
 | terminal · process | 37 | ~98% |
 | editor | 23 | 96% |
 | calc · clipboard | 23 | ~95% |
@@ -223,7 +225,7 @@ cargo lint-host                          # host clippy, -D warnings
 - [x] Copy/paste between apps (Ctrl+C / Ctrl+V)
 - [x] OJFS filesystem + file commands
 - [x] ATA PIO disk driver (persistence across reboots)
-- [ ] Network stack
+- [x] Network stack (NE2000 + ARP/IPv4/ICMP, answers ping)
 
 ---
 

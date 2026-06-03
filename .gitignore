@@ -17,3 +17,4 @@
 # Runtime artifacts
 qemu-err.txt
 qlog.txt
+*.pcap

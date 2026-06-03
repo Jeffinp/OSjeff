@@ -30,7 +30,7 @@ hardware — e o `unsafe` fica isolado e auditável.
 ```mermaid
 flowchart LR
     subgraph host["cargo test (host, std)"]
-        T["142 testes unitários"]
+        T["152 testes unitários"]
     end
     subgraph prod["kernel (no_std, bare metal)"]
         K["glue de hardware"]
@@ -265,6 +265,34 @@ disco via **`ata.rs`** — um driver **ATA PIO** (LBA de 28 bits) no canal IDE
 secundário, separado do disco de boot. Todas as esperas são limitadas: um disco
 ausente devolve `false` em vez de pendurar o boot, e o sistema cai para um
 filesystem só em RAM. Cada `SAVE`/`RM` faz *flush* da imagem inteira (~17 KiB).
+
+---
+
+## 9. Rede
+
+A lógica de protocolo (**`osjeff_core::net`**) é pura e testada: o **checksum da
+internet** (RFC 1071) e o parse/build de **Ethernet/ARP/IPv4/ICMP**. O ponto de
+entrada é `respond(frame, mac, ip, out)` — dado um frame recebido, devolve o
+frame de resposta a transmitir. Assim o *responder* inteiro (ARP reply + ICMP
+echo reply, que torna o SO **pingável**) é testável no host, sem hardware.
+
+```mermaid
+flowchart LR
+    NIC["ne2000::poll"] --> FR["frame recebido"]
+    FR --> RESP["net::respond"]
+    RESP -->|ARP/ping| TX["ne2000::send"]
+    RESP -->|outro| DROP["ignora"]
+    BOOT["boot"] --> GARP["net::arp_announce → ne2000::send"]
+```
+
+O kernel fala com a placa via **`ne2000.rs`** — um driver **NE2000 (DP8390)** por
+*port I/O* (sem PCI nem DMA-descriptors), o NIC mais simples de programar. É
+**polled** (sem IRQ): o loop do compositor chama `poll` a cada acordada e
+transmite as respostas. No boot, o SO manda um **ARP gratuito** se anunciando.
+Como o resto do sistema, é tolerante: `init` devolve `false` se não há placa, e
+o sistema boota sem rede. O QEMU grava todo o tráfego num `.pcap`
+(`filter-dump`) — então dá para ver o ARP gratuito e as respostas sem montar
+rede no host.
 
 ---
 

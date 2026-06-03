@@ -15,6 +15,7 @@ mod icons;
 mod interrupts;
 mod io;
 mod logo;
+mod ne2000;
 mod power;
 mod ps2;
 mod rtc;
@@ -26,7 +27,11 @@ use bootloader_api::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use desktop::{Desktop, CURSOR_H, CURSOR_W};
 use fb::Canvas;
+use osjeff_core::net::{self, Ipv4};
 use osjeff_core::{Rect, Time};
+
+/// Our IPv4 address. Matches QEMU's user-mode (SLIRP) default guest address.
+const NET_IP: Ipv4 = Ipv4([10, 0, 2, 15]);
 use ps2::Event;
 
 entry_point!(kernel_main);
@@ -88,6 +93,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Real interrupts: IDT + exception handlers, PIC remap, PIT timer, and
     // IRQ-driven keyboard (IRQ1) + mouse (IRQ12).
     interrupts::init();
+
+    // Bring up the NIC (if present) and announce ourselves with a gratuitous
+    // ARP, so the network is visible on the wire from boot. No card -> skip.
+    let net_up = ne2000::init();
+    if net_up {
+        let mut frame = [0u8; 64];
+        let len = net::arp_announce(&mut frame, ne2000::MAC, NET_IP);
+        ne2000::send(&frame[..len]);
+    }
 
     // Boot splash: progress tracks real elapsed time (>= 5 seconds).
     run_splash(&mut *framebuffer, &mut *back, info, n);
@@ -250,6 +264,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
         was_anim = any_anim;
+
+        // Service the network: answer ARP/ping for any frames the NIC received.
+        if net_up {
+            let mut rx = [0u8; 1600];
+            while let Some(len) = ne2000::poll(&mut rx) {
+                let mut tx = [0u8; 1600];
+                if let Some(reply) = net::respond(&rx[..len], ne2000::MAC, NET_IP, &mut tx) {
+                    ne2000::send(&tx[..reply]);
+                }
+            }
+        }
 
         // Idle until the next interrupt instead of busy-spinning. The timer
         // (250 Hz) wakes us to step animations and the per-second clock; the

@@ -91,6 +91,23 @@ fn build_arp_reply(out: &mut [u8], mac: Mac, ip: Ipv4, target_mac: Mac, target_i
     ETH_HDR + ARP_LEN
 }
 
+/// Build a broadcast "gratuitous ARP" announcing `mac`/`ip` (sender == target).
+/// Sent on boot so the OS advertises itself on the wire. Returns 42.
+pub fn arp_announce(out: &mut [u8], mac: Mac, ip: Ipv4) -> usize {
+    write_eth(out, Mac([0xff; 6]), mac, ETHERTYPE_ARP);
+    let a = &mut out[ETH_HDR..ETH_HDR + ARP_LEN];
+    a[0..2].copy_from_slice(&1u16.to_be_bytes());
+    a[2..4].copy_from_slice(&ETHERTYPE_IPV4.to_be_bytes());
+    a[4] = 6;
+    a[5] = 4;
+    a[6..8].copy_from_slice(&ARP_REQUEST.to_be_bytes());
+    a[8..14].copy_from_slice(&mac.0); // sender hw = us
+    a[14..18].copy_from_slice(&ip.0); // sender proto = us
+    a[18..24].copy_from_slice(&[0u8; 6]); // target hw unknown
+    a[24..28].copy_from_slice(&ip.0); // target proto = us (gratuitous)
+    ETH_HDR + ARP_LEN
+}
+
 /// Build an ICMP echo reply for a received echo request whose ICMP payload is
 /// `icmp_req` (type/code/checksum/id/seq/data), addressed back to `peer`.
 fn build_icmp_reply(
@@ -317,6 +334,20 @@ mod tests {
         let frame = icmp_echo(Ipv4([10, 0, 2, 99]), b"x");
         let mut out = [0u8; 128];
         assert_eq!(respond(&frame, OUR_MAC, OUR_IP, &mut out), None);
+    }
+
+    #[test]
+    fn arp_announce_is_broadcast_from_us() {
+        let mut out = [0u8; 64];
+        let n = arp_announce(&mut out, OUR_MAC, OUR_IP);
+        assert_eq!(n, ETH_HDR + ARP_LEN);
+        assert_eq!(&out[0..6], &[0xff; 6]); // broadcast
+        assert_eq!(&out[6..12], &OUR_MAC.0);
+        let a = &out[ETH_HDR..];
+        assert_eq!(u16::from_be_bytes([a[6], a[7]]), ARP_REQUEST);
+        assert_eq!(&a[8..14], &OUR_MAC.0); // sender hw
+        assert_eq!(&a[14..18], &OUR_IP.0); // sender proto
+        assert_eq!(&a[24..28], &OUR_IP.0); // target proto = us (gratuitous)
     }
 
     #[test]
