@@ -14,6 +14,7 @@ pub mod editor;
 pub mod fs;
 pub mod heap;
 pub mod keymap;
+pub mod net;
 pub mod process;
 pub mod terminal;
 pub mod window;
