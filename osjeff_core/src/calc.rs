@@ -112,7 +112,6 @@ impl Calc {
         }
     }
 
-
     fn push_dot(&mut self) {
         if self.error {
             self.clear();

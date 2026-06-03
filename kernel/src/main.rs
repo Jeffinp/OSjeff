@@ -227,6 +227,65 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 prev_cursor = desk.cursor();
                 prev_damage = damage;
             }
+        } else if desk.overlay_open() {
+            // ---- Overlay fast-path: a context menu or the start panel is open.
+            // Cache the overlay-less scene in STATIC, then repaint only the
+            // overlay's rectangle as the cursor moves (hover highlight) — O(menu)
+            // instead of recomposing every window + shadow on each mouse move.
+            let sig = desk.anim_signature();
+            let ov = desk.overlay_bounds();
+            if !static_valid || sig != last_sig || scene_dirty {
+                static_buf.copy_from_slice(bg);
+                desk.compose_static(static_buf, info, time);
+                back.copy_from_slice(static_buf);
+                {
+                    let mut c = Canvas::new(back, info);
+                    desk.draw_overlay(&mut c);
+                }
+                framebuffer.buffer_mut()[..n].copy_from_slice(back);
+                {
+                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
+                    desk.draw_cursor_overlay(&mut c);
+                }
+                prev_cursor = desk.cursor();
+                static_valid = true;
+                last_sig = sig;
+            } else if cursor_moved {
+                // Restore the overlay-less scene under the overlay rect, redraw
+                // the overlay (updated hover), and blit just that rect.
+                blit_rect(back, static_buf, info, ov.x, ov.y, ov.w, ov.h, n);
+                {
+                    let mut c = Canvas::new(back, info);
+                    desk.draw_overlay(&mut c);
+                }
+                blit_rect(
+                    framebuffer.buffer_mut(),
+                    back,
+                    info,
+                    ov.x,
+                    ov.y,
+                    ov.w,
+                    ov.h,
+                    n,
+                );
+                // Repaint the cursor (it may have moved off the overlay).
+                let (ox, oy) = prev_cursor;
+                blit_rect(
+                    framebuffer.buffer_mut(),
+                    back,
+                    info,
+                    ox,
+                    oy,
+                    CURSOR_W,
+                    CURSOR_H,
+                    n,
+                );
+                {
+                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
+                    desk.draw_cursor_overlay(&mut c);
+                }
+                prev_cursor = desk.cursor();
+            }
         } else {
             static_valid = false;
             // A finished animation needs one final full recompose to settle.

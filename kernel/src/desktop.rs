@@ -737,11 +737,10 @@ impl Desktop {
             }
         }
 
-        // While the menu or start panel is open, movement must repaint for the
-        // hover highlight.
-        if (self.menu.is_some() || self.start_open) && cursor_moved {
-            scene = true;
-        }
+        // Moving over an open menu / start panel updates the hover highlight,
+        // but it is NOT a full-scene change: the compositor repaints only the
+        // overlay's rectangle on `cursor_moved` (see the overlay path in the
+        // main loop), so we deliberately do not set `scene` here.
 
         self.prev_left = left;
         self.prev_right = right;
@@ -795,11 +794,43 @@ impl Desktop {
             }
         }
         draw_clock(&mut c, time);
+        self.draw_overlay(&mut c);
+    }
+
+    /// Draws the transient overlays (right-click menu + start panel) on top of
+    /// the composed scene. Separated so the compositor can repaint only their
+    /// region on a hover change instead of recomposing the whole desktop.
+    pub fn draw_overlay(&self, c: &mut Canvas) {
         if let Some((mx, my)) = self.menu {
-            self.draw_menu(&mut c, mx, my);
+            self.draw_menu(c, mx, my);
         }
         if self.start_open {
-            self.draw_start(&mut c);
+            self.draw_start(c);
+        }
+    }
+
+    /// True while a transient overlay (menu / start panel) is shown.
+    pub fn overlay_open(&self) -> bool {
+        self.menu.is_some() || self.start_open
+    }
+
+    /// Bounding rect of the open overlay(s), inflated for their drop shadows and
+    /// clamped to the screen. Empty when nothing is open. Drives the overlay
+    /// damage repaint.
+    pub fn overlay_bounds(&self) -> Rect {
+        let mut bounds: Option<Rect> = None;
+        if let Some((mx, my)) = self.menu {
+            let h = MENU_PAD * 2 + MENU_ITEMS.len() as i32 * MENU_ITEM_H;
+            bounds = Some(Rect::new(mx, my, MENU_W, h));
+        }
+        if self.start_open {
+            let (sx, sy) = start_origin(self.sw, self.sh);
+            let sr = Rect::new(sx, sy, START_W, start_height());
+            bounds = Some(bounds.map_or(sr, |b| b.union(&sr)));
+        }
+        match bounds {
+            Some(b) => b.inflated(12).clamped_to(self.sw, self.sh),
+            None => Rect::new(0, 0, 0, 0),
         }
     }
 
