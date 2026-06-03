@@ -193,8 +193,8 @@ pub fn respond(frame: &[u8], mac: Mac, ip: Ipv4, out: &mut [u8]) -> Option<usize
                 return None;
             }
             let proto = payload[9];
-            let dst = Ipv4([payload[16], payload[17], payload[18], payload[19]]);
             let src = Ipv4([payload[12], payload[13], payload[14], payload[15]]);
+            let dst = Ipv4([payload[16], payload[17], payload[18], payload[19]]);
             if proto != IPPROTO_ICMP || dst != ip {
                 return None;
             }

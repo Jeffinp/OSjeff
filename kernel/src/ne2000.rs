@@ -188,7 +188,8 @@ pub fn send(frame: &[u8]) {
     w(RSAR1, TX_PAGE);
     w(CR, CR_START | CR_RD_WRITE);
     for i in 0..len {
-        outb(DATA, frame.get(i).copied().unwrap_or(0));
+        let byte = if i < frame.len() { frame[i] } else { 0 };
+        outb(DATA, byte);
     }
     for _ in 0..SPIN {
         if r(ISR) & ISR_RDC != 0 {

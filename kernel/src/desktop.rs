@@ -487,31 +487,26 @@ impl Desktop {
     }
 
     fn fs_cat(&mut self, f: FileName) {
-        let mut buf = [0u8; fs::MAX_FILE_SIZE];
-        let n = match fs::read(disk(), f.as_bytes()) {
-            Some(data) => {
-                let n = data.len();
-                buf[..n].copy_from_slice(data);
-                n
-            }
+        let data = match fs::read(disk(), f.as_bytes()) {
+            Some(d) => d,
             None => {
                 self.term.println(b"file not found");
                 return;
             }
         };
-        if n == 0 {
+        if data.is_empty() {
             self.term.println(b"(empty)");
             return;
         }
         let mut start = 0;
-        for i in 0..n {
-            if buf[i] == b'\n' {
-                self.term.println(&buf[start..i]);
+        for i in 0..data.len() {
+            if data[i] == b'\n' {
+                self.term.println(&data[start..i]);
                 start = i + 1;
             }
         }
-        if start < n {
-            self.term.println(&buf[start..n]);
+        if start < data.len() {
+            self.term.println(&data[start..]);
         }
     }
 
@@ -537,10 +532,8 @@ impl Desktop {
             }
             let mut line = [b' '; 28];
             let name = fs::name_at(d, i);
-            let nlen = name.len().min(fs::MAX_NAME);
-            line[..nlen].copy_from_slice(&name[..nlen]);
-            let size = fs::size_at(d, i);
-            write_uint(&mut line, 18, 6, size as u32);
+            line[..name.len()].copy_from_slice(name);
+            write_uint(&mut line, 18, 6, fs::size_at(d, i) as u32);
             self.term.println(&line);
         }
     }

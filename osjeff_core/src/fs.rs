@@ -62,8 +62,9 @@ pub fn name_at(img: &[u8], i: usize) -> &[u8] {
         return &[];
     }
     let o = rec_off(i);
-    let n = (img[o + 1] as usize).min(MAX_NAME);
-    &img[o + 2..o + 2 + n]
+    let len = img[o + 1] as usize;
+    // Bounds check prevents out-of-range reads on corrupted length fields.
+    &img[o + 2..o + 2 + len.min(MAX_NAME)]
 }
 
 /// Payload size of slot `i`.

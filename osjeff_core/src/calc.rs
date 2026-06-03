@@ -112,6 +112,7 @@ impl Calc {
         }
     }
 
+
     fn push_dot(&mut self) {
         if self.error {
             self.clear();
@@ -254,9 +255,9 @@ impl Calc {
 /// Parse a `[-]digits[.digits]` byte string into `f64` (no `std` parser).
 fn parse_decimal(s: &[u8]) -> f64 {
     let mut i = 0;
-    let neg = i < s.len() && s[i] == b'-';
+    let neg = !s.is_empty() && s[0] == b'-';
     if neg {
-        i += 1;
+        i = 1;
     }
     let mut val = 0.0;
     while i < s.len() && s[i].is_ascii_digit() {
