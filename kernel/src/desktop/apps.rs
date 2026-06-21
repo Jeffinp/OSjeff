@@ -31,6 +31,7 @@ impl Desktop {
             Icon::Editor,
             Icon::TaskMgr,
             Icon::Calculator,
+            Icon::Browser,
         ];
         for (i, (label, _)) in MENU_ITEMS.iter().enumerate() {
             let iy = my + MENU_PAD + i as i32 * MENU_ITEM_H;
@@ -117,6 +118,96 @@ impl Desktop {
         }
     }
 
+    /// Browser content geometry (address bar + scrollable text), derived from
+    /// the window rect so drawing and hit-testing/scroll agree. Returns
+    /// `(bar, content, line_h, visible_lines)`.
+    pub(crate) fn browser_layout(r: Rect) -> (Rect, Rect, i32, usize) {
+        let pad = 16;
+        let bar_h = 32;
+        let bar = Rect::new(r.x + pad, r.y + TITLE_H + 10, r.w - pad * 2, bar_h);
+        let cy = bar.bottom() + 12;
+        let content = Rect::new(
+            r.x + pad,
+            cy,
+            r.w - pad * 2,
+            (r.bottom() - pad - cy).max(0),
+        );
+        let line_h = 18;
+        let visible = (content.h / line_h).max(0) as usize;
+        (bar, content, line_h, visible)
+    }
+
+    pub(crate) fn draw_browser(&self, c: &mut Canvas, r: Rect, focused: bool) {
+        let (bar, content, line_h, visible) = Self::browser_layout(r);
+
+        // Address bar: dark rounded input with the URL and a caret when focused.
+        c.fill_round_rect(
+            bar.x as usize,
+            bar.y as usize,
+            bar.w as usize,
+            bar.h as usize,
+            8,
+            Color::rgb(0x0E, 0x16, 0x28),
+        );
+        let tx = (bar.x + 12) as usize;
+        let ty = (bar.y + (bar.h - 14) / 2) as usize;
+        let url = self.browser.url();
+        // Truncate the displayed URL to the bar width.
+        let bar_cols = ((bar.w - 110) as usize / font::cell_w(2)).max(1);
+        let shown = &url[url.len().saturating_sub(bar_cols)..];
+        font::draw_bytes(c, tx, ty, shown, theme::HEADER_TEXT, 2);
+        if focused {
+            let caret = self.browser.caret().min(shown.len());
+            let cx = tx + caret * font::cell_w(2);
+            c.fill_rect(cx, ty - 1, 2, 16, theme::ACCENT);
+        }
+
+        // Status badge at the bar's right edge.
+        use osjeff_core::browser::Status;
+        let (label, col): (&[u8], Color) = match self.browser.status() {
+            Status::Loading => (b"...", theme::ACCENT_2),
+            Status::Done => (b"OK", theme::ACCENT),
+            Status::Error => (b"ERR", theme::CLOSE),
+            Status::Idle => (b"GO", theme::TEXT_MUTED),
+        };
+        let lw = label.len() * font::cell_w(2);
+        font::draw_bytes(
+            c,
+            (bar.right() - 14) as usize - lw,
+            ty,
+            label,
+            col,
+            2,
+        );
+
+        // Content: wrapped text lines from the scroll offset, clipped to the
+        // content box vertically (visible count) and horizontally (max_cols).
+        let max_cols = (content.w as usize / font::cell_w(2)).max(1);
+        let total = self.browser.line_count();
+        let mut yy = content.y as usize;
+        for idx in self.browser.scroll..(self.browser.scroll + visible).min(total) {
+            if let Some(line) = self.browser.line(idx) {
+                let n = line.len().min(max_cols);
+                font::draw_bytes(c, content.x as usize, yy, &line[..n], theme::TEXT, 2);
+            }
+            yy += line_h as usize;
+        }
+
+        // Scrollbar track + thumb when the content overflows.
+        if total > visible && visible > 0 {
+            let track_x = (content.right() - 4) as usize;
+            let track_h = content.h as usize;
+            c.fill_rect(track_x, content.y as usize, 4, track_h, theme::DOCK_EDGE);
+            let thumb_h = (track_h * visible / total).max(12);
+            let max_scroll = total - visible;
+            let thumb_y = content.y as usize
+                + ((track_h - thumb_h) * self.browser.scroll)
+                    .checked_div(max_scroll)
+                    .unwrap_or(0);
+            c.fill_round_rect(track_x, thumb_y, 4, thumb_h, 2, theme::ACCENT);
+        }
+    }
+
     pub(crate) fn draw_start(&self, c: &mut Canvas) {
         let (sx, sy) = start_origin(self.sw, self.sh);
         let h = start_height();
@@ -146,6 +237,7 @@ impl Desktop {
             Icon::Editor,
             Icon::TaskMgr,
             Icon::Calculator,
+            Icon::Browser,
         ];
 
         for (i, (label, win)) in START_APPS.iter().enumerate() {

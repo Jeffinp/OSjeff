@@ -50,6 +50,13 @@ impl Desktop {
                 Key::Esc => self.request_close(CALC),
                 _ => {}
             },
+            Kind::Browser => {
+                if key == Key::Esc {
+                    self.request_close(BROWSER);
+                } else {
+                    self.browser.on_key(key);
+                }
+            }
         }
         true
     }
@@ -95,6 +102,7 @@ impl Desktop {
                 Kind::Terminal => self.term.input(),
                 Kind::Editor => self.editor.line(self.editor.cursor().1),
                 Kind::Calculator => self.calc.display(),
+                Kind::Browser => self.browser.url(),
                 Kind::TaskMgr => &[],
             };
             n = text.len().min(clipboard::CAP);
@@ -137,6 +145,13 @@ impl Desktop {
             Kind::Calculator => {
                 for &b in data {
                     self.calc.input(b);
+                }
+            }
+            Kind::Browser => {
+                for &b in data {
+                    if b != b'\n' && b != b'\r' {
+                        self.browser.on_key(Key::Char(b));
+                    }
                 }
             }
             Kind::TaskMgr => {}

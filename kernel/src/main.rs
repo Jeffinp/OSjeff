@@ -70,8 +70,10 @@ static BG: RacyCell<AlignedBuf> = RacyCell::new(AlignedBuf([0; MAX_BYTES]));
 // animation so each frame only redraws the small damaged region.
 static STATIC: RacyCell<AlignedBuf> = RacyCell::new(AlignedBuf([0; MAX_BYTES]));
 
-// Kernel heap (1 MiB) backing the global allocator, so `alloc` works.
-const HEAP_SIZE: usize = 1024 * 1024;
+// Kernel heap (4 MiB) backing the global allocator. Sized for the TLS 1.3
+// handshake (P-256 ECDH + AES-GCM) the browser uses for HTTPS, on top of the
+// smoltcp socket buffers.
+const HEAP_SIZE: usize = 4 * 1024 * 1024;
 static HEAP: RacyCell<[u8; HEAP_SIZE]> = RacyCell::new([0; HEAP_SIZE]);
 
 #[global_allocator]
@@ -218,24 +220,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let mut frame = [0u8; 64];
         let len = net::arp_announce(&mut frame, ne2000::MAC, net_ip);
         ne2000::send(&frame[..len]);
-
-        // Smoke-test the smoltcp stack: fetch a plain-HTTP page end to end
-        // (DNS -> TCP -> HTTP) and log the first bytes. Proves the browser
-        // transport works over the NE2000 before wiring TLS and the UI.
-        serial_println!("netstack: GET http://example.com/");
-        let mut stack = netstack::Net::new();
-        match stack.http_get("example.com", "/", 80) {
-            Some(resp) => {
-                let head = &resp[..resp.len().min(80)];
-                serial_println!(
-                    "netstack: {} bytes; head={:?}",
-                    resp.len(),
-                    core::str::from_utf8(head).unwrap_or("<binary>")
-                );
-            }
-            None => serial_println!("netstack: fetch failed"),
-        }
     }
+
+    // The browser's TCP/IP + TLS stack, kept alive for the whole session so the
+    // native browser app can fetch pages on demand (HTTP and HTTPS). Built only
+    // when a NIC is present.
+    let mut net_stack = if net_up {
+        Some(netstack::Net::new())
+    } else {
+        None
+    };
+
 
     // Boot splash: progress tracks real elapsed time (>= 5 seconds).
     run_splash(&mut *framebuffer, &mut *back, info, n);
@@ -265,6 +260,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // also repaint the window that just lost focus (its title de-highlights).
     let mut prev_focused: Option<Rect> = None;
     let mut last_hud = 0u64; // tick of the last perf-HUD refresh
+    // Set after a browser fetch completes so the next iteration repaints the
+    // page (the fetch itself blocks, so it can't render in its own frame).
+    let mut browser_redraw = false;
 
     // Wall-clock animation speed, independent of how often the GUI thread is
     // scheduled (the timer preempts round-robin across all threads).
@@ -288,7 +286,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
 
         // Drain all pending PS/2 events.
-        let mut scene_dirty = false;
+        let mut scene_dirty = core::mem::take(&mut browser_redraw);
         let mut cursor_moved = false;
         let mut clock_tick = false;
         while let Some(event) = ps2::poll() {
@@ -576,6 +574,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             perf.draw(&mut c, heap_pct, sched::thread_count());
         }
 
+        // Browser navigation: if the app requested a page, fetch it now. This
+        // blocks for the duration of the fetch (single-threaded stack), but the
+        // "Carregando" (...) state was already painted this frame, so the user
+        // sees it; the result is shown next iteration via `browser_redraw`.
+        if let Some(net) = net_stack.as_mut() {
+            let mut url = [0u8; 256];
+            if let Some(len) = desk.browser_take_request(&mut url) {
+                browser_fetch(net, &url[..len], &mut desk);
+                browser_redraw = true;
+            }
+        }
+
         // Service the network: answer ARP/ping for any frames the NIC received.
         if net_up {
             let mut rx = [0u8; 1600];
@@ -593,6 +603,45 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // the tick rate and stops the compositor from burning a full core — a
         // real system halts when it has nothing to draw.
         x86_64::instructions::hlt();
+    }
+}
+
+/// Resolve a browser URL and fetch it (HTTP or HTTPS), feeding the raw response
+/// back into the browser app — or marking it failed.
+fn browser_fetch(net: &mut netstack::Net, url: &[u8], desk: &mut Desktop) {
+    use osjeff_core::browser::parse_url;
+    let Some(u) = parse_url(url) else {
+        desk.browser_fail();
+        return;
+    };
+    let (Ok(host), Ok(path)) = (
+        core::str::from_utf8(u.host()),
+        core::str::from_utf8(u.path()),
+    ) else {
+        desk.browser_fail();
+        return;
+    };
+    serial_println!(
+        "browser: GET {}://{}{} :{}",
+        if u.https { "https" } else { "http" },
+        host,
+        path,
+        u.port
+    );
+    let resp = if u.https {
+        net.https_get(host, path, u.port)
+    } else {
+        net.http_get(host, path, u.port)
+    };
+    match resp {
+        Some(r) => {
+            serial_println!("browser: {} bytes received", r.len());
+            desk.browser_load(&r);
+        }
+        None => {
+            serial_println!("browser: fetch failed");
+            desk.browser_fail();
+        }
     }
 }
 

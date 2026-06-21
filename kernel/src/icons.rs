@@ -12,6 +12,7 @@ pub enum Icon {
     Editor,
     TaskMgr,
     Calculator,
+    Browser,
     Power,
 }
 
@@ -22,6 +23,7 @@ pub fn draw(c: &mut Canvas, icon: Icon, x: usize, y: usize, size: usize) {
         Icon::Editor => editor(c, x, y, size),
         Icon::TaskMgr => taskmgr(c, x, y, size),
         Icon::Calculator => calculator(c, x, y, size),
+        Icon::Browser => browser(c, x, y, size),
         Icon::Power => power(c, x, y, size),
     }
 }
@@ -136,6 +138,24 @@ fn power(c: &mut Canvas, x: usize, y: usize, size: usize) {
         (size / 12).max(2),
         Color::rgb(0x2A, 0x12, 0x18),
     );
+}
+
+/// Globe: teal disc, violet "land" wedge, white meridian + equator lines.
+fn browser(c: &mut Canvas, x: usize, y: usize, size: usize) {
+    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x10, 0x1A, 0x30));
+    let cx = x + size / 2;
+    let cy = y + size / 2;
+    let r = (size / 2).saturating_sub(size / 8).max(3);
+    // Ocean disc.
+    c.fill_round_rect(cx - r, cy - r, 2 * r, 2 * r, r, theme::ACCENT);
+    // A couple of violet "continents".
+    let l = (r / 2).max(2);
+    c.fill_round_rect(cx - r + r / 4, cy - r / 2, l, l, l / 2, theme::ACCENT_2);
+    c.fill_round_rect(cx + r / 6, cy, (l * 3) / 4, (l * 3) / 4, l / 3, theme::ACCENT_2);
+    // Equator + meridian in white.
+    let t = (size / 16).max(1);
+    c.fill_rect(cx - r, cy - t / 2, 2 * r, t, theme::WHITE);
+    c.fill_rect(cx - t / 2, cy - r, t, 2 * r, theme::WHITE);
 }
 
 fn taskmgr(c: &mut Canvas, x: usize, y: usize, size: usize) {

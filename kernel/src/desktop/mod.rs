@@ -26,7 +26,7 @@ const SLIDE_PX: f32 = 28.0;
 const DOCK_ICON: i32 = 40;
 const DOCK_GAP: i32 = 14;
 const DOCK_PAD: i32 = 12;
-const DOCK_COUNT: i32 = 5; // brand + terminal + editor + taskmgr + calculator
+const DOCK_COUNT: i32 = 6; // brand + terminal + editor + taskmgr + calculator + browser
 const DOCK_MARGIN: i32 = 16; // gap from screen bottom
 
 // Calculator keypad: the input byte for each cell (0x08 = backspace). Duplicate
@@ -61,7 +61,8 @@ const TERM: usize = 0;
 const EDIT: usize = 1;
 const TASK: usize = 2;
 const CALC: usize = 3;
-const WIN_COUNT: usize = 4;
+const BROWSER: usize = 4;
+const WIN_COUNT: usize = 5;
 
 /// Cursor sprite bounding box (used by the dirty-rect overlay path).
 pub const CURSOR_W: i32 = 10;
@@ -71,11 +72,12 @@ pub const CURSOR_H: i32 = 16;
 const MENU_W: i32 = 220;
 const MENU_ITEM_H: i32 = 32;
 const MENU_PAD: i32 = 6;
-const MENU_ITEMS: [(&str, usize); 4] = [
+const MENU_ITEMS: [(&str, usize); 5] = [
     ("Terminal", TERM),
     ("Editor", EDIT),
     ("Task Manager", TASK),
     ("Calculator", CALC),
+    ("Navegador", BROWSER),
 ];
 
 // Start panel (system icon → all apps + power).
@@ -83,11 +85,12 @@ const START_W: i32 = 240;
 const START_ROW_H: i32 = 38;
 const START_PAD: i32 = 10;
 const START_GAP: i32 = 12; // divider gap before the power rows
-const START_APPS: [(&str, usize); 4] = [
+const START_APPS: [(&str, usize); 5] = [
     ("Terminal", TERM),
     ("Editor", EDIT),
     ("Task Manager", TASK),
     ("Calculator", CALC),
+    ("Navegador", BROWSER),
 ];
 
 /// An entry in the start panel.
@@ -117,6 +120,7 @@ enum Kind {
     Editor,
     TaskMgr,
     Calculator,
+    Browser,
 }
 
 struct Win {
@@ -148,6 +152,7 @@ pub struct Desktop {
     term: Terminal,
     editor: Editor,
     calc: Calc,
+    browser: osjeff_core::Browser,
     clipboard: Clipboard,
     keymap: Keymap,
     procs: ProcessTable,
@@ -219,6 +224,15 @@ impl Desktop {
                 anim: None,
                 pid: 0,
             },
+            Win {
+                rect: Rect::new(150, 60, 916, 560),
+                visible: false,
+                kind: Kind::Browser,
+                title: "NAVEGADOR",
+                proc_name: b"browser",
+                anim: None,
+                pid: 0,
+            },
         ];
 
         Self {
@@ -227,11 +241,12 @@ impl Desktop {
             term: Terminal::new(),
             editor: Editor::new(),
             calc: Calc::new(),
+            browser: osjeff_core::Browser::new(),
             clipboard: Clipboard::new(),
             keymap: Keymap::new(),
             procs,
             windows,
-            order: [TASK, CALC, EDIT, TERM], // terminal focused
+            order: [BROWSER, TASK, CALC, EDIT, TERM], // terminal focused
             drag: None,
             menu: None,
             start_open: false,
@@ -366,6 +381,7 @@ impl Desktop {
                     2 => Some(DockAction::Open(EDIT)),
                     3 => Some(DockAction::Open(TASK)),
                     4 => Some(DockAction::Open(CALC)),
+                    5 => Some(DockAction::Open(BROWSER)),
                     _ => None,
                 };
             }
@@ -454,6 +470,30 @@ impl Desktop {
     pub fn has_animation(&self) -> bool {
         self.drag.is_some()
             || (0..WIN_COUNT).any(|w| self.windows[w].visible && self.windows[w].anim.is_some())
+    }
+
+    // ---- browser networking hand-off (driven by the kernel main loop) ----
+
+    /// If the browser app has a pending navigation, copy the target URL into
+    /// `out` and return its length (clearing the pending flag). The kernel then
+    /// performs the blocking fetch and reports back with [`browser_load`] /
+    /// [`browser_fail`].
+    pub fn browser_take_request(&mut self, out: &mut [u8]) -> Option<usize> {
+        self.browser.take_request().map(|url| {
+            let n = url.len().min(out.len());
+            out[..n].copy_from_slice(&url[..n]);
+            n
+        })
+    }
+
+    /// Render a fetched raw HTTP response into the browser's page.
+    pub fn browser_load(&mut self, resp: &[u8]) {
+        self.browser.load_response(resp);
+    }
+
+    /// Mark the in-flight browser fetch as failed.
+    pub fn browser_fail(&mut self) {
+        self.browser.fail();
     }
 }
 
@@ -645,6 +685,7 @@ pub fn paint_background(c: &mut Canvas) {
         Icon::Editor,
         Icon::TaskMgr,
         Icon::Calculator,
+        Icon::Browser,
     ];
     for (i, kind) in kinds.iter().enumerate() {
         let r = icons[i];

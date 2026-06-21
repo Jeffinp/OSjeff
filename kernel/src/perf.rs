@@ -78,7 +78,10 @@ impl Perf {
         let mut line = [0u8; 32];
         // "0.2ms  ~5000fps" — frame time is the real smoothness metric; the
         // "possible fps" (1000/ms) shows the headroom even when idle.
-        let possible = 1_000_000u64.checked_div(self.frame_us).unwrap_or(0).min(9999) as u32;
+        let possible = 1_000_000u64
+            .checked_div(self.frame_us)
+            .unwrap_or(0)
+            .min(9999) as u32;
         let mut n = put_ms(&mut line, 0, self.frame_us);
         n = put(&mut line, n, b"  ~");
         n = put_u32(&mut line, n, possible);
