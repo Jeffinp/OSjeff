@@ -148,23 +148,23 @@ impl<'a> Canvas<'a> {
         // pixel instead of three, which the backend lowers to `rep stosd` / SSE.
         // The render buffers are 64-byte aligned and rows start on a 4-byte
         // boundary, so `align_to_mut::<u32>` yields no scalar prefix/suffix.
-        if bpp == 4 {
-            if let Some(packed) = self.pack32(c) {
-                for y in y0..y_end {
-                    let o = (y * stride + x0) * 4;
-                    let row = &mut self.buf[o..o + count * 4];
-                    let (pre, mid, suf) = unsafe { row.align_to_mut::<u32>() };
-                    if pre.is_empty() && suf.is_empty() {
-                        mid.fill(packed);
-                    } else {
-                        let b = packed.to_ne_bytes();
-                        for (i, px) in row.iter_mut().enumerate() {
-                            *px = b[i & 3];
-                        }
+        if bpp == 4
+            && let Some(packed) = self.pack32(c)
+        {
+            for y in y0..y_end {
+                let o = (y * stride + x0) * 4;
+                let row = &mut self.buf[o..o + count * 4];
+                let (pre, mid, suf) = unsafe { row.align_to_mut::<u32>() };
+                if pre.is_empty() && suf.is_empty() {
+                    mid.fill(packed);
+                } else {
+                    let b = packed.to_ne_bytes();
+                    for (i, px) in row.iter_mut().enumerate() {
+                        *px = b[i & 3];
                     }
                 }
-                return;
             }
+            return;
         }
 
         // 3-byte RGB/BGR ordering written directly per row, skipping the
@@ -229,11 +229,60 @@ impl<'a> Canvas<'a> {
         alpha: u16,
     ) {
         let r = r.min(w / 2).min(h / 2);
+        let a = alpha.min(256);
+        if a == 0 {
+            return;
+        }
+        let ia = 256 - a;
+
+        // Hoist everything that does not change per pixel out of the loop. The
+        // old path called `inside_round` (an isqrt per pixel) and `blend_pixel`
+        // (a format match + bounds check per pixel) across the whole w*h box, so
+        // a single window shadow was ~hundreds of thousands of isqrts. Now isqrt
+        // runs once per row (corner inset, identical geometry to inside_round)
+        // and the inner loop is a straight blend over a clamped span -- the same
+        // span strategy `fill_round_rect` already uses. Same pixels, ~orders of
+        // magnitude fewer ops; this is what tanked FPS with several windows up.
+        let bpp = self.info.bytes_per_pixel;
+        let stride = self.info.stride;
+        let (c0, c1, c2) = match self.info.pixel_format {
+            PixelFormat::Rgb => (c.r, c.g, c.b),
+            PixelFormat::Bgr => (c.b, c.g, c.r),
+            _ => return,
+        };
+        // Pre-multiply the source contribution (src * a) once per channel.
+        let (sa0, sa1, sa2) = (c0 as u16 * a, c1 as u16 * a, c2 as u16 * a);
+
         for y in 0..h {
-            for x in 0..w {
-                if self.inside_round(x, y, w, h, r) {
-                    self.blend_pixel(x0 + x, y0 + y, c, alpha);
-                }
+            let py = y0 + y;
+            if py >= self.info.height {
+                break;
+            }
+            let inset = if r == 0 {
+                0
+            } else if y < r {
+                let dy = r - y; // 1..=r
+                r - isqrt(r * r - dy * dy)
+            } else if y >= h - r {
+                let dy = y - (h - 1 - r); // 0..=r
+                r - isqrt(r.saturating_mul(r).saturating_sub(dy * dy))
+            } else {
+                0
+            };
+            if w <= 2 * inset {
+                continue;
+            }
+            let xs = x0 + inset;
+            let xe = (x0 + w - inset).min(self.info.width);
+            if xs >= xe {
+                continue;
+            }
+            let row = py * stride;
+            for px in xs..xe {
+                let o = (row + px) * bpp;
+                self.buf[o] = ((self.buf[o] as u16 * ia + sa0) / 256) as u8;
+                self.buf[o + 1] = ((self.buf[o + 1] as u16 * ia + sa1) / 256) as u8;
+                self.buf[o + 2] = ((self.buf[o + 2] as u16 * ia + sa2) / 256) as u8;
             }
         }
     }
@@ -314,38 +363,5 @@ impl<'a> Canvas<'a> {
                 }
             }
         }
-    }
-
-    #[inline]
-    fn inside_round(&self, x: usize, y: usize, w: usize, h: usize, r: usize) -> bool {
-        if r == 0 {
-            return true;
-        }
-        // Corner centers.
-        let corners: [(usize, usize); 4] = [
-            (r, r),
-            (w - 1 - r, r),
-            (r, h - 1 - r),
-            (w - 1 - r, h - 1 - r),
-        ];
-        let in_left = x < r;
-        let in_right = x >= w - r;
-        let in_top = y < r;
-        let in_bottom = y >= h - r;
-
-        let (cx, cy) = if in_left && in_top {
-            corners[0]
-        } else if in_right && in_top {
-            corners[1]
-        } else if in_left && in_bottom {
-            corners[2]
-        } else if in_right && in_bottom {
-            corners[3]
-        } else {
-            return true; // not in a corner zone
-        };
-        let dx = x as isize - cx as isize;
-        let dy = y as isize - cy as isize;
-        (dx * dx + dy * dy) <= (r * r) as isize
     }
 }
