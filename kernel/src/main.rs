@@ -16,6 +16,7 @@ mod io;
 mod logo;
 mod ne2000;
 mod pci;
+mod perf;
 mod power;
 mod ps2;
 mod rtc;
@@ -131,6 +132,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // IRQ-driven keyboard (IRQ1) + mouse (IRQ12).
     interrupts::init();
 
+    // Calibrate the TSC against the now-running PIT so the perf HUD can report
+    // frame time in real milliseconds.
+    let tsc_khz = perf::calibrate_khz();
+    serial_println!("TSC calibrated: {} kHz", tsc_khz);
+    let mut perf = perf::Perf::new(tsc_khz);
+
     // Bring up the NIC (if present), lease an IP over DHCP (falling back to the
     // static address if no server answers), and announce ourselves with a
     // gratuitous ARP so the network is visible on the wire from boot. No card ->
@@ -170,6 +177,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Focused window rect from the previous steady frame, so a content change can
     // also repaint the window that just lost focus (its title de-highlights).
     let mut prev_focused: Option<Rect> = None;
+    let mut last_hud = 0u64; // tick of the last perf-HUD refresh
 
     // Wall-clock animation speed, independent of how often the GUI thread is
     // scheduled (the timer preempts round-robin across all threads).
@@ -215,6 +223,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             last_sec = rt.s;
             desk.tick_processes();
             clock_tick = true;
+            perf.second_tick();
         }
 
         let any_anim = desk.has_animation();
@@ -226,6 +235,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             scene_dirty = true;
             clock_tick = false;
         }
+
+        // Did this iteration do real rendering work? (Used to time frames.)
+        let work = any_anim || scene_dirty || clock_tick || cursor_moved || was_anim;
+        let frame_start = io::rdtsc();
 
         if any_anim {
             // ---- Animation fast-path: cache the static scene, then each frame
@@ -449,6 +462,23 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             prev_focused = desk.focused_box();
         }
         was_anim = any_anim;
+
+        // Record the frame time (only when we actually rendered).
+        if work {
+            perf.record(io::rdtsc().wrapping_sub(frame_start));
+        }
+
+        // Perf HUD: refresh ~10x/s as a framebuffer overlay restored from `back`,
+        // so it never pollutes the cached scene. Drawn outside the timed window.
+        if tick.saturating_sub(last_hud) >= 25 {
+            last_hud = tick;
+            let used = HEAP_SIZE - ALLOCATOR.free_bytes().min(HEAP_SIZE);
+            let heap_pct = (used * 100 / HEAP_SIZE) as u32;
+            let hr = perf::Perf::rect(info.width as i32);
+            blit_rect(framebuffer.buffer_mut(), back, info, hr.x, hr.y, hr.w, hr.h, n);
+            let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
+            perf.draw(&mut c, heap_pct, sched::thread_count());
+        }
 
         // Service the network: answer ARP/ping for any frames the NIC received.
         if net_up {

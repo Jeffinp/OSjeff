@@ -206,6 +206,17 @@ impl LinkedListAllocator {
             adjust_request(layout.size(), layout.align(), node_size(), node_align());
         unsafe { self.add_free_region(ptr as usize, size) };
     }
+
+    /// Total bytes currently on the free list (sum of all free regions).
+    fn free_bytes(&self) -> usize {
+        let mut total = 0;
+        let mut cur = self.head.next.as_deref();
+        while let Some(node) = cur {
+            total += node.size;
+            cur = node.next.as_deref();
+        }
+        total
+    }
 }
 
 impl Default for LinkedListAllocator {
@@ -227,6 +238,11 @@ impl LockedHeap {
     /// See [`LinkedListAllocator::init`].
     pub unsafe fn init(&self, start: usize, size: usize) {
         unsafe { self.0.lock().init(start, size) };
+    }
+
+    /// Bytes currently free on the heap (for the perf HUD).
+    pub fn free_bytes(&self) -> usize {
+        self.0.lock().free_bytes()
     }
 }
 
