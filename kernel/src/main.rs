@@ -117,11 +117,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         None => serial_println!("virtio-gpu: absent — using the VBE framebuffer"),
     }
 
-    // Kernel scheduler: register the boot context as a thread and spawn a
-    // couple of background workers that run concurrently with the GUI.
+    // Kernel scheduler: register the boot context (the compositor) as thread 0.
+    // The preemptive round-robin is in place for real future threads, but we no
+    // longer spawn demo spin-workers — they consumed 2/3 of the CPU under the
+    // equal-slice round-robin, starving the compositor and capping the frame
+    // rate. With the GUI as the sole thread it gets the whole core.
     sched::init();
-    sched::spawn("worker-a", worker_a);
-    sched::spawn("worker-b", worker_b);
 
     // Configure the PS/2 controller BEFORE enabling interrupts, so the init
     // handshake (config write + mouse ACKs) is read by polling without racing
@@ -495,8 +496,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // (250 Hz) wakes us to step animations and the per-second clock; the
         // keyboard/mouse IRQs wake us immediately on input. This paces frames to
         // the tick rate and stops the compositor from burning a full core — a
-        // real system halts when it has nothing to draw. (The demo workers still
-        // spin without yielding, which is what proves preemption.)
+        // real system halts when it has nothing to draw.
         x86_64::instructions::hlt();
     }
 }
@@ -565,25 +565,6 @@ fn blit_rect(
         if end <= n {
             dst[off..end].copy_from_slice(&src[off..end]);
         }
-    }
-}
-
-// Background worker threads. They never yield — the timer ISR preempts them —
-// which is exactly what proves the scheduler is preemptive. Visible in the Task
-// Manager with their real accumulated CPU time.
-extern "C" fn worker_a() -> ! {
-    let mut acc: u64 = 0;
-    loop {
-        acc = acc.wrapping_add(1);
-        core::hint::black_box(acc);
-    }
-}
-
-extern "C" fn worker_b() -> ! {
-    let mut acc: u64 = 1;
-    loop {
-        acc = acc.wrapping_mul(3);
-        core::hint::black_box(acc);
     }
 }
 

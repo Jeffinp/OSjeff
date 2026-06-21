@@ -13,3 +13,11 @@ members = ["kernel", "os", "osjeff_core"]
 opt-level = 3
 lto = true
 codegen-units = 1
+
+# The kernel is consumed as an *artifact build-dependency*. Pin the kernel (and
+# the bootloader/build glue) to opt-level 3 explicitly, so the bootable image can
+# never accidentally embed an unoptimized kernel regardless of Cargo's default
+# `build-override` behaviour.
+[profile.release.build-override]
+opt-level = 3
+codegen-units = 1

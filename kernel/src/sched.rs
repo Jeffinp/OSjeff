@@ -14,6 +14,10 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use x86_64::registers::segmentation::{CS, SS, Segment};
 
+// Thread-spawn machinery (STACK_SIZE / spawn / scheduler) is the preemptive
+// scheduler's API, kept for real future threads (e.g. userspace). Nothing spawns
+// today — the compositor runs as the sole thread — so it is allowed to be idle.
+#[allow(dead_code)]
 const STACK_SIZE: usize = 64 * 1024;
 const MAX_THREADS: usize = 8;
 
@@ -102,6 +106,7 @@ pub fn init() {
 }
 
 /// Spawn a preemptible kernel thread starting at `entry` (must never return).
+#[allow(dead_code)]
 pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
     let s = scheduler();
     assert!(s.threads.len() < MAX_THREADS, "too many threads");
@@ -215,6 +220,7 @@ pub fn thread_ticks(i: usize) -> u64 {
     }
 }
 
+#[allow(dead_code)]
 fn scheduler() -> &'static mut Scheduler {
     unsafe { (*SCHED.get()).as_mut().expect("scheduler not initialized") }
 }
