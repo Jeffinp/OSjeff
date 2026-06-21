@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![allow(static_mut_refs)]
 #![feature(abi_x86_interrupt)]
 
 extern crate alloc;
@@ -20,12 +19,13 @@ mod power;
 mod ps2;
 mod rtc;
 mod sched;
+mod sync;
 mod theme;
 
 use bootloader_api::info::FrameBufferInfo;
-use bootloader_api::{entry_point, BootInfo};
+use bootloader_api::{BootInfo, entry_point};
 use core::panic::PanicInfo;
-use desktop::{Desktop, CURSOR_H, CURSOR_W};
+use desktop::{CURSOR_H, CURSOR_W, Desktop};
 use fb::Canvas;
 use osjeff_core::net::{self, Ipv4};
 use osjeff_core::{Rect, Time};
@@ -45,15 +45,17 @@ const MAX_BYTES: usize = 1920 * 1080 * 4;
 #[repr(C, align(64))]
 struct AlignedBuf([u8; MAX_BYTES]);
 
-static mut BACK: AlignedBuf = AlignedBuf([0; MAX_BYTES]);
-static mut BG: AlignedBuf = AlignedBuf([0; MAX_BYTES]);
+use sync::RacyCell;
+
+static BACK: RacyCell<AlignedBuf> = RacyCell::new(AlignedBuf([0; MAX_BYTES]));
+static BG: RacyCell<AlignedBuf> = RacyCell::new(AlignedBuf([0; MAX_BYTES]));
 // Cached "everything except the animating window(s)" layer, composed once per
 // animation so each frame only redraws the small damaged region.
-static mut STATIC: AlignedBuf = AlignedBuf([0; MAX_BYTES]);
+static STATIC: RacyCell<AlignedBuf> = RacyCell::new(AlignedBuf([0; MAX_BYTES]));
 
 // Kernel heap (1 MiB) backing the global allocator, so `alloc` works.
 const HEAP_SIZE: usize = 1024 * 1024;
-static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
+static HEAP: RacyCell<[u8; HEAP_SIZE]> = RacyCell::new([0; HEAP_SIZE]);
 
 #[global_allocator]
 static ALLOCATOR: allocator::LockedHeap = allocator::LockedHeap::new();
@@ -66,16 +68,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let info = framebuffer.info();
     let n = framebuffer.buffer().len().min(MAX_BYTES);
 
-    let back: &mut [u8] =
-        unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(BACK) as *mut u8, n) };
-    let bg: &mut [u8] =
-        unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(BG) as *mut u8, n) };
+    let back: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(BACK.get() as *mut u8, n) };
+    let bg: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(BG.get() as *mut u8, n) };
     let static_buf: &mut [u8] =
-        unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(STATIC) as *mut u8, n) };
+        unsafe { core::slice::from_raw_parts_mut(STATIC.get() as *mut u8, n) };
 
     // Initialize the kernel heap so `alloc` works, then smoke-test it.
     unsafe {
-        ALLOCATOR.init(core::ptr::addr_of_mut!(HEAP) as usize, HEAP_SIZE);
+        ALLOCATOR.init(HEAP.get() as usize, HEAP_SIZE);
     }
     heap_smoke_test();
 
@@ -115,10 +115,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut desk = Desktop::new(info.width as i32, info.height as i32);
     let mut last_sec = 0xFFu8; // force first render
     let mut prev_cursor = desk.cursor();
-    let mut last_tick = 0u64;
+    // Seed from the live tick count, NOT 0: the splash ran for ~5 s with the
+    // timer firing, so a 0 seed would make the first frame's delta enormous and
+    // instantly complete the open animation (skipping the full-screen blit that
+    // clears the splash).
+    let mut last_tick = interrupts::ticks();
 
-    // Animation fast-path state.
-    let mut was_anim = false;
+    // Animation fast-path state. `was_anim` starts true so the first steady
+    // frame forces one full repaint over the splash even if no animation runs.
+    let mut was_anim = true;
     let mut static_valid = false;
     let mut last_sig = 0u32;
     let mut prev_damage = Rect::new(0, 0, 0, 0);
@@ -147,6 +152,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Drain all pending PS/2 events.
         let mut scene_dirty = false;
         let mut cursor_moved = false;
+        let mut clock_tick = false;
         while let Some(event) = ps2::poll() {
             match event {
                 Event::Mouse(p) => {
@@ -165,10 +171,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if rt.s != last_sec {
             last_sec = rt.s;
             desk.tick_processes();
-            scene_dirty = true;
+            clock_tick = true;
         }
 
         let any_anim = desk.has_animation();
+
+        // The cheap clock-tick repaint (rect-only blit) is only valid in the
+        // steady desktop. While an overlay or animation is up, fold the tick
+        // into a normal recompose so those transient layers stay consistent.
+        if clock_tick && (any_anim || desk.overlay_open()) {
+            scene_dirty = true;
+            clock_tick = false;
+        }
 
         if any_anim {
             // ---- Animation fast-path: cache the static scene, then each frame
@@ -297,6 +311,54 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 back.copy_from_slice(bg);
                 desk.render(back, info, time);
                 framebuffer.buffer_mut()[..n].copy_from_slice(back);
+                {
+                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
+                    desk.draw_cursor_overlay(&mut c);
+                }
+                prev_cursor = desk.cursor();
+            } else if clock_tick {
+                // Per-second tick, nothing else changed: recompose `back` (cheap
+                // host-RAM work) but upload only the clock pill — plus the Task
+                // Manager window if open — to VRAM, skipping the ~8 MiB
+                // full-screen blit that made the clock tick hitch every second.
+                back.copy_from_slice(bg);
+                desk.render(back, info, time);
+                let cr = desk.clock_rect();
+                blit_rect(
+                    framebuffer.buffer_mut(),
+                    back,
+                    info,
+                    cr.x,
+                    cr.y,
+                    cr.w,
+                    cr.h,
+                    n,
+                );
+                if let Some(tr) = desk.task_window_rect() {
+                    blit_rect(
+                        framebuffer.buffer_mut(),
+                        back,
+                        info,
+                        tr.x,
+                        tr.y,
+                        tr.w,
+                        tr.h,
+                        n,
+                    );
+                }
+                // The cursor isn't in `back`; repaint it in case it overlaps the
+                // regions just blitted.
+                let (ox, oy) = prev_cursor;
+                blit_rect(
+                    framebuffer.buffer_mut(),
+                    back,
+                    info,
+                    ox,
+                    oy,
+                    CURSOR_W,
+                    CURSOR_H,
+                    n,
+                );
                 {
                     let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
                     desk.draw_cursor_overlay(&mut c);
