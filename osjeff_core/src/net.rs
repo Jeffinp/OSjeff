@@ -212,6 +212,211 @@ pub fn respond(frame: &[u8], mac: Mac, ip: Ipv4, out: &mut [u8]) -> Option<usize
     }
 }
 
+// ---- UDP + DHCP client (acquire an IP automatically) ----
+
+pub const IPPROTO_UDP: u8 = 17;
+const UDP_HDR: usize = 8;
+const DHCP_CLIENT_PORT: u16 = 68;
+const DHCP_SERVER_PORT: u16 = 67;
+const BOOTREQUEST: u8 = 1;
+const BOOTREPLY: u8 = 2;
+const DHCP_MAGIC: u32 = 0x6382_5363;
+/// BOOTP fixed area length (op..file), i.e. everything before the magic cookie.
+const BOOTP_FIXED: usize = 236;
+
+// DHCP message types (option 53).
+pub const DHCP_DISCOVER: u8 = 1;
+pub const DHCP_OFFER: u8 = 2;
+pub const DHCP_REQUEST: u8 = 3;
+pub const DHCP_ACK: u8 = 5;
+pub const DHCP_NAK: u8 = 6;
+
+/// What a parsed DHCP reply tells us.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DhcpReply {
+    pub msg_type: u8, // DHCP_OFFER / DHCP_ACK / DHCP_NAK
+    pub xid: u32,
+    pub your_ip: Ipv4,        // yiaddr — the address offered/assigned
+    pub server_id: Ipv4,      // option 54
+    pub subnet: Option<Ipv4>, // option 1
+    pub router: Option<Ipv4>, // option 3
+    pub dns: Option<Ipv4>,    // option 6
+}
+
+/// Lay down the Ethernet/IPv4/UDP/BOOTP envelope for a broadcast DHCP message
+/// from `mac` with transaction id `xid`. Returns the offset where DHCP options
+/// begin (right after the magic cookie).
+fn dhcp_envelope(out: &mut [u8], mac: Mac, xid: u32) -> usize {
+    write_eth(out, Mac([0xff; 6]), mac, ETHERTYPE_IPV4); // broadcast
+    let b = ETH_HDR + IPV4_HDR + UDP_HDR; // BOOTP start
+    let opt_start = b + BOOTP_FIXED + 4; // after the magic cookie
+    out[b..opt_start].fill(0);
+    out[b] = BOOTREQUEST;
+    out[b + 1] = 1; // htype = ethernet
+    out[b + 2] = 6; // hlen
+    out[b + 4..b + 8].copy_from_slice(&xid.to_be_bytes());
+    out[b + 10..b + 12].copy_from_slice(&0x8000u16.to_be_bytes()); // broadcast flag
+    out[b + 28..b + 34].copy_from_slice(&mac.0); // chaddr (client MAC)
+    out[b + BOOTP_FIXED..opt_start].copy_from_slice(&DHCP_MAGIC.to_be_bytes());
+    opt_start
+}
+
+/// Fill the UDP + IPv4 headers for a DHCP packet whose content ends at `end`,
+/// checksum the IP header, and return `end`. The UDP checksum is left zero,
+/// which RFC 768 permits over IPv4.
+fn dhcp_finalize(out: &mut [u8], end: usize) -> usize {
+    let ip_off = ETH_HDR;
+    let udp_off = ETH_HDR + IPV4_HDR;
+    let udp_len = end - udp_off;
+    out[udp_off..udp_off + 2].copy_from_slice(&DHCP_CLIENT_PORT.to_be_bytes());
+    out[udp_off + 2..udp_off + 4].copy_from_slice(&DHCP_SERVER_PORT.to_be_bytes());
+    out[udp_off + 4..udp_off + 6].copy_from_slice(&(udp_len as u16).to_be_bytes());
+    out[udp_off + 6..udp_off + 8].copy_from_slice(&[0, 0]); // no UDP checksum
+    {
+        let h = &mut out[ip_off..ip_off + IPV4_HDR];
+        h.fill(0);
+        h[0] = 0x45; // IPv4, IHL 5
+        h[2..4].copy_from_slice(&((IPV4_HDR + udp_len) as u16).to_be_bytes());
+        h[8] = 64; // TTL
+        h[9] = IPPROTO_UDP;
+        h[16..20].copy_from_slice(&[255, 255, 255, 255]); // dst broadcast; src 0.0.0.0
+    }
+    let csum = checksum(&out[ip_off..ip_off + IPV4_HDR]);
+    out[ip_off + 10..ip_off + 12].copy_from_slice(&csum.to_be_bytes());
+    end
+}
+
+/// Build a DHCPDISCOVER broadcast from `mac`, transaction id `xid`.
+pub fn dhcp_discover(out: &mut [u8], mac: Mac, xid: u32) -> usize {
+    let mut o = dhcp_envelope(out, mac, xid);
+    out[o] = 53; // message type
+    out[o + 1] = 1;
+    out[o + 2] = DHCP_DISCOVER;
+    o += 3;
+    out[o] = 55; // parameter request list: subnet, router, DNS
+    out[o + 1] = 3;
+    out[o + 2] = 1;
+    out[o + 3] = 3;
+    out[o + 4] = 6;
+    o += 5;
+    out[o] = 255; // end
+    o += 1;
+    dhcp_finalize(out, o)
+}
+
+/// Build a DHCPREQUEST for `requested_ip` from `server_id`, transaction `xid`.
+pub fn dhcp_request(
+    out: &mut [u8],
+    mac: Mac,
+    xid: u32,
+    requested_ip: Ipv4,
+    server_id: Ipv4,
+) -> usize {
+    let mut o = dhcp_envelope(out, mac, xid);
+    out[o] = 53;
+    out[o + 1] = 1;
+    out[o + 2] = DHCP_REQUEST;
+    o += 3;
+    out[o] = 50; // requested IP
+    out[o + 1] = 4;
+    out[o + 2..o + 6].copy_from_slice(&requested_ip.0);
+    o += 6;
+    out[o] = 54; // server identifier
+    out[o + 1] = 4;
+    out[o + 2..o + 6].copy_from_slice(&server_id.0);
+    o += 6;
+    out[o] = 55;
+    out[o + 1] = 3;
+    out[o + 2] = 1;
+    out[o + 3] = 3;
+    out[o + 4] = 6;
+    o += 5;
+    out[o] = 255;
+    o += 1;
+    dhcp_finalize(out, o)
+}
+
+/// Parse a received `frame` as a DHCP reply addressed to us (UDP -> port 68 with
+/// our MAC in chaddr). `None` if it is not a DHCP reply we should act on.
+pub fn parse_dhcp(frame: &[u8], our_mac: Mac) -> Option<DhcpReply> {
+    let (eth, payload) = parse_eth(frame)?;
+    if eth.ethertype != ETHERTYPE_IPV4 || payload.len() < IPV4_HDR {
+        return None;
+    }
+    let ihl = (payload[0] & 0x0F) as usize * 4;
+    if ihl < IPV4_HDR || payload[9] != IPPROTO_UDP {
+        return None;
+    }
+    let total = (u16::from_be_bytes([payload[2], payload[3]]) as usize).min(payload.len());
+    if total < ihl + UDP_HDR {
+        return None;
+    }
+    let udp = &payload[ihl..total];
+    if u16::from_be_bytes([udp[2], udp[3]]) != DHCP_CLIENT_PORT {
+        return None;
+    }
+    let dhcp = &udp[UDP_HDR..];
+    if dhcp.len() < BOOTP_FIXED + 4 || dhcp[0] != BOOTREPLY || dhcp[28..34] != our_mac.0 {
+        return None;
+    }
+    let magic = u32::from_be_bytes([
+        dhcp[BOOTP_FIXED],
+        dhcp[BOOTP_FIXED + 1],
+        dhcp[BOOTP_FIXED + 2],
+        dhcp[BOOTP_FIXED + 3],
+    ]);
+    if magic != DHCP_MAGIC {
+        return None;
+    }
+    let xid = u32::from_be_bytes([dhcp[4], dhcp[5], dhcp[6], dhcp[7]]);
+    let your_ip = Ipv4([dhcp[16], dhcp[17], dhcp[18], dhcp[19]]);
+
+    let (mut msg_type, mut server_id) = (0u8, Ipv4([0; 4]));
+    let (mut subnet, mut router, mut dns) = (None, None, None);
+    let mut i = BOOTP_FIXED + 4;
+    while i < dhcp.len() {
+        let code = dhcp[i];
+        if code == 255 {
+            break; // end
+        }
+        if code == 0 {
+            i += 1; // pad
+            continue;
+        }
+        if i + 1 >= dhcp.len() {
+            break;
+        }
+        let len = dhcp[i + 1] as usize;
+        let val = i + 2;
+        if val + len > dhcp.len() {
+            break;
+        }
+        let v = &dhcp[val..val + len];
+        let ip4 = || Ipv4([v[0], v[1], v[2], v[3]]);
+        match code {
+            53 if len >= 1 => msg_type = v[0],
+            54 if len >= 4 => server_id = ip4(),
+            1 if len >= 4 => subnet = Some(ip4()),
+            3 if len >= 4 => router = Some(ip4()),
+            6 if len >= 4 => dns = Some(ip4()),
+            _ => {}
+        }
+        i = val + len;
+    }
+    if msg_type == 0 {
+        return None;
+    }
+    Some(DhcpReply {
+        msg_type,
+        xid,
+        your_ip,
+        server_id,
+        subnet,
+        router,
+        dns,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +425,139 @@ mod tests {
     const OUR_IP: Ipv4 = Ipv4([10, 0, 2, 15]);
     const PEER_MAC: Mac = Mac([0x52, 0x55, 0x0a, 0x00, 0x02, 0x02]);
     const PEER_IP: Ipv4 = Ipv4([10, 0, 2, 2]);
+
+    /// Craft a BOOTREPLY (server -> client) DHCP packet for round-trip tests.
+    fn craft_reply(
+        out: &mut [u8],
+        our_mac: Mac,
+        xid: u32,
+        your_ip: Ipv4,
+        server_id: Ipv4,
+        msg_type: u8,
+    ) -> usize {
+        write_eth(out, our_mac, PEER_MAC, ETHERTYPE_IPV4);
+        let b = ETH_HDR + IPV4_HDR + UDP_HDR;
+        let opt = b + BOOTP_FIXED + 4;
+        out[b..opt].fill(0);
+        out[b] = BOOTREPLY;
+        out[b + 1] = 1;
+        out[b + 2] = 6;
+        out[b + 4..b + 8].copy_from_slice(&xid.to_be_bytes());
+        out[b + 16..b + 20].copy_from_slice(&your_ip.0); // yiaddr
+        out[b + 28..b + 34].copy_from_slice(&our_mac.0); // chaddr
+        out[b + BOOTP_FIXED..opt].copy_from_slice(&DHCP_MAGIC.to_be_bytes());
+        let mut o = opt;
+        out[o] = 53;
+        out[o + 1] = 1;
+        out[o + 2] = msg_type;
+        o += 3;
+        out[o] = 54;
+        out[o + 1] = 4;
+        out[o + 2..o + 6].copy_from_slice(&server_id.0);
+        o += 6;
+        out[o] = 1;
+        out[o + 1] = 4;
+        out[o + 2..o + 6].copy_from_slice(&[255, 255, 255, 0]); // subnet
+        o += 6;
+        out[o] = 3;
+        out[o + 1] = 4;
+        out[o + 2..o + 6].copy_from_slice(&PEER_IP.0); // router
+        o += 6;
+        out[o] = 255;
+        o += 1;
+        let udp_off = ETH_HDR + IPV4_HDR;
+        let udp_len = o - udp_off;
+        out[udp_off..udp_off + 2].copy_from_slice(&DHCP_SERVER_PORT.to_be_bytes());
+        out[udp_off + 2..udp_off + 4].copy_from_slice(&DHCP_CLIENT_PORT.to_be_bytes());
+        out[udp_off + 4..udp_off + 6].copy_from_slice(&(udp_len as u16).to_be_bytes());
+        let ip_off = ETH_HDR;
+        let h = &mut out[ip_off..ip_off + IPV4_HDR];
+        h.fill(0);
+        h[0] = 0x45;
+        h[2..4].copy_from_slice(&((IPV4_HDR + udp_len) as u16).to_be_bytes());
+        h[8] = 64;
+        h[9] = IPPROTO_UDP;
+        h[12..16].copy_from_slice(&server_id.0);
+        h[16..20].copy_from_slice(&[255, 255, 255, 255]);
+        o
+    }
+
+    #[test]
+    fn dhcp_discover_structure() {
+        let mut buf = [0u8; 600];
+        let n = dhcp_discover(&mut buf, OUR_MAC, 0xAABB_CCDD);
+        assert!(n > ETH_HDR + IPV4_HDR + UDP_HDR + BOOTP_FIXED + 4);
+        assert_eq!(&buf[0..6], &[0xff; 6]); // Ethernet broadcast
+        assert_eq!(u16::from_be_bytes([buf[12], buf[13]]), ETHERTYPE_IPV4);
+        assert_eq!(buf[ETH_HDR + 9], IPPROTO_UDP);
+        let u = ETH_HDR + IPV4_HDR;
+        assert_eq!(u16::from_be_bytes([buf[u], buf[u + 1]]), 68); // sport
+        assert_eq!(u16::from_be_bytes([buf[u + 2], buf[u + 3]]), 67); // dport
+        let b = u + UDP_HDR;
+        assert_eq!(buf[b], BOOTREQUEST);
+        let magic = u32::from_be_bytes([
+            buf[b + BOOTP_FIXED],
+            buf[b + BOOTP_FIXED + 1],
+            buf[b + BOOTP_FIXED + 2],
+            buf[b + BOOTP_FIXED + 3],
+        ]);
+        assert_eq!(magic, DHCP_MAGIC);
+        let opt = b + BOOTP_FIXED + 4;
+        assert_eq!(buf[opt], 53);
+        assert_eq!(buf[opt + 2], DHCP_DISCOVER);
+        // IPv4 header checksum must be valid (folds back to zero).
+        assert_eq!(checksum(&buf[ETH_HDR..ETH_HDR + IPV4_HDR]), 0);
+    }
+
+    #[test]
+    fn parse_offer_roundtrip() {
+        let mut buf = [0u8; 600];
+        let your = Ipv4([10, 0, 2, 15]);
+        let server = Ipv4([10, 0, 2, 2]);
+        let n = craft_reply(&mut buf, OUR_MAC, 0x1234_5678, your, server, DHCP_OFFER);
+        let r = parse_dhcp(&buf[..n], OUR_MAC).expect("offer should parse");
+        assert_eq!(r.msg_type, DHCP_OFFER);
+        assert_eq!(r.xid, 0x1234_5678);
+        assert_eq!(r.your_ip, your);
+        assert_eq!(r.server_id, server);
+        assert_eq!(r.subnet, Some(Ipv4([255, 255, 255, 0])));
+        assert_eq!(r.router, Some(PEER_IP));
+    }
+
+    #[test]
+    fn parse_dhcp_rejects_other_mac() {
+        let mut buf = [0u8; 600];
+        let n = craft_reply(&mut buf, OUR_MAC, 1, Ipv4([1, 2, 3, 4]), Ipv4([1, 2, 3, 1]), DHCP_ACK);
+        assert!(parse_dhcp(&buf[..n], Mac([0, 0, 0, 0, 0, 1])).is_none());
+    }
+
+    #[test]
+    fn dhcp_request_carries_requested_ip_and_server() {
+        let mut buf = [0u8; 600];
+        let req_ip = Ipv4([10, 0, 2, 15]);
+        let srv = Ipv4([10, 0, 2, 2]);
+        let n = dhcp_request(&mut buf, OUR_MAC, 7, req_ip, srv);
+        let opts = &buf[ETH_HDR + IPV4_HDR + UDP_HDR + BOOTP_FIXED + 4..n];
+        let (mut f50, mut f54) = (None, None);
+        let mut i = 0;
+        while i < opts.len() {
+            let c = opts[i];
+            if c == 255 {
+                break;
+            }
+            let l = opts[i + 1] as usize;
+            let v = &opts[i + 2..i + 2 + l];
+            if c == 50 {
+                f50 = Some(Ipv4([v[0], v[1], v[2], v[3]]));
+            }
+            if c == 54 {
+                f54 = Some(Ipv4([v[0], v[1], v[2], v[3]]));
+            }
+            i += 2 + l;
+        }
+        assert_eq!(f50, Some(req_ip));
+        assert_eq!(f54, Some(srv));
+    }
 
     #[test]
     fn checksum_known_ipv4_header() {

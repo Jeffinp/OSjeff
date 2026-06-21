@@ -94,12 +94,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // IRQ-driven keyboard (IRQ1) + mouse (IRQ12).
     interrupts::init();
 
-    // Bring up the NIC (if present) and announce ourselves with a gratuitous
-    // ARP, so the network is visible on the wire from boot. No card -> skip.
+    // Bring up the NIC (if present), lease an IP over DHCP (falling back to the
+    // static address if no server answers), and announce ourselves with a
+    // gratuitous ARP so the network is visible on the wire from boot. No card ->
+    // skip and keep the static IP.
     let net_up = ne2000::init();
+    let net_ip = if net_up { dhcp_acquire(NET_IP) } else { NET_IP };
     if net_up {
         let mut frame = [0u8; 64];
-        let len = net::arp_announce(&mut frame, ne2000::MAC, NET_IP);
+        let len = net::arp_announce(&mut frame, ne2000::MAC, net_ip);
         ne2000::send(&frame[..len]);
     }
 
@@ -415,7 +418,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             let mut rx = [0u8; 1600];
             while let Some(len) = ne2000::poll(&mut rx) {
                 let mut tx = [0u8; 1600];
-                if let Some(reply) = net::respond(&rx[..len], ne2000::MAC, NET_IP, &mut tx) {
+                if let Some(reply) = net::respond(&rx[..len], ne2000::MAC, net_ip, &mut tx) {
                     ne2000::send(&tx[..reply]);
                 }
             }
@@ -515,6 +518,44 @@ extern "C" fn worker_b() -> ! {
         acc = acc.wrapping_mul(3);
         core::hint::black_box(acc);
     }
+}
+
+/// Acquire an IP via DHCP (DISCOVER -> OFFER -> REQUEST -> ACK). Every wait is
+/// time-bounded against the timer tick, so a missing or slow server never hangs
+/// the boot — it just falls back to `default` (the static address).
+fn dhcp_acquire(default: Ipv4) -> Ipv4 {
+    let xid = (io::rdtsc() as u32) | 1; // any non-zero transaction id
+    let mut tx = [0u8; 600];
+    let mut rx = [0u8; 1600];
+
+    let len = net::dhcp_discover(&mut tx, ne2000::MAC, xid);
+    ne2000::send(&tx[..len]);
+    let offer = match poll_dhcp(&mut rx, xid, net::DHCP_OFFER) {
+        Some(o) => o,
+        None => return default,
+    };
+
+    let len = net::dhcp_request(&mut tx, ne2000::MAC, xid, offer.your_ip, offer.server_id);
+    ne2000::send(&tx[..len]);
+    match poll_dhcp(&mut rx, xid, net::DHCP_ACK) {
+        Some(ack) => ack.your_ip,
+        None => default,
+    }
+}
+
+/// Poll the NIC for up to ~300 ms for a DHCP reply of type `want` matching `xid`.
+fn poll_dhcp(rx: &mut [u8], xid: u32, want: u8) -> Option<net::DhcpReply> {
+    let deadline = interrupts::ticks() + 75; // 75 ticks / 250 Hz ≈ 300 ms
+    while interrupts::ticks() < deadline {
+        if let Some(n) = ne2000::poll(rx)
+            && let Some(r) = net::parse_dhcp(&rx[..n], ne2000::MAC)
+            && r.xid == xid
+            && r.msg_type == want
+        {
+            return Some(r);
+        }
+    }
+    None
 }
 
 /// Exercises the heap (alloc, grow, free) once at boot. A broken allocator
