@@ -288,7 +288,10 @@ flowchart LR
 O kernel fala com a placa via **`ne2000.rs`** — um driver **NE2000 (DP8390)** por
 *port I/O* (sem PCI nem DMA-descriptors), o NIC mais simples de programar. É
 **polled** (sem IRQ): o loop do compositor chama `poll` a cada acordada e
-transmite as respostas. No boot, o SO manda um **ARP gratuito** se anunciando.
+transmite as respostas. No boot, o SO **adquire um IP por DHCP**
+(DISCOVER→OFFER→REQUEST→ACK; a lógica UDP/BOOTP/DHCP é pura e testada em
+`osjeff_core::net`), com cada espera limitada pelo tick do timer — sem servidor,
+cai para um IP estático. Em seguida manda um **ARP gratuito** se anunciando.
 Como o resto do sistema, é tolerante: `init` devolve `false` se não há placa, e
 o sistema boota sem rede. O QEMU grava todo o tráfego num `.pcap`
 (`filter-dump`) — então dá para ver o ARP gratuito e as respostas sem montar
