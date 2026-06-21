@@ -68,6 +68,9 @@ impl Desktop {
         match action {
             Action::OpenEditor => self.open(EDIT),
             Action::OpenTasks => self.open(TASK),
+            Action::OpenCalc => self.open(CALC),
+            Action::Reboot => crate::power::reboot(),
+            Action::Shutdown => crate::power::shutdown(),
             Action::List => self.fs_list(),
             Action::Save(f) => self.fs_save(f),
             Action::Load(f) => self.fs_load(f),

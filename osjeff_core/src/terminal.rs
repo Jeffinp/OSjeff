@@ -62,6 +62,9 @@ pub enum Action {
     None,
     OpenEditor,
     OpenTasks,
+    OpenCalc,
+    Reboot,
+    Shutdown,
     List,
     Save(FileName),
     Load(FileName),
@@ -267,7 +270,8 @@ impl Terminal {
         if token == b"HELP" {
             self.println(b"Commands:");
             self.println(b" HELP CLS TIME VER ECHO");
-            self.println(b" EDIT PS LS CAT SAVE LOAD RM");
+            self.println(b" EDIT CALC PS LS CAT");
+            self.println(b" SAVE LOAD RM REBOOT SHUTDOWN");
             self.println(b"LS/CAT/SAVE/LOAD/RM = files");
         } else if token == b"LS" || token == b"DIR" {
             return Action::List;
@@ -279,9 +283,18 @@ impl Terminal {
             return self.file_action(rest, Action::Cat);
         } else if token == b"RM" || token == b"DEL" {
             return self.file_action(rest, Action::Remove);
-        } else if token == b"PS" || token == b"TASK" {
+        } else if token == b"PS" || token == b"TASK" || token == b"TASKS" {
             self.println(b"Opening task manager...");
             return Action::OpenTasks;
+        } else if token == b"CALC" {
+            self.println(b"Launching calculator...");
+            return Action::OpenCalc;
+        } else if token == b"REBOOT" || token == b"RESTART" {
+            self.println(b"Rebooting...");
+            return Action::Reboot;
+        } else if token == b"SHUTDOWN" || token == b"POWEROFF" {
+            self.println(b"Shutting down...");
+            return Action::Shutdown;
         } else if token == b"CLS" || token == b"CLEAR" {
             self.clear();
         } else if token == b"VER" || token == b"ABOUT" {
@@ -297,7 +310,7 @@ impl Terminal {
             self.println(&out);
         } else if token == b"ECHO" {
             self.println(rest);
-        } else if token == b"EDIT" {
+        } else if token == b"EDIT" || token == b"EDITOR" {
             self.println(b"Launching editor...");
             return Action::OpenEditor;
         } else {
@@ -426,6 +439,25 @@ mod tests {
             let mut t = Terminal::new();
             type_str(&mut t, cmd);
             assert_eq!(t.on_key(Key::Enter, t0()), want);
+        }
+    }
+
+    #[test]
+    fn app_and_power_commands_map_to_actions() {
+        for (cmd, want) in [
+            ("calc", Action::OpenCalc),
+            ("edit", Action::OpenEditor),
+            ("editor", Action::OpenEditor),
+            ("tasks", Action::OpenTasks),
+            ("ps", Action::OpenTasks),
+            ("reboot", Action::Reboot),
+            ("restart", Action::Reboot),
+            ("shutdown", Action::Shutdown),
+            ("poweroff", Action::Shutdown),
+        ] {
+            let mut t = Terminal::new();
+            type_str(&mut t, cmd);
+            assert_eq!(t.on_key(Key::Enter, t0()), want, "command: {cmd}");
         }
     }
 
