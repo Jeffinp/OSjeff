@@ -272,11 +272,7 @@ fn parse_decimal(s: &[u8]) -> f64 {
             i += 1;
         }
     }
-    if neg {
-        -val
-    } else {
-        val
-    }
+    if neg { -val } else { val }
 }
 
 #[cfg(test)]

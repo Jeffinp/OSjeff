@@ -1,7 +1,7 @@
 [package]
 name = "os"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 # The kernel is built for bare metal and embedded by the build script.
 # Artifact deps consumed in build.rs must live under [build-dependencies].

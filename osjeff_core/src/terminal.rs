@@ -327,11 +327,7 @@ fn two(buf: &mut [u8], idx: usize, val: u8) {
 }
 
 fn ascii_upper(c: u8) -> u8 {
-    if c.is_ascii_lowercase() {
-        c - 32
-    } else {
-        c
-    }
+    if c.is_ascii_lowercase() { c - 32 } else { c }
 }
 
 /// Copy the first whitespace-delimited token, uppercased, into `out`.

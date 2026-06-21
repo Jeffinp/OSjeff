@@ -4,6 +4,7 @@
 
 use crate::interrupts::{self, SRC_KEYBOARD};
 use crate::io::{inb, outb};
+use crate::sync::RacyCell;
 
 const DATA: u16 = 0x60;
 const STATUS: u16 = 0x64;
@@ -77,9 +78,20 @@ pub enum Event {
     Key(KeyEvent),
 }
 
-static mut MOUSE_CYCLE: u8 = 0;
-static mut MOUSE_BUF: [u8; 3] = [0; 3];
-static mut KEY_EXTENDED: bool = false;
+/// Incremental decoder state for the scancode/mouse-packet state machines.
+/// Touched only by [`poll`] on the main loop (the sole consumer of the IRQ
+/// ring), so a single non-reentrant owner — see [`RacyCell`].
+struct DecoderState {
+    mouse_cycle: u8,
+    mouse_buf: [u8; 3],
+    key_extended: bool,
+}
+
+static DECODER: RacyCell<DecoderState> = RacyCell::new(DecoderState {
+    mouse_cycle: 0,
+    mouse_buf: [0; 3],
+    key_extended: false,
+});
 
 /// Drains the IRQ ring until a complete event is decoded, or it empties.
 pub fn poll() -> Option<Event> {
@@ -101,12 +113,13 @@ pub fn poll() -> Option<Event> {
 }
 
 fn decode_keyboard(data: u8) -> Option<Event> {
+    let d = unsafe { &mut *DECODER.get() };
     if data == 0xE0 {
-        unsafe { KEY_EXTENDED = true };
+        d.key_extended = true;
         return None; // prefix; real scancode is the next byte
     }
-    let extended = unsafe { KEY_EXTENDED };
-    unsafe { KEY_EXTENDED = false };
+    let extended = d.key_extended;
+    d.key_extended = false;
     Some(Event::Key(KeyEvent {
         scan_code: data & 0x7F,
         pressed: data & 0x80 == 0,
@@ -115,40 +128,39 @@ fn decode_keyboard(data: u8) -> Option<Event> {
 }
 
 fn decode_mouse(data: u8) -> Option<Event> {
-    unsafe {
-        match MOUSE_CYCLE {
-            0 => {
-                if data & 0x08 == 0 {
-                    return None; // out of sync; bit3 of byte0 is always 1
-                }
-                MOUSE_BUF[0] = data;
-                MOUSE_CYCLE = 1;
-                None
+    let d = unsafe { &mut *DECODER.get() };
+    match d.mouse_cycle {
+        0 => {
+            if data & 0x08 == 0 {
+                return None; // out of sync; bit3 of byte0 is always 1
             }
-            1 => {
-                MOUSE_BUF[1] = data;
-                MOUSE_CYCLE = 2;
-                None
+            d.mouse_buf[0] = data;
+            d.mouse_cycle = 1;
+            None
+        }
+        1 => {
+            d.mouse_buf[1] = data;
+            d.mouse_cycle = 2;
+            None
+        }
+        _ => {
+            d.mouse_buf[2] = data;
+            d.mouse_cycle = 0;
+            let flags = d.mouse_buf[0];
+            let mut dx = d.mouse_buf[1] as i32;
+            let mut dy = d.mouse_buf[2] as i32;
+            if flags & 0x10 != 0 {
+                dx -= 256;
             }
-            _ => {
-                MOUSE_BUF[2] = data;
-                MOUSE_CYCLE = 0;
-                let flags = MOUSE_BUF[0];
-                let mut dx = MOUSE_BUF[1] as i32;
-                let mut dy = MOUSE_BUF[2] as i32;
-                if flags & 0x10 != 0 {
-                    dx -= 256;
-                }
-                if flags & 0x20 != 0 {
-                    dy -= 256;
-                }
-                Some(Event::Mouse(Packet {
-                    dx,
-                    dy,
-                    left: flags & 0x01 != 0,
-                    right: flags & 0x02 != 0,
-                }))
+            if flags & 0x20 != 0 {
+                dy -= 256;
             }
+            Some(Event::Mouse(Packet {
+                dx,
+                dy,
+                left: flags & 0x01 != 0,
+                right: flags & 0x02 != 0,
+            }))
         }
     }
 }

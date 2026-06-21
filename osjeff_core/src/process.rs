@@ -225,9 +225,10 @@ mod tests {
         for _ in 0..MAX_PROC {
             assert!(t.spawn(b"p", ProcKind::App, ProcState::Running).is_some());
         }
-        assert!(t
-            .spawn(b"overflow", ProcKind::App, ProcState::Running)
-            .is_none());
+        assert!(
+            t.spawn(b"overflow", ProcKind::App, ProcState::Running)
+                .is_none()
+        );
         assert_eq!(t.len(), MAX_PROC);
     }
 

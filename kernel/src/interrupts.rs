@@ -7,10 +7,11 @@
 //! instead of triple-faulting (silent reboot), making bugs visible.
 
 use crate::io::{inb, outb};
+use crate::sync::RacyCell;
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 use x86_64::VirtAddr;
+use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 /// Monotonic timer tick count (incremented at `TIMER_HZ`).
 pub static TICKS: AtomicU64 = AtomicU64::new(0);
@@ -32,21 +33,24 @@ const TIMER_VECTOR: u8 = 32; // IRQ0
 const KEYBOARD_VECTOR: u8 = 33; // IRQ1
 const MOUSE_VECTOR: u8 = 44; // IRQ12 (slave PIC)
 
-static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
+static IDT: RacyCell<InterruptDescriptorTable> = RacyCell::new(InterruptDescriptorTable::new());
 
 pub fn init() {
     unsafe {
-        IDT.breakpoint.set_handler_fn(breakpoint);
-        IDT.general_protection_fault
+        let idt = &mut *IDT.get();
+        idt.breakpoint.set_handler_fn(breakpoint);
+        idt.general_protection_fault
             .set_handler_fn(general_protection);
-        IDT.page_fault.set_handler_fn(page_fault);
-        IDT.double_fault.set_handler_fn(double_fault);
+        idt.page_fault.set_handler_fn(page_fault);
+        idt.double_fault.set_handler_fn(double_fault);
         // The timer uses a naked ISR that performs a full preemptive context
         // switch, so it's installed by raw address instead of `set_handler_fn`.
-        IDT[TIMER_VECTOR].set_handler_addr(VirtAddr::from_ptr(timer_isr as *const ()));
-        IDT[KEYBOARD_VECTOR].set_handler_fn(keyboard);
-        IDT[MOUSE_VECTOR].set_handler_fn(mouse);
-        IDT.load();
+        idt[TIMER_VECTOR].set_handler_addr(VirtAddr::from_ptr(timer_isr as *const ()));
+        idt[KEYBOARD_VECTOR].set_handler_fn(keyboard);
+        idt[MOUSE_VECTOR].set_handler_fn(mouse);
+        // `load` needs `&'static self`; the table lives in a `static`, so a
+        // reference derived from its raw pointer is genuinely `'static`.
+        (*IDT.get()).load();
     }
     remap_pic();
     init_pit(TIMER_HZ);
@@ -109,7 +113,7 @@ core::arch::global_asm!(
     schedule = sym timer_schedule,
 );
 
-extern "C" {
+unsafe extern "C" {
     /// Naked timer ISR entry (see `switch.s`): saves the interrupted context,
     /// switches stacks to the next thread, and `iretq`s into it.
     fn timer_isr();

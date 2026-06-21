@@ -9,6 +9,7 @@
 //! QEMU: `-device ne2k_isa,netdev=...,mac=52:54:00:12:34:56` (I/O base 0x300).
 
 use crate::io::{inb, outb};
+use crate::sync::RacyCell;
 use osjeff_core::net::Mac;
 
 const IO: u16 = 0x300; // ISA I/O base (QEMU ne2k_isa default)
@@ -58,8 +59,9 @@ const SPIN: u32 = 1_000_000;
 /// Our hardware address (must match the QEMU `mac=` option).
 pub const MAC: Mac = Mac([0x52, 0x54, 0x00, 0x12, 0x34, 0x56]);
 
-/// Next ring page to read (the software read pointer).
-static mut NEXT: u8 = RX_START + 1;
+/// Next ring page to read (the software read pointer). Touched only by `poll`
+/// and `init`, both on the polled main loop — never from an ISR.
+static NEXT: RacyCell<u8> = RacyCell::new(RX_START + 1);
 
 #[inline]
 fn r(reg: u16) -> u8 {
@@ -111,7 +113,7 @@ pub fn init() -> bool {
     w(RCR, 0x04); // accept broadcast (unicast matches PAR)
     w(CR, CR_START | CR_RD_ABORT); // start
 
-    unsafe { NEXT = RX_START + 1 };
+    unsafe { *NEXT.get() = RX_START + 1 };
     true
 }
 
@@ -138,7 +140,7 @@ pub fn poll(buf: &mut [u8]) -> Option<usize> {
     let curr = r(CURR);
     w(CR, CR_START | CR_RD_ABORT);
 
-    let next = unsafe { NEXT };
+    let next = unsafe { *NEXT.get() };
     if next == curr {
         return None; // ring empty
     }
@@ -150,7 +152,7 @@ pub fn poll(buf: &mut [u8]) -> Option<usize> {
 
     // Sanity-check the length; on garbage, drop the whole ring to resync.
     if !(4..=1518 + 4).contains(&total) || !(RX_START..=RX_STOP).contains(&next_page) {
-        unsafe { NEXT = curr };
+        unsafe { *NEXT.get() = curr };
         let bnry = if curr == RX_START {
             RX_STOP - 1
         } else {
@@ -165,7 +167,7 @@ pub fn poll(buf: &mut [u8]) -> Option<usize> {
     dma_read(((next as u16) << 8) + 4, &mut buf[..n]);
 
     // Advance the read pointer and the hardware boundary.
-    unsafe { NEXT = next_page };
+    unsafe { *NEXT.get() = next_page };
     let bnry = if next_page == RX_START {
         RX_STOP - 1
     } else {
