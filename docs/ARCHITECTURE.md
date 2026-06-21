@@ -307,3 +307,5 @@ rede no host.
 | Spin lock com `cli/sti` | Evitar deadlock de alocação sob preempção |
 | Exceções → tela travada | Tornar bugs visíveis em vez de reboot silencioso |
 | `qemu -d int,cpu_reset` | Depurar faults sem hardware de debug |
+| Edition 2024 + zero `static mut` (`RacyCell`) | `static mut` + `&mut` é UB; a 2024 o proíbe (`static_mut_refs`). Estado global mutável passa por um `Sync`-cell que expõe `*mut T`, sem materializar `&mut` aliasável. Soundness justificada (single-core + exclusão por flag de interrupção), não suprimida com `allow` |
+| Stack canary por thread | Overflow de pilha (stacks são heap, sem guard page) sobrescreve o canário no fundo da pilha antes de invadir o heap. Checado em cada troca de contexto → `panic` com o nome da thread, em vez de corrupção silenciosa do heap |
