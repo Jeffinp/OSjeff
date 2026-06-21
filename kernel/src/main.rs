@@ -15,6 +15,7 @@ mod interrupts;
 mod io;
 mod logo;
 mod ne2000;
+mod netstack;
 mod pci;
 mod perf;
 mod power;
@@ -217,6 +218,23 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let mut frame = [0u8; 64];
         let len = net::arp_announce(&mut frame, ne2000::MAC, net_ip);
         ne2000::send(&frame[..len]);
+
+        // Smoke-test the smoltcp stack: fetch a plain-HTTP page end to end
+        // (DNS -> TCP -> HTTP) and log the first bytes. Proves the browser
+        // transport works over the NE2000 before wiring TLS and the UI.
+        serial_println!("netstack: GET http://example.com/");
+        let mut stack = netstack::Net::new();
+        match stack.http_get("example.com", "/", 80) {
+            Some(resp) => {
+                let head = &resp[..resp.len().min(80)];
+                serial_println!(
+                    "netstack: {} bytes; head={:?}",
+                    resp.len(),
+                    core::str::from_utf8(head).unwrap_or("<binary>")
+                );
+            }
+            None => serial_println!("netstack: fetch failed"),
+        }
     }
 
     // Boot splash: progress tracks real elapsed time (>= 5 seconds).
