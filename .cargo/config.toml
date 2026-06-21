@@ -2,6 +2,17 @@
 [unstable]
 bindeps = true
 
+# The bare-metal kernel target builds with SSE disabled, which makes the
+# RustCrypto SIMD backends (aes/polyval/ghash, used by embedded-tls' AES-GCM)
+# fail to codegen. These `--cfg` flags select their pure-software backends so
+# TLS compiles without enabling SSE in the kernel. (sha2 uses a cargo feature.)
+[target.x86_64-unknown-none]
+rustflags = [
+    "--cfg", "aes_force_soft",
+    "--cfg", "polyval_force_soft",
+    "--cfg", "ghash_force_soft",
+]
+
 # Clippy must target bare metal for the kernel; the host crates lint normally.
 # `cargo clippy` (no target) fails because the no_std kernel can't unwind on host.
 [alias]
