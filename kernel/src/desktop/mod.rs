@@ -153,6 +153,9 @@ pub struct Desktop {
     editor: Editor,
     calc: Calc,
     browser: osjeff_core::Browser,
+    // Rendered web page (display list from the `web` engine) + its pixel scroll.
+    web_page: Option<osjeff_core::web::Page>,
+    page_scroll: i32,
     clipboard: Clipboard,
     keymap: Keymap,
     procs: ProcessTable,
@@ -242,6 +245,8 @@ impl Desktop {
             editor: Editor::new(),
             calc: Calc::new(),
             browser: osjeff_core::Browser::new(),
+            web_page: None,
+            page_scroll: 0,
             clipboard: Clipboard::new(),
             keymap: Keymap::new(),
             procs,
@@ -486,14 +491,32 @@ impl Desktop {
         })
     }
 
-    /// Render a fetched raw HTTP response into the browser's page.
+    /// Render a fetched raw HTTP response with the `web` engine and keep the
+    /// resulting display list for painting/scrolling.
     pub fn browser_load(&mut self, resp: &[u8]) {
-        self.browser.load_response(resp);
+        let content_w = BrowserChrome::of(self.windows[BROWSER].rect).content.w;
+        let body = osjeff_core::browser::page_body(resp);
+        self.web_page = Some(osjeff_core::web::render(&body, content_w));
+        self.page_scroll = 0;
+        self.browser.loaded();
     }
 
     /// Mark the in-flight browser fetch as failed.
     pub fn browser_fail(&mut self) {
+        self.web_page = None;
         self.browser.fail();
+    }
+
+
+    /// Scroll the rendered page by `dy` pixels, clamped to its content height.
+    pub(crate) fn scroll_page(&mut self, dy: i32) {
+        let view_h = BrowserChrome::of(self.windows[BROWSER].rect).content.h;
+        let max = self
+            .web_page
+            .as_ref()
+            .map(|p| (p.height - view_h).max(0))
+            .unwrap_or(0);
+        self.page_scroll = (self.page_scroll + dy).clamp(0, max);
     }
 }
 
@@ -575,8 +598,6 @@ pub(crate) struct BrowserChrome {
     pub go: Rect,
     pub bar: Rect,
     pub content: Rect,
-    pub line_h: i32,
-    pub visible: usize,
 }
 
 impl BrowserChrome {
@@ -592,16 +613,12 @@ impl BrowserChrome {
         let bar = Rect::new(bar_x, ty, (go.x - gap - bar_x).max(60), btn);
         let cy = ty + btn + 16;
         let content = Rect::new(r.x + pad, cy, r.w - pad * 2, (r.bottom() - 14 - cy).max(0));
-        let line_h = 18;
-        let visible = (content.h / line_h).max(0) as usize;
         Self {
             home,
             reload,
             go,
             bar,
             content,
-            line_h,
-            visible,
         }
     }
 }

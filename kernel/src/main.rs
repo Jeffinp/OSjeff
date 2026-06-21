@@ -605,43 +605,81 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
 }
 
-/// Resolve a browser URL and fetch it (HTTP or HTTPS), feeding the raw response
-/// back into the browser app — or marking it failed.
+/// Resolve a browser URL and fetch it (HTTP or HTTPS), following up to 5
+/// redirects, then feed the response into the browser app — or mark it failed.
 fn browser_fetch(net: &mut netstack::Net, url: &[u8], desk: &mut Desktop) {
-    use osjeff_core::browser::parse_url;
-    let Some(u) = parse_url(url) else {
-        desk.browser_fail();
-        return;
-    };
-    let (Ok(host), Ok(path)) = (
-        core::str::from_utf8(u.host()),
-        core::str::from_utf8(u.path()),
-    ) else {
-        desk.browser_fail();
-        return;
-    };
-    serial_println!(
-        "browser: GET {}://{}{} :{}",
-        if u.https { "https" } else { "http" },
-        host,
-        path,
-        u.port
-    );
-    let resp = if u.https {
-        net.https_get(host, path, u.port)
-    } else {
-        net.http_get(host, path, u.port)
-    };
-    match resp {
-        Some(r) => {
-            serial_println!("browser: {} bytes received", r.len());
-            desk.browser_load(&r);
-        }
-        None => {
+    use osjeff_core::browser::{header_value, parse_url, status_code};
+    let mut cur: alloc::vec::Vec<u8> = url.to_vec();
+
+    for _hop in 0..5 {
+        let Some(u) = parse_url(&cur) else {
+            desk.browser_fail();
+            return;
+        };
+        let (Ok(host), Ok(path)) = (
+            core::str::from_utf8(u.host()),
+            core::str::from_utf8(u.path()),
+        ) else {
+            desk.browser_fail();
+            return;
+        };
+        serial_println!(
+            "browser: GET {}://{}{} :{}",
+            if u.https { "https" } else { "http" },
+            host,
+            path,
+            u.port
+        );
+        let resp = if u.https {
+            net.https_get(host, path, u.port)
+        } else {
+            net.http_get(host, path, u.port)
+        };
+        let Some(r) = resp else {
             serial_println!("browser: fetch failed");
             desk.browser_fail();
+            return;
+        };
+
+        // Follow 3xx redirects.
+        let code = status_code(&r).unwrap_or(0);
+        if matches!(code, 301 | 302 | 303 | 307 | 308)
+            && let Some(loc) = header_value(&r, b"location")
+        {
+            let next = resolve_redirect(host, loc);
+            serial_println!("browser: {} redirect -> {} bytes target", code, next.len());
+            cur = next;
+            continue;
         }
+
+        serial_println!("browser: {} bytes received (status {})", r.len(), code);
+        desk.browser_load(&r);
+        return;
     }
+    serial_println!("browser: too many redirects");
+    desk.browser_fail();
+}
+
+/// Build an absolute URL from a redirect `Location` value relative to `host`.
+fn resolve_redirect(host: &str, loc: &[u8]) -> alloc::vec::Vec<u8> {
+    let ci = |p: &[u8]| loc.len() >= p.len() && loc[..p.len()].eq_ignore_ascii_case(p);
+    let mut out = alloc::vec::Vec::new();
+    if ci(b"http://") || ci(b"https://") {
+        out.extend_from_slice(loc);
+    } else if loc.starts_with(b"//") {
+        out.extend_from_slice(b"https:");
+        out.extend_from_slice(loc);
+    } else if loc.starts_with(b"/") {
+        out.extend_from_slice(b"https://");
+        out.extend_from_slice(host.as_bytes());
+        out.extend_from_slice(loc);
+    } else {
+        out.extend_from_slice(b"https://");
+        out.extend_from_slice(host.as_bytes());
+        out.push(b'/');
+        out.extend_from_slice(loc);
+    }
+    out
 }
 
 fn secs_of_day(t: rtc::Time) -> u32 {

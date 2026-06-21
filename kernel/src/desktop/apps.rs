@@ -196,30 +196,86 @@ impl Desktop {
         }
 
         let content = ch.content;
-        let max_cols = (content.w as usize / font::cell_w(2)).max(1);
-        let total = self.browser.line_count();
-        let visible = ch.visible;
-        let mut yy = content.y as usize;
-        for idx in self.browser.scroll..(self.browser.scroll + visible).min(total) {
-            if let Some(line) = self.browser.line(idx) {
-                let n = line.len().min(max_cols);
-                font::draw_bytes(c, content.x as usize, yy, &line[..n], theme::TEXT, 2);
-            }
-            yy += ch.line_h as usize;
-        }
+        let Some(page) = &self.web_page else {
+            font::draw_text(
+                c,
+                (content.x + 8) as usize,
+                (content.y + 8) as usize,
+                "Falha ao carregar a pagina.",
+                theme::CLOSE,
+                2,
+            );
+            return;
+        };
+        self.paint_web_page(c, page, content);
 
-        // Scrollbar track + thumb when the content overflows.
-        if total > visible && visible > 0 {
+        // Scrollbar track + thumb when the rendered page overflows.
+        if page.height > content.h && content.h > 0 {
             let track_x = (content.right() - 4) as usize;
             let track_h = content.h as usize;
             c.fill_rect(track_x, content.y as usize, 4, track_h, theme::DOCK_EDGE);
-            let thumb_h = (track_h * visible / total).max(12);
-            let max_scroll = total - visible;
+            let thumb_h = ((track_h * track_h) / page.height as usize).max(16);
+            let max_scroll = (page.height - content.h) as usize;
             let thumb_y = content.y as usize
-                + ((track_h - thumb_h) * self.browser.scroll)
+                + ((track_h - thumb_h) * self.page_scroll as usize)
                     .checked_div(max_scroll)
                     .unwrap_or(0);
             c.fill_round_rect(track_x, thumb_y, 4, thumb_h, 2, theme::ACCENT);
+        }
+    }
+
+    /// Rasterize a `web` engine display list into the content box, offset by the
+    /// current scroll and clipped vertically to the visible area.
+    pub(crate) fn paint_web_page(
+        &self,
+        c: &mut Canvas,
+        page: &osjeff_core::web::Page,
+        content: Rect,
+    ) {
+        use osjeff_core::web::Cmd;
+        let top = self.page_scroll;
+        let bottom = top + content.h;
+        let ox = content.x;
+        let oy = content.y - top;
+        for cmd in &page.cmds {
+            match cmd {
+                Cmd::Rect { x, y, w, h, color } => {
+                    if *y + *h < top || *y > bottom {
+                        continue;
+                    }
+                    let py = (oy + *y).max(content.y);
+                    let ph = (*y + *h + oy).min(content.bottom()) - py;
+                    if ph > 0 {
+                        let cw = (*w).min(content.w - *x);
+                        c.fill_rect(
+                            (ox + *x).max(0) as usize,
+                            py.max(0) as usize,
+                            cw.max(0) as usize,
+                            ph as usize,
+                            rgb(*color),
+                        );
+                    }
+                }
+                Cmd::Text {
+                    x,
+                    y,
+                    text,
+                    color,
+                    scale,
+                    bold,
+                } => {
+                    let lh = 9 * *scale as i32;
+                    if *y + lh < top || *y > bottom {
+                        continue;
+                    }
+                    let px = (ox + *x) as usize;
+                    let py = (oy + *y) as usize;
+                    font::draw_bytes(c, px, py, text.as_bytes(), rgb(*color), *scale as usize);
+                    if *bold {
+                        font::draw_bytes(c, px + 1, py, text.as_bytes(), rgb(*color), *scale as usize);
+                    }
+                }
+            }
         }
     }
 
@@ -552,8 +608,20 @@ impl Desktop {
     }
 }
 
+/// Convert a `web` engine color to a framebuffer color.
+fn rgb(c: osjeff_core::web::Rgb) -> Color {
+    Color::rgb(c.0, c.1, c.2)
+}
+
 fn draw_tool_button(c: &mut Canvas, r: Rect, bg: Color, _fg: Color) {
-    c.fill_round_rect(r.x as usize, r.y as usize, r.w as usize, r.h as usize, 9, bg);
+    c.fill_round_rect(
+        r.x as usize,
+        r.y as usize,
+        r.w as usize,
+        r.h as usize,
+        9,
+        bg,
+    );
 }
 
 /// A `thick`-pixel ring (donut) of `color`, punched hollow with `bg`.
@@ -651,6 +719,18 @@ fn glyph_globe(c: &mut Canvas, r: Rect) {
         (r.w / 2) as usize,
         theme::ACCENT,
     );
-    c.fill_rect((cx - rad) as usize, cy as usize, (2 * rad) as usize, 2, theme::WHITE);
-    c.fill_rect(cx as usize, (cy - rad) as usize, 2, (2 * rad) as usize, theme::WHITE);
+    c.fill_rect(
+        (cx - rad) as usize,
+        cy as usize,
+        (2 * rad) as usize,
+        2,
+        theme::WHITE,
+    );
+    c.fill_rect(
+        cx as usize,
+        (cy - rad) as usize,
+        2,
+        (2 * rad) as usize,
+        theme::WHITE,
+    );
 }

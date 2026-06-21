@@ -50,13 +50,16 @@ impl Desktop {
                 Key::Esc => self.request_close(CALC),
                 _ => {}
             },
-            Kind::Browser => {
-                if key == Key::Esc {
-                    self.request_close(BROWSER);
-                } else {
+            Kind::Browser => match key {
+                Key::Esc => self.request_close(BROWSER),
+                // Arrows scroll the rendered page (a pixel at a time feels slow,
+                // so step by a few lines).
+                Key::Up => self.scroll_page(-48),
+                Key::Down => self.scroll_page(48),
+                _ => {
                     self.browser.on_key(key);
                 }
-            }
+            },
         }
         true
     }
