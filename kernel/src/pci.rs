@@ -61,6 +61,21 @@ impl PciDevice {
         cmd |= 0x0006; // bit1 = memory space, bit2 = bus master
         write32(self.bus, self.slot, self.func, 0x04, cmd);
     }
+
+    /// Offset of the first entry in the PCI capability list, or `None` if the
+    /// device has none (status register bit 4 clears it).
+    pub fn cap_list(&self) -> Option<u8> {
+        let status = read16(self.bus, self.slot, self.func, 0x06);
+        if status & 0x10 == 0 {
+            return None;
+        }
+        Some((read16(self.bus, self.slot, self.func, 0x34) & 0xFC) as u8)
+    }
+
+    /// Read a config-space dword at `offset` (for walking capabilities).
+    pub fn cap_read32(&self, offset: u8) -> u32 {
+        read32(self.bus, self.slot, self.func, offset)
+    }
 }
 
 /// Visit every present function on bus 0, calling `f` for each. QEMU places its

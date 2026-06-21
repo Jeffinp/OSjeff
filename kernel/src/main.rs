@@ -24,7 +24,9 @@ mod sched;
 mod serial;
 mod sync;
 mod theme;
+mod virtio;
 
+use bootloader_api::config::{BootloaderConfig, Mapping};
 use bootloader_api::info::FrameBufferInfo;
 use bootloader_api::{BootInfo, entry_point};
 use core::panic::PanicInfo;
@@ -37,7 +39,17 @@ use osjeff_core::{Rect, Time};
 const NET_IP: Ipv4 = Ipv4([10, 0, 2, 15]);
 use ps2::Event;
 
-entry_point!(kernel_main);
+// Ask the bootloader to map all physical memory at a fixed offset. This gives
+// the kernel a `physical_memory_offset` so it can translate between virtual and
+// physical addresses — required for DMA: the virtio-gpu device reads its
+// descriptor rings and buffers by physical address.
+static BOOT_CONFIG: BootloaderConfig = {
+    let mut c = BootloaderConfig::new_default();
+    c.mappings.physical_memory = Some(Mapping::Dynamic);
+    c
+};
+
+entry_point!(kernel_main, config = &BOOT_CONFIG);
 
 // Render buffers sized for up to 1920x1080x4. BACK is the compositing target;
 // BG caches the static wallpaper so it is never recomputed per frame.
@@ -68,6 +80,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // missing, so driver bring-up is observable without the screen.
     serial::init();
     serial_println!("OSjeff boot: kernel entry");
+
+    // Capture the physical-memory offset before `boot_info` is borrowed for the
+    // framebuffer. Needed for DMA (virtio-gpu addresses memory physically).
+    let phys_offset = boot_info.physical_memory_offset.into_option();
+    serial_println!("physical_memory_offset: {:#x?}", phys_offset);
 
     let framebuffer = match boot_info.framebuffer.as_mut() {
         Some(fb) => fb,
@@ -108,11 +125,35 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         Some(gpu) => {
             gpu.enable_bus_master();
             serial_println!(
-                "virtio-gpu present @ slot {} func {} bar0={:#010x} (accel path available)",
+                "virtio-gpu @ slot {} func {} bar0={:#010x}",
                 gpu.slot,
                 gpu.func,
                 gpu.bar(0)
             );
+            match virtio::discover(&gpu) {
+                Some(caps) => {
+                    serial_println!(
+                        "  common bar{} off={:#x} len={}",
+                        caps.common.bar,
+                        caps.common.offset,
+                        caps.common.length
+                    );
+                    serial_println!(
+                        "  notify bar{} off={:#x} mul={}",
+                        caps.notify.bar,
+                        caps.notify.offset,
+                        caps.notify_off_mul
+                    );
+                    serial_println!(
+                        "  isr    bar{} off={:#x}   device bar{} off={:#x}",
+                        caps.isr.bar,
+                        caps.isr.offset,
+                        caps.device.bar,
+                        caps.device.offset
+                    );
+                }
+                None => serial_println!("  virtio caps: none (transitional device?)"),
+            }
         }
         None => serial_println!("virtio-gpu: absent — using the VBE framebuffer"),
     }
