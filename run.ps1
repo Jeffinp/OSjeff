@@ -11,29 +11,55 @@
 #   .\run.ps1 -SoftwareGfx   # keep QEMU's default display (escape hatch if the
 #                            #   SDL/GL path misbehaves on this machine)
 #   .\run.ps1 -SkipBuild     # skip cargo build, just boot the existing image
+#   .\run.ps1 -Usb           # build the UEFI image + copy it out for USB flashing
+#                            #   (real hardware boot; does NOT launch QEMU)
 param(
     [switch]$NoAccel,
     [switch]$SkipBuild,
     [switch]$Gl,
-    [switch]$SoftwareGfx
+    [switch]$SoftwareGfx,
+    [switch]$Usb
 )
 
 $ErrorActionPreference = 'Stop'
 $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 $img = Join-Path $PSScriptRoot 'osjeff-bios.img'
 
-if (-not (Test-Path $qemu)) { throw "QEMU nao encontrado em $qemu" }
-
-if (-not $SkipBuild) {
-    # Translate "C:\path\to" -> "/mnt/c/path/to" for WSL.
+# Build the project's `os` package (release) inside WSL. Returns nothing; throws
+# on failure. Factored out so both the QEMU and USB paths share it.
+function Build-OSjeff {
     $drive = $PSScriptRoot.Substring(0, 1).ToLower()
     $rest = ($PSScriptRoot.Substring(2)) -replace '\\', '/'
     $wslDir = "/mnt/$drive$rest"
     Write-Host "Compilando OSjeff (release) em $wslDir ..." -ForegroundColor Cyan
-
-    # `bash -lc` loads the login profile so cargo/rustup are on PATH.
     wsl -e bash -lc "cd '$wslDir' && cargo build --package os --release"
     if ($LASTEXITCODE -ne 0) { throw "cargo build falhou (exit $LASTEXITCODE)" }
+}
+
+if ($Usb) {
+    # Real-hardware boot: build, then copy the UEFI image to the project root so
+    # it can be flashed RAW to a USB stick. No QEMU involved.
+    Build-OSjeff
+    $built = Get-ChildItem -Path (Join-Path $PSScriptRoot 'target\release\build') `
+        -Recurse -Filter 'osjeff-uefi.img' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime | Select-Object -Last 1
+    if (-not $built) { throw "osjeff-uefi.img nao encontrada apos o build" }
+    $usbImg = Join-Path $PSScriptRoot 'osjeff-uefi.img'
+    Copy-Item $built.FullName $usbImg -Force
+    Write-Host ""
+    Write-Host "Imagem UEFI pronta: $usbImg" -ForegroundColor Green
+    Write-Host "Grave-a CRUA num pendrive (apaga o pendrive inteiro!):" -ForegroundColor Yellow
+    Write-Host "  - Rufus: selecione a imagem, modo 'DD Image'; ou" -ForegroundColor Gray
+    Write-Host "  - balenaEtcher: Flash from file -> escolha o pendrive." -ForegroundColor Gray
+    Write-Host "No PC alvo: firmware UEFI, Secure Boot DESLIGADO, dê boot pelo pendrive." -ForegroundColor Gray
+    Write-Host "Detalhes e limitacoes: docs/BOOT-USB.md" -ForegroundColor Gray
+    exit 0
+}
+
+if (-not (Test-Path $qemu)) { throw "QEMU nao encontrado em $qemu" }
+
+if (-not $SkipBuild) {
+    Build-OSjeff
 
     # Copy the freshest generated image to the project root.
     $built = Get-ChildItem -Path (Join-Path $PSScriptRoot 'target\release\build') `
