@@ -18,3 +18,7 @@
 qemu-err.txt
 qlog.txt
 *.pcap
+.shots/
+
+# Claude Code local session state / memory
+.claude/
