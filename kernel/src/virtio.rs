@@ -44,6 +44,17 @@ pub struct VirtioCaps {
     pub device: CapLoc,
 }
 
+/// Physical base address of BAR `bar`, handling 64-bit (two-dword) BARs.
+pub fn bar_base(dev: &PciDevice, bar: u8) -> u64 {
+    let lo = dev.bar(bar);
+    if lo & 0b110 == 0b100 {
+        // 64-bit memory BAR: the high half is in the next BAR slot.
+        ((dev.bar(bar + 1) as u64) << 32) | (lo as u64 & !0xF)
+    } else {
+        lo as u64 & !0xF
+    }
+}
+
 /// Walk `dev`'s PCI capability list and collect its virtio config locations.
 /// `None` if the device exposes no virtio common-config capability.
 pub fn discover(dev: &PciDevice) -> Option<VirtioCaps> {

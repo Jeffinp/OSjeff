@@ -154,6 +154,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 }
                 None => serial_println!("  virtio caps: none (transitional device?)"),
             }
+
+            // Probe: is the BAR2 MMIO reachable through the physical-memory
+            // mapping? Read the common-config `num_queues`/`device_status`. If
+            // this prints sane values the window is mapped; if the OS freezes
+            // here instead, the MMIO hole needs an explicit page mapping.
+            if let (Some(off), Some(caps)) = (phys_offset, virtio::discover(&gpu)) {
+                let base = virtio::bar_base(&gpu, caps.common.bar);
+                let common = (base + off + caps.common.offset as u64) as *const u8;
+                let num_queues =
+                    unsafe { core::ptr::read_volatile(common.add(0x12) as *const u16) };
+                let status = unsafe { core::ptr::read_volatile(common.add(0x14)) };
+                serial_println!(
+                    "  common_cfg @ {:#x}: num_queues={} status={:#x}",
+                    base + off + caps.common.offset as u64,
+                    num_queues,
+                    status
+                );
+            }
         }
         None => serial_println!("virtio-gpu: absent — using the VBE framebuffer"),
     }
