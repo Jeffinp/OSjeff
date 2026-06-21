@@ -174,6 +174,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                             }
                             None => serial_println!("virtio-gpu: get_display_info failed"),
                         }
+                        // Exercise the 2D command path (no scanout swap — the VBE
+                        // display stays live). The accelerated scanout is the next step.
+                        dev.verify_2d();
                     }
                     None => serial_println!("virtio-gpu: init failed"),
                 }
@@ -541,7 +544,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             let used = HEAP_SIZE - ALLOCATOR.free_bytes().min(HEAP_SIZE);
             let heap_pct = (used * 100 / HEAP_SIZE) as u32;
             let hr = perf::Perf::rect(info.width as i32);
-            blit_rect(framebuffer.buffer_mut(), back, info, hr.x, hr.y, hr.w, hr.h, n);
+            blit_rect(
+                framebuffer.buffer_mut(),
+                back,
+                info,
+                hr.x,
+                hr.y,
+                hr.w,
+                hr.h,
+                n,
+            );
             let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
             perf.draw(&mut c, heap_pct, sched::thread_count());
         }

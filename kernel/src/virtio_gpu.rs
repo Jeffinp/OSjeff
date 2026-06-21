@@ -25,14 +25,26 @@ const F_WRITE: u16 = 2;
 
 // virtio-gpu control commands / responses.
 const CMD_GET_DISPLAY_INFO: u32 = 0x0100;
+const CMD_RESOURCE_CREATE_2D: u32 = 0x0101;
+const CMD_SET_SCANOUT: u32 = 0x0103;
+const CMD_RESOURCE_FLUSH: u32 = 0x0104;
+const CMD_TRANSFER_TO_HOST_2D: u32 = 0x0105;
+const CMD_RESOURCE_ATTACH_BACKING: u32 = 0x0106;
+const RESP_OK_NODATA: u32 = 0x1100;
 const RESP_OK_DISPLAY_INFO: u32 = 0x1101;
+
+const FORMAT_B8G8R8X8: u32 = 2; // matches a Bgr framebuffer (4th byte ignored)
+const RES_ID: u32 = 1; // our single scanout resource
+const SCANOUT_ID: u32 = 0;
 
 #[repr(C, align(4096))]
 struct DmaPage([u8; 4096]);
 
-// One page for the queue rings, one for the request+response command buffers.
+// One page for the queue rings, one for the request+response command buffers,
+// one page-aligned throwaway page used to verify the 2D command path.
 static QUEUE_MEM: RacyCell<DmaPage> = RacyCell::new(DmaPage([0; 4096]));
 static CMD_MEM: RacyCell<DmaPage> = RacyCell::new(DmaPage([0; 4096]));
+static BACKING: RacyCell<DmaPage> = RacyCell::new(DmaPage([0; 4096]));
 const RESP_OFF: usize = 2048; // response buffer lives in the second half
 
 /// A live virtio-gpu device with its control queue ready.
@@ -43,6 +55,7 @@ pub struct GpuDevice {
     cmd_virt: *mut u8,
     cmd_phys: u64,
     resp_phys: u64,
+    phys_offset: u64,
     avail_idx: u16,
     last_used: u16,
 }
@@ -50,7 +63,11 @@ pub struct GpuDevice {
 impl GpuDevice {
     /// Initialize the device: negotiate, set up the control queue with DMA
     /// rings, and flip DRIVER_OK. `None` if anything looks wrong.
-    pub fn init(gpu: &crate::pci::PciDevice, caps: VirtioCaps, phys_offset: u64) -> Option<GpuDevice> {
+    pub fn init(
+        gpu: &crate::pci::PciDevice,
+        caps: VirtioCaps,
+        phys_offset: u64,
+    ) -> Option<GpuDevice> {
         let common_addr =
             virtio::bar_base(gpu, caps.common.bar) + phys_offset + caps.common.offset as u64;
         let common = unsafe { Common::new(common_addr) };
@@ -80,7 +97,9 @@ impl GpuDevice {
             + notify_off as u64 * caps.notify_off_mul as u64;
 
         // Driver is fully up.
-        common.set_status(virtio::S_ACK | virtio::S_DRIVER | virtio::S_FEATURES_OK | virtio::S_DRIVER_OK);
+        common.set_status(
+            virtio::S_ACK | virtio::S_DRIVER | virtio::S_FEATURES_OK | virtio::S_DRIVER_OK,
+        );
 
         Some(GpuDevice {
             qsize,
@@ -89,6 +108,7 @@ impl GpuDevice {
             cmd_virt,
             cmd_phys,
             resp_phys,
+            phys_offset,
             avail_idx: 0,
             last_used: 0,
         })
@@ -167,6 +187,106 @@ impl GpuDevice {
         let h = unsafe { core::ptr::read_volatile(resp.add(24 + 12) as *const u32) };
         Some((w, h))
     }
+
+    // ---- 2D scanout commands ----
+
+    /// Submit a request whose only meaningful reply is OK_NODATA.
+    fn cmd_nodata(&mut self, req: &[u8]) -> bool {
+        matches!(self.submit(req, 24), Some(RESP_OK_NODATA))
+    }
+
+    /// Create the 2D resource (B8G8R8X8) of size `w`x`h`.
+    pub fn create_resource(&mut self, w: u32, h: u32) -> bool {
+        let mut req = [0u8; 40];
+        put32(&mut req, 0, CMD_RESOURCE_CREATE_2D);
+        put32(&mut req, 24, RES_ID);
+        put32(&mut req, 28, FORMAT_B8G8R8X8);
+        put32(&mut req, 32, w);
+        put32(&mut req, 36, h);
+        self.cmd_nodata(&req)
+    }
+
+    /// Attach a single physically-contiguous backing buffer (`phys`, `len`).
+    pub fn attach_backing(&mut self, phys: u64, len: u32) -> bool {
+        let mut req = [0u8; 48];
+        put32(&mut req, 0, CMD_RESOURCE_ATTACH_BACKING);
+        put32(&mut req, 24, RES_ID);
+        put32(&mut req, 28, 1); // nr_entries
+        put64(&mut req, 32, phys);
+        put32(&mut req, 40, len);
+        self.cmd_nodata(&req)
+    }
+
+    /// Bind the resource to scanout 0 — this switches the display to it.
+    #[allow(dead_code)] // used by the live accelerated-display swap (next step)
+    pub fn set_scanout(&mut self, w: u32, h: u32) -> bool {
+        let mut req = [0u8; 48];
+        put32(&mut req, 0, CMD_SET_SCANOUT);
+        put_rect(&mut req, 24, 0, 0, w, h);
+        put32(&mut req, 40, SCANOUT_ID);
+        put32(&mut req, 44, RES_ID);
+        self.cmd_nodata(&req)
+    }
+
+    fn transfer(&mut self, x: u32, y: u32, w: u32, h: u32, offset: u64) -> bool {
+        let mut req = [0u8; 56];
+        put32(&mut req, 0, CMD_TRANSFER_TO_HOST_2D);
+        put_rect(&mut req, 24, x, y, w, h);
+        put64(&mut req, 40, offset);
+        put32(&mut req, 48, RES_ID);
+        self.cmd_nodata(&req)
+    }
+
+    fn flush_rect(&mut self, x: u32, y: u32, w: u32, h: u32) -> bool {
+        let mut req = [0u8; 48];
+        put32(&mut req, 0, CMD_RESOURCE_FLUSH);
+        put_rect(&mut req, 24, x, y, w, h);
+        put32(&mut req, 40, RES_ID);
+        self.cmd_nodata(&req)
+    }
+
+    /// Copy a rect from the backing to the host resource and display it.
+    /// `stride_px` is the resource width in pixels (for the backing offset).
+    #[allow(dead_code)] // used by the live accelerated-display swap (next step)
+    pub fn present(&mut self, x: u32, y: u32, w: u32, h: u32, stride_px: u32) -> bool {
+        let offset = (y as u64 * stride_px as u64 + x as u64) * 4;
+        self.transfer(x, y, w, h, offset) && self.flush_rect(x, y, w, h)
+    }
+
+    /// Exercise create/attach/transfer/flush on a throwaway 16x16 resource
+    /// backed by a dedicated page, WITHOUT touching the scanout (so the live VBE
+    /// display is untouched). Logs the result. Returns true if all four succeed.
+    pub fn verify_2d(&mut self) -> bool {
+        let backing_phys = match virtio::virt_to_phys(BACKING.get() as u64, self.phys_offset) {
+            Some(p) => p,
+            None => return false,
+        };
+        let ok = self.create_resource(16, 16)
+            && self.attach_backing(backing_phys, 16 * 16 * 4)
+            && self.transfer(0, 0, 16, 16, 0)
+            && self.flush_rect(0, 0, 16, 16);
+        serial_println!(
+            "virtio-gpu: 2D command path (create/attach/xfer/flush) -> {}",
+            ok
+        );
+        ok
+    }
+}
+
+#[inline]
+fn put32(b: &mut [u8], off: usize, v: u32) {
+    b[off..off + 4].copy_from_slice(&v.to_le_bytes());
+}
+#[inline]
+fn put64(b: &mut [u8], off: usize, v: u64) {
+    b[off..off + 8].copy_from_slice(&v.to_le_bytes());
+}
+#[inline]
+fn put_rect(b: &mut [u8], off: usize, x: u32, y: u32, w: u32, h: u32) {
+    put32(b, off, x);
+    put32(b, off + 4, y);
+    put32(b, off + 8, w);
+    put32(b, off + 12, h);
 }
 
 /// Virtual address of the notify region for this device.
