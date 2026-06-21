@@ -216,8 +216,20 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
 /// boundary should become a line break in the extracted text.
 fn is_break_tag(tag: &[u8]) -> bool {
     const BREAKS: [&[u8]; 14] = [
-        b"br", b"/p", b"/div", b"/h1", b"/h2", b"/h3", b"/h4", b"/li", b"/tr", b"/ul", b"/ol",
-        b"/table", b"/article", b"hr",
+        b"br",
+        b"/p",
+        b"/div",
+        b"/h1",
+        b"/h2",
+        b"/h3",
+        b"/h4",
+        b"/li",
+        b"/tr",
+        b"/ul",
+        b"/ol",
+        b"/table",
+        b"/article",
+        b"hr",
     ];
     BREAKS.contains(&tag)
 }
@@ -240,36 +252,84 @@ fn tag_name<'a>(inner: &[u8], buf: &'a mut [u8; 12]) -> &'a [u8] {
     &buf[..n]
 }
 
-/// Decode a small set of common HTML entities. `name` is the text between `&`
-/// and `;`. Returns the decoded byte, or `None` to keep the literal text.
+/// Fold a Unicode code point to a single printable ASCII byte for our bitmap
+/// font (which only has ASCII). Accented Latin letters collapse to their base
+/// letter; a few punctuation marks map to ASCII look-alikes. Returns `None` for
+/// code points with no sensible ASCII rendering (the caller drops them).
+fn fold_ascii(cp: u32) -> Option<u8> {
+    if (0x20..0x7f).contains(&cp) {
+        return Some(cp as u8);
+    }
+    let b = match cp {
+        0x00A0 => b' ',                                              // nbsp
+        0x00C0..=0x00C5 | 0x00E0..=0x00E5 => b'a',                   // À-Å à-å
+        0x00C7 | 0x00E7 => b'c',                                     // Ç ç
+        0x00C8..=0x00CB | 0x00E8..=0x00EB => b'e',                   // È-Ë è-ë
+        0x00CC..=0x00CF | 0x00EC..=0x00EF => b'i',                   // Ì-Ï ì-ï
+        0x00D1 | 0x00F1 => b'n',                                     // Ñ ñ
+        0x00D2..=0x00D6 | 0x00D8 | 0x00F2..=0x00F6 | 0x00F8 => b'o', // Ò-Ö Ø ò-ö ø
+        0x00D9..=0x00DC | 0x00F9..=0x00FC => b'u',                   // Ù-Ü ù-ü
+        0x00DD | 0x00FD | 0x00FF => b'y',                            // Ý ý ÿ
+        0x2018 | 0x2019 | 0x201B => b'\'',                           // ' ' ‛
+        0x201C | 0x201D => b'"',                                     // " "
+        0x2013 | 0x2014 | 0x2212 => b'-',                            // – — −
+        0x2026 => b'.',                                              // …
+        0x00A9 => b'c',                                              // ©
+        0x00AE => b'r',                                              // ®
+        _ => return None,
+    };
+    Some(b)
+}
+
+/// Decode an HTML entity. `name` is the text between `&` and `;`. Returns the
+/// decoded byte (ASCII-folded), or `None` to keep the literal text.
 fn decode_entity(name: &[u8]) -> Option<u8> {
     match name {
         b"amp" => Some(b'&'),
         b"lt" => Some(b'<'),
         b"gt" => Some(b'>'),
-        b"quot" => Some(b'"'),
-        b"apos" | b"#39" => Some(b'\''),
-        b"nbsp" | b"#160" => Some(b' '),
+        b"quot" | b"ldquo" | b"rdquo" => Some(b'"'),
+        b"apos" | b"lsquo" | b"rsquo" => Some(b'\''),
+        b"nbsp" => Some(b' '),
         b"copy" => Some(b'c'),
+        b"reg" => Some(b'r'),
         b"hellip" => Some(b'.'),
-        b"mdash" | b"ndash" | b"#8211" | b"#8212" => Some(b'-'),
+        b"mdash" | b"ndash" => Some(b'-'),
+        b"aacute" | b"agrave" | b"acirc" | b"atilde" | b"auml" => Some(b'a'),
+        b"eacute" | b"egrave" | b"ecirc" | b"euml" => Some(b'e'),
+        b"iacute" | b"igrave" | b"icirc" | b"iuml" => Some(b'i'),
+        b"oacute" | b"ograve" | b"ocirc" | b"otilde" | b"ouml" => Some(b'o'),
+        b"uacute" | b"ugrave" | b"ucirc" | b"uuml" => Some(b'u'),
+        b"ccedil" => Some(b'c'),
+        b"ntilde" => Some(b'n'),
         _ => {
-            // Numeric entity &#NN; in the printable ASCII range.
-            if let [b'#', digits @ ..] = name
-                && !digits.is_empty()
-                && digits.iter().all(|c| c.is_ascii_digit())
+            // Numeric entity: &#NN; (decimal) or &#xHH; (hex).
+            if let [b'#', rest @ ..] = name
+                && !rest.is_empty()
             {
-                let mut v = 0u32;
-                for &d in digits {
-                    v = v * 10 + (d - b'0') as u32;
-                }
-                if (0x20..0x7f).contains(&v) {
-                    return Some(v as u8);
-                }
+                let cp = if let [b'x' | b'X', hex @ ..] = rest {
+                    parse_radix(hex, 16)
+                } else {
+                    parse_radix(rest, 10)
+                };
+                return cp.and_then(fold_ascii);
             }
             None
         }
     }
+}
+
+/// Parse `digits` in `radix` (10 or 16), or `None` on any invalid digit.
+fn parse_radix(digits: &[u8], radix: u32) -> Option<u32> {
+    if digits.is_empty() {
+        return None;
+    }
+    let mut v: u32 = 0;
+    for &d in digits {
+        let n = (d as char).to_digit(radix)?;
+        v = v.checked_mul(radix)?.checked_add(n)?;
+    }
+    Some(v)
 }
 
 /// Extract readable, word-wrapped text from an HTML document into `out`.
@@ -337,12 +397,44 @@ pub fn html_to_text(html: &[u8], out: &mut [u8]) -> usize {
         } else if c == b'\n' || c == b'\r' || c == b'\t' {
             w.space();
             i += 1;
+        } else if c >= 0x80 {
+            // Raw UTF-8: decode and fold to ASCII (the font has no accents).
+            let (cp, len) = decode_utf8(&html[i..]);
+            if let Some(b) = fold_ascii(cp) {
+                w.push(b);
+            }
+            i += len;
         } else {
             w.push(c);
             i += 1;
         }
     }
     w.len()
+}
+
+/// Decode the first UTF-8 scalar in `bytes`, returning its code point and the
+/// number of bytes consumed. Malformed input yields `(0, 1)` so the caller
+/// skips one byte and makes progress.
+fn decode_utf8(bytes: &[u8]) -> (u32, usize) {
+    let b0 = bytes[0];
+    let (len, init) = match b0 {
+        0x00..=0x7f => return (b0 as u32, 1),
+        0xC0..=0xDF => (2, (b0 & 0x1F) as u32),
+        0xE0..=0xEF => (3, (b0 & 0x0F) as u32),
+        0xF0..=0xF7 => (4, (b0 & 0x07) as u32),
+        _ => return (0, 1),
+    };
+    if bytes.len() < len {
+        return (0, 1);
+    }
+    let mut cp = init;
+    for &b in &bytes[1..len] {
+        if b & 0xC0 != 0x80 {
+            return (0, 1); // not a continuation byte
+        }
+        cp = (cp << 6) | (b & 0x3F) as u32;
+    }
+    (cp, len)
 }
 
 /// Greedy word-wrapper that writes into a fixed buffer, collapsing whitespace
@@ -442,8 +534,18 @@ pub struct Browser {
     pending: bool,
     nav: [u8; URL_CAP],
     nav_len: usize,
+    home: bool,        // showing the native start page (no page loaded)
     pub scroll: usize, // first visible text line
 }
+
+/// Quick-link shortcuts shown on the start page (label, URL). All chosen to
+/// accept our P-256 TLS 1.3 handshake.
+pub const QUICK_LINKS: [(&str, &str); 4] = [
+    ("Bing", "www.bing.com"),
+    ("Wikipedia", "en.wikipedia.org/wiki/OS"),
+    ("Rust", "www.rust-lang.org"),
+    ("Exemplo", "example.com"),
+];
 
 impl Default for Browser {
     fn default() -> Self {
@@ -463,14 +565,38 @@ impl Browser {
             pending: false,
             nav: [0; URL_CAP],
             nav_len: 0,
+            home: true,
             scroll: 0,
         };
-        b.set_url(b"www.bing.com");
-        let welcome =
-            b"Bem-vindo ao navegador OSjeff.\nDigite uma URL ou uma busca na barra acima e tecle ENTER.\nUse as setas para rolar a pagina.";
-        b.content_len = welcome.len().min(CONTENT_CAP);
-        b.content[..b.content_len].copy_from_slice(&welcome[..b.content_len]);
+        b.set_url(b"");
         b
+    }
+
+    /// True while the native start page (logo + shortcuts) is shown.
+    pub fn is_home(&self) -> bool {
+        self.home
+    }
+
+    /// Return to the start page, clearing the loaded content and address bar.
+    pub fn go_home(&mut self) {
+        self.home = true;
+        self.status = Status::Idle;
+        self.content_len = 0;
+        self.scroll = 0;
+        self.set_url(b"");
+    }
+
+    /// Re-fetch the current address (no-op on the start page).
+    pub fn reload(&mut self) {
+        if !self.home {
+            self.submit();
+        }
+    }
+
+    /// Navigate straight to `url` (used by the start-page shortcuts).
+    pub fn open(&mut self, url: &[u8]) {
+        self.set_url(url);
+        self.submit();
     }
 
     fn set_url(&mut self, s: &[u8]) {
@@ -612,6 +738,7 @@ impl Browser {
         self.nav[..n].copy_from_slice(&nav[..n]);
         self.status = Status::Loading;
         self.pending = true;
+        self.home = false;
         self.scroll = 0;
     }
 
@@ -738,8 +865,7 @@ mod tests {
 
     #[test]
     fn html_skips_script_and_style() {
-        let html =
-            b"<style>.x{color:red}</style><p>Keep</p><script>var a=1<2;</script><p>This</p>";
+        let html = b"<style>.x{color:red}</style><p>Keep</p><script>var a=1<2;</script><p>This</p>";
         let mut out = [0u8; 256];
         let n = html_to_text(html, &mut out);
         let text = core::str::from_utf8(&out[..n]).unwrap();
@@ -782,11 +908,45 @@ mod tests {
     #[test]
     fn browser_submit_navigates_url() {
         let mut b = Browser::new();
-        b.submit();
+        assert!(b.is_home());
+        for &c in b"example.com" {
+            b.on_key(Key::Char(c));
+        }
+        b.on_key(Key::Enter);
+        assert!(!b.is_home());
         let req = b.take_request().unwrap();
-        assert_eq!(req, b"https://www.bing.com");
+        assert_eq!(req, b"https://example.com");
         assert_eq!(b.status(), Status::Loading);
         assert!(b.take_request().is_none()); // consumed
+    }
+
+    #[test]
+    fn browser_go_home_resets() {
+        let mut b = Browser::new();
+        b.open(b"example.com");
+        let _ = b.take_request();
+        b.load_response(b"\r\n\r\n<p>hi</p>");
+        assert!(!b.is_home());
+        b.go_home();
+        assert!(b.is_home());
+        assert_eq!(b.url(), b"");
+        assert_eq!(b.status(), Status::Idle);
+    }
+
+    #[test]
+    fn html_folds_accented_entities_and_utf8() {
+        // Numeric, hex, named entities and raw UTF-8 all fold to ASCII.
+        let html = "<p>Conte&#250;do Coment&#225;rios V&#xED;deos Aten\u{e7}\u{e3}o caf\u{e9}</p>"
+            .as_bytes();
+        let mut out = [0u8; 256];
+        let n = html_to_text(html, &mut out);
+        let text = core::str::from_utf8(&out[..n]).unwrap();
+        assert!(text.contains("Conteudo"));
+        assert!(text.contains("Comentarios"));
+        assert!(text.contains("Videos"));
+        assert!(text.contains("Atencao"));
+        assert!(text.contains("cafe"));
+        assert!(!text.contains('&'));
     }
 
     #[test]
