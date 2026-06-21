@@ -44,6 +44,95 @@ pub struct VirtioCaps {
     pub device: CapLoc,
 }
 
+// virtio device_status bits.
+pub const S_ACK: u8 = 1;
+pub const S_DRIVER: u8 = 2;
+#[allow(dead_code)] // set after the virtqueues exist (next step)
+pub const S_DRIVER_OK: u8 = 4;
+pub const S_FEATURES_OK: u8 = 8;
+pub const S_FAILED: u8 = 128;
+
+/// Volatile accessor over a virtio common-config MMIO window. All access is
+/// MMIO, so every read/write is volatile.
+pub struct Common {
+    base: *mut u8,
+}
+
+impl Common {
+    /// # Safety
+    /// `addr` must be the mapped virtual address of the common-config window.
+    pub unsafe fn new(addr: u64) -> Self {
+        Self {
+            base: addr as *mut u8,
+        }
+    }
+
+    #[inline]
+    unsafe fn r8(&self, o: usize) -> u8 {
+        unsafe { core::ptr::read_volatile(self.base.add(o)) }
+    }
+    #[inline]
+    unsafe fn w8(&self, o: usize, v: u8) {
+        unsafe { core::ptr::write_volatile(self.base.add(o), v) }
+    }
+    #[inline]
+    unsafe fn r16(&self, o: usize) -> u16 {
+        unsafe { core::ptr::read_volatile(self.base.add(o) as *const u16) }
+    }
+    #[inline]
+    unsafe fn r32(&self, o: usize) -> u32 {
+        unsafe { core::ptr::read_volatile(self.base.add(o) as *const u32) }
+    }
+    #[inline]
+    unsafe fn w32(&self, o: usize, v: u32) {
+        unsafe { core::ptr::write_volatile(self.base.add(o) as *mut u32, v) }
+    }
+
+    pub fn status(&self) -> u8 {
+        unsafe { self.r8(0x14) }
+    }
+    pub fn set_status(&self, s: u8) {
+        unsafe { self.w8(0x14, s) }
+    }
+    pub fn num_queues(&self) -> u16 {
+        unsafe { self.r16(0x12) }
+    }
+
+    /// Read a 32-bit window of the device feature bits (`sel` = 0 -> bits 0..31,
+    /// 1 -> bits 32..63).
+    pub fn device_features(&self, sel: u32) -> u32 {
+        unsafe {
+            self.w32(0x00, sel);
+            self.r32(0x04)
+        }
+    }
+    /// Write a 32-bit window of the negotiated driver feature bits.
+    pub fn set_driver_features(&self, sel: u32, v: u32) {
+        unsafe {
+            self.w32(0x08, sel);
+            self.w32(0x0C, v);
+        }
+    }
+}
+
+/// Drive the virtio 1.0 reset + feature negotiation up to FEATURES_OK (the
+/// DRIVER_OK bit is set later, once the virtqueues exist). We accept only
+/// `VIRTIO_F_VERSION_1` (bit 32). Returns false if the device rejects it.
+pub fn negotiate(c: &Common) -> bool {
+    c.set_status(0); // reset
+    let _ = c.status(); // read back to flush the reset
+    c.set_status(S_ACK);
+    c.set_status(S_ACK | S_DRIVER);
+
+    let _have = c.device_features(1); // bits 32..63 (must contain VERSION_1)
+    c.set_driver_features(0, 0);
+    c.set_driver_features(1, 1 << 0); // VIRTIO_F_VERSION_1 (bit 32)
+
+    c.set_status(S_ACK | S_DRIVER | S_FEATURES_OK);
+    let s = c.status();
+    s & S_FEATURES_OK != 0 && s & S_FAILED == 0
+}
+
 /// Physical base address of BAR `bar`, handling 64-bit (two-dword) BARs.
 pub fn bar_base(dev: &PciDevice, bar: u8) -> u64 {
     let lo = dev.bar(bar);
