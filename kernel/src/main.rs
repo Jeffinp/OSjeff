@@ -97,6 +97,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let info = framebuffer.info();
     let n = framebuffer.buffer().len().min(MAX_BYTES);
 
+    // Wipe the bootloader's on-screen debug log immediately, so the early init
+    // (PCI scan, TSC calibration, DHCP) shows a clean screen instead of a frozen
+    // wall of text until the splash takes over.
+    framebuffer.buffer_mut()[..n].fill(0);
+
     let back: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(BACK.get() as *mut u8, n) };
     let bg: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(BG.get() as *mut u8, n) };
     let static_buf: &mut [u8] =
