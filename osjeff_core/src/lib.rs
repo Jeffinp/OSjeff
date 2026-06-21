@@ -7,6 +7,12 @@
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 
+// Most of the crate is fixed-buffer and allocation-free. The `web` rendering
+// engine is the exception: an HTML/CSS box-model engine needs a dynamic DOM and
+// display list, so it uses `alloc` (backed by the kernel's global allocator in
+// production, and by `std` under tests).
+extern crate alloc;
+
 pub mod anim;
 pub mod browser;
 pub mod calc;
@@ -18,6 +24,7 @@ pub mod keymap;
 pub mod net;
 pub mod process;
 pub mod terminal;
+pub mod web;
 pub mod window;
 
 pub use anim::Anim;

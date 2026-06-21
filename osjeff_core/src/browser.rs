@@ -212,6 +212,101 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     (0..=hay.len() - needle.len()).find(|&i| &hay[i..i + needle.len()] == needle)
 }
 
+/// Parse the numeric status code from an HTTP response's status line.
+pub fn status_code(resp: &[u8]) -> Option<u16> {
+    let line = resp.split(|&b| b == b'\r' || b == b'\n').next()?;
+    let code = line.split(|&b| b == b' ').nth(1)?;
+    core::str::from_utf8(code).ok()?.parse().ok()
+}
+
+/// Look up a response header (case-insensitive), returning its trimmed value.
+pub fn header_value<'a>(resp: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
+    let end = find(resp, b"\r\n\r\n")
+        .or_else(|| find(resp, b"\n\n"))
+        .unwrap_or(resp.len());
+    for line in resp[..end].split(|&b| b == b'\n') {
+        let line = trim_ascii(line);
+        if let Some(pos) = line.iter().position(|&b| b == b':')
+            && line[..pos].eq_ignore_ascii_case(name)
+        {
+            return Some(trim_ascii(&line[pos + 1..]));
+        }
+    }
+    None
+}
+
+fn trim_ascii(mut s: &[u8]) -> &[u8] {
+    while let [f, rest @ ..] = s {
+        if f.is_ascii_whitespace() {
+            s = rest;
+        } else {
+            break;
+        }
+    }
+    while let [rest @ .., l] = s {
+        if l.is_ascii_whitespace() {
+            s = rest;
+        } else {
+            break;
+        }
+    }
+    s
+}
+
+/// The clean HTML body of a raw HTTP response: headers stripped and, if the
+/// response is `Transfer-Encoding: chunked`, the chunk framing removed.
+pub fn page_body(resp: &[u8]) -> alloc::vec::Vec<u8> {
+    let body = http_body(resp);
+    let chunked = header_value(resp, b"transfer-encoding")
+        .map(|v| v.eq_ignore_ascii_case(b"chunked"))
+        .unwrap_or(false);
+    if chunked {
+        dechunk(body)
+    } else {
+        body.to_vec()
+    }
+}
+
+/// Decode an HTTP/1.1 chunked body into the raw payload.
+fn dechunk(body: &[u8]) -> alloc::vec::Vec<u8> {
+    let mut out = alloc::vec::Vec::new();
+    let mut i = 0;
+    while i < body.len() {
+        // Chunk size in hex up to CR/LF or ';' (chunk extensions).
+        let mut size = 0usize;
+        let mut saw_digit = false;
+        while i < body.len() {
+            let c = body[i];
+            if let Some(d) = (c as char).to_digit(16) {
+                size = size * 16 + d as usize;
+                saw_digit = true;
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        if !saw_digit {
+            break;
+        }
+        // Skip to end of the size line.
+        while i < body.len() && body[i] != b'\n' {
+            i += 1;
+        }
+        i += 1; // past '\n'
+        if size == 0 || i >= body.len() {
+            break;
+        }
+        let end = (i + size).min(body.len());
+        out.extend_from_slice(&body[i..end]);
+        i = end;
+        // Skip the CRLF after the chunk data.
+        while i < body.len() && (body[i] == b'\r' || body[i] == b'\n') {
+            i += 1;
+        }
+    }
+    out
+}
+
 /// True if `tag` (lowercased element name) introduces or ends a block whose
 /// boundary should become a line break in the extracted text.
 fn is_break_tag(tag: &[u8]) -> bool {
@@ -256,7 +351,7 @@ fn tag_name<'a>(inner: &[u8], buf: &'a mut [u8; 12]) -> &'a [u8] {
 /// font (which only has ASCII). Accented Latin letters collapse to their base
 /// letter; a few punctuation marks map to ASCII look-alikes. Returns `None` for
 /// code points with no sensible ASCII rendering (the caller drops them).
-fn fold_ascii(cp: u32) -> Option<u8> {
+pub fn fold_ascii(cp: u32) -> Option<u8> {
     if (0x20..0x7f).contains(&cp) {
         return Some(cp as u8);
     }
@@ -283,7 +378,7 @@ fn fold_ascii(cp: u32) -> Option<u8> {
 
 /// Decode an HTML entity. `name` is the text between `&` and `;`. Returns the
 /// decoded byte (ASCII-folded), or `None` to keep the literal text.
-fn decode_entity(name: &[u8]) -> Option<u8> {
+pub fn decode_entity(name: &[u8]) -> Option<u8> {
     match name {
         b"amp" => Some(b'&'),
         b"lt" => Some(b'<'),
@@ -415,7 +510,7 @@ pub fn html_to_text(html: &[u8], out: &mut [u8]) -> usize {
 /// Decode the first UTF-8 scalar in `bytes`, returning its code point and the
 /// number of bytes consumed. Malformed input yields `(0, 1)` so the caller
 /// skips one byte and makes progress.
-fn decode_utf8(bytes: &[u8]) -> (u32, usize) {
+pub fn decode_utf8(bytes: &[u8]) -> (u32, usize) {
     let b0 = bytes[0];
     let (len, init) = match b0 {
         0x00..=0x7f => return (b0 as u32, 1),
@@ -542,8 +637,8 @@ pub struct Browser {
 /// accept our P-256 TLS 1.3 handshake.
 pub const QUICK_LINKS: [(&str, &str); 4] = [
     ("Bing", "www.bing.com"),
-    ("Wikipedia", "en.wikipedia.org/wiki/OS"),
-    ("Rust", "www.rust-lang.org"),
+    ("Wikipedia", "en.wikipedia.org/wiki/Operating_system"),
+    ("Cloudflare", "www.cloudflare.com"),
     ("Exemplo", "example.com"),
 ];
 
@@ -753,6 +848,13 @@ impl Browser {
         }
     }
 
+    /// Mark a navigation as successfully loaded (the kernel renders the page via
+    /// the `web` engine and owns the display list).
+    pub fn loaded(&mut self) {
+        self.status = Status::Done;
+        self.home = false;
+    }
+
     /// Replace the page with text extracted from a raw HTTP response.
     pub fn load_response(&mut self, resp: &[u8]) {
         let body = http_body(resp);
@@ -849,6 +951,21 @@ mod tests {
     fn http_body_after_headers() {
         let resp = b"HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n\r\n<p>hi</p>";
         assert_eq!(http_body(resp), b"<p>hi</p>");
+    }
+
+    #[test]
+    fn parses_status_and_headers() {
+        let resp = b"HTTP/1.1 301 Moved\r\nLocation: https://x.com/y\r\nServer: t\r\n\r\nbody";
+        assert_eq!(status_code(resp), Some(301));
+        assert_eq!(header_value(resp, b"location"), Some(&b"https://x.com/y"[..]));
+        assert_eq!(header_value(resp, b"LOCATION"), Some(&b"https://x.com/y"[..]));
+        assert_eq!(header_value(resp, b"missing"), None);
+    }
+
+    #[test]
+    fn page_body_dechunks() {
+        let resp = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n";
+        assert_eq!(page_body(resp), b"Wikipedia");
     }
 
     #[test]
