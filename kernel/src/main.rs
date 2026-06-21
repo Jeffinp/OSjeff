@@ -231,7 +231,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         None
     };
 
-
     // Boot splash: progress tracks real elapsed time (>= 5 seconds).
     run_splash(&mut *framebuffer, &mut *back, info, n);
 

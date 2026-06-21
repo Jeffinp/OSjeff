@@ -567,6 +567,64 @@ fn calc_button_at(r: Rect, px: i32, py: i32) -> Option<u8> {
     None
 }
 
+/// Browser chrome geometry, shared by drawing and hit-testing so the toolbar
+/// buttons, address bar and content area always agree.
+pub(crate) struct BrowserChrome {
+    pub home: Rect,
+    pub reload: Rect,
+    pub go: Rect,
+    pub bar: Rect,
+    pub content: Rect,
+    pub line_h: i32,
+    pub visible: usize,
+}
+
+impl BrowserChrome {
+    pub(crate) fn of(r: Rect) -> Self {
+        let pad = 14;
+        let btn = 36;
+        let gap = 8;
+        let ty = r.y + TITLE_H + 12;
+        let home = Rect::new(r.x + pad, ty, btn, btn);
+        let reload = Rect::new(home.right() + gap, ty, btn, btn);
+        let go = Rect::new(r.right() - pad - btn, ty, btn, btn);
+        let bar_x = reload.right() + gap;
+        let bar = Rect::new(bar_x, ty, (go.x - gap - bar_x).max(60), btn);
+        let cy = ty + btn + 16;
+        let content = Rect::new(r.x + pad, cy, r.w - pad * 2, (r.bottom() - 14 - cy).max(0));
+        let line_h = 18;
+        let visible = (content.h / line_h).max(0) as usize;
+        Self {
+            home,
+            reload,
+            go,
+            bar,
+            content,
+            line_h,
+            visible,
+        }
+    }
+}
+
+/// Start-page layout: the brand logo rect and the four shortcut-tile rects,
+/// centered in the content box.
+pub(crate) fn browser_home_layout(content: Rect) -> (Rect, [Rect; 4]) {
+    let cx = content.x + content.w / 2;
+    let logo_sz = 84;
+    let logo = Rect::new(cx - logo_sz / 2, content.y + 30, logo_sz, logo_sz);
+    let tile_w = 150;
+    let tile_h = 96;
+    let gap = 18;
+    let total = 4 * tile_w + 3 * gap;
+    let sx = cx - total / 2;
+    let ty = logo.bottom() + 108;
+    let mut tiles = [Rect::new(0, 0, 0, 0); 4];
+    for (i, t) in tiles.iter_mut().enumerate() {
+        *t = Rect::new(sx + i as i32 * (tile_w + gap), ty, tile_w, tile_h);
+    }
+    (logo, tiles)
+}
+
 /// Label bytes for a keypad cell (`<` for the backspace sentinel).
 fn key_label(k: &u8) -> &[u8] {
     if *k == 0x08 {

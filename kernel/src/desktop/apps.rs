@@ -118,79 +118,94 @@ impl Desktop {
         }
     }
 
-    /// Browser content geometry (address bar + scrollable text), derived from
-    /// the window rect so drawing and hit-testing/scroll agree. Returns
-    /// `(bar, content, line_h, visible_lines)`.
-    pub(crate) fn browser_layout(r: Rect) -> (Rect, Rect, i32, usize) {
-        let pad = 16;
-        let bar_h = 32;
-        let bar = Rect::new(r.x + pad, r.y + TITLE_H + 10, r.w - pad * 2, bar_h);
-        let cy = bar.bottom() + 12;
-        let content = Rect::new(
-            r.x + pad,
-            cy,
-            r.w - pad * 2,
-            (r.bottom() - pad - cy).max(0),
-        );
-        let line_h = 18;
-        let visible = (content.h / line_h).max(0) as usize;
-        (bar, content, line_h, visible)
-    }
-
     pub(crate) fn draw_browser(&self, c: &mut Canvas, r: Rect, focused: bool) {
-        let (bar, content, line_h, visible) = Self::browser_layout(r);
+        let ch = BrowserChrome::of(r);
 
-        // Address bar: dark rounded input with the URL and a caret when focused.
+        // ---- toolbar: nav buttons + address bar + search button ----
+        let tool_bg = Color::rgb(0xEC, 0xEF, 0xF5);
+        draw_tool_button(c, ch.home, tool_bg, theme::HEADER);
+        glyph_home(c, ch.home, theme::HEADER);
+        draw_tool_button(c, ch.reload, tool_bg, theme::HEADER);
+        glyph_reload(c, ch.reload, theme::HEADER, tool_bg);
+
+        // Address bar: white pill with a 1px border, a leading globe, the URL
+        // (or a muted placeholder) and a caret when focused.
+        let bar = ch.bar;
         c.fill_round_rect(
             bar.x as usize,
             bar.y as usize,
             bar.w as usize,
             bar.h as usize,
-            8,
-            Color::rgb(0x0E, 0x16, 0x28),
+            bar.h as usize / 2,
+            Color::rgb(0xCE, 0xD6, 0xE6),
         );
-        let tx = (bar.x + 12) as usize;
+        c.fill_round_rect(
+            (bar.x + 1) as usize,
+            (bar.y + 1) as usize,
+            (bar.w - 2) as usize,
+            (bar.h - 2) as usize,
+            (bar.h as usize - 2) / 2,
+            theme::WHITE,
+        );
+        glyph_globe(c, Rect::new(bar.x + 10, bar.y + (bar.h - 18) / 2, 18, 18));
+        let tx = (bar.x + 36) as usize;
         let ty = (bar.y + (bar.h - 14) / 2) as usize;
         let url = self.browser.url();
-        // Truncate the displayed URL to the bar width.
-        let bar_cols = ((bar.w - 110) as usize / font::cell_w(2)).max(1);
-        let shown = &url[url.len().saturating_sub(bar_cols)..];
-        font::draw_bytes(c, tx, ty, shown, theme::HEADER_TEXT, 2);
-        if focused {
-            let caret = self.browser.caret().min(shown.len());
-            let cx = tx + caret * font::cell_w(2);
-            c.fill_rect(cx, ty - 1, 2, 16, theme::ACCENT);
+        let bar_cols = ((bar.w - 48) as usize / font::cell_w(2)).max(1);
+        if url.is_empty() {
+            font::draw_text(
+                c,
+                tx,
+                ty,
+                "Pesquisar ou digitar um endereco",
+                theme::TEXT_MUTED,
+                2,
+            );
+        } else {
+            let shown = &url[url.len().saturating_sub(bar_cols)..];
+            font::draw_bytes(c, tx, ty, shown, theme::TEXT, 2);
+            if focused {
+                let caret = self.browser.caret().min(shown.len());
+                let cx = tx + caret * font::cell_w(2);
+                c.fill_rect(cx, ty - 1, 2, 16, theme::ACCENT);
+            }
         }
 
-        // Status badge at the bar's right edge.
-        use osjeff_core::browser::Status;
-        let (label, col): (&[u8], Color) = match self.browser.status() {
-            Status::Loading => (b"...", theme::ACCENT_2),
-            Status::Done => (b"OK", theme::ACCENT),
-            Status::Error => (b"ERR", theme::CLOSE),
-            Status::Idle => (b"GO", theme::TEXT_MUTED),
-        };
-        let lw = label.len() * font::cell_w(2);
-        font::draw_bytes(
-            c,
-            (bar.right() - 14) as usize - lw,
-            ty,
-            label,
-            col,
-            2,
-        );
+        // Search/go button (accent) with a magnifier glyph.
+        draw_tool_button(c, ch.go, theme::ACCENT, theme::WHITE);
+        glyph_search(c, ch.go, theme::WHITE, theme::ACCENT);
 
-        // Content: wrapped text lines from the scroll offset, clipped to the
-        // content box vertically (visible count) and horizontally (max_cols).
+        // ---- body: native start page, loading state, or page text ----
+        use osjeff_core::browser::Status;
+        if self.browser.is_home() {
+            self.draw_browser_home(c, ch.content);
+            return;
+        }
+        if self.browser.status() == Status::Loading {
+            let msg = "Carregando...";
+            let w = font::text_width(msg, 2);
+            font::draw_text(
+                c,
+                (ch.content.x + (ch.content.w - w as i32) / 2) as usize,
+                (ch.content.y + 40) as usize,
+                msg,
+                theme::TEXT_MUTED,
+                2,
+            );
+            return;
+        }
+
+        let content = ch.content;
         let max_cols = (content.w as usize / font::cell_w(2)).max(1);
         let total = self.browser.line_count();
+        let visible = ch.visible;
         let mut yy = content.y as usize;
         for idx in self.browser.scroll..(self.browser.scroll + visible).min(total) {
             if let Some(line) = self.browser.line(idx) {
                 let n = line.len().min(max_cols);
                 font::draw_bytes(c, content.x as usize, yy, &line[..n], theme::TEXT, 2);
             }
-            yy += line_h as usize;
+            yy += ch.line_h as usize;
         }
 
         // Scrollbar track + thumb when the content overflows.
@@ -205,6 +220,113 @@ impl Desktop {
                     .checked_div(max_scroll)
                     .unwrap_or(0);
             c.fill_round_rect(track_x, thumb_y, 4, thumb_h, 2, theme::ACCENT);
+        }
+    }
+
+    /// The native start page: brand mark, tagline, and clickable shortcut tiles.
+    pub(crate) fn draw_browser_home(&self, c: &mut Canvas, content: Rect) {
+        let (logo, tiles) = browser_home_layout(content);
+
+        // Brand globe + wordmark + tagline, centered.
+        icons::draw(
+            c,
+            Icon::Browser,
+            logo.x as usize,
+            logo.y as usize,
+            logo.w as usize,
+        );
+        let cx = content.x + content.w / 2;
+        let wm = "OSjeff";
+        let wmw = font::text_width(wm, 5) as i32;
+        font::draw_text(
+            c,
+            (cx - wmw / 2) as usize,
+            (logo.bottom() + 16) as usize,
+            wm,
+            theme::HEADER,
+            5,
+        );
+        let sub = "Navegador";
+        let sw = font::text_width(sub, 2) as i32;
+        font::draw_text(
+            c,
+            (cx - sw / 2) as usize,
+            (logo.bottom() + 60) as usize,
+            sub,
+            theme::ACCENT,
+            2,
+        );
+        let hint = "Pesquise ou digite um endereco na barra acima";
+        let hw = font::text_width(hint, 2) as i32;
+        font::draw_text(
+            c,
+            (cx - hw / 2) as usize,
+            (logo.bottom() + 84) as usize,
+            hint,
+            theme::TEXT_MUTED,
+            2,
+        );
+
+        // Shortcut tiles: a colored monogram chip over a centered label.
+        let accents = [
+            theme::ACCENT,
+            theme::ACCENT_2,
+            Color::rgb(0xF5, 0x9E, 0x0B),
+            Color::rgb(0x4C, 0xC2, 0xFF),
+        ];
+        for (i, t) in tiles.iter().enumerate() {
+            let (label, _url) = osjeff_core::browser::QUICK_LINKS[i];
+            let accent = accents[i];
+            // Card with a soft shadow.
+            c.fill_round_rect_alpha(
+                (t.x + 3) as usize,
+                (t.y + 5) as usize,
+                t.w as usize,
+                t.h as usize,
+                12,
+                theme::SHADOW,
+                26,
+            );
+            c.fill_round_rect(
+                t.x as usize,
+                t.y as usize,
+                t.w as usize,
+                t.h as usize,
+                12,
+                theme::WHITE,
+            );
+            // Monogram chip (first letter of the label).
+            let chip = 34;
+            let chx = t.x + (t.w - chip) / 2;
+            let chy = t.y + 16;
+            c.fill_round_rect(
+                chx as usize,
+                chy as usize,
+                chip as usize,
+                chip as usize,
+                10,
+                accent,
+            );
+            let initial = [label.as_bytes()[0].to_ascii_uppercase()];
+            let iw = font::cell_w(3);
+            font::draw_bytes(
+                c,
+                (chx + (chip - iw as i32) / 2) as usize,
+                (chy + (chip - 7 * 3) / 2) as usize,
+                &initial,
+                theme::WHITE,
+                3,
+            );
+            // Label.
+            let lw = font::text_width(label, 2) as i32;
+            font::draw_text(
+                c,
+                (t.x + (t.w - lw) / 2) as usize,
+                (t.y + t.h - 24) as usize,
+                label,
+                theme::TEXT,
+                2,
+            );
         }
     }
 
@@ -428,4 +550,107 @@ impl Desktop {
             }
         }
     }
+}
+
+fn draw_tool_button(c: &mut Canvas, r: Rect, bg: Color, _fg: Color) {
+    c.fill_round_rect(r.x as usize, r.y as usize, r.w as usize, r.h as usize, 9, bg);
+}
+
+/// A `thick`-pixel ring (donut) of `color`, punched hollow with `bg`.
+fn donut(c: &mut Canvas, cx: i32, cy: i32, rad: i32, thick: i32, color: Color, bg: Color) {
+    c.fill_round_rect(
+        (cx - rad) as usize,
+        (cy - rad) as usize,
+        (2 * rad) as usize,
+        (2 * rad) as usize,
+        rad as usize,
+        color,
+    );
+    let ir = (rad - thick).max(1);
+    c.fill_round_rect(
+        (cx - ir) as usize,
+        (cy - ir) as usize,
+        (2 * ir) as usize,
+        (2 * ir) as usize,
+        ir as usize,
+        bg,
+    );
+}
+
+// Small vector glyphs centered in their button rects (the bitmap font has no
+// icon glyphs).
+fn glyph_home(c: &mut Canvas, r: Rect, color: Color) {
+    let cx = r.x + r.w / 2;
+    let top = r.y + r.h / 2 - 8;
+    // Roof: a triangle drawn as widening rows.
+    for i in 0..8 {
+        c.fill_rect(
+            (cx - i) as usize,
+            (top + i) as usize,
+            (2 * i + 1) as usize,
+            1,
+            color,
+        );
+    }
+    // Body.
+    let bw = 12;
+    c.fill_round_rect(
+        (cx - bw / 2) as usize,
+        (top + 8) as usize,
+        bw as usize,
+        9,
+        1,
+        color,
+    );
+}
+
+fn glyph_reload(c: &mut Canvas, r: Rect, color: Color, bg: Color) {
+    let cx = r.x + r.w / 2;
+    let cy = r.y + r.h / 2;
+    let rad = 9;
+    donut(c, cx, cy, rad, 3, color, bg);
+    // Break the ring at the top-right and add an arrowhead, hinting "refresh".
+    c.fill_rect((cx) as usize, (cy - rad - 1) as usize, 7, 7, bg);
+    for i in 0..5 {
+        c.fill_rect(
+            (cx + 1) as usize,
+            (cy - rad + i - 1) as usize,
+            (5 - i) as usize,
+            1,
+            color,
+        );
+    }
+}
+
+fn glyph_search(c: &mut Canvas, r: Rect, color: Color, bg: Color) {
+    let cx = r.x + r.w / 2 - 2;
+    let cy = r.y + r.h / 2 - 2;
+    let rad = 7;
+    donut(c, cx, cy, rad, 2, color, bg);
+    // Handle: a short thick diagonal off the lower-right of the lens.
+    for i in 0..5 {
+        c.fill_rect(
+            (cx + rad - 2 + i) as usize,
+            (cy + rad - 2 + i) as usize,
+            3,
+            3,
+            color,
+        );
+    }
+}
+
+fn glyph_globe(c: &mut Canvas, r: Rect) {
+    let cx = r.x + r.w / 2;
+    let cy = r.y + r.h / 2;
+    let rad = r.w / 2;
+    c.fill_round_rect(
+        r.x as usize,
+        r.y as usize,
+        r.w as usize,
+        r.w as usize,
+        (r.w / 2) as usize,
+        theme::ACCENT,
+    );
+    c.fill_rect((cx - rad) as usize, cy as usize, (2 * rad) as usize, 2, theme::WHITE);
+    c.fill_rect(cx as usize, (cy - rad) as usize, 2, (2 * rad) as usize, theme::WHITE);
 }

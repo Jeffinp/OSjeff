@@ -61,6 +61,28 @@ impl Desktop {
         true
     }
 
+    /// Resolve a click inside the browser window: toolbar buttons (home /
+    /// reload / search) or, on the start page, the shortcut tiles.
+    pub(crate) fn browser_click(&mut self, rect: Rect, px: i32, py: i32) {
+        let ch = BrowserChrome::of(rect);
+        if ch.home.contains(px, py) {
+            self.browser.go_home();
+        } else if ch.reload.contains(px, py) {
+            self.browser.reload();
+        } else if ch.go.contains(px, py) {
+            self.browser.submit();
+        } else if self.browser.is_home() {
+            let (_logo, tiles) = browser_home_layout(ch.content);
+            for (i, t) in tiles.iter().enumerate() {
+                if t.contains(px, py) {
+                    self.browser
+                        .open(osjeff_core::browser::QUICK_LINKS[i].1.as_bytes());
+                    break;
+                }
+            }
+        }
+    }
+
     pub(crate) fn calc_input(&mut self, k: u8) {
         if k == 0x08 {
             self.calc.backspace();
@@ -237,6 +259,8 @@ impl Desktop {
                         && let Some(k) = calc_button_at(rect, cx, cy)
                     {
                         self.calc_input(k);
+                    } else if self.windows[w].kind == Kind::Browser {
+                        self.browser_click(rect, cx, cy);
                     }
                 }
                 scene = true;

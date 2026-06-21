@@ -10,7 +10,7 @@ use crate::{interrupts, io, ne2000};
 use alloc::vec;
 use alloc::vec::Vec;
 use embedded_tls::blocking::*;
-use smoltcp::iface::{Config, Interface, SocketSet, SocketHandle};
+use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
 use smoltcp::socket::{dns, tcp};
 use smoltcp::time::Instant;
@@ -125,7 +125,8 @@ impl Net {
     fn resolve(&mut self, host: &str) -> Option<IpAddress> {
         let query = {
             let s = self.sockets.get_mut::<dns::Socket>(self.dns);
-            s.start_query(self.iface.context(), host, DnsQueryType::A).ok()?
+            s.start_query(self.iface.context(), host, DnsQueryType::A)
+                .ok()?
         };
         let end = Self::deadline(5000);
         while interrupts::ticks() < end {
@@ -148,7 +149,8 @@ impl Net {
         let local_port = 49152 + (interrupts::ticks() as u16 & 0x3FFF);
         {
             let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
-            s.connect(self.iface.context(), (ip, port), local_port).ok()?;
+            s.connect(self.iface.context(), (ip, port), local_port)
+                .ok()?;
         }
         let end = Self::deadline(8000);
         while interrupts::ticks() < end {
@@ -199,7 +201,9 @@ impl Net {
         let local_port = 49152 + (interrupts::ticks() as u16 & 0x3FFF);
         {
             let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
-            if s.connect(self.iface.context(), (ip, port), local_port).is_err() {
+            if s.connect(self.iface.context(), (ip, port), local_port)
+                .is_err()
+            {
                 return false;
             }
         }

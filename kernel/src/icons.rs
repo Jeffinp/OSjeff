@@ -151,7 +151,14 @@ fn browser(c: &mut Canvas, x: usize, y: usize, size: usize) {
     // A couple of violet "continents".
     let l = (r / 2).max(2);
     c.fill_round_rect(cx - r + r / 4, cy - r / 2, l, l, l / 2, theme::ACCENT_2);
-    c.fill_round_rect(cx + r / 6, cy, (l * 3) / 4, (l * 3) / 4, l / 3, theme::ACCENT_2);
+    c.fill_round_rect(
+        cx + r / 6,
+        cy,
+        (l * 3) / 4,
+        (l * 3) / 4,
+        l / 3,
+        theme::ACCENT_2,
+    );
     // Equator + meridian in white.
     let t = (size / 16).max(1);
     c.fill_rect(cx - r, cy - t / 2, 2 * r, t, theme::WHITE);
