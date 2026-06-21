@@ -527,7 +527,14 @@ mod tests {
     #[test]
     fn parse_dhcp_rejects_other_mac() {
         let mut buf = [0u8; 600];
-        let n = craft_reply(&mut buf, OUR_MAC, 1, Ipv4([1, 2, 3, 4]), Ipv4([1, 2, 3, 1]), DHCP_ACK);
+        let n = craft_reply(
+            &mut buf,
+            OUR_MAC,
+            1,
+            Ipv4([1, 2, 3, 4]),
+            Ipv4([1, 2, 3, 1]),
+            DHCP_ACK,
+        );
         assert!(parse_dhcp(&buf[..n], Mac([0, 0, 0, 0, 0, 1])).is_none());
     }
 

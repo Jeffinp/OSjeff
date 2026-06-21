@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod anim;
+pub mod browser;
 pub mod calc;
 pub mod clipboard;
 pub mod editor;
@@ -20,6 +21,7 @@ pub mod terminal;
 pub mod window;
 
 pub use anim::Anim;
+pub use browser::Browser;
 pub use calc::Calc;
 pub use clipboard::Clipboard;
 pub use editor::Editor;
