@@ -15,10 +15,12 @@ mod interrupts;
 mod io;
 mod logo;
 mod ne2000;
+mod pci;
 mod power;
 mod ps2;
 mod rtc;
 mod sched;
+mod serial;
 mod sync;
 mod theme;
 
@@ -61,9 +63,17 @@ static HEAP: RacyCell<[u8; HEAP_SIZE]> = RacyCell::new([0; HEAP_SIZE]);
 static ALLOCATOR: allocator::LockedHeap = allocator::LockedHeap::new();
 
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
+    // Serial first: a text log on COM1 that survives even if the framebuffer is
+    // missing, so driver bring-up is observable without the screen.
+    serial::init();
+    serial_println!("OSjeff boot: kernel entry");
+
     let framebuffer = match boot_info.framebuffer.as_mut() {
         Some(fb) => fb,
-        None => halt(),
+        None => {
+            serial_println!("FATAL: bootloader provided no framebuffer");
+            halt()
+        }
     };
     let info = framebuffer.info();
     let n = framebuffer.buffer().len().min(MAX_BYTES);
@@ -78,6 +88,33 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ALLOCATOR.init(HEAP.get() as usize, HEAP_SIZE);
     }
     heap_smoke_test();
+
+    // Enumerate the PCI bus — groundwork for the virtio-gpu driver: locate the
+    // device and, when present, enable bus mastering so a later DMA-capable
+    // driver can use it. QEMU captures the log via `-serial file:...`.
+    serial_println!("OSjeff boot: enumerating PCI bus 0");
+    pci::for_each(|d| {
+        serial_println!(
+            "  pci {:02x}:{:02x}.{}  {:04x}:{:04x}",
+            d.bus,
+            d.slot,
+            d.func,
+            d.vendor,
+            d.device
+        );
+    });
+    match pci::find_virtio_gpu() {
+        Some(gpu) => {
+            gpu.enable_bus_master();
+            serial_println!(
+                "virtio-gpu present @ slot {} func {} bar0={:#010x} (accel path available)",
+                gpu.slot,
+                gpu.func,
+                gpu.bar(0)
+            );
+        }
+        None => serial_println!("virtio-gpu: absent — using the VBE framebuffer"),
+    }
 
     // Kernel scheduler: register the boot context as a thread and spawn a
     // couple of background workers that run concurrently with the GUI.
