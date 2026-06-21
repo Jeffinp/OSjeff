@@ -432,6 +432,13 @@ impl Desktop {
         r
     }
 
+    /// On-screen rect of the focused window, or `None` if none is focused. Lets
+    /// the steady-state loop repaint only this window on a content change (a
+    /// keystroke, a calc button) instead of blitting the whole framebuffer.
+    pub fn focused_box(&self) -> Option<Rect> {
+        self.focused().map(|w| self.window_box(w))
+    }
+
     /// A "dynamic" window is one the compositor must redraw every frame and
     /// keep OUT of the cached static layer: one that is opening/closing, or the
     /// one currently being dragged. Treating a drag like an animation lets the

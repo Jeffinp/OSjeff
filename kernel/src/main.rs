@@ -127,6 +127,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut static_valid = false;
     let mut last_sig = 0u32;
     let mut prev_damage = Rect::new(0, 0, 0, 0);
+    // Focused window rect from the previous steady frame, so a content change can
+    // also repaint the window that just lost focus (its title de-highlights).
+    let mut prev_focused: Option<Rect> = None;
 
     // Wall-clock animation speed, independent of how often the GUI thread is
     // scheduled (the timer preempts round-robin across all threads).
@@ -310,7 +313,27 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             if scene_dirty {
                 back.copy_from_slice(bg);
                 desk.render(back, info, time);
-                framebuffer.buffer_mut()[..n].copy_from_slice(back);
+                if was_anim {
+                    // Settle frame after an animation (and the first desktop
+                    // frame): the whole scene may differ, so blit it all.
+                    framebuffer.buffer_mut()[..n].copy_from_slice(back);
+                } else {
+                    // Steady content change (a keystroke, a calc button, a
+                    // focus/z-order switch): the only pixels that differ live in
+                    // the focused window, the one that just lost focus (its title
+                    // de-highlights), and the clock. Upload just those rects
+                    // instead of the whole ~8 MiB framebuffer.
+                    let mut up = |r: Rect| {
+                        blit_rect(framebuffer.buffer_mut(), back, info, r.x, r.y, r.w, r.h, n);
+                    };
+                    if let Some(fb_) = desk.focused_box() {
+                        up(fb_);
+                    }
+                    if let Some(pf) = prev_focused {
+                        up(pf);
+                    }
+                    up(desk.clock_rect());
+                }
                 {
                     let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
                     desk.draw_cursor_overlay(&mut c);
@@ -383,6 +406,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 }
                 prev_cursor = desk.cursor();
             }
+            prev_focused = desk.focused_box();
         }
         was_anim = any_anim;
 
