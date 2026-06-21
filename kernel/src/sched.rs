@@ -7,14 +7,23 @@
 //! cooperating. New threads are launched by fabricating an initial stack frame
 //! that the ISR epilogue + `iretq` "resume" into the entry function.
 
+use crate::sync::RacyCell;
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use x86_64::registers::segmentation::{Segment, CS, SS};
+use x86_64::registers::segmentation::{CS, SS, Segment};
 
 const STACK_SIZE: usize = 64 * 1024;
 const MAX_THREADS: usize = 8;
+
+/// Sentinel written to the lowest 8 bytes of every spawned stack. A stack
+/// overflow grows *downward* past the usable region and clobbers this word
+/// before running off the end of the heap allocation into unrelated data — so a
+/// mismatch on context switch means "this thread overflowed its stack" and is
+/// caught here instead of silently corrupting the heap (the worst failure mode:
+/// a wild write with no fault, surfacing as nondeterministic garbage later).
+const STACK_CANARY: u64 = 0xDEAD_C0DE_CAFE_F00D;
 
 /// 512-byte, 16-byte-aligned save area for `fxsave`/`fxrstor` (x87 + SSE state:
 /// xmm0..15, MXCSR, FPU control/status). One per thread so float/SSE registers
@@ -47,8 +56,8 @@ static TICKS: [AtomicU64; MAX_THREADS] = [const { AtomicU64::new(0) }; MAX_THREA
 struct Thread {
     name: &'static str,
     rsp: u64,
-    _stack: Box<[u8]>, // owns the stack (empty for the boot thread)
-    fpu: Box<FxArea>,  // x87/SSE save area, swapped on context switch
+    stack: Box<[u8]>, // owns the stack (empty for the boot thread)
+    fpu: Box<FxArea>, // x87/SSE save area, swapped on context switch
 }
 
 impl Thread {
@@ -57,6 +66,16 @@ impl Thread {
         // Box gives a stable, 16-byte-aligned address (FxArea is align(16)).
         &*self.fpu as *const FxArea as *mut u8
     }
+
+    /// `true` if this thread's stack canary is intact (or it has no canary, like
+    /// the boot thread). A `false` means the stack overflowed its bounds.
+    #[inline]
+    fn stack_intact(&self) -> bool {
+        match self.stack.first_chunk::<8>() {
+            Some(bytes) => u64::from_ne_bytes(*bytes) == STACK_CANARY,
+            None => true, // boot thread: no owned stack, nothing to check
+        }
+    }
 }
 
 struct Scheduler {
@@ -64,18 +83,18 @@ struct Scheduler {
     current: usize,
 }
 
-static mut SCHED: Option<Scheduler> = None;
+static SCHED: RacyCell<Option<Scheduler>> = RacyCell::new(None);
 
 /// Register the current (boot) context as thread 0. Run before interrupts.
 pub fn init() {
     let boot = Thread {
         name: "compositor",
         rsp: 0, // captured on the first preemption
-        _stack: Vec::new().into_boxed_slice(),
+        stack: Vec::new().into_boxed_slice(),
         fpu: FxArea::seeded(),
     };
     unsafe {
-        SCHED = Some(Scheduler {
+        *SCHED.get() = Some(Scheduler {
             threads: vec![boot],
             current: 0,
         });
@@ -87,7 +106,9 @@ pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
     let s = scheduler();
     assert!(s.threads.len() < MAX_THREADS, "too many threads");
 
-    let stack = vec![0u8; STACK_SIZE].into_boxed_slice();
+    let mut stack = vec![0u8; STACK_SIZE].into_boxed_slice();
+    // Plant the overflow tripwire in the lowest 8 bytes (see `STACK_CANARY`).
+    stack[..8].copy_from_slice(&STACK_CANARY.to_ne_bytes());
     let top = stack.as_ptr() as u64 + STACK_SIZE as u64;
 
     // Running stack pointer once the thread is live (≡ 8 mod 16, as if just
@@ -117,7 +138,7 @@ pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
     s.threads.push(Thread {
         name,
         rsp,
-        _stack: stack,
+        stack,
         fpu: FxArea::seeded(),
     });
 }
@@ -126,11 +147,17 @@ pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
 /// thread that just ran, advance round-robin, and return the next thread's
 /// `rsp`. Touches only scheduler state (no allocation, no other locks).
 pub extern "C" fn switch_current(rsp: u64) -> u64 {
-    let s = match unsafe { SCHED.as_mut() } {
+    let s = match unsafe { (*SCHED.get()).as_mut() } {
         Some(s) => s,
         None => return rsp,
     };
     let cur = s.current;
+
+    // Catch a stack overflow the instant the offending thread is preempted,
+    // before its wild writes corrupt the heap and detonate elsewhere.
+    if !s.threads[cur].stack_intact() {
+        panic!("stack overflow in thread '{}'", s.threads[cur].name);
+    }
 
     // Save the outgoing thread's x87/SSE state. This must run before any xmm
     // use: the path from ISR entry to here (GP-reg pushes, integer scheduler
@@ -171,11 +198,11 @@ pub extern "C" fn switch_current(rsp: u64) -> u64 {
 // ---- introspection for the Task Manager ----
 
 pub fn thread_count() -> usize {
-    unsafe { SCHED.as_ref() }.map_or(0, |s| s.threads.len())
+    unsafe { (*SCHED.get()).as_ref() }.map_or(0, |s| s.threads.len())
 }
 
 pub fn thread_name(i: usize) -> &'static str {
-    unsafe { SCHED.as_ref() }
+    unsafe { (*SCHED.get()).as_ref() }
         .and_then(|s| s.threads.get(i))
         .map_or("", |t| t.name)
 }
@@ -189,5 +216,5 @@ pub fn thread_ticks(i: usize) -> u64 {
 }
 
 fn scheduler() -> &'static mut Scheduler {
-    unsafe { SCHED.as_mut().expect("scheduler not initialized") }
+    unsafe { (*SCHED.get()).as_mut().expect("scheduler not initialized") }
 }
