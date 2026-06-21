@@ -7,6 +7,16 @@ edition = "2024"
 bootloader_api = "0.11"
 osjeff_core = { path = "../osjeff_core" }
 x86_64 = "0.15"
+# no_std TCP/IP stack layered over our NE2000 driver (the browser's networking).
+smoltcp = { version = "0.12", default-features = false, features = [
+    "alloc",
+    "medium-ethernet",
+    "proto-ipv4",
+    "proto-dhcpv4",
+    "socket-tcp",
+    "socket-dhcpv4",
+    "socket-dns",
+] }
 
 # The kernel binary is bare-metal: never built or run as a host test target.
 [[bin]]
