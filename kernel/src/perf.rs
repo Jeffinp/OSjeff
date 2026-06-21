@@ -76,15 +76,20 @@ impl Perf {
         c.fill_round_rect(x, y, HUD_W as usize, HUD_H as usize, 8, theme::DOCK);
 
         let mut line = [0u8; 32];
-        // "FPS 60  4.2ms"
-        let mut n = put(&mut line, 0, b"FPS ");
-        n = put_u32(&mut line, n, self.fps);
-        n = put(&mut line, n, b"  ");
-        n = put_ms(&mut line, n, self.frame_us);
+        // "0.2ms  ~5000fps" — frame time is the real smoothness metric; the
+        // "possible fps" (1000/ms) shows the headroom even when idle.
+        let possible = 1_000_000u64.checked_div(self.frame_us).unwrap_or(0).min(9999) as u32;
+        let mut n = put_ms(&mut line, 0, self.frame_us);
+        n = put(&mut line, n, b"  ~");
+        n = put_u32(&mut line, n, possible);
+        n = put(&mut line, n, b"fps");
         text(c, x + 10, y + 8, &line[..n], theme::ACCENT);
 
-        // "max 9.1ms"
-        let mut n = put(&mut line, 0, b"max ");
+        // "draws/s 60  max 0.4ms" — how often we actually redraw (= activity,
+        // low when idle by design) and the worst frame this second.
+        let mut n = put(&mut line, 0, b"draws/s ");
+        n = put_u32(&mut line, n, self.fps);
+        n = put(&mut line, n, b" ");
         n = put_ms(&mut line, n, self.max_us);
         text(c, x + 10, y + 24, &line[..n], theme::HEADER_TEXT);
 

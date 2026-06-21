@@ -25,6 +25,7 @@ mod serial;
 mod sync;
 mod theme;
 mod virtio;
+mod virtio_gpu;
 
 use bootloader_api::config::{BootloaderConfig, Mapping};
 use bootloader_api::info::FrameBufferInfo;
@@ -155,20 +156,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 None => serial_println!("  virtio caps: none (transitional device?)"),
             }
 
-            // Reset the device and negotiate features (virtio 1.0 handshake,
-            // MMIO only). Reaching FEATURES_OK proves the transport works end to
-            // end; the virtqueues and DRIVER_OK come next.
+            // Bring up the full virtio-gpu driver: negotiate, set up the control
+            // queue (DMA), flip DRIVER_OK, and query the display geometry — which
+            // exercises the entire command path end to end.
             if let (Some(off), Some(caps)) = (phys_offset, virtio::discover(&gpu)) {
-                let addr = virtio::bar_base(&gpu, caps.common.bar) + off + caps.common.offset as u64;
-                let common = unsafe { virtio::Common::new(addr) };
-                serial_println!(
-                    "  common_cfg @ {:#x}: queues={} status={:#x}",
-                    addr,
-                    common.num_queues(),
-                    common.status()
-                );
-                let ok = virtio::negotiate(&common);
-                serial_println!("  virtio negotiate -> {} (status {:#x})", ok, common.status());
+                match virtio_gpu::GpuDevice::init(&gpu, caps, off) {
+                    Some(mut dev) => {
+                        serial_println!("virtio-gpu: control queue up, DRIVER_OK");
+                        match dev.get_display_info() {
+                            Some((w, h)) => {
+                                serial_println!("virtio-gpu display 0: {}x{}", w, h)
+                            }
+                            None => serial_println!("virtio-gpu: get_display_info failed"),
+                        }
+                    }
+                    None => serial_println!("virtio-gpu: init failed"),
+                }
             }
         }
         None => serial_println!("virtio-gpu: absent — using the VBE framebuffer"),

@@ -7,6 +7,22 @@
 //! virtio-gpu driver then maps those MMIO windows and drives the device.
 
 use crate::pci::PciDevice;
+use x86_64::VirtAddr;
+use x86_64::registers::control::Cr3;
+use x86_64::structures::paging::{OffsetPageTable, PageTable, Translate};
+
+/// Translate a kernel virtual address to its physical address by walking the
+/// active page tables (reachable through `phys_offset`). Needed to hand the
+/// virtio device the physical addresses of DMA buffers.
+pub fn virt_to_phys(virt: u64, phys_offset: u64) -> Option<u64> {
+    let (l4_frame, _) = Cr3::read();
+    let l4_virt = phys_offset + l4_frame.start_address().as_u64();
+    let l4: &mut PageTable = unsafe { &mut *(l4_virt as *mut PageTable) };
+    let mapper = unsafe { OffsetPageTable::new(l4, VirtAddr::new(phys_offset)) };
+    mapper
+        .translate_addr(VirtAddr::new(virt))
+        .map(|p| p.as_u64())
+}
 
 const VIRTIO_PCI_CAP: u8 = 0x09; // vendor-specific cap carrying virtio config
 
@@ -80,12 +96,50 @@ impl Common {
         unsafe { core::ptr::read_volatile(self.base.add(o) as *const u16) }
     }
     #[inline]
+    unsafe fn w16(&self, o: usize, v: u16) {
+        unsafe { core::ptr::write_volatile(self.base.add(o) as *mut u16, v) }
+    }
+    #[inline]
     unsafe fn r32(&self, o: usize) -> u32 {
         unsafe { core::ptr::read_volatile(self.base.add(o) as *const u32) }
     }
     #[inline]
     unsafe fn w32(&self, o: usize, v: u32) {
         unsafe { core::ptr::write_volatile(self.base.add(o) as *mut u32, v) }
+    }
+    #[inline]
+    unsafe fn w64(&self, o: usize, v: u64) {
+        // Common-config 64-bit fields are written as two 32-bit halves.
+        unsafe {
+            self.w32(o, v as u32);
+            self.w32(o + 4, (v >> 32) as u32);
+        }
+    }
+
+    // ---- virtqueue setup (after `queue_select`) ----
+    pub fn select_queue(&self, q: u16) {
+        unsafe { self.w16(0x16, q) }
+    }
+    pub fn queue_size(&self) -> u16 {
+        unsafe { self.r16(0x18) }
+    }
+    pub fn set_queue_size(&self, n: u16) {
+        unsafe { self.w16(0x18, n) }
+    }
+    pub fn set_queue_desc(&self, phys: u64) {
+        unsafe { self.w64(0x20, phys) }
+    }
+    pub fn set_queue_driver(&self, phys: u64) {
+        unsafe { self.w64(0x28, phys) }
+    }
+    pub fn set_queue_device(&self, phys: u64) {
+        unsafe { self.w64(0x30, phys) }
+    }
+    pub fn enable_queue(&self) {
+        unsafe { self.w16(0x1C, 1) }
+    }
+    pub fn queue_notify_off(&self) -> u16 {
+        unsafe { self.r16(0x1E) }
     }
 
     pub fn status(&self) -> u8 {
@@ -94,10 +148,6 @@ impl Common {
     pub fn set_status(&self, s: u8) {
         unsafe { self.w8(0x14, s) }
     }
-    pub fn num_queues(&self) -> u16 {
-        unsafe { self.r16(0x12) }
-    }
-
     /// Read a 32-bit window of the device feature bits (`sel` = 0 -> bits 0..31,
     /// 1 -> bits 32..63).
     pub fn device_features(&self, sel: u32) -> u32 {
