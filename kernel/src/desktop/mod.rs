@@ -481,14 +481,23 @@ impl Desktop {
     /// rectangle each frame, instead of recomposing the whole desktop + an 8 MiB
     /// blit on every mouse step.
     pub(crate) fn is_dynamic(&self, w: usize) -> bool {
-        self.windows[w].anim.is_some() || self.drag.as_ref().is_some_and(|d| d.win == w)
+        self.windows[w].anim.is_some()
+            || self.drag.as_ref().is_some_and(|d| d.win == w)
+            // A visible WASM app renders a fresh frame every tick (it may animate
+            // on its own clock), so it is kept out of the cached static layer and
+            // repainted through the per-frame damage path like an animation.
+            || (self.windows[w].visible && self.windows[w].kind == Kind::WasmApp)
     }
 
-    /// True while any window is opening, closing, or being dragged — i.e. the
-    /// compositor should run its per-frame damage path rather than the steady one.
+    /// True while any window is opening, closing, being dragged, or is a live
+    /// WASM app — i.e. the compositor should run its per-frame damage path so the
+    /// app gets continuous frames, rather than the steady (repaint-on-change) one.
     pub fn has_animation(&self) -> bool {
         self.drag.is_some()
-            || (0..WIN_COUNT).any(|w| self.windows[w].visible && self.windows[w].anim.is_some())
+            || (0..WIN_COUNT).any(|w| {
+                self.windows[w].visible
+                    && (self.windows[w].anim.is_some() || self.windows[w].kind == Kind::WasmApp)
+            })
     }
 
     // ---- browser networking hand-off (driven by the kernel main loop) ----
