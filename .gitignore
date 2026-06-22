@@ -1,5 +1,7 @@
 # Rust build output
 /target/
+# wasm app crates build into their own (detached) target dirs
+wasm-apps/*/target/
 
 # Generated bootable images
 *.img

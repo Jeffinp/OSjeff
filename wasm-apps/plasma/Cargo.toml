@@ -1,0 +1,21 @@
+# A native OSjeff app written in Rust and compiled to `wasm32-unknown-unknown`.
+# This is the "download source, compile to wasm, equip the OS" model: the kernel
+# builds this crate at build time (see kernel/build.rs) and runs the resulting
+# `.wasm` through its WebAssembly app engine — no foreign OS, no emulation.
+#
+# `[workspace]` (empty) detaches it from the root workspace so it has its own
+# target dir and lock, and the host build never tries to compile it natively.
+[package]
+name = "plasma"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+
+[workspace]

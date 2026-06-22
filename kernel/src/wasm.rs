@@ -120,6 +120,37 @@ fn host_text(st: &HostState, s: &str, x: i32, y: i32, color: i32, scale: i32) {
     }
 }
 
+/// `host.blit`: copy a `w*h` RGBA image from guest memory (at offset `off`) to
+/// the surface at content-local `(dx, dy)`, translated by the surface origin and
+/// clipped to the content box. The per-frame primitive for framebuffer apps
+/// (a game pushes its rendered frame this way).
+fn host_blit(caller: &Caller<'_, HostState>, off: i32, w: i32, h: i32, dx: i32, dy: i32) {
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    let st = caller.data();
+    let (ox, oy, bx, by, bw, bh) = (st.ox, st.oy, st.ox, st.oy, st.cw, st.ch);
+    let Some(mut c) = st.canvas() else { return };
+    let need = (w as i64) * (h as i64) * 4;
+    let Some(px) = guest_bytes(caller, off, need.min(i32::MAX as i64) as i32) else {
+        return;
+    };
+    for row in 0..h {
+        let sy = oy + dy + row;
+        if sy < by || sy >= by + bh {
+            continue;
+        }
+        for col in 0..w {
+            let sx = ox + dx + col;
+            if sx < bx || sx >= bx + bw {
+                continue;
+            }
+            let o = ((row * w + col) * 4) as usize;
+            c.put(sx as usize, sy as usize, Color::rgb(px[o], px[o + 1], px[o + 2]));
+        }
+    }
+}
+
 /// Register the OS ABI on `linker`. Shared by one-shot runs and the persistent
 /// windowed app so every guest sees the same host surface.
 fn install_abi(linker: &mut Linker<HostState>) -> Result<(), &'static str> {
@@ -160,6 +191,16 @@ fn install_abi(linker: &mut Linker<HostState>) -> Result<(), &'static str> {
             },
         )
         .map_err(|_| "link host.draw_text")?;
+    // host.blit(ptr, w, h, dx, dy): copy an RGBA frame from guest memory.
+    linker
+        .func_wrap(
+            "host",
+            "blit",
+            |caller: Caller<'_, HostState>, off: i32, w: i32, h: i32, dx: i32, dy: i32| {
+                host_blit(&caller, off, w, h, dx, dy);
+            },
+        )
+        .map_err(|_| "link host.blit")?;
     // host.time_ms(): milliseconds since boot. The PIT ticks at 250 Hz, so each
     // tick is 4 ms. Lets a guest animate or time its own logic.
     linker
@@ -274,14 +315,28 @@ pub fn draw_app(buf: &mut [u8], info: FrameBufferInfo, ox: i32, oy: i32, cw: i32
     app.store.data_mut().info = None;
 }
 
-/// Borrow a UTF-8 string of `len` bytes at offset `ptr` from the guest's
-/// exported `mem`. `None` on missing memory, out-of-bounds range, or non-UTF-8.
-fn guest_str<'a>(caller: &'a Caller<'_, HostState>, ptr: i32, len: i32) -> Option<&'a str> {
-    let Some(Extern::Memory(mem)) = caller.get_export("mem") else {
-        return None;
-    };
+/// The guest's exported linear memory. WAT modules here export it as `mem`;
+/// Rust/clang-compiled modules export it as `memory` — accept either.
+fn guest_mem(caller: &Caller<'_, HostState>) -> Option<wasmi::Memory> {
+    for name in ["memory", "mem"] {
+        if let Some(Extern::Memory(m)) = caller.get_export(name) {
+            return Some(m);
+        }
+    }
+    None
+}
+
+/// Borrow `len` raw bytes at offset `ptr` from the guest's linear memory.
+/// `None` on missing memory or an out-of-bounds range.
+fn guest_bytes<'a>(caller: &'a Caller<'_, HostState>, ptr: i32, len: i32) -> Option<&'a [u8]> {
+    let mem = guest_mem(caller)?;
     let data = mem.data(caller);
-    let (ptr, len) = (ptr as usize, len as usize);
-    let bytes = data.get(ptr..ptr.saturating_add(len))?;
-    core::str::from_utf8(bytes).ok()
+    let (ptr, len) = (ptr as usize, len.max(0) as usize);
+    data.get(ptr..ptr.saturating_add(len))
+}
+
+/// Borrow a UTF-8 string of `len` bytes at offset `ptr` from guest memory.
+/// `None` on missing memory, out-of-bounds range, or non-UTF-8.
+fn guest_str<'a>(caller: &'a Caller<'_, HostState>, ptr: i32, len: i32) -> Option<&'a str> {
+    core::str::from_utf8(guest_bytes(caller, ptr, len)?).ok()
 }
