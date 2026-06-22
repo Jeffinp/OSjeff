@@ -31,10 +31,10 @@ fn main() {
     );
     emit_wat(&out, "demo.wasm", &console);
 
-    // 2) Windowed app: compile the `plasma` crate to wasm and embed it. It
-    //    computes an animated framebuffer and pushes it with `host.blit`, the way
-    //    a game renders — proving the Rust→wasm→native-app pipeline end to end.
-    build_wasm_app(&out, "plasma");
+    // 2) Windowed app: compile the `snake` game crate to wasm and embed it — a
+    //    real-time, interactive game running natively through the WASM engine.
+    //    (`wasm-apps/plasma` is a second example app, kept for the blit demo.)
+    build_wasm_app(&out, "snake");
 
     println!("cargo:rerun-if-changed=build.rs");
 }
@@ -57,6 +57,15 @@ fn build_wasm_app(out: &Path, crate_name: &str) {
 
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let status = Command::new(cargo)
+        // Build the app as a plain release, isolated from how the kernel itself
+        // is being compiled. Without this, running `cargo clippy` on the kernel
+        // leaks its clippy wrapper + `-D warnings` into this nested build and the
+        // app's own lints would fail the parent lint.
+        .env_remove("RUSTC_WORKSPACE_WRAPPER")
+        .env_remove("RUSTC_WRAPPER")
+        .env_remove("RUSTFLAGS")
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env_remove("CARGO_BUILD_RUSTFLAGS")
         .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
         .arg("--manifest-path")
         .arg(&manifest)

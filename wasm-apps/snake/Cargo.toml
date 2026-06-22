@@ -1,0 +1,17 @@
+# A playable game written in Rust, compiled to wasm32 and equipped as a native
+# OSjeff app (see kernel/build.rs). Proves the WASM platform hosts a real-time,
+# interactive game — the "games run natively" goal — no foreign OS, no emulation.
+[package]
+name = "snake"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+
+[workspace]
