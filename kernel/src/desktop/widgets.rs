@@ -290,7 +290,12 @@ pub(crate) fn scratch_slice() -> &'static mut [u8] {
 }
 
 /// Copy the rectangle `r` from `src` into `dst` (identical framebuffer layout).
-pub(crate) fn copy_region(dst: &mut [u8], src: &[u8], info: bootloader_api::info::FrameBufferInfo, r: Rect) {
+pub(crate) fn copy_region(
+    dst: &mut [u8],
+    src: &[u8],
+    info: bootloader_api::info::FrameBufferInfo,
+    r: Rect,
+) {
     let bpp = info.bytes_per_pixel;
     let stride = info.stride;
     let x = r.x.max(0) as usize;
