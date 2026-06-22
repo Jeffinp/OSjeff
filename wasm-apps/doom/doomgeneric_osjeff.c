@@ -31,7 +31,7 @@ void DG_DrawFrame(void) {
         rgba[i * 4 + 2] = (unsigned char)(p);
         rgba[i * 4 + 3] = 255;
     }
-    host_blit(rgba, DGW, DGH, 8, 56);
+    host_blit(rgba, DGW, DGH, 8, 8);
 }
 
 void DG_SleepMs(uint32_t ms) { (void)ms; }

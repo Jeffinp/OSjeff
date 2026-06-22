@@ -144,28 +144,30 @@ fn host_blit(caller: &Caller<'_, HostState>, off: i32, w: i32, h: i32, dx: i32, 
         return;
     }
     let st = caller.data();
-    let (ox, oy, bx, by, bw, bh) = (st.ox, st.oy, st.ox, st.oy, st.cw, st.ch);
+    let (ox, oy, cw, ch) = (st.ox, st.oy, st.cw, st.ch);
     let Some(mut c) = st.canvas() else { return };
     let need = (w as i64) * (h as i64) * 4;
     let Some(px) = guest_bytes(caller, off, need.min(i32::MAX as i64) as i32) else {
         return;
     };
+    // Integer nearest-neighbor upscale to fill the content box starting at
+    // `(dx, dy)`, aspect-preserved and centered horizontally — so a small guest
+    // framebuffer (DOOM's 320×200) fills the window instead of sitting tiny in a
+    // corner. `scale == 1` reproduces a plain 1:1 blit.
+    let avail_w = (cw - dx).max(1);
+    let avail_h = (ch - dy).max(1);
+    let scale = (avail_w / w).min(avail_h / h).max(1);
+    let x_off = dx + (avail_w - w * scale).max(0) / 2;
+    let s = scale as usize;
+    // Each source pixel becomes a scale×scale block. The image is scaled to fit
+    // inside the content box, so the blocks never exceed it; `fill_rect` (which
+    // clips to the framebuffer) draws each block on the fast 32-bit path.
     for row in 0..h {
-        let sy = oy + dy + row;
-        if sy < by || sy >= by + bh {
-            continue;
-        }
+        let py0 = (oy + dy + row * scale) as usize;
         for col in 0..w {
-            let sx = ox + dx + col;
-            if sx < bx || sx >= bx + bw {
-                continue;
-            }
             let o = ((row * w + col) * 4) as usize;
-            c.put(
-                sx as usize,
-                sy as usize,
-                Color::rgb(px[o], px[o + 1], px[o + 2]),
-            );
+            let color = Color::rgb(px[o], px[o + 1], px[o + 2]);
+            c.fill_rect((ox + x_off + col * scale) as usize, py0, s, s, color);
         }
     }
 }
