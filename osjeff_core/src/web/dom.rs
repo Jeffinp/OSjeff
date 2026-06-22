@@ -342,7 +342,6 @@ fn decode_text(bytes: &[u8]) -> String {
     out
 }
 
-
 #[cfg(test)]
 mod html_tests {
     use super::*;

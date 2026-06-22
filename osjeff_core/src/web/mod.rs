@@ -71,4 +71,3 @@ pub fn parse_color(s: &str) -> Option<Rgb> {
         _ => return None,
     })
 }
-

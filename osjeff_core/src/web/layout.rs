@@ -1,9 +1,9 @@
 //! Block layout with inline text flow, producing the display list.
 
+use super::Rgb;
 use super::css::{Stylesheet, parse_css};
 use super::dom::{Element, Node, parse_html};
 use super::style::{Align, Computed, Disp, UA_CSS, compute};
-use super::Rgb;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -217,31 +217,34 @@ fn flush_inline(
     let mut line: Vec<&Word> = Vec::new();
     let mut line_w = 0;
     let mut max_scale = 1u8;
-    let flush_line =
-        |line: &mut Vec<&Word>, line_w: &mut i32, max_scale: &mut u8, y: &mut i32, p: &mut Painter| {
-            if line.is_empty() {
-                return;
-            }
-            let mut lx = x;
-            if align == Align::Center && *line_w < width {
-                lx += (width - *line_w) / 2;
-            }
-            for w in line.iter() {
-                p.cmds.push(Cmd::Text {
-                    x: lx,
-                    y: *y,
-                    text: w.text.clone(),
-                    color: w.color,
-                    scale: w.scale,
-                    bold: w.bold,
-                });
-                lx += char_w(w.scale) * w.text.chars().count() as i32 + char_w(w.scale);
-            }
-            *y += line_h(*max_scale);
-            line.clear();
-            *line_w = 0;
-            *max_scale = 1;
-        };
+    let flush_line = |line: &mut Vec<&Word>,
+                      line_w: &mut i32,
+                      max_scale: &mut u8,
+                      y: &mut i32,
+                      p: &mut Painter| {
+        if line.is_empty() {
+            return;
+        }
+        let mut lx = x;
+        if align == Align::Center && *line_w < width {
+            lx += (width - *line_w) / 2;
+        }
+        for w in line.iter() {
+            p.cmds.push(Cmd::Text {
+                x: lx,
+                y: *y,
+                text: w.text.clone(),
+                color: w.color,
+                scale: w.scale,
+                bold: w.bold,
+            });
+            lx += char_w(w.scale) * w.text.chars().count() as i32 + char_w(w.scale);
+        }
+        *y += line_h(*max_scale);
+        line.clear();
+        *line_w = 0;
+        *max_scale = 1;
+    };
 
     for w in words.iter() {
         if w.text == "\n" {
@@ -261,7 +264,6 @@ fn flush_inline(
     words.clear();
     y
 }
-
 
 #[cfg(test)]
 mod layout_tests {
@@ -343,4 +345,3 @@ mod layout_tests {
         assert!(link_blue);
     }
 }
-

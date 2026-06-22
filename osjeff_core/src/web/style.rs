@@ -108,7 +108,10 @@ fn matched_decls<'a>(el: &Element, sheet: &'a Stylesheet) -> Vec<&'a Decl> {
         })
         .collect();
     rules.sort_by_key(|(sp, _)| *sp);
-    rules.into_iter().flat_map(|(_, r)| r.decls.iter()).collect()
+    rules
+        .into_iter()
+        .flat_map(|(_, r)| r.decls.iter())
+        .collect()
 }
 
 /// Resolve the computed style for `el` given its inherited parent style.
@@ -183,4 +186,3 @@ pub(crate) fn compute(el: &Element, sheet: &Stylesheet, parent: &Computed) -> Co
     }
     c
 }
-

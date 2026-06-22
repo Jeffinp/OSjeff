@@ -4,7 +4,7 @@
 //! Pure and allocation-free (fixed buffers), so the whole parser and editing
 //! model is host-testable. The kernel supplies only the networking: it pulls a
 //! pending request out with [`Browser::take_request`], fetches the bytes, and
-//! feeds the raw HTTP response back via [`Browser::load_response`].
+//! fetches the bytes; the kernel renders them with the `web` engine.
 
 use crate::Key;
 
@@ -12,11 +12,6 @@ use crate::Key;
 pub const URL_CAP: usize = 220;
 /// Max host length.
 pub const HOST_CAP: usize = 80;
-/// Extracted, word-wrapped page text capacity.
-pub const CONTENT_CAP: usize = 28 * 1024;
-/// Wrap width in characters for the rendered text (matched to the browser
-/// window's content width at the kernel's 2x font scale).
-pub const COLS: usize = 70;
 
 /// Where a fetch stands, surfaced in the UI.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -307,46 +302,6 @@ fn dechunk(body: &[u8]) -> alloc::vec::Vec<u8> {
     out
 }
 
-/// True if `tag` (lowercased element name) introduces or ends a block whose
-/// boundary should become a line break in the extracted text.
-fn is_break_tag(tag: &[u8]) -> bool {
-    const BREAKS: [&[u8]; 14] = [
-        b"br",
-        b"/p",
-        b"/div",
-        b"/h1",
-        b"/h2",
-        b"/h3",
-        b"/h4",
-        b"/li",
-        b"/tr",
-        b"/ul",
-        b"/ol",
-        b"/table",
-        b"/article",
-        b"hr",
-    ];
-    BREAKS.contains(&tag)
-}
-
-/// Lowercase element name of a tag body (the bytes between `<` and `>`),
-/// e.g. `"P class=x"` → `b"p"`, `"/DIV"` → `b"/div"`. Written into `buf`.
-fn tag_name<'a>(inner: &[u8], buf: &'a mut [u8; 12]) -> &'a [u8] {
-    let mut n = 0;
-    for &c in inner {
-        if c == b' ' || c == b'\t' || c == b'\n' || c == b'>' {
-            break;
-        }
-        if n < buf.len() {
-            buf[n] = c.to_ascii_lowercase();
-            n += 1;
-        } else {
-            break;
-        }
-    }
-    &buf[..n]
-}
-
 /// Fold a Unicode code point to a single printable ASCII byte for our bitmap
 /// font (which only has ASCII). Accented Latin letters collapse to their base
 /// letter; a few punctuation marks map to ASCII look-alikes. Returns `None` for
@@ -431,82 +386,6 @@ fn parse_radix(digits: &[u8], radix: u32) -> Option<u32> {
 /// Strips tags and `<script>`/`<style>` bodies, decodes common entities,
 /// collapses runs of whitespace, and inserts line breaks at block boundaries.
 /// Returns the number of bytes written.
-pub fn html_to_text(html: &[u8], out: &mut [u8]) -> usize {
-    let mut w = Wrapper::new(out);
-    let mut i = 0;
-    while i < html.len() {
-        let c = html[i];
-        if c == b'<' {
-            // Find the tag's closing '>'.
-            let start = i + 1;
-            let mut j = start;
-            while j < html.len() && html[j] != b'>' {
-                j += 1;
-            }
-            let inner = &html[start..j.min(html.len())];
-            let mut nb = [0u8; 12];
-            let name = tag_name(inner, &mut nb);
-
-            // Skip the entire body of <script> / <style>.
-            if name == b"script" || name == b"style" {
-                let close: &[u8] = if name == b"script" {
-                    b"</script"
-                } else {
-                    b"</style"
-                };
-                if let Some(rel) = find(&html[j..], close) {
-                    i = j + rel;
-                    // advance past this close tag's '>'
-                    while i < html.len() && html[i] != b'>' {
-                        i += 1;
-                    }
-                    i += 1;
-                    continue;
-                } else {
-                    break;
-                }
-            }
-
-            if is_break_tag(name) {
-                w.newline();
-            } else {
-                w.space();
-            }
-            i = j + 1;
-        } else if c == b'&' {
-            // Entity: read up to ';' (bounded).
-            let mut j = i + 1;
-            while j < html.len() && j < i + 12 && html[j] != b';' {
-                j += 1;
-            }
-            if j < html.len()
-                && html[j] == b';'
-                && let Some(b) = decode_entity(&html[i + 1..j])
-            {
-                w.push(b);
-                i = j + 1;
-                continue;
-            }
-            w.push(b'&');
-            i += 1;
-        } else if c == b'\n' || c == b'\r' || c == b'\t' {
-            w.space();
-            i += 1;
-        } else if c >= 0x80 {
-            // Raw UTF-8: decode and fold to ASCII (the font has no accents).
-            let (cp, len) = decode_utf8(&html[i..]);
-            if let Some(b) = fold_ascii(cp) {
-                w.push(b);
-            }
-            i += len;
-        } else {
-            w.push(c);
-            i += 1;
-        }
-    }
-    w.len()
-}
-
 /// Decode the first UTF-8 scalar in `bytes`, returning its code point and the
 /// number of bytes consumed. Malformed input yields `(0, 1)` so the caller
 /// skips one byte and makes progress.
@@ -532,105 +411,21 @@ pub fn decode_utf8(bytes: &[u8]) -> (u32, usize) {
     (cp, len)
 }
 
-/// Greedy word-wrapper that writes into a fixed buffer, collapsing whitespace
-/// and breaking lines at word boundaries no wider than [`COLS`]. Words are
-/// buffered until a separator so a break can be decided before emitting them.
-struct Wrapper<'a> {
-    out: &'a mut [u8],
-    len: usize,
-    col: usize,
-    word: [u8; COLS],
-    wlen: usize,
-}
+// ---- the address-bar model ----
 
-impl<'a> Wrapper<'a> {
-    fn new(out: &'a mut [u8]) -> Self {
-        Self {
-            out,
-            len: 0,
-            col: 0,
-            word: [0; COLS],
-            wlen: 0,
-        }
-    }
-
-    fn raw(&mut self, b: u8) {
-        if self.len < self.out.len() {
-            self.out[self.len] = b;
-            self.len += 1;
-        }
-    }
-
-    /// Emit the buffered word, wrapping to a new line first if it would not fit.
-    fn flush_word(&mut self) {
-        if self.wlen == 0 {
-            return;
-        }
-        // A leading space costs one column when continuing a line.
-        let needs_space = self.col > 0;
-        let cost = self.wlen + needs_space as usize;
-        if needs_space && self.col + cost > COLS {
-            self.raw(b'\n');
-            self.col = 0;
-        } else if needs_space {
-            self.raw(b' ');
-            self.col += 1;
-        }
-        for i in 0..self.wlen {
-            self.raw(self.word[i]);
-        }
-        self.col += self.wlen;
-        self.wlen = 0;
-    }
-
-    fn push(&mut self, b: u8) {
-        if b == b' ' {
-            self.space();
-            return;
-        }
-        if self.wlen == self.word.len() {
-            // Word longer than a full line: hard-break it onto its own line.
-            self.flush_word();
-            self.raw(b'\n');
-            self.col = 0;
-        }
-        self.word[self.wlen] = b;
-        self.wlen += 1;
-    }
-
-    fn space(&mut self) {
-        self.flush_word();
-    }
-
-    fn newline(&mut self) {
-        self.flush_word();
-        self.raw(b'\n');
-        self.col = 0;
-    }
-
-    fn len(&mut self) -> usize {
-        self.flush_word();
-        self.len
-    }
-}
-
-// ---- the address-bar + content model ----
-
-/// The browser app's editable address bar plus the rendered page text and
-/// scroll position. The kernel drives networking via [`take_request`] /
-/// [`load_response`].
+/// The browser app's editable address bar and navigation state. The rendered
+/// page itself is produced by the `web` engine and owned by the kernel; this
+/// only tracks the URL input, status, and start-page flag. The kernel drives
+/// networking via [`take_request`].
 pub struct Browser {
     url: [u8; URL_CAP],
     url_len: usize,
     caret: usize,
-    content: [u8; CONTENT_CAP],
-    content_len: usize,
     status: Status,
     pending: bool,
     nav: [u8; URL_CAP],
     nav_len: usize,
-    home: bool,        // showing the native start page (no page loaded)
-    pub scroll: usize, // first visible text line
+    home: bool, // showing the native start page (no page loaded)
 }
 
 /// Quick-link shortcuts shown on the start page (label, URL). All chosen to
@@ -654,14 +449,11 @@ impl Browser {
             url: [0; URL_CAP],
             url_len: 0,
             caret: 0,
-            content: [0; CONTENT_CAP],
-            content_len: 0,
             status: Status::Idle,
             pending: false,
             nav: [0; URL_CAP],
             nav_len: 0,
             home: true,
-            scroll: 0,
         };
         b.set_url(b"");
         b
@@ -672,12 +464,10 @@ impl Browser {
         self.home
     }
 
-    /// Return to the start page, clearing the loaded content and address bar.
+    /// Return to the start page, clearing the address bar.
     pub fn go_home(&mut self) {
         self.home = true;
         self.status = Status::Idle;
-        self.content_len = 0;
-        self.scroll = 0;
         self.set_url(b"");
     }
 
@@ -708,27 +498,6 @@ impl Browser {
     }
     pub fn status(&self) -> Status {
         self.status
-    }
-    pub fn content(&self) -> &[u8] {
-        &self.content[..self.content_len]
-    }
-
-    /// Number of wrapped text lines in the current content.
-    pub fn line_count(&self) -> usize {
-        if self.content_len == 0 {
-            return 0;
-        }
-        1 + self.content[..self.content_len]
-            .iter()
-            .filter(|&&c| c == b'\n')
-            .count()
-    }
-
-    /// The `idx`-th wrapped line (without the trailing newline), or `None`.
-    pub fn line(&self, idx: usize) -> Option<&[u8]> {
-        self.content[..self.content_len]
-            .split(|&c| c == b'\n')
-            .nth(idx)
     }
 
     /// Handle a key while the address bar has focus. Returns `true` if anything
@@ -786,16 +555,6 @@ impl Browser {
                 self.caret = self.url_len;
                 true
             }
-            Key::Up => {
-                self.scroll = self.scroll.saturating_sub(1);
-                true
-            }
-            Key::Down => {
-                if self.scroll + 1 < self.line_count() {
-                    self.scroll += 1;
-                }
-                true
-            }
             Key::Enter => {
                 self.submit();
                 true
@@ -834,11 +593,10 @@ impl Browser {
         self.status = Status::Loading;
         self.pending = true;
         self.home = false;
-        self.scroll = 0;
     }
 
     /// Pull a pending navigation target (clears the pending flag). The kernel
-    /// fetches it and reports back with [`load_response`] / [`fail`].
+    /// fetches it and reports back with [`loaded`] / [`fail`].
     pub fn take_request(&mut self) -> Option<&[u8]> {
         if self.pending {
             self.pending = false;
@@ -855,35 +613,10 @@ impl Browser {
         self.home = false;
     }
 
-    /// Replace the page with text extracted from a raw HTTP response.
-    pub fn load_response(&mut self, resp: &[u8]) {
-        let body = http_body(resp);
-        self.content_len = html_to_text(body, &mut self.content);
-        if self.content_len == 0 {
-            let msg = b"(pagina vazia)";
-            self.content_len = msg.len();
-            self.content[..msg.len()].copy_from_slice(msg);
-        }
-        self.status = Status::Done;
-        self.scroll = 0;
-    }
-
-    /// Mark the current fetch as failed and show a message.
+    /// Mark the current fetch as failed (the kernel shows the error state).
     pub fn fail(&mut self) {
-        let msg = b"Falha ao carregar a pagina (sem rede, DNS ou TLS).";
-        self.content_len = msg.len();
-        self.content[..msg.len()].copy_from_slice(msg);
         self.status = Status::Error;
-        self.scroll = 0;
-    }
-
-    /// Clamp scroll so at least one line stays on screen for a viewport of
-    /// `visible` lines.
-    pub fn clamp_scroll(&mut self, visible: usize) {
-        let max = self.line_count().saturating_sub(visible.max(1));
-        if self.scroll > max {
-            self.scroll = max;
-        }
+        self.home = false;
     }
 }
 
@@ -957,8 +690,14 @@ mod tests {
     fn parses_status_and_headers() {
         let resp = b"HTTP/1.1 301 Moved\r\nLocation: https://x.com/y\r\nServer: t\r\n\r\nbody";
         assert_eq!(status_code(resp), Some(301));
-        assert_eq!(header_value(resp, b"location"), Some(&b"https://x.com/y"[..]));
-        assert_eq!(header_value(resp, b"LOCATION"), Some(&b"https://x.com/y"[..]));
+        assert_eq!(
+            header_value(resp, b"location"),
+            Some(&b"https://x.com/y"[..])
+        );
+        assert_eq!(
+            header_value(resp, b"LOCATION"),
+            Some(&b"https://x.com/y"[..])
+        );
         assert_eq!(header_value(resp, b"missing"), None);
     }
 
@@ -966,44 +705,6 @@ mod tests {
     fn page_body_dechunks() {
         let resp = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n";
         assert_eq!(page_body(resp), b"Wikipedia");
-    }
-
-    #[test]
-    fn html_strips_tags_and_decodes_entities() {
-        let html = b"<html><body><p>Hello &amp; welcome</p><p>Line 2</p></body></html>";
-        let mut out = [0u8; 256];
-        let n = html_to_text(html, &mut out);
-        let text = core::str::from_utf8(&out[..n]).unwrap();
-        assert!(text.contains("Hello & welcome"));
-        assert!(text.contains("Line 2"));
-        // Block boundary inserted a newline.
-        assert!(text.contains('\n'));
-    }
-
-    #[test]
-    fn html_skips_script_and_style() {
-        let html = b"<style>.x{color:red}</style><p>Keep</p><script>var a=1<2;</script><p>This</p>";
-        let mut out = [0u8; 256];
-        let n = html_to_text(html, &mut out);
-        let text = core::str::from_utf8(&out[..n]).unwrap();
-        assert!(text.contains("Keep"));
-        assert!(text.contains("This"));
-        assert!(!text.contains("color"));
-        assert!(!text.contains("var a"));
-    }
-
-    #[test]
-    fn html_wraps_long_lines() {
-        let mut html = [b'a'; 200];
-        // make it words
-        for i in (0..200).step_by(5) {
-            html[i] = b' ';
-        }
-        let mut out = [0u8; 512];
-        let n = html_to_text(&html, &mut out);
-        for line in out[..n].split(|&c| c == b'\n') {
-            assert!(line.len() <= COLS, "line too long: {}", line.len());
-        }
     }
 
     #[test]
@@ -1042,28 +743,12 @@ mod tests {
         let mut b = Browser::new();
         b.open(b"example.com");
         let _ = b.take_request();
-        b.load_response(b"\r\n\r\n<p>hi</p>");
+        b.loaded();
         assert!(!b.is_home());
         b.go_home();
         assert!(b.is_home());
         assert_eq!(b.url(), b"");
         assert_eq!(b.status(), Status::Idle);
-    }
-
-    #[test]
-    fn html_folds_accented_entities_and_utf8() {
-        // Numeric, hex, named entities and raw UTF-8 all fold to ASCII.
-        let html = "<p>Conte&#250;do Coment&#225;rios V&#xED;deos Aten\u{e7}\u{e3}o caf\u{e9}</p>"
-            .as_bytes();
-        let mut out = [0u8; 256];
-        let n = html_to_text(html, &mut out);
-        let text = core::str::from_utf8(&out[..n]).unwrap();
-        assert!(text.contains("Conteudo"));
-        assert!(text.contains("Comentarios"));
-        assert!(text.contains("Videos"));
-        assert!(text.contains("Atencao"));
-        assert!(text.contains("cafe"));
-        assert!(!text.contains('&'));
     }
 
     #[test]
@@ -1081,20 +766,12 @@ mod tests {
     }
 
     #[test]
-    fn browser_loads_response_into_lines() {
+    fn browser_loaded_sets_done() {
         let mut b = Browser::new();
-        b.load_response(b"HTTP/1.0 200 OK\r\n\r\n<p>One</p><p>Two</p>");
+        b.open(b"example.com");
+        let _ = b.take_request();
+        b.loaded();
         assert_eq!(b.status(), Status::Done);
-        assert!(b.line_count() >= 2);
-        assert!(b.content().windows(3).any(|w| w == b"One"));
-    }
-
-    #[test]
-    fn browser_scroll_clamps() {
-        let mut b = Browser::new();
-        b.load_response(b"\r\n\r\n<p>a</p><p>b</p><p>c</p>");
-        b.scroll = 100;
-        b.clamp_scroll(2);
-        assert!(b.scroll <= b.line_count());
+        assert!(!b.is_home());
     }
 }

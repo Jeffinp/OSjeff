@@ -229,7 +229,6 @@ pub(crate) fn parse_decls(text: &str) -> Vec<Decl> {
     out
 }
 
-
 #[cfg(test)]
 mod css_tests {
     use super::super::dom::{Node, parse_html};
@@ -278,4 +277,3 @@ mod css_tests {
         assert_eq!(sel.classes, ["hl"]);
     }
 }
-
