@@ -60,12 +60,13 @@ impl Desktop {
                     self.browser.on_key(key);
                 }
             },
+            // Forward keystrokes to the guest (printable bytes as-is, Enter as
+            // LF, Esc as 0x1B so apps like DOOM get their menu key). A WASM app is
+            // closed with the title-bar button, not Esc, so the guest keeps Esc.
             Kind::WasmApp => match key {
-                Key::Esc => self.request_close(WASM),
-                // Forward keystrokes to the guest: printable bytes as-is, Enter
-                // as ASCII LF. The app reacts in its own `on_key` export.
                 Key::Char(b) => crate::wasm::on_key(b as i32),
                 Key::Enter => crate::wasm::on_key(10),
+                Key::Esc => crate::wasm::on_key(27),
                 _ => {}
             },
         }

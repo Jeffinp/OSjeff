@@ -18,7 +18,8 @@ param(
     [switch]$SkipBuild,
     [switch]$Gl,
     [switch]$SoftwareGfx,
-    [switch]$Usb
+    [switch]$Usb,
+    [switch]$Doom
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,8 +32,11 @@ function Build-OSjeff {
     $drive = $PSScriptRoot.Substring(0, 1).ToLower()
     $rest = ($PSScriptRoot.Substring(2)) -replace '\\', '/'
     $wslDir = "/mnt/$drive$rest"
+    # -Doom builds the DOOM app variant (C→wasm32-wasi + embedded IWAD). Needs
+    # wasi-sdk at ~/wasi-sdk and the IWAD at wasm-apps/doom/doom1.wad in WSL.
+    $envPrefix = if ($Doom) { 'DOOM=1 WASI_SDK_PATH=$HOME/wasi-sdk ' } else { '' }
     Write-Host "Compilando OSjeff (release) em $wslDir ..." -ForegroundColor Cyan
-    wsl -e bash -lc "cd '$wslDir' && cargo build --package os --release"
+    wsl -e bash -lc "cd '$wslDir' && ${envPrefix}cargo build --package os --release"
     if ($LASTEXITCODE -ne 0) { throw "cargo build falhou (exit $LASTEXITCODE)" }
 }
 
@@ -81,7 +85,9 @@ if (-not (Test-Path $fsImg)) {
 }
 
 $pcap = Join-Path $PSScriptRoot 'osjeff-net.pcap'
-$qargs = @('-m', '256M', '-drive', "format=raw,file=$img",
+# DOOM grows its wasm guest memory well past the default; give it more RAM.
+$mem = if ($Doom) { '512M' } else { '256M' }
+$qargs = @('-m', $mem, '-drive', "format=raw,file=$img",
     '-drive', "format=raw,file=$fsImg,if=ide,index=2",
     '-netdev', 'user,id=n0',
     '-device', 'ne2k_isa,netdev=n0,mac=52:54:00:12:34:56',
