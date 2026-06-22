@@ -500,6 +500,12 @@ impl Desktop {
             })
     }
 
+    /// True while the WASM app window is open — gates the app worker thread so it
+    /// runs (and burns CPU) only when its window is visible.
+    pub fn wasm_active(&self) -> bool {
+        self.windows[WASM].active()
+    }
+
     // ---- browser networking hand-off (driven by the kernel main loop) ----
 
     /// If the browser app has a pending navigation, copy the target URL into

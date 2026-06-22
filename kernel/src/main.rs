@@ -243,6 +243,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         });
     }
 
+    // Hand the framebuffer layout to the WASM app engine and spawn its worker
+    // thread, so a heavy app (DOOM loading its WAD, then running its game loop)
+    // renders off the compositor thread and never freezes the UI.
+    wasm::init(info);
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        sched::spawn("wasmapp", wasm::worker);
+    });
+
     // Boot splash: progress tracks real elapsed time (>= 5 seconds).
     run_splash(&mut *framebuffer, &mut *back, info, n);
 
@@ -321,6 +329,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             clock_tick = true;
             perf.second_tick();
         }
+
+        // Run the WASM app worker only while its window is open.
+        wasm::set_active(desk.wasm_active());
 
         let any_anim = desk.has_animation();
 

@@ -20,6 +20,7 @@ use crate::fb::{Canvas, Color};
 use crate::sync::RacyCell;
 use crate::{font, serial_print};
 use bootloader_api::info::FrameBufferInfo;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use wasmi::{Caller, Engine, Extern, Instance, Linker, Module, Store};
 
 /// The console demo (boot smoke-test) and the windowed app, assembled from WAT
@@ -313,54 +314,216 @@ fn app_mut() -> Option<&'static mut App> {
     slot.as_mut()
 }
 
-/// Deliver a pointer event to the app in its own content-local coordinates.
-/// `buttons` is a bitmask (bit 0 = left). A no-op if the app omits `on_pointer`.
+// ---- threaded app worker ----
+//
+// The resident app runs on its OWN kernel thread, not the compositor's: a heavy
+// app (DOOM parsing a 4 MiB WAD, then running its game loop) must never block the
+// UI. The worker renders into an offscreen surface; the compositor copies the
+// latest finished frame into the window. Input is queued to the worker. This is
+// the same decoupling the browser's background fetcher uses.
+
+/// Offscreen surface size — the WASM window's content box (window 720×470).
+const WASM_SW: usize = 692;
+const WASM_SH: usize = 414;
+const SURF_BYTES: usize = WASM_SW * WASM_SH * 4;
+
+/// Double-buffered offscreen surfaces: the worker renders into the back buffer,
+/// then publishes it as the front for the compositor — so no half-drawn frame
+/// is ever shown.
+static SURFACE: RacyCell<[[u8; SURF_BYTES]; 2]> = RacyCell::new([[0; SURF_BYTES]; 2]);
+static FRONT: AtomicUsize = AtomicUsize::new(0);
+static READY: AtomicBool = AtomicBool::new(false);
+/// Set while the WASM window is open; the worker idles (`hlt`) otherwise.
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+/// The real framebuffer layout, captured at boot to derive the offscreen one.
+static FB_INFO: RacyCell<Option<FrameBufferInfo>> = RacyCell::new(None);
+
+/// A queued input event for the worker. `kind`: 1 = key, 2 = pointer.
+#[derive(Clone, Copy)]
+struct Ev {
+    kind: u8,
+    a: i32,
+    b: i32,
+    c: i32,
+}
+const EV_CAP: usize = 128;
+static EVENTS: RacyCell<[Ev; EV_CAP]> = RacyCell::new(
+    [Ev {
+        kind: 0,
+        a: 0,
+        b: 0,
+        c: 0,
+    }; EV_CAP],
+);
+static EV_HEAD: AtomicUsize = AtomicUsize::new(0); // producer (compositor/input)
+static EV_TAIL: AtomicUsize = AtomicUsize::new(0); // consumer (worker)
+
+/// Capture the framebuffer layout (call once at boot, before spawning [`worker`]).
+pub fn init(info: FrameBufferInfo) {
+    unsafe {
+        *FB_INFO.get() = Some(info);
+    }
+}
+
+/// Mark the WASM app window open/closed. The worker only runs while open.
+pub fn set_active(on: bool) {
+    ACTIVE.store(on, Ordering::Release);
+}
+
+fn push_ev(ev: Ev) {
+    let h = EV_HEAD.load(Ordering::Relaxed);
+    let next = (h + 1) % EV_CAP;
+    if next == EV_TAIL.load(Ordering::Acquire) {
+        return; // queue full — drop the event
+    }
+    unsafe {
+        (*EVENTS.get())[h] = ev;
+    }
+    EV_HEAD.store(next, Ordering::Release);
+}
+
+/// Queue a pointer event (content-local coords; `buttons` bit 0 = left).
 pub fn on_pointer(x: i32, y: i32, buttons: i32) {
-    let Some(app) = app_mut() else { return };
-    if let Ok(f) = app
-        .instance
-        .get_typed_func::<(i32, i32, i32), ()>(&app.store, "on_pointer")
-    {
-        let _ = f.call(&mut app.store, (x, y, buttons));
-    }
+    push_ev(Ev {
+        kind: 2,
+        a: x,
+        b: y,
+        c: buttons,
+    });
 }
 
-/// Deliver a key event to the app (`code` is an ASCII byte, or 10 for Enter).
-/// A no-op if the app omits `on_key`.
+/// Queue a key event (`code` is an ASCII byte, or 10 for Enter / 27 for Esc).
 pub fn on_key(code: i32) {
-    let Some(app) = app_mut() else { return };
-    if let Ok(f) = app.instance.get_typed_func::<i32, ()>(&app.store, "on_key") {
-        let _ = f.call(&mut app.store, code);
-    }
+    push_ev(Ev {
+        kind: 1,
+        a: code,
+        b: 0,
+        c: 0,
+    });
 }
 
-/// Render the resident WASM app into `buf` at window content box `(ox, oy, cw,
-/// ch)`. The guest draws from its own origin; the host translates and clips.
-/// Builds the app on first call; a load failure makes this a no-op.
-pub fn draw_app(buf: &mut [u8], info: FrameBufferInfo, ox: i32, oy: i32, cw: i32, ch: i32) {
-    let Some(app) = app_mut() else { return };
-
-    {
-        let st = app.store.data_mut();
-        st.fb = buf.as_mut_ptr();
-        st.fb_len = buf.len();
-        st.info = Some(info);
-        st.ox = ox;
-        st.oy = oy;
-        st.cw = cw;
-        st.ch = ch;
-    }
-    if let Ok(func) = app.instance.get_typed_func::<(), ()>(&app.store, "render")
-        && let Err(e) = func.call(&mut app.store, ())
-    {
-        // Log the first trap only, so a crashing guest doesn't spam the log.
-        static LOGGED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-        if !LOGGED.swap(true, core::sync::atomic::Ordering::Relaxed) {
-            crate::serial_println!("wasm app: render trap: {:?}", e);
+/// Drain queued input into the app's `on_key` / `on_pointer` exports.
+fn drain_input(app: &mut App) {
+    loop {
+        let t = EV_TAIL.load(Ordering::Relaxed);
+        if t == EV_HEAD.load(Ordering::Acquire) {
+            break;
+        }
+        let ev = unsafe { (*EVENTS.get())[t] };
+        EV_TAIL.store((t + 1) % EV_CAP, Ordering::Release);
+        match ev.kind {
+            1 => {
+                if let Ok(f) = app.instance.get_typed_func::<i32, ()>(&app.store, "on_key") {
+                    let _ = f.call(&mut app.store, ev.a);
+                }
+            }
+            2 => {
+                if let Ok(f) =
+                    app.instance
+                        .get_typed_func::<(i32, i32, i32), ()>(&app.store, "on_pointer")
+                {
+                    let _ = f.call(&mut app.store, (ev.a, ev.b, ev.c));
+                }
+            }
+            _ => {}
         }
     }
-    // Drop the surface so a stale pointer is never reused between frames.
-    app.store.data_mut().info = None;
+}
+
+/// The offscreen framebuffer layout: content-box sized, same pixel format as the
+/// real screen so the compositor can copy rows verbatim.
+fn surface_info() -> Option<FrameBufferInfo> {
+    let mut oi = unsafe { *FB_INFO.get() }?;
+    oi.width = WASM_SW;
+    oi.height = WASM_SH;
+    oi.stride = WASM_SW;
+    Some(oi)
+}
+
+/// Worker-thread entry: build the app, then loop — drain input, render one frame
+/// into the back surface, publish it. Idles (`hlt`) while the window is closed or
+/// the app has not loaded yet.
+pub extern "C" fn worker() -> ! {
+    loop {
+        if !ACTIVE.load(Ordering::Acquire) {
+            x86_64::instructions::hlt();
+            continue;
+        }
+        let (Some(app), Some(oi)) = (app_mut(), surface_info()) else {
+            x86_64::instructions::hlt();
+            continue;
+        };
+        let back = 1 - FRONT.load(Ordering::Relaxed);
+        {
+            let buf = unsafe { &mut (*SURFACE.get())[back] };
+            let st = app.store.data_mut();
+            st.fb = buf.as_mut_ptr();
+            st.fb_len = buf.len();
+            st.info = Some(oi);
+            st.ox = 0;
+            st.oy = 0;
+            st.cw = WASM_SW as i32;
+            st.ch = WASM_SH as i32;
+        }
+        drain_input(app);
+        if let Ok(func) = app.instance.get_typed_func::<(), ()>(&app.store, "render")
+            && let Err(e) = func.call(&mut app.store, ())
+        {
+            static LOGGED: AtomicBool = AtomicBool::new(false);
+            if !LOGGED.swap(true, Ordering::Relaxed) {
+                crate::serial_println!("wasm app: render trap: {:?}", e);
+            }
+        }
+        app.store.data_mut().info = None;
+        FRONT.store(back, Ordering::Release);
+        READY.store(true, Ordering::Release);
+    }
+}
+
+/// Copy the latest finished app frame into the live `Canvas` at content origin
+/// `(cx, cy)`. Shows a placeholder until the first frame is ready (the worker may
+/// still be loading — e.g. DOOM parsing its WAD).
+pub fn blit_surface(c: &mut Canvas, cx: i32, cy: i32) {
+    if !READY.load(Ordering::Acquire) {
+        c.fill_rect(
+            cx.max(0) as usize,
+            cy.max(0) as usize,
+            WASM_SW,
+            WASM_SH,
+            Color::rgb(0x10, 0x14, 0x20),
+        );
+        font::draw_text(
+            c,
+            (cx + 16).max(0) as usize,
+            (cy + 16).max(0) as usize,
+            "Carregando app WASM...",
+            Color::rgb(0x9a, 0xa6, 0xbd),
+            2,
+        );
+        return;
+    }
+    let info = c.fb_info();
+    let bpp = info.bytes_per_pixel;
+    let stride = info.stride;
+    let (sw, sh) = (info.width as i32, info.height as i32);
+    let front = FRONT.load(Ordering::Acquire);
+    let src = unsafe { &(*SURFACE.get())[front] };
+    let dst = c.buffer_mut();
+    for y in 0..WASM_SH as i32 {
+        let dyy = cy + y;
+        if dyy < 0 || dyy >= sh {
+            continue;
+        }
+        let x0 = cx.max(0);
+        let x1 = (cx + WASM_SW as i32).min(sw);
+        if x1 <= x0 {
+            continue;
+        }
+        let cols = (x1 - x0) as usize;
+        let so = (y as usize * WASM_SW + (x0 - cx) as usize) * bpp;
+        let dofs = (dyy as usize * stride + x0 as usize) * bpp;
+        dst[dofs..dofs + cols * bpp].copy_from_slice(&src[so..so + cols * bpp]);
+    }
 }
 
 /// The guest's exported linear memory. WAT modules here export it as `mem`;

@@ -398,14 +398,12 @@ impl Desktop {
     /// guest paints through the host drawing ABI; the engine translates and
     /// clips it to this box (see [`crate::wasm::draw_app`]).
     pub(crate) fn draw_wasm(&self, c: &mut Canvas, r: Rect) {
+        // The app renders on its own worker thread into an offscreen surface; the
+        // compositor just copies the latest finished frame into the window.
         let pad = 14;
         let cx = r.x + pad;
         let cy = r.y + TITLE_H + 12;
-        let cw = (r.w - pad * 2).max(0);
-        let ch = (r.bottom() - 14 - cy).max(0);
-        let info = c.fb_info();
-        let buf = c.buffer_mut();
-        crate::wasm::draw_app(buf, info, cx, cy, cw, ch);
+        crate::wasm::blit_surface(c, cx, cy);
     }
 
     pub(crate) fn draw_start(&self, c: &mut Canvas) {
