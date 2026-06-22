@@ -72,10 +72,11 @@ static BG: RacyCell<AlignedBuf> = RacyCell::new(AlignedBuf([0; MAX_BYTES]));
 // animation so each frame only redraws the small damaged region.
 static STATIC: RacyCell<AlignedBuf> = RacyCell::new(AlignedBuf([0; MAX_BYTES]));
 
-// Kernel heap (4 MiB) backing the global allocator. Sized for the TLS 1.3
-// handshake (P-256 ECDH + AES-GCM) the browser uses for HTTPS, on top of the
-// smoltcp socket buffers.
-const HEAP_SIZE: usize = 4 * 1024 * 1024;
+// Kernel heap backing the global allocator. Sized for the heaviest user: a
+// native WASM app's linear memory (DOOM grows its wasm memory to ~16-20 MiB for
+// its zone + the IWAD it reads in), well above what the TLS 1.3 handshake or the
+// smoltcp socket buffers need. Zero-initialized BSS — no on-disk image cost.
+const HEAP_SIZE: usize = 64 * 1024 * 1024;
 static HEAP: RacyCell<[u8; HEAP_SIZE]> = RacyCell::new([0; HEAP_SIZE]);
 
 #[global_allocator]

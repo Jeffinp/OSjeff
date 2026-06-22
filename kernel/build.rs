@@ -31,14 +31,26 @@ fn main() {
     );
     emit_wat(&out, "demo.wasm", &console);
 
-    // 2) Windowed app. By default the `snake` game (Rust→wasm) — reproducible on
-    //    any machine with the wasm32 target. If `WASI_SDK_PATH` is set, instead
-    //    compile a C program to wasm with that SDK's clang: the same C→wasm path a
-    //    ported C game (DOOM) rides on. Either way the result is `app.wasm`.
+    // 2) Windowed app (`app.wasm`). Selected by env:
+    //    - DOOM=1 + WASI_SDK_PATH → compile DOOM (doomgeneric) to wasm32-wasi and
+    //      embed the IWAD. The full "run open-source C software natively" path.
+    //    - WASI_SDK_PATH only      → a freestanding C demo (cdemo).
+    //    - neither                 → the `snake` game (Rust→wasm), the default
+    //                                that builds anywhere with the wasm32 target.
     println!("cargo:rerun-if-env-changed=WASI_SDK_PATH");
-    match std::env::var("WASI_SDK_PATH") {
-        Ok(sdk) if !sdk.is_empty() => build_c_app(&out, "cdemo", &sdk),
-        _ => build_wasm_app(&out, "snake"),
+    println!("cargo:rerun-if-env-changed=DOOM");
+    let doom = std::env::var("DOOM").map(|v| v == "1").unwrap_or(false);
+    let sdk = std::env::var("WASI_SDK_PATH").ok().filter(|s| !s.is_empty());
+    match (doom, sdk) {
+        (true, Some(sdk)) => build_doom(&out, &sdk),
+        (false, Some(sdk)) => {
+            build_c_app(&out, "cdemo", &sdk);
+            write_empty_wad(&out);
+        }
+        _ => {
+            build_wasm_app(&out, "snake");
+            write_empty_wad(&out);
+        }
     }
 
     println!("cargo:rerun-if-changed=build.rs");
@@ -86,7 +98,10 @@ fn build_wasm_app(out: &Path, crate_name: &str) {
     std::fs::copy(&wasm, out.join("app.wasm"))
         .unwrap_or_else(|e| panic!("copy {}: {e}", wasm.display()));
 
-    println!("cargo:rerun-if-changed={}", app_dir.join("src/lib.rs").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        app_dir.join("src/lib.rs").display()
+    );
     println!("cargo:rerun-if-changed={}", manifest.display());
 }
 
@@ -123,4 +138,41 @@ fn build_c_app(out: &Path, name: &str, wasi_sdk: &str) {
     assert!(status.success(), "C app `{name}` failed to build");
 
     println!("cargo:rerun-if-changed={}", src.display());
+}
+
+/// Ensure `out/doom1.wad` exists so the kernel's `include_bytes!` always works.
+/// Empty when not building DOOM (no IWAD to embed).
+fn write_empty_wad(out: &Path) {
+    let wad = out.join("doom1.wad");
+    if !wad.exists() {
+        std::fs::write(&wad, []).expect("write empty doom1.wad");
+    }
+}
+
+/// Build DOOM (doomgeneric) to wasm32-wasi via `tools/build-doom.sh` (which uses
+/// the wasi-sdk clang and clones the GPL upstream if needed), then embed the
+/// resulting module as `app.wasm` and the IWAD as `doom1.wad`. The IWAD must be
+/// present at `wasm-apps/doom/doom1.wad` (fetched separately — not redistributed).
+fn build_doom(out: &Path, wasi_sdk: &str) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let script = root.join("tools/build-doom.sh");
+    let status = Command::new("bash")
+        .arg(&script)
+        .env("WASI_SDK_PATH", wasi_sdk)
+        .status()
+        .unwrap_or_else(|e| panic!("failed to run build-doom.sh: {e}"));
+    assert!(status.success(), "DOOM wasm build failed");
+
+    let doom_wasm = root.join("wasm-apps/doom/doom.wasm");
+    let iwad = root.join("wasm-apps/doom/doom1.wad");
+    assert!(
+        iwad.exists(),
+        "missing IWAD at {} (fetch doom1.wad there first)",
+        iwad.display()
+    );
+    std::fs::copy(&doom_wasm, out.join("app.wasm")).expect("copy doom.wasm");
+    std::fs::copy(&iwad, out.join("doom1.wad")).expect("copy doom1.wad");
+
+    println!("cargo:rerun-if-changed={}", doom_wasm.display());
+    println!("cargo:rerun-if-changed={}", iwad.display());
 }

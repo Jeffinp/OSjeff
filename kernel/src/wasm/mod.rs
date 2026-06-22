@@ -26,6 +26,12 @@ use wasmi::{Caller, Engine, Extern, Instance, Linker, Module, Store};
 /// at build time (see `build.rs`).
 static DEMO_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/demo.wasm"));
 static APP_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/app.wasm"));
+/// The DOOM IWAD, embedded so the WASI file layer ([`wasi`]) can serve it to a
+/// wasm guest. Empty unless the kernel was built in DOOM mode (`build.rs` writes
+/// the real `doom1.wad` to `OUT_DIR` then, otherwise an empty placeholder).
+pub(super) static WAD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/doom1.wad"));
+
+mod wasi;
 
 /// Per-instance host state: the surface a guest's drawing syscalls target plus
 /// the translation/clip that places that surface inside a window.
@@ -41,6 +47,12 @@ struct HostState {
     oy: i32,
     cw: i32,
     ch: i32,
+    /// WASI: the single open WAD file handle (DOOM keeps the IWAD open for the
+    /// whole session). `-1` when closed. `wad_pos` is the read cursor.
+    wad_fd: i32,
+    wad_pos: usize,
+    /// Seed for `random_get` (reseeded from the clock on first use).
+    rng: u32,
 }
 
 impl HostState {
@@ -54,6 +66,9 @@ impl HostState {
             oy: 0,
             cw: 0,
             ch: 0,
+            wad_fd: -1,
+            wad_pos: 0,
+            rng: 0,
         }
     }
 
@@ -146,7 +161,11 @@ fn host_blit(caller: &Caller<'_, HostState>, off: i32, w: i32, h: i32, dx: i32, 
                 continue;
             }
             let o = ((row * w + col) * 4) as usize;
-            c.put(sx as usize, sy as usize, Color::rgb(px[o], px[o + 1], px[o + 2]));
+            c.put(
+                sx as usize,
+                sy as usize,
+                Color::rgb(px[o], px[o + 1], px[o + 2]),
+            );
         }
     }
 }
@@ -208,6 +227,9 @@ fn install_abi(linker: &mut Linker<HostState>) -> Result<(), &'static str> {
             (crate::interrupts::ticks() * 4) as i64
         })
         .map_err(|_| "link host.time_ms")?;
+    // The WASI subset (wasi_snapshot_preview1) a C/clang guest like DOOM needs.
+    // Harmless for guests that don't import it.
+    wasi::install(linker)?;
     Ok(())
 }
 
@@ -250,11 +272,32 @@ static APP: RacyCell<Option<App>> = RacyCell::new(None);
 /// Build the resident windowed app from `APP_WASM`. `None` if it fails to load.
 fn build_app() -> Option<App> {
     let engine = Engine::default();
-    let module = Module::new(&engine, APP_WASM).ok()?;
+    let module = match Module::new(&engine, APP_WASM) {
+        Ok(m) => m,
+        Err(e) => {
+            crate::serial_println!("wasm app: decode failed: {:?}", e);
+            return None;
+        }
+    };
     let mut store = Store::new(&engine, HostState::console());
     let mut linker = <Linker<HostState>>::new(&engine);
     install_abi(&mut linker).ok()?;
-    let instance = linker.instantiate_and_start(&mut store, &module).ok()?;
+    let instance = match linker.instantiate_and_start(&mut store, &module) {
+        Ok(i) => i,
+        Err(e) => {
+            crate::serial_println!("wasm app: instantiate failed: {:?}", e);
+            return None;
+        }
+    };
+    // A WASI "reactor" module (clang -mexec-model=reactor, e.g. DOOM) exposes
+    // `_initialize`, which must run once to set up libc globals before any other
+    // export is called. No-op for our hand-written/Rust modules.
+    if let Ok(init) = instance.get_typed_func::<(), ()>(&store, "_initialize")
+        && let Err(e) = init.call(&mut store, ())
+    {
+        crate::serial_println!("wasm app: _initialize trap: {:?}", e);
+        return None;
+    }
     Some(App { store, instance })
 }
 
@@ -284,10 +327,7 @@ pub fn on_pointer(x: i32, y: i32, buttons: i32) {
 /// A no-op if the app omits `on_key`.
 pub fn on_key(code: i32) {
     let Some(app) = app_mut() else { return };
-    if let Ok(f) = app
-        .instance
-        .get_typed_func::<i32, ()>(&app.store, "on_key")
-    {
+    if let Ok(f) = app.instance.get_typed_func::<i32, ()>(&app.store, "on_key") {
         let _ = f.call(&mut app.store, code);
     }
 }
@@ -308,8 +348,14 @@ pub fn draw_app(buf: &mut [u8], info: FrameBufferInfo, ox: i32, oy: i32, cw: i32
         st.cw = cw;
         st.ch = ch;
     }
-    if let Ok(func) = app.instance.get_typed_func::<(), ()>(&app.store, "render") {
-        let _ = func.call(&mut app.store, ());
+    if let Ok(func) = app.instance.get_typed_func::<(), ()>(&app.store, "render")
+        && let Err(e) = func.call(&mut app.store, ())
+    {
+        // Log the first trap only, so a crashing guest doesn't spam the log.
+        static LOGGED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+        if !LOGGED.swap(true, core::sync::atomic::Ordering::Relaxed) {
+            crate::serial_println!("wasm app: render trap: {:?}", e);
+        }
     }
     // Drop the surface so a stale pointer is never reused between frames.
     app.store.data_mut().info = None;
