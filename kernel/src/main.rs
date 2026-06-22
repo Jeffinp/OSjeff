@@ -250,6 +250,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let mut c = Canvas::new(bg, info);
         desktop::paint_background(&mut c);
     }
+    // Let a native WASM guest paint onto the background through the drawing ABI
+    // (host.fill_rect / host.draw_text), proving guest→framebuffer rendering.
+    wasm::run_gui_demo(bg, info);
 
     let mut desk = Desktop::new(info.width as i32, info.height as i32);
     let mut last_sec = 0xFFu8; // force first render
