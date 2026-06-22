@@ -54,3 +54,13 @@ macro_rules! serial_println {
         let _ = writeln!($crate::serial::Serial, $($arg)*);
     }};
 }
+
+/// `print!`-style logging to COM1 (no trailing newline). Used by the WASM host
+/// `log` syscall, which streams raw guest output that may not be line-aligned.
+#[macro_export]
+macro_rules! serial_print {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write as _;
+        let _ = write!($crate::serial::Serial, $($arg)*);
+    }};
+}

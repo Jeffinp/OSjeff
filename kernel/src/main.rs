@@ -28,6 +28,7 @@ mod sync;
 mod theme;
 mod virtio;
 mod virtio_gpu;
+mod wasm;
 
 use bootloader_api::config::{BootloaderConfig, Mapping};
 use bootloader_api::info::FrameBufferInfo;
@@ -116,6 +117,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ALLOCATOR.init(HEAP.get() as usize, HEAP_SIZE);
     }
     heap_smoke_test();
+
+    // First run through the native WebAssembly app engine: prove the OS can load
+    // and execute a `.wasm` program (its native app format) end to end. Output
+    // lands on serial. The graphics/input ABI (windowed apps) builds on this.
+    serial_println!("OSjeff boot: running native WASM demo");
+    wasm::run_demo();
 
     // Enumerate the PCI bus — groundwork for the virtio-gpu driver: locate the
     // device and, when present, enable bus mastering so a later DMA-capable

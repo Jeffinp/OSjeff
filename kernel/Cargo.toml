@@ -28,6 +28,12 @@ rand_core = { version = "0.6.3", default-features = false }
 # this operator"). sha2 exposes a `force-soft` cargo feature; aes/polyval/ghash
 # are forced to their software backends via `--cfg` flags in `.cargo/config.toml`.
 sha2 = { version = "0.10", default-features = false, features = ["force-soft"] }
+# WebAssembly interpreter — the OS's native app format. no_std, alloc-based.
+wasmi = { version = "1", default-features = false }
+
+# Host-only: assembles the demo WAT into binary .wasm at build time (see build.rs).
+[build-dependencies]
+wat = "1"
 
 # The kernel binary is bare-metal: never built or run as a host test target.
 [[bin]]
