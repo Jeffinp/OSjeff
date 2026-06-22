@@ -9,6 +9,7 @@ mod ata;
 mod boot;
 mod desktop;
 mod fb;
+mod fetch;
 mod font;
 mod icons;
 mod interrupts;
@@ -222,14 +223,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ne2000::send(&frame[..len]);
     }
 
-    // The browser's TCP/IP + TLS stack, kept alive for the whole session so the
-    // native browser app can fetch pages on demand (HTTP and HTTPS). Built only
-    // when a NIC is present.
-    let mut net_stack = if net_up {
-        Some(netstack::Net::new())
-    } else {
-        None
-    };
+    // Hand the browser's TCP/IP + TLS stack to the background fetcher and spawn
+    // its worker thread, so page loads (and the slow software TLS handshake) run
+    // off the compositor thread and never freeze the UI. Interrupts are disabled
+    // around `spawn` because it mutates the scheduler's thread list, which the
+    // timer ISR also reads.
+    if net_up {
+        fetch::init(netstack::Net::new());
+        x86_64::instructions::interrupts::without_interrupts(|| {
+            sched::spawn("fetcher", fetch::worker);
+        });
+    }
 
     // Boot splash: progress tracks real elapsed time (>= 5 seconds).
     run_splash(&mut *framebuffer, &mut *back, info, n);
@@ -573,20 +577,27 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             perf.draw(&mut c, heap_pct, sched::thread_count());
         }
 
-        // Browser navigation: if the app requested a page, fetch it now. This
-        // blocks for the duration of the fetch (single-threaded stack), but the
-        // "Carregando" (...) state was already painted this frame, so the user
-        // sees it; the result is shown next iteration via `browser_redraw`.
-        if let Some(net) = net_stack.as_mut() {
+        // Browser navigation: hand any pending request to the background fetcher
+        // (non-blocking — the worker thread does the slow fetch while we keep
+        // rendering the "Carregando" state), and pick up a finished result.
+        if fetch::is_idle() {
             let mut url = [0u8; 256];
             if let Some(len) = desk.browser_take_request(&mut url) {
-                browser_fetch(net, &url[..len], &mut desk);
-                browser_redraw = true;
+                fetch::try_post(&url[..len]);
             }
         }
+        if let Some(result) = fetch::take_result() {
+            match result {
+                Some(r) => desk.browser_load(&r),
+                None => desk.browser_fail(),
+            }
+            browser_redraw = true;
+        }
 
-        // Service the network: answer ARP/ping for any frames the NIC received.
-        if net_up {
+        // Service the network: answer ARP/ping for received frames — but only
+        // while no fetch is running, so the NIC has a single owner (the worker
+        // owns it during a fetch).
+        if net_up && fetch::is_idle() {
             let mut rx = [0u8; 1600];
             while let Some(len) = ne2000::poll(&mut rx) {
                 let mut tx = [0u8; 1600];
@@ -603,83 +614,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // real system halts when it has nothing to draw.
         x86_64::instructions::hlt();
     }
-}
-
-/// Resolve a browser URL and fetch it (HTTP or HTTPS), following up to 5
-/// redirects, then feed the response into the browser app — or mark it failed.
-fn browser_fetch(net: &mut netstack::Net, url: &[u8], desk: &mut Desktop) {
-    use osjeff_core::browser::{header_value, parse_url, status_code};
-    let mut cur: alloc::vec::Vec<u8> = url.to_vec();
-
-    for _hop in 0..5 {
-        let Some(u) = parse_url(&cur) else {
-            desk.browser_fail();
-            return;
-        };
-        let (Ok(host), Ok(path)) = (
-            core::str::from_utf8(u.host()),
-            core::str::from_utf8(u.path()),
-        ) else {
-            desk.browser_fail();
-            return;
-        };
-        serial_println!(
-            "browser: GET {}://{}{} :{}",
-            if u.https { "https" } else { "http" },
-            host,
-            path,
-            u.port
-        );
-        let resp = if u.https {
-            net.https_get(host, path, u.port)
-        } else {
-            net.http_get(host, path, u.port)
-        };
-        let Some(r) = resp else {
-            serial_println!("browser: fetch failed");
-            desk.browser_fail();
-            return;
-        };
-
-        // Follow 3xx redirects.
-        let code = status_code(&r).unwrap_or(0);
-        if matches!(code, 301 | 302 | 303 | 307 | 308)
-            && let Some(loc) = header_value(&r, b"location")
-        {
-            let next = resolve_redirect(host, loc);
-            serial_println!("browser: {} redirect -> {} bytes target", code, next.len());
-            cur = next;
-            continue;
-        }
-
-        serial_println!("browser: {} bytes received (status {})", r.len(), code);
-        desk.browser_load(&r);
-        return;
-    }
-    serial_println!("browser: too many redirects");
-    desk.browser_fail();
-}
-
-/// Build an absolute URL from a redirect `Location` value relative to `host`.
-fn resolve_redirect(host: &str, loc: &[u8]) -> alloc::vec::Vec<u8> {
-    let ci = |p: &[u8]| loc.len() >= p.len() && loc[..p.len()].eq_ignore_ascii_case(p);
-    let mut out = alloc::vec::Vec::new();
-    if ci(b"http://") || ci(b"https://") {
-        out.extend_from_slice(loc);
-    } else if loc.starts_with(b"//") {
-        out.extend_from_slice(b"https:");
-        out.extend_from_slice(loc);
-    } else if loc.starts_with(b"/") {
-        out.extend_from_slice(b"https://");
-        out.extend_from_slice(host.as_bytes());
-        out.extend_from_slice(loc);
-    } else {
-        out.extend_from_slice(b"https://");
-        out.extend_from_slice(host.as_bytes());
-        out.push(b'/');
-        out.extend_from_slice(loc);
-    }
-    out
 }
 
 fn secs_of_day(t: rtc::Time) -> u32 {
