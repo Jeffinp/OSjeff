@@ -60,11 +60,14 @@ impl Desktop {
                     self.browser.on_key(key);
                 }
             },
-            Kind::WasmApp => {
-                if key == Key::Esc {
-                    self.request_close(WASM);
-                }
-            }
+            Kind::WasmApp => match key {
+                Key::Esc => self.request_close(WASM),
+                // Forward keystrokes to the guest: printable bytes as-is, Enter
+                // as ASCII LF. The app reacts in its own `on_key` export.
+                Key::Char(b) => crate::wasm::on_key(b as i32),
+                Key::Enter => crate::wasm::on_key(10),
+                _ => {}
+            },
         }
         true
     }
@@ -269,6 +272,13 @@ impl Desktop {
                         self.calc_input(k);
                     } else if self.windows[w].kind == Kind::Browser {
                         self.browser_click(rect, cx, cy);
+                    } else if self.windows[w].kind == Kind::WasmApp {
+                        // Translate the click into the guest's content-local
+                        // coordinates (same origin as `draw_wasm`) and deliver it.
+                        let pad = 14;
+                        let lx = cx - (rect.x + pad);
+                        let ly = cy - (rect.y + TITLE_H + 12);
+                        crate::wasm::on_pointer(lx, ly, 1);
                     }
                 }
                 scene = true;

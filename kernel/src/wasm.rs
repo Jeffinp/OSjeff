@@ -147,6 +147,13 @@ fn install_abi(linker: &mut Linker<HostState>) -> Result<(), &'static str> {
             },
         )
         .map_err(|_| "link host.draw_text")?;
+    // host.time_ms(): milliseconds since boot. The PIT ticks at 250 Hz, so each
+    // tick is 4 ms. Lets a guest animate or time its own logic.
+    linker
+        .func_wrap("host", "time_ms", |_: Caller<'_, HostState>| -> i64 {
+            (crate::interrupts::ticks() * 4) as i64
+        })
+        .map_err(|_| "link host.time_ms")?;
     Ok(())
 }
 
@@ -197,16 +204,45 @@ fn build_app() -> Option<App> {
     Some(App { store, instance })
 }
 
-/// Render the resident WASM app into `buf` at window content box `(ox, oy, cw,
-/// ch)`. The guest draws from its own origin; the host translates and clips.
-/// Builds the app on first call; a load failure makes this a no-op.
-pub fn draw_app(buf: &mut [u8], info: FrameBufferInfo, ox: i32, oy: i32, cw: i32, ch: i32) {
-    // SAFETY: single-threaded desktop context (compositor thread only).
+/// The resident app, built lazily on first access. `None` if it fails to load.
+/// SAFETY: single-threaded desktop context (compositor thread only).
+fn app_mut() -> Option<&'static mut App> {
     let slot = unsafe { &mut *APP.get() };
     if slot.is_none() {
         *slot = build_app();
     }
-    let Some(app) = slot.as_mut() else { return };
+    slot.as_mut()
+}
+
+/// Deliver a pointer event to the app in its own content-local coordinates.
+/// `buttons` is a bitmask (bit 0 = left). A no-op if the app omits `on_pointer`.
+pub fn on_pointer(x: i32, y: i32, buttons: i32) {
+    let Some(app) = app_mut() else { return };
+    if let Ok(f) = app
+        .instance
+        .get_typed_func::<(i32, i32, i32), ()>(&app.store, "on_pointer")
+    {
+        let _ = f.call(&mut app.store, (x, y, buttons));
+    }
+}
+
+/// Deliver a key event to the app (`code` is an ASCII byte, or 10 for Enter).
+/// A no-op if the app omits `on_key`.
+pub fn on_key(code: i32) {
+    let Some(app) = app_mut() else { return };
+    if let Ok(f) = app
+        .instance
+        .get_typed_func::<i32, ()>(&app.store, "on_key")
+    {
+        let _ = f.call(&mut app.store, code);
+    }
+}
+
+/// Render the resident WASM app into `buf` at window content box `(ox, oy, cw,
+/// ch)`. The guest draws from its own origin; the host translates and clips.
+/// Builds the app on first call; a load failure makes this a no-op.
+pub fn draw_app(buf: &mut [u8], info: FrameBufferInfo, ox: i32, oy: i32, cw: i32, ch: i32) {
+    let Some(app) = app_mut() else { return };
 
     {
         let st = app.store.data_mut();
