@@ -31,10 +31,15 @@ fn main() {
     );
     emit_wat(&out, "demo.wasm", &console);
 
-    // 2) Windowed app: compile the `snake` game crate to wasm and embed it — a
-    //    real-time, interactive game running natively through the WASM engine.
-    //    (`wasm-apps/plasma` is a second example app, kept for the blit demo.)
-    build_wasm_app(&out, "snake");
+    // 2) Windowed app. By default the `snake` game (Rust→wasm) — reproducible on
+    //    any machine with the wasm32 target. If `WASI_SDK_PATH` is set, instead
+    //    compile a C program to wasm with that SDK's clang: the same C→wasm path a
+    //    ported C game (DOOM) rides on. Either way the result is `app.wasm`.
+    println!("cargo:rerun-if-env-changed=WASI_SDK_PATH");
+    match std::env::var("WASI_SDK_PATH") {
+        Ok(sdk) if !sdk.is_empty() => build_c_app(&out, "cdemo", &sdk),
+        _ => build_wasm_app(&out, "snake"),
+    }
 
     println!("cargo:rerun-if-changed=build.rs");
 }
@@ -83,4 +88,39 @@ fn build_wasm_app(out: &Path, crate_name: &str) {
 
     println!("cargo:rerun-if-changed={}", app_dir.join("src/lib.rs").display());
     println!("cargo:rerun-if-changed={}", manifest.display());
+}
+
+/// Compile a freestanding C app `../wasm-apps/<name>/<name>.c` to
+/// `wasm32-unknown-unknown` with the wasi-sdk clang at `wasi_sdk`, exporting our
+/// app entry points and importing the host ABI. Writes `out/app.wasm`. This is
+/// the same toolchain path a ported C game uses.
+fn build_c_app(out: &Path, name: &str, wasi_sdk: &str) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let src = root
+        .join("..")
+        .join("wasm-apps")
+        .join(name)
+        .join(format!("{name}.c"));
+    let clang = PathBuf::from(wasi_sdk).join("bin/clang");
+    let app = out.join("app.wasm");
+
+    let status = Command::new(&clang)
+        .args([
+            "--target=wasm32-unknown-unknown",
+            "-O2",
+            "-nostdlib",
+            "-Wl,--no-entry",
+            "-Wl,--export=render",
+            "-Wl,--export=on_key",
+            "-Wl,--export-memory",
+            "-Wl,--allow-undefined",
+            "-o",
+        ])
+        .arg(&app)
+        .arg(&src)
+        .status()
+        .unwrap_or_else(|e| panic!("failed to launch clang ({}): {e}", clang.display()));
+    assert!(status.success(), "C app `{name}` failed to build");
+
+    println!("cargo:rerun-if-changed={}", src.display());
 }
