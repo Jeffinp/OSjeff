@@ -92,19 +92,32 @@ fn host_fill(st: &HostState, x: i32, y: i32, w: i32, h: i32, color: i32) {
     }
 }
 
-/// `host.draw_text`: draw guest text translated by the surface origin. Pixels
-/// outside the framebuffer are dropped by `Canvas`; the guest stays within its
-/// content box by convention.
+/// `host.draw_text`: draw guest text translated by the surface origin and
+/// clipped to the content box, glyph by glyph, so a guest can never paint text
+/// past its window onto the desktop or another window (sandbox containment).
 fn host_text(st: &HostState, s: &str, x: i32, y: i32, color: i32, scale: i32) {
     let Some(mut c) = st.canvas() else { return };
-    font::draw_text(
-        &mut c,
-        (st.ox + x).max(0) as usize,
-        (st.oy + y).max(0) as usize,
-        s,
-        rgb(color),
-        scale.max(1) as usize,
-    );
+    let scale = scale.max(1) as usize;
+    let cw = font::cell_w(scale) as i32;
+    let gh = (8 * scale) as i32; // glyph cell height
+    let (bx, by, bw, bh) = (st.ox, st.oy, st.cw, st.ch);
+    let py = st.oy + y;
+    // Vertical clip: drop the whole line unless it fits inside the box.
+    if py < by || py + gh > by + bh {
+        return;
+    }
+    let col = rgb(color);
+    let mut px = st.ox + x;
+    for &ch in s.as_bytes() {
+        if px >= bx + bw {
+            break; // past the right edge — nothing more is visible
+        }
+        // Only draw glyphs wholly inside the box horizontally.
+        if px >= bx && px + cw <= bx + bw {
+            font::draw_char(&mut c, px as usize, py as usize, ch, col, scale);
+        }
+        px += cw;
+    }
 }
 
 /// Register the OS ABI on `linker`. Shared by one-shot runs and the persistent
