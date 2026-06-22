@@ -250,9 +250,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let mut c = Canvas::new(bg, info);
         desktop::paint_background(&mut c);
     }
-    // Let a native WASM guest paint onto the background through the drawing ABI
-    // (host.fill_rect / host.draw_text), proving guest→framebuffer rendering.
-    wasm::run_gui_demo(bg, info);
 
     let mut desk = Desktop::new(info.width as i32, info.height as i32);
     let mut last_sec = 0xFFu8; // force first render
@@ -267,7 +264,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // frame forces one full repaint over the splash even if no animation runs.
     let mut was_anim = true;
     let mut static_valid = false;
-    let mut last_sig = 0u32;
+    let mut last_sig = 0u64;
     let mut prev_damage = Rect::new(0, 0, 0, 0);
     // Focused window rect from the previous steady frame, so a content change can
     // also repaint the window that just lost focus (its title de-highlights).

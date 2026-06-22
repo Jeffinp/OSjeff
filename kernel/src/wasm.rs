@@ -7,56 +7,61 @@
 //!
 //! The host surface a guest may import is the OS ABI:
 //! - `host.log(ptr, len)` — write a UTF-8 string from guest memory to serial.
-//! - `host.fill_rect(x, y, w, h, rgb)` — fill a framebuffer rectangle.
+//! - `host.fill_rect(x, y, w, h, rgb)` — fill a rectangle in the app's surface.
 //! - `host.draw_text(x, y, ptr, len, rgb, scale)` — draw guest text.
 //!
-//! Input and timing syscalls (and per-window app surfaces) come next.
+//! Drawing coordinates are relative to the guest's own surface origin: the host
+//! translates them by `(ox, oy)` and clips every primitive to `(cw, ch)`, so a
+//! guest paints from `(0,0)` and the kernel places it inside a window's content
+//! box. Console-only guests leave the surface unset, making the drawing
+//! syscalls no-ops.
 
 use crate::fb::{Canvas, Color};
+use crate::sync::RacyCell;
 use crate::{font, serial_print};
 use bootloader_api::info::FrameBufferInfo;
-use wasmi::{Caller, Engine, Extern, Linker, Module, Store};
+use wasmi::{Caller, Engine, Extern, Instance, Linker, Module, Store};
 
-/// The console demo (logs a greeting) and the GUI demo (paints a panel),
-/// assembled from WAT at build time (see `build.rs`).
+/// The console demo (boot smoke-test) and the windowed app, assembled from WAT
+/// at build time (see `build.rs`).
 static DEMO_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/demo.wasm"));
-static GUI_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/gui.wasm"));
+static APP_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/app.wasm"));
 
-/// Per-instance host state: the framebuffer a guest's drawing syscalls target.
+/// Per-instance host state: the surface a guest's drawing syscalls target plus
+/// the translation/clip that places that surface inside a window.
+///
 /// A raw pointer (not a borrow) because the guest calls back into these host
-/// functions from inside `wasmi`, outliving any normal borrow; the boot context
-/// is single-threaded, matching the kernel's `RacyCell` discipline. `info` is
-/// `None` for console-only guests, which makes the drawing syscalls no-ops.
+/// functions from inside `wasmi`, outliving any normal borrow; the boot/desktop
+/// context is single-threaded, matching the kernel's `RacyCell` discipline.
 struct HostState {
     fb: *mut u8,
     fb_len: usize,
     info: Option<FrameBufferInfo>,
+    ox: i32,
+    oy: i32,
+    cw: i32,
+    ch: i32,
 }
 
 impl HostState {
-    /// Console-only state: drawing syscalls become no-ops.
+    /// Console-only state: the drawing syscalls become no-ops.
     fn console() -> Self {
         Self {
             fb: core::ptr::null_mut(),
             fb_len: 0,
             info: None,
+            ox: 0,
+            oy: 0,
+            cw: 0,
+            ch: 0,
         }
     }
 
-    /// Grant a guest pixel access to `buf` with the given framebuffer layout.
-    fn with_fb(buf: &mut [u8], info: FrameBufferInfo) -> Self {
-        Self {
-            fb: buf.as_mut_ptr(),
-            fb_len: buf.len(),
-            info: Some(info),
-        }
-    }
-
-    /// Borrow the framebuffer as a `Canvas`, or `None` for console-only guests.
-    fn canvas(&self) -> Option<Canvas<'_>> {
+    /// Build a `Canvas` over the surface, or `None` for console-only guests.
+    fn canvas(&self) -> Option<Canvas<'static>> {
         let info = self.info?;
-        // SAFETY: single-threaded boot context; the pointer/length come from the
-        // live framebuffer slice that outlives this guest call.
+        // SAFETY: single-threaded context; the pointer/length come from a live
+        // framebuffer slice that outlives this guest call (set right before it).
         let buf = unsafe { core::slice::from_raw_parts_mut(self.fb, self.fb_len) };
         Some(Canvas::new(buf, info))
     }
@@ -68,34 +73,43 @@ fn rgb(packed: i32) -> Color {
     Color::rgb((p >> 16) as u8, (p >> 8) as u8, p as u8)
 }
 
-/// Run the embedded console demo: decode it, wire up the host ABI, call `main`.
-pub fn run_demo() {
-    match run(DEMO_WASM, "main", HostState::console()) {
-        Ok(()) => crate::serial_println!("wasm: demo module ran OK"),
-        Err(e) => crate::serial_println!("wasm: demo failed: {}", e),
+/// `host.fill_rect`: fill a guest rectangle, translated by the surface origin
+/// and clipped to the surface box.
+fn host_fill(st: &HostState, x: i32, y: i32, w: i32, h: i32, color: i32) {
+    let Some(mut c) = st.canvas() else { return };
+    let x0 = (st.ox + x).max(st.ox);
+    let y0 = (st.oy + y).max(st.oy);
+    let x1 = (st.ox + x + w).min(st.ox + st.cw);
+    let y1 = (st.oy + y + h).min(st.oy + st.ch);
+    if x1 > x0 && y1 > y0 {
+        c.fill_rect(
+            x0.max(0) as usize,
+            y0.max(0) as usize,
+            (x1 - x0) as usize,
+            (y1 - y0) as usize,
+            rgb(color),
+        );
     }
 }
 
-/// Run the embedded GUI demo, letting it paint into `buf` (a live framebuffer
-/// layer) through the drawing ABI. Used to render the WASM panel onto the
-/// desktop background, proving guest→framebuffer drawing end to end.
-pub fn run_gui_demo(buf: &mut [u8], info: FrameBufferInfo) {
-    match run(GUI_WASM, "render", HostState::with_fb(buf, info)) {
-        Ok(()) => crate::serial_println!("wasm: gui module rendered OK"),
-        Err(e) => crate::serial_println!("wasm: gui failed: {}", e),
-    }
+/// `host.draw_text`: draw guest text translated by the surface origin. Pixels
+/// outside the framebuffer are dropped by `Canvas`; the guest stays within its
+/// content box by convention.
+fn host_text(st: &HostState, s: &str, x: i32, y: i32, color: i32, scale: i32) {
+    let Some(mut c) = st.canvas() else { return };
+    font::draw_text(
+        &mut c,
+        (st.ox + x).max(0) as usize,
+        (st.oy + y).max(0) as usize,
+        s,
+        rgb(color),
+        scale.max(1) as usize,
+    );
 }
 
-/// Instantiate `bytes` as a WebAssembly module, granting it the OS ABI, and call
-/// its `entry` export. Returns a short error string on any failure.
-fn run(bytes: &[u8], entry: &str, state: HostState) -> Result<(), &'static str> {
-    let engine = Engine::default();
-    let module = Module::new(&engine, bytes).map_err(|_| "module decode")?;
-
-    let mut store = Store::new(&engine, state);
-    let mut linker = <Linker<HostState>>::new(&engine);
-
-    // host.log(ptr, len): print a UTF-8 string from the guest's linear memory.
+/// Register the OS ABI on `linker`. Shared by one-shot runs and the persistent
+/// windowed app so every guest sees the same host surface.
+fn install_abi(linker: &mut Linker<HostState>) -> Result<(), &'static str> {
     linker
         .func_wrap(
             "host",
@@ -107,27 +121,15 @@ fn run(bytes: &[u8], entry: &str, state: HostState) -> Result<(), &'static str> 
             },
         )
         .map_err(|_| "link host.log")?;
-
-    // host.fill_rect(x, y, w, h, rgb): fill a rectangle in the framebuffer.
     linker
         .func_wrap(
             "host",
             "fill_rect",
             |caller: Caller<'_, HostState>, x: i32, y: i32, w: i32, h: i32, color: i32| {
-                if let Some(mut c) = caller.data().canvas() {
-                    c.fill_rect(
-                        x.max(0) as usize,
-                        y.max(0) as usize,
-                        w.max(0) as usize,
-                        h.max(0) as usize,
-                        rgb(color),
-                    );
-                }
+                host_fill(caller.data(), x, y, w, h, color);
             },
         )
         .map_err(|_| "link host.fill_rect")?;
-
-    // host.draw_text(x, y, ptr, len, rgb, scale): draw guest text at scale.
     linker
         .func_wrap(
             "host",
@@ -139,37 +141,92 @@ fn run(bytes: &[u8], entry: &str, state: HostState) -> Result<(), &'static str> 
              len: i32,
              color: i32,
              scale: i32| {
-                if let Some(s) = guest_str(&caller, ptr, len)
-                    && let Some(mut c) = caller.data().canvas()
-                {
-                    font::draw_text(
-                        &mut c,
-                        x.max(0) as usize,
-                        y.max(0) as usize,
-                        s,
-                        rgb(color),
-                        (scale.max(1)) as usize,
-                    );
+                if let Some(s) = guest_str(&caller, ptr, len) {
+                    host_text(caller.data(), s, x, y, color, scale);
                 }
             },
         )
         .map_err(|_| "link host.draw_text")?;
+    Ok(())
+}
 
+/// Run the embedded console demo: decode it, wire up the ABI, call `main`.
+pub fn run_demo() {
+    match run(DEMO_WASM, "main", HostState::console()) {
+        Ok(()) => crate::serial_println!("wasm: demo module ran OK"),
+        Err(e) => crate::serial_println!("wasm: demo failed: {}", e),
+    }
+}
+
+/// Instantiate `bytes`, granting it the OS ABI, and call its `entry` export.
+fn run(bytes: &[u8], entry: &str, state: HostState) -> Result<(), &'static str> {
+    let engine = Engine::default();
+    let module = Module::new(&engine, bytes).map_err(|_| "module decode")?;
+    let mut store = Store::new(&engine, state);
+    let mut linker = <Linker<HostState>>::new(&engine);
+    install_abi(&mut linker)?;
     let instance = linker
         .instantiate_and_start(&mut store, &module)
         .map_err(|_| "instantiate")?;
-
     let func = instance
         .get_typed_func::<(), ()>(&store, entry)
         .map_err(|_| "no entry export")?;
-
     func.call(&mut store, ()).map_err(|_| "trap in entry")?;
     Ok(())
 }
 
+/// A live, persistent WASM application: instantiated once, then re-rendered each
+/// frame into whichever window content box the compositor passes in.
+struct App {
+    store: Store<HostState>,
+    instance: Instance,
+}
+
+/// The desktop's WASM app, built lazily on first paint and kept resident so the
+/// interpreter is not re-instantiated every frame. Single-threaded access.
+static APP: RacyCell<Option<App>> = RacyCell::new(None);
+
+/// Build the resident windowed app from `APP_WASM`. `None` if it fails to load.
+fn build_app() -> Option<App> {
+    let engine = Engine::default();
+    let module = Module::new(&engine, APP_WASM).ok()?;
+    let mut store = Store::new(&engine, HostState::console());
+    let mut linker = <Linker<HostState>>::new(&engine);
+    install_abi(&mut linker).ok()?;
+    let instance = linker.instantiate_and_start(&mut store, &module).ok()?;
+    Some(App { store, instance })
+}
+
+/// Render the resident WASM app into `buf` at window content box `(ox, oy, cw,
+/// ch)`. The guest draws from its own origin; the host translates and clips.
+/// Builds the app on first call; a load failure makes this a no-op.
+pub fn draw_app(buf: &mut [u8], info: FrameBufferInfo, ox: i32, oy: i32, cw: i32, ch: i32) {
+    // SAFETY: single-threaded desktop context (compositor thread only).
+    let slot = unsafe { &mut *APP.get() };
+    if slot.is_none() {
+        *slot = build_app();
+    }
+    let Some(app) = slot.as_mut() else { return };
+
+    {
+        let st = app.store.data_mut();
+        st.fb = buf.as_mut_ptr();
+        st.fb_len = buf.len();
+        st.info = Some(info);
+        st.ox = ox;
+        st.oy = oy;
+        st.cw = cw;
+        st.ch = ch;
+    }
+    if let Ok(func) = app.instance.get_typed_func::<(), ()>(&app.store, "render") {
+        let _ = func.call(&mut app.store, ());
+    }
+    // Drop the surface so a stale pointer is never reused between frames.
+    app.store.data_mut().info = None;
+}
+
 /// Borrow a UTF-8 string of `len` bytes at offset `ptr` from the guest's
-/// exported `mem`. `None` if there is no memory, the range is out of bounds, or
-/// the bytes are not valid UTF-8.
+/// exported `mem`. `None` on missing memory, out-of-bounds range, or non-UTF-8.
 fn guest_str<'a>(caller: &'a Caller<'_, HostState>, ptr: i32, len: i32) -> Option<&'a str> {
     let Some(Extern::Memory(mem)) = caller.get_export("mem") else {
         return None;

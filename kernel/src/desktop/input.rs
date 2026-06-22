@@ -60,6 +60,11 @@ impl Desktop {
                     self.browser.on_key(key);
                 }
             },
+            Kind::WasmApp => {
+                if key == Key::Esc {
+                    self.request_close(WASM);
+                }
+            }
         }
         true
     }
@@ -128,7 +133,7 @@ impl Desktop {
                 Kind::Editor => self.editor.line(self.editor.cursor().1),
                 Kind::Calculator => self.calc.display(),
                 Kind::Browser => self.browser.url(),
-                Kind::TaskMgr => &[],
+                Kind::TaskMgr | Kind::WasmApp => &[],
             };
             n = text.len().min(clipboard::CAP);
             tmp[..n].copy_from_slice(&text[..n]);
@@ -179,7 +184,7 @@ impl Desktop {
                     }
                 }
             }
-            Kind::TaskMgr => {}
+            Kind::TaskMgr | Kind::WasmApp => {}
         }
     }
 

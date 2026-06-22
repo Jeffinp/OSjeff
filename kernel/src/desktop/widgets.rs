@@ -239,6 +239,7 @@ pub fn paint_background(c: &mut Canvas) {
         Icon::TaskMgr,
         Icon::Calculator,
         Icon::Browser,
+        Icon::WasmApp,
     ];
     for (i, kind) in kinds.iter().enumerate() {
         let r = icons[i];

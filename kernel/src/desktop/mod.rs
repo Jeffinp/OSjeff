@@ -26,7 +26,7 @@ const SLIDE_PX: f32 = 28.0;
 const DOCK_ICON: i32 = 40;
 const DOCK_GAP: i32 = 14;
 const DOCK_PAD: i32 = 12;
-const DOCK_COUNT: i32 = 6; // brand + terminal + editor + taskmgr + calculator + browser
+const DOCK_COUNT: i32 = 7; // brand + terminal + editor + taskmgr + calculator + browser + wasm
 const DOCK_MARGIN: i32 = 16; // gap from screen bottom
 
 // Calculator keypad: the input byte for each cell (0x08 = backspace). Duplicate
@@ -62,7 +62,8 @@ const EDIT: usize = 1;
 const TASK: usize = 2;
 const CALC: usize = 3;
 const BROWSER: usize = 4;
-const WIN_COUNT: usize = 5;
+const WASM: usize = 5;
+const WIN_COUNT: usize = 6;
 
 /// Cursor sprite bounding box (used by the dirty-rect overlay path).
 pub const CURSOR_W: i32 = 10;
@@ -72,12 +73,13 @@ pub const CURSOR_H: i32 = 16;
 const MENU_W: i32 = 220;
 const MENU_ITEM_H: i32 = 32;
 const MENU_PAD: i32 = 6;
-const MENU_ITEMS: [(&str, usize); 5] = [
+const MENU_ITEMS: [(&str, usize); 6] = [
     ("Terminal", TERM),
     ("Editor", EDIT),
     ("Task Manager", TASK),
     ("Calculator", CALC),
     ("Navegador", BROWSER),
+    ("WASM App", WASM),
 ];
 
 // Start panel (system icon → all apps + power).
@@ -85,12 +87,13 @@ const START_W: i32 = 240;
 const START_ROW_H: i32 = 38;
 const START_PAD: i32 = 10;
 const START_GAP: i32 = 12; // divider gap before the power rows
-const START_APPS: [(&str, usize); 5] = [
+const START_APPS: [(&str, usize); 6] = [
     ("Terminal", TERM),
     ("Editor", EDIT),
     ("Task Manager", TASK),
     ("Calculator", CALC),
     ("Navegador", BROWSER),
+    ("WASM App", WASM),
 ];
 
 /// An entry in the start panel.
@@ -121,6 +124,7 @@ enum Kind {
     TaskMgr,
     Calculator,
     Browser,
+    WasmApp,
 }
 
 struct Win {
@@ -236,6 +240,15 @@ impl Desktop {
                 anim: None,
                 pid: 0,
             },
+            Win {
+                rect: Rect::new(240, 130, 720, 470),
+                visible: false,
+                kind: Kind::WasmApp,
+                title: "WASM APP",
+                proc_name: b"wasmapp",
+                anim: None,
+                pid: 0,
+            },
         ];
 
         Self {
@@ -251,7 +264,7 @@ impl Desktop {
             keymap: Keymap::new(),
             procs,
             windows,
-            order: [BROWSER, TASK, CALC, EDIT, TERM], // terminal focused
+            order: [WASM, BROWSER, TASK, CALC, EDIT, TERM], // terminal focused
             drag: None,
             menu: None,
             start_open: false,
@@ -387,6 +400,7 @@ impl Desktop {
                     3 => Some(DockAction::Open(TASK)),
                     4 => Some(DockAction::Open(CALC)),
                     5 => Some(DockAction::Open(BROWSER)),
+                    6 => Some(DockAction::Open(WASM)),
                     _ => None,
                 };
             }

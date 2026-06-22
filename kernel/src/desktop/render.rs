@@ -61,29 +61,29 @@ impl Desktop {
     /// Compact signature of the *static* scene (which windows are visible /
     /// animating, and their z-order). When it changes, the cached static layer
     /// must be rebuilt.
-    pub fn anim_signature(&self) -> u32 {
-        // Layout (WIN_COUNT = 5, so each window index needs 3 bits):
-        //   bits 0..4   visible flags
-        //   bits 5..9   animating flags
-        //   bits 10..24 z-order (5 entries x 3 bits)
-        //   bits 25..27 drag target (+1, 0 = no drag)
-        let mut s = 0u32;
+    pub fn anim_signature(&self) -> u64 {
+        // Layout (WIN_COUNT = 6, so each window index needs 3 bits):
+        //   bits 0..5    visible flags
+        //   bits 6..11   animating flags
+        //   bits 12..29  z-order (6 entries x 3 bits)
+        //   bits 30..32  drag target (+1, 0 = no drag)
+        let mut s = 0u64;
         for w in 0..WIN_COUNT {
             if self.windows[w].visible {
                 s |= 1 << w;
             }
             if self.windows[w].anim.is_some() {
-                s |= 1 << (w + 5);
+                s |= 1 << (w + WIN_COUNT);
             }
         }
         for (i, &w) in self.order.iter().enumerate() {
-            s |= (w as u32 & 0x7) << (10 + i * 3);
+            s |= (w as u64 & 0x7) << (12 + i * 3);
         }
         // Fold in the drag target so the static layer is rebuilt when a drag
         // starts (the window leaves the static layer) and ends (it rejoins it),
         // but stays stable mid-drag so it is composed only once.
         if let Some(d) = &self.drag {
-            s |= ((d.win as u32 & 0x7) + 1) << 25;
+            s |= ((d.win as u64 & 0x7) + 1) << 30;
         }
         s
     }
@@ -247,6 +247,7 @@ impl Desktop {
             Kind::TaskMgr => self.draw_taskmgr(c, x, y),
             Kind::Calculator => self.draw_calculator(c, r, focused),
             Kind::Browser => self.draw_browser(c, r, focused),
+            Kind::WasmApp => self.draw_wasm(c, r),
         }
     }
 }

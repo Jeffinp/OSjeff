@@ -68,6 +68,20 @@ impl<'a> Canvas<'a> {
         self.info.bytes_per_pixel
     }
 
+    /// The framebuffer layout backing this canvas.
+    #[inline]
+    pub fn fb_info(&self) -> FrameBufferInfo {
+        self.info
+    }
+
+    /// Mutable access to the raw pixel buffer. Lets the WASM app engine draw a
+    /// guest's window content into the live compositor buffer through its own
+    /// `Canvas` over the same memory.
+    #[inline]
+    pub fn buffer_mut(&mut self) -> &mut [u8] {
+        self.buf
+    }
+
     /// Pack a color into a native-endian 32-bit pixel for the 4-byte-per-pixel
     /// formats. `None` for layouts we can't pack (grayscale / unknown), which
     /// fall back to the byte path. The padding byte is left 0.

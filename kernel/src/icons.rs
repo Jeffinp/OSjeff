@@ -13,6 +13,7 @@ pub enum Icon {
     TaskMgr,
     Calculator,
     Browser,
+    WasmApp,
     Power,
 }
 
@@ -24,8 +25,28 @@ pub fn draw(c: &mut Canvas, icon: Icon, x: usize, y: usize, size: usize) {
         Icon::TaskMgr => taskmgr(c, x, y, size),
         Icon::Calculator => calculator(c, x, y, size),
         Icon::Browser => browser(c, x, y, size),
+        Icon::WasmApp => wasm_app(c, x, y, size),
         Icon::Power => power(c, x, y, size),
     }
+}
+
+/// WebAssembly app: brand-purple squircle with a white "W" glyph.
+fn wasm_app(c: &mut Canvas, x: usize, y: usize, size: usize) {
+    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x65, 0x4F, 0xF0));
+    let pad = size / 6;
+    c.fill_round_rect(
+        x + pad,
+        y + pad,
+        size - pad * 2,
+        size - pad * 2,
+        size / 8,
+        Color::rgb(0x4B, 0x3A, 0xC4),
+    );
+    let scale = (size / 12).max(1);
+    let gw = crate::font::text_width("W", scale);
+    let gx = x + size / 2 - gw / 2;
+    let gy = y + size / 2 - (7 * scale) / 2;
+    crate::font::draw_text(c, gx, gy, "W", theme::WHITE, scale);
 }
 
 /// OSJeff mark: teal squircle, violet diagonal half, white chevron.
