@@ -272,7 +272,14 @@ impl Desktop {
                     let py = (oy + *y) as usize;
                     font::draw_bytes(c, px, py, text.as_bytes(), rgb(*color), *scale as usize);
                     if *bold {
-                        font::draw_bytes(c, px + 1, py, text.as_bytes(), rgb(*color), *scale as usize);
+                        font::draw_bytes(
+                            c,
+                            px + 1,
+                            py,
+                            text.as_bytes(),
+                            rgb(*color),
+                            *scale as usize,
+                        );
                     }
                 }
             }
