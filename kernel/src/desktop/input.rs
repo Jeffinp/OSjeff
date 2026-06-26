@@ -104,22 +104,33 @@ impl Desktop {
         }
     }
 
-    /// Resolve a click in the file manager: the Files/Trash tabs (top) or a row
-    /// in the list below. Mirrors the geometry in `draw_files`.
+    /// Resolve a click in the file manager. Geometry mirrors `files_ui::draw_files`
+    /// (sidebar width 176, rows 30px high). Sidebar items switch the view; clicks
+    /// in the main list select a row.
     pub(crate) fn files_click(&mut self, rect: Rect, px: i32, py: i32) {
-        let cx = rect.x + 14;
-        let tabs_y = rect.y + TITLE_H + 12 + 78;
-        if (tabs_y..tabs_y + 24).contains(&py) {
-            let v: u8 = if px >= cx + 170 { 1 } else { 0 };
-            if self.files_view != v {
-                self.files_view = v;
-                self.files_sel = 0;
+        let cy0 = rect.y + TITLE_H;
+        if px < rect.x + 176 {
+            let view = if (cy0 + 34..cy0 + 64).contains(&py) {
+                Some(0)
+            } else if (cy0 + 66..cy0 + 96).contains(&py) {
+                Some(1)
+            } else if (cy0 + 132..cy0 + 162).contains(&py) {
+                Some(2)
+            } else if (cy0 + 164..cy0 + 194).contains(&py) {
+                Some(3)
+            } else {
+                None
+            };
+            if let Some(v) = view {
+                self.files_set_view(v);
             }
             return;
         }
-        let list_y = tabs_y + 36;
-        if py >= list_y {
-            self.files_select_at(((py - list_y) / 22).max(0) as usize);
+        if self.files_view <= 1 {
+            let list_y = cy0 + 78;
+            if py >= list_y {
+                self.files_select_at(((py - list_y) / 30).max(0) as usize);
+            }
         }
     }
 

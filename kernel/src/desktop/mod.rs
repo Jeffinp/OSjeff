@@ -267,7 +267,7 @@ impl Desktop {
                 pid: 0,
             },
             Win {
-                rect: Rect::new(300, 150, 640, 460),
+                rect: Rect::new(250, 120, 780, 520),
                 visible: false,
                 kind: Kind::Files,
                 title: "ARQUIVOS",
@@ -582,20 +582,25 @@ impl Desktop {
 
     // ---- file manager ----
 
-    /// Rows shown in the current view (active files, or the trash).
+    /// Rows shown in the current view. Views: 0 = files, 1 = trash, 2/3 = the
+    /// boot / filesystem disk panels (no rows).
     pub(crate) fn files_rows(&self) -> usize {
         let img = disk();
-        if self.files_view == 0 {
-            fs::count_active(img)
-        } else {
-            fs::count_trashed(img)
+        match self.files_view {
+            0 => fs::count_active(img),
+            1 => fs::count_trashed(img),
+            _ => 0,
         }
     }
 
     /// The filesystem slot backing visible row `n` of the current view.
     fn files_slot(&self, n: usize) -> Option<usize> {
         let img = disk();
-        let active = self.files_view == 0;
+        let active = match self.files_view {
+            0 => true,
+            1 => false,
+            _ => return None,
+        };
         (0..fs::MAX_FILES)
             .filter(|&i| {
                 if active {
@@ -605,6 +610,12 @@ impl Desktop {
                 }
             })
             .nth(n)
+    }
+
+    /// Switch the file-manager view from a sidebar selection (0..=3).
+    pub(crate) fn files_set_view(&mut self, v: u8) {
+        self.files_view = v.min(3);
+        self.files_sel = 0;
     }
 
     /// Snapshot the selected row's name into an owned buffer (ends the fs borrow
@@ -628,9 +639,9 @@ impl Desktop {
         self.files_sel = (cur + delta).clamp(0, rows as i32 - 1) as usize;
     }
 
-    /// Toggle between the Files and Trash views.
+    /// Cycle through the sidebar views (Files → Trash → boot → FS → …).
     pub(crate) fn files_toggle_view(&mut self) {
-        self.files_view ^= 1;
+        self.files_view = (self.files_view + 1) % 4;
         self.files_sel = 0;
     }
 
