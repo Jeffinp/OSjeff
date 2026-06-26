@@ -38,6 +38,12 @@ const fn rec_off(i: usize) -> usize {
     4 + i * REC_SIZE
 }
 
+// A record's first byte is its state. Reusing it for the trash keeps the on-disk
+// layout (and image size) unchanged — no reformat needed.
+const ST_FREE: u8 = 0; // empty slot
+const ST_ACTIVE: u8 = 1; // a live file
+const ST_TRASHED: u8 = 2; // recoverable in the trash
+
 /// Write a fresh, empty filesystem into `img` (must be at least [`IMAGE_SIZE`]).
 pub fn format(img: &mut [u8]) {
     img[..4].copy_from_slice(&MAGIC);
@@ -114,7 +120,7 @@ pub fn write(img: &mut [u8], name: &[u8], data: &[u8]) -> Result<(), FsError> {
         .ok_or(FsError::NoSpace)?;
 
     let o = rec_off(slot);
-    img[o] = 1;
+    img[o] = ST_ACTIVE;
     img[o + 1] = name.len() as u8;
     img[o + 2..o + 2 + name.len()].copy_from_slice(name);
     let sz = (data.len() as u16).to_le_bytes();
@@ -127,8 +133,65 @@ pub fn write(img: &mut [u8], name: &[u8], data: &[u8]) -> Result<(), FsError> {
 /// Delete `name`. Returns `NotFound` if it does not exist.
 pub fn remove(img: &mut [u8], name: &[u8]) -> Result<(), FsError> {
     let i = find(img, name).ok_or(FsError::NotFound)?;
-    img[rec_off(i)] = 0;
+    img[rec_off(i)] = ST_FREE;
     Ok(())
+}
+
+// ---- trash / permanent delete ----
+
+/// True if slot `i` holds a live (non-trashed) file.
+pub fn is_active(img: &[u8], i: usize) -> bool {
+    i < MAX_FILES && img[rec_off(i)] == ST_ACTIVE
+}
+
+/// True if slot `i` holds a file currently in the trash.
+pub fn is_trashed(img: &[u8], i: usize) -> bool {
+    i < MAX_FILES && img[rec_off(i)] == ST_TRASHED
+}
+
+/// Number of live (non-trashed) files.
+pub fn count_active(img: &[u8]) -> usize {
+    (0..MAX_FILES).filter(|&i| is_active(img, i)).count()
+}
+
+/// Number of files in the trash.
+pub fn count_trashed(img: &[u8]) -> usize {
+    (0..MAX_FILES).filter(|&i| is_trashed(img, i)).count()
+}
+
+/// Move a live `name` to the trash — recoverable with [`restore`]. The slot and
+/// data are kept; only the state changes. `NotFound` if no live file matches.
+pub fn trash(img: &mut [u8], name: &[u8]) -> Result<(), FsError> {
+    let i = (0..MAX_FILES)
+        .find(|&i| is_active(img, i) && name_at(img, i) == name)
+        .ok_or(FsError::NotFound)?;
+    img[rec_off(i)] = ST_TRASHED;
+    Ok(())
+}
+
+/// Restore a trashed `name` back to a live file. `NotFound` if not in the trash.
+pub fn restore(img: &mut [u8], name: &[u8]) -> Result<(), FsError> {
+    let i = (0..MAX_FILES)
+        .find(|&i| is_trashed(img, i) && name_at(img, i) == name)
+        .ok_or(FsError::NotFound)?;
+    img[rec_off(i)] = ST_ACTIVE;
+    Ok(())
+}
+
+/// Permanently delete `name` (any state), freeing its slot. Unrecoverable.
+pub fn purge(img: &mut [u8], name: &[u8]) -> Result<(), FsError> {
+    let i = find(img, name).ok_or(FsError::NotFound)?;
+    img[rec_off(i)] = ST_FREE;
+    Ok(())
+}
+
+/// Permanently delete every file in the trash.
+pub fn empty_trash(img: &mut [u8]) {
+    for i in 0..MAX_FILES {
+        if is_trashed(img, i) {
+            img[rec_off(i)] = ST_FREE;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -171,6 +234,37 @@ mod tests {
         write(&mut img, b"a", b"second longer").unwrap();
         assert_eq!(read(&img, b"a"), Some(&b"second longer"[..]));
         assert_eq!(count(&img), 1);
+    }
+
+    #[test]
+    fn trash_restore_purge_flow() {
+        let mut img = img();
+        write(&mut img, b"a.txt", b"hi").unwrap();
+        write(&mut img, b"b.txt", b"yo").unwrap();
+        assert_eq!(count_active(&img), 2);
+
+        // Trash keeps the data, hides it from the active count.
+        trash(&mut img, b"a.txt").unwrap();
+        assert_eq!(count_active(&img), 1);
+        assert_eq!(count_trashed(&img), 1);
+        assert_eq!(read(&img, b"a.txt"), Some(&b"hi"[..]));
+        assert_eq!(trash(&mut img, b"a.txt"), Err(FsError::NotFound)); // already trashed
+
+        // Restore brings it back.
+        restore(&mut img, b"a.txt").unwrap();
+        assert_eq!(count_active(&img), 2);
+        assert_eq!(count_trashed(&img), 0);
+
+        // Permanent delete frees the slot and the data is gone.
+        purge(&mut img, b"a.txt").unwrap();
+        assert_eq!(count_active(&img), 1);
+        assert_eq!(read(&img, b"a.txt"), None);
+
+        // Empty trash purges everything in it.
+        trash(&mut img, b"b.txt").unwrap();
+        empty_trash(&mut img);
+        assert_eq!(count_trashed(&img), 0);
+        assert_eq!(read(&img, b"b.txt"), None);
     }
 
     #[test]
