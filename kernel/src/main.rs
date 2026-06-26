@@ -202,6 +202,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // longer spawn demo spin-workers — they consumed 2/3 of the CPU under the
     // equal-slice round-robin, starving the compositor and capping the frame
     // rate. With the GUI as the sole thread it gets the whole core.
+    // Probe the IDE channels: report where the OS is installed (boot disk) and
+    // whether each disk is a spinning HD or an SSD, so storage can adapt.
+    ata::detect_and_log();
+
     sched::init();
 
     // Configure the PS/2 controller BEFORE enabling interrupts, so the init
