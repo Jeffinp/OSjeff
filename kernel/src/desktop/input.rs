@@ -73,9 +73,11 @@ impl Desktop {
                 Key::Esc => self.request_close(FILES),
                 Key::Up => self.files_move(-1),
                 Key::Down => self.files_move(1),
-                Key::Tab | Key::Left | Key::Right => self.files_toggle_view(),
-                Key::Delete | Key::Backspace => self.files_delete(),
-                Key::Enter => self.files_primary(),
+                Key::Left | Key::Backspace => self.files_up(),
+                Key::Enter | Key::Right => self.files_primary(),
+                Key::Tab => self.files_toggle_view(),
+                Key::Delete => self.files_delete(),
+                Key::Char(b'n') | Key::Char(b'N') => self.files_mkdir(),
                 _ => {}
             },
         }

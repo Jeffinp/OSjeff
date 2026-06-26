@@ -168,6 +168,7 @@ pub struct Desktop {
     // snapshot of the two IDE disks (boot + filesystem) for its disk panel.
     files_sel: usize,
     files_view: u8,
+    files_cwd: u8, // current directory slot (fs::ROOT at the top level)
     disks: [Option<crate::ata::DiskInfo>; 2],
     clipboard: Clipboard,
     keymap: Keymap,
@@ -208,6 +209,9 @@ impl Desktop {
                 b"Bem-vindo ao OSjeff. Gerenciador: setas navegam, Del manda pra lixeira, Tab alterna arquivos/lixeira, Enter abre.",
             );
             let _ = fs::write(disk(), b"notas.txt", b"Arquivo de exemplo do OSjeff.");
+            if let Ok(d) = fs::mkdir(disk(), fs::ROOT, b"Documentos") {
+                let _ = fs::write_in(disk(), d as u8, b"projeto.txt", b"Arquivo dentro de uma pasta.");
+            }
             let _ = crate::ata::write_image(disk());
         }
 
@@ -288,6 +292,7 @@ impl Desktop {
             page_scroll: 0,
             files_sel: 0,
             files_view: 0,
+            files_cwd: fs::ROOT,
             disks: [
                 crate::ata::identify(0x1F0, 0x3F6, false),
                 crate::ata::identify(0x170, 0x376, false),
@@ -582,12 +587,32 @@ impl Desktop {
 
     // ---- file manager ----
 
-    /// Rows shown in the current view. Views: 0 = files, 1 = trash, 2/3 = the
-    /// boot / filesystem disk panels (no rows).
+    /// The effective current directory: `files_cwd` if it is still a live folder,
+    /// else fall back to the root (e.g. after the folder was trashed).
+    pub(crate) fn files_cwd(&self) -> u8 {
+        let c = self.files_cwd;
+        if c == fs::ROOT {
+            return fs::ROOT;
+        }
+        let img = disk();
+        if fs::is_active(img, c as usize) && fs::is_dir(img, c as usize) {
+            c
+        } else {
+            fs::ROOT
+        }
+    }
+
+    /// Rows shown in the current view. Views: 0 = files (within the current
+    /// directory), 1 = trash, 2/3 = the boot / filesystem disk panels (no rows).
     pub(crate) fn files_rows(&self) -> usize {
         let img = disk();
         match self.files_view {
-            0 => fs::count_active(img),
+            0 => {
+                let cwd = self.files_cwd();
+                (0..fs::MAX_FILES)
+                    .filter(|&i| fs::is_active(img, i) && fs::parent_at(img, i) == cwd)
+                    .count()
+            }
             1 => fs::count_trashed(img),
             _ => 0,
         }
@@ -596,20 +621,16 @@ impl Desktop {
     /// The filesystem slot backing visible row `n` of the current view.
     fn files_slot(&self, n: usize) -> Option<usize> {
         let img = disk();
-        let active = match self.files_view {
-            0 => true,
-            1 => false,
-            _ => return None,
-        };
-        (0..fs::MAX_FILES)
-            .filter(|&i| {
-                if active {
-                    fs::is_active(img, i)
-                } else {
-                    fs::is_trashed(img, i)
-                }
-            })
-            .nth(n)
+        match self.files_view {
+            0 => {
+                let cwd = self.files_cwd();
+                (0..fs::MAX_FILES)
+                    .filter(|&i| fs::is_active(img, i) && fs::parent_at(img, i) == cwd)
+                    .nth(n)
+            }
+            1 => (0..fs::MAX_FILES).filter(|&i| fs::is_trashed(img, i)).nth(n),
+            _ => None,
+        }
     }
 
     /// Switch the file-manager view from a sidebar selection (0..=3).
@@ -645,38 +666,81 @@ impl Desktop {
         self.files_sel = 0;
     }
 
-    /// Delete: in Files view, move the selection to the trash; in Trash view,
-    /// delete it permanently.
+    /// Delete: in Files view, move the selection (a folder takes its contents) to
+    /// the trash; in Trash view, delete it permanently. Recursive for folders.
     pub(crate) fn files_delete(&mut self) {
-        let Some((buf, n)) = self.files_sel_name() else {
+        let Some(slot) = self.files_slot(self.files_sel) else {
             return;
         };
-        let nm = &buf[..n];
-        let _ = if self.files_view == 0 {
-            fs::trash(disk(), nm)
+        if self.files_view == 0 {
+            fs::trash_slot(disk(), slot);
         } else {
-            fs::purge(disk(), nm)
-        };
+            fs::purge_slot(disk(), slot);
+        }
         flush_disk();
         self.files_move(0);
     }
 
-    /// Primary action (Enter): in Trash view, restore the selection; in Files
-    /// view, open the file in the editor.
+    /// Primary action (Enter): Trash view → restore; a folder → open it; a file →
+    /// open it in the editor.
     pub(crate) fn files_primary(&mut self) {
+        let Some(slot) = self.files_slot(self.files_sel) else {
+            return;
+        };
+        if self.files_view == 1 {
+            fs::restore_slot(disk(), slot);
+            flush_disk();
+            self.files_move(0);
+            return;
+        }
+        if fs::is_dir(disk(), slot) {
+            self.files_cwd = slot as u8;
+            self.files_sel = 0;
+            return;
+        }
         let Some((buf, n)) = self.files_sel_name() else {
             return;
         };
-        let nm = &buf[..n];
-        if self.files_view == 1 {
-            let _ = fs::restore(disk(), nm);
-            flush_disk();
-            self.files_move(0);
-        } else if let Some(f) = FileName::parse(nm) {
+        if let Some(f) = FileName::parse(&buf[..n]) {
             self.editor_file = f;
             self.fs_load(f);
             self.open(EDIT);
         }
+    }
+
+    /// Go to the parent directory (Files view only).
+    pub(crate) fn files_up(&mut self) {
+        if self.files_view == 0 && self.files_cwd != fs::ROOT {
+            self.files_cwd = fs::parent_at(disk(), self.files_cwd as usize);
+            self.files_sel = 0;
+        }
+    }
+
+    /// Create a new auto-named folder in the current directory (Files view).
+    pub(crate) fn files_mkdir(&mut self) {
+        if self.files_view != 0 {
+            return;
+        }
+        let cwd = self.files_cwd();
+        let base: &[u8] = b"nova pasta";
+        let mut name = [0u8; fs::MAX_NAME];
+        for n in 1..=9u8 {
+            let len = if n == 1 {
+                name[..base.len()].copy_from_slice(base);
+                base.len()
+            } else {
+                name[..base.len()].copy_from_slice(base);
+                name[base.len()] = b' ';
+                name[base.len() + 1] = b'0' + n;
+                base.len() + 2
+            };
+            if fs::find_in(disk(), cwd, &name[..len]).is_none() {
+                let _ = fs::mkdir(disk(), cwd, &name[..len]);
+                flush_disk();
+                break;
+            }
+        }
+        self.files_move(0);
     }
 
     /// Select the row at content-local `y` within the files list (for clicks).

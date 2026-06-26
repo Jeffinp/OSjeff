@@ -130,8 +130,22 @@ impl Desktop {
     fn draw_file_list(&self, c: &mut Canvas, r: Rect, mx: i32, mw: i32) {
         let right = mx + mw;
         let mut my = r.y + TITLE_H + 14;
-        let title: &[u8] = if self.files_view == 0 { b"Arquivos" } else { b"Lixeira" };
-        font::draw_bytes(c, mx as usize, my as usize, title, FG, 3);
+        if self.files_view == 1 {
+            font::draw_text(c, mx as usize, my as usize, "Lixeira", FG, 3);
+        } else {
+            // Breadcrumb: the current folder name (or "Arquivos" at the root).
+            let cwd = self.files_cwd();
+            if cwd == fs::ROOT {
+                font::draw_text(c, mx as usize, my as usize, "Arquivos", FG, 3);
+            } else {
+                let name = fs::name_at(disk(), cwd as usize);
+                let nw = name.len() as i32 * font::cell_w(3) as i32;
+                font::draw_text(c, mx as usize, my as usize, "Arquivos / ", MUTED, 2);
+                let off = font::text_width("Arquivos / ", 2) as i32;
+                font::draw_bytes(c, (mx + off) as usize, my as usize, name, FG, 2);
+                let _ = nw;
+            }
+        }
         my += 36;
         font::draw_text(c, mx as usize, my as usize, "Nome", MUTED, 2);
         let th = font::text_width("Tamanho", 2) as i32;
@@ -156,7 +170,15 @@ impl Desktop {
             let Some(slot) = self.files_slot(n) else { break };
             let img = disk();
             let tc = if sel { theme::WHITE } else { FG };
-            glyph(c, 3, mx, ry + (ROW - 18) / 2, 18, if sel { theme::WHITE } else { MUTED });
+            let is_dir = fs::is_dir(img, slot);
+            let gcol = if sel {
+                theme::WHITE
+            } else if is_dir {
+                BLUE
+            } else {
+                MUTED
+            };
+            glyph(c, if is_dir { 0 } else { 3 }, mx, ry + (ROW - 18) / 2, 18, gcol);
             font::draw_bytes(c, (mx + 26) as usize, (ry + (ROW - 14) / 2) as usize, fs::name_at(img, slot), tc, 2);
             let mut sz = [0u8; 12];
             let q = push_num(&mut sz, 0, fs::size_at(img, slot) as u32);
@@ -231,7 +253,7 @@ impl Desktop {
             let p = push(&mut s, p, b" itens");
             font::draw_bytes(c, mx as usize, by as usize, &s[..p], MUTED, 2);
         }
-        let hint = "Tab muda  Enter abre  Del apaga";
+        let hint = "N pasta  Bksp volta  Del apaga";
         let hw = font::text_width(hint, 2) as i32;
         font::draw_text(c, (r.right() - 16 - hw) as usize, by as usize, hint, MUTED, 2);
     }

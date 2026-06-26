@@ -6,10 +6,18 @@
 //! slice, so the same code is exercised on the host with a plain array.
 //!
 //! Layout: a 4-byte magic, then [`MAX_FILES`] fixed records:
-//! `[used:1][name_len:1][name:16][size:2 LE][data:1024]`.
+//! `[state:1][flags:1][parent:1][name_len:1][name:16][size:2 LE][data:1024]`.
+//! `flags` bit 0 marks a directory; `parent` is the slot of the containing
+//! directory ([`ROOT`] = 0xFF for the top level). The tree is just records that
+//! point at their parent — no separate directory blocks.
 
-/// Magic marking a formatted image.
-const MAGIC: [u8; 4] = *b"OJFS";
+/// Magic marking a formatted image. Bumped to `OJF2` when the record layout
+/// gained `flags`/`parent`, so older `OJFS` images are treated as unformatted
+/// and re-formatted instead of misread.
+const MAGIC: [u8; 4] = *b"OJF2";
+
+/// Parent value for items at the top level (no containing directory).
+pub const ROOT: u8 = 0xFF;
 
 /// Maximum number of files. Bumped from 16 → 48 (the record size is unchanged,
 /// so older images stay readable; the extra slots were zero/unused tail). The
@@ -20,7 +28,14 @@ pub const MAX_NAME: usize = 16;
 /// Maximum file payload in bytes.
 pub const MAX_FILE_SIZE: usize = 1024;
 
-const HEADER: usize = 1 + 1 + MAX_NAME + 2; // used + name_len + name + size
+// state + flags + parent + name_len + name + size.
+const HEADER: usize = 1 + 1 + 1 + 1 + MAX_NAME + 2;
+const OFF_FLAGS: usize = 1;
+const OFF_PARENT: usize = 2;
+const OFF_NAMELEN: usize = 3;
+const OFF_NAME: usize = 4;
+const OFF_SIZE: usize = OFF_NAME + MAX_NAME; // 20
+const FL_DIR: u8 = 1; // flags bit 0: this record is a directory
 const REC_SIZE: usize = HEADER + MAX_FILE_SIZE;
 /// Total image size in bytes. The backing store must be at least this big.
 pub const IMAGE_SIZE: usize = 4 + MAX_FILES * REC_SIZE;
@@ -70,9 +85,9 @@ pub fn name_at(img: &[u8], i: usize) -> &[u8] {
         return &[];
     }
     let o = rec_off(i);
-    let len = img[o + 1] as usize;
+    let len = img[o + OFF_NAMELEN] as usize;
     // Bounds check prevents out-of-range reads on corrupted length fields.
-    &img[o + 2..o + 2 + len.min(MAX_NAME)]
+    &img[o + OFF_NAME..o + OFF_NAME + len.min(MAX_NAME)]
 }
 
 /// Payload size of slot `i`.
@@ -81,29 +96,57 @@ pub fn size_at(img: &[u8], i: usize) -> usize {
         return 0;
     }
     let o = rec_off(i);
-    u16::from_le_bytes([img[o + 18], img[o + 19]]) as usize
+    u16::from_le_bytes([img[o + OFF_SIZE], img[o + OFF_SIZE + 1]]) as usize
 }
 
-/// Number of files currently stored.
+/// True if slot `i` is a directory.
+pub fn is_dir(img: &[u8], i: usize) -> bool {
+    is_used(img, i) && img[rec_off(i) + OFF_FLAGS] & FL_DIR != 0
+}
+
+/// The slot of `i`'s parent directory ([`ROOT`] for a top-level item).
+pub fn parent_at(img: &[u8], i: usize) -> u8 {
+    if is_used(img, i) {
+        img[rec_off(i) + OFF_PARENT]
+    } else {
+        ROOT
+    }
+}
+
+/// Number of records currently stored (files + dirs, any state).
 pub fn count(img: &[u8]) -> usize {
     (0..MAX_FILES).filter(|&i| is_used(img, i)).count()
 }
 
-/// Find the slot holding `name`, if any.
-pub fn find(img: &[u8], name: &[u8]) -> Option<usize> {
-    (0..MAX_FILES).find(|&i| is_used(img, i) && name_at(img, i) == name)
+/// Find an active item named `name` directly inside directory `parent`.
+pub fn find_in(img: &[u8], parent: u8, name: &[u8]) -> Option<usize> {
+    (0..MAX_FILES)
+        .find(|&i| is_active(img, i) && parent_at(img, i) == parent && name_at(img, i) == name)
 }
 
-/// Read the contents of `name`.
-pub fn read<'a>(img: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
-    let i = find(img, name)?;
+/// Find an active top-level item named `name`.
+pub fn find(img: &[u8], name: &[u8]) -> Option<usize> {
+    find_in(img, ROOT, name)
+}
+
+/// Read the contents of slot `i` (`None` for directories / unused).
+pub fn read_slot(img: &[u8], i: usize) -> Option<&[u8]> {
+    if !is_used(img, i) || is_dir(img, i) {
+        return None;
+    }
     let o = rec_off(i);
     let s = size_at(img, i);
     Some(&img[o + HEADER..o + HEADER + s])
 }
 
-/// Create or overwrite `name` with `data`.
-pub fn write(img: &mut [u8], name: &[u8], data: &[u8]) -> Result<(), FsError> {
+/// Read the contents of a top-level file `name`.
+pub fn read<'a>(img: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
+    read_slot(img, find(img, name)?)
+}
+
+/// Allocate (or reuse a same-name) active record in `parent`, returning its slot
+/// and writing its header. Shared by [`write_in`] and [`mkdir`].
+fn alloc(img: &mut [u8], parent: u8, name: &[u8], dir: bool) -> Result<usize, FsError> {
     if !is_formatted(img) {
         return Err(FsError::NotFormatted);
     }
@@ -113,29 +156,49 @@ pub fn write(img: &mut [u8], name: &[u8], data: &[u8]) -> Result<(), FsError> {
     if name.len() > MAX_NAME {
         return Err(FsError::NameTooLong);
     }
+    let slot = find_in(img, parent, name)
+        .or_else(|| (0..MAX_FILES).find(|&i| !is_used(img, i)))
+        .ok_or(FsError::NoSpace)?;
+    let o = rec_off(slot);
+    img[o] = ST_ACTIVE;
+    img[o + OFF_FLAGS] = if dir { FL_DIR } else { 0 };
+    img[o + OFF_PARENT] = parent;
+    img[o + OFF_NAMELEN] = name.len() as u8;
+    img[o + OFF_NAME..o + OFF_NAME + name.len()].copy_from_slice(name);
+    Ok(slot)
+}
+
+/// Create or overwrite file `name` inside directory `parent`.
+pub fn write_in(img: &mut [u8], parent: u8, name: &[u8], data: &[u8]) -> Result<(), FsError> {
     if data.len() > MAX_FILE_SIZE {
         return Err(FsError::TooBig);
     }
-    // Overwrite an existing file, else take the first free slot.
-    let slot = find(img, name)
-        .or_else(|| (0..MAX_FILES).find(|&i| !is_used(img, i)))
-        .ok_or(FsError::NoSpace)?;
-
-    let o = rec_off(slot);
-    img[o] = ST_ACTIVE;
-    img[o + 1] = name.len() as u8;
-    img[o + 2..o + 2 + name.len()].copy_from_slice(name);
+    let o = rec_off(alloc(img, parent, name, false)?);
     let sz = (data.len() as u16).to_le_bytes();
-    img[o + 18] = sz[0];
-    img[o + 19] = sz[1];
+    img[o + OFF_SIZE] = sz[0];
+    img[o + OFF_SIZE + 1] = sz[1];
     img[o + HEADER..o + HEADER + data.len()].copy_from_slice(data);
     Ok(())
 }
 
-/// Delete `name`. Returns `NotFound` if it does not exist.
+/// Create or overwrite a top-level file.
+pub fn write(img: &mut [u8], name: &[u8], data: &[u8]) -> Result<(), FsError> {
+    write_in(img, ROOT, name, data)
+}
+
+/// Create directory `name` inside `parent`. Returns its slot.
+pub fn mkdir(img: &mut [u8], parent: u8, name: &[u8]) -> Result<usize, FsError> {
+    let slot = alloc(img, parent, name, true)?;
+    let o = rec_off(slot);
+    img[o + OFF_SIZE] = 0;
+    img[o + OFF_SIZE + 1] = 0;
+    Ok(slot)
+}
+
+/// Permanently delete top-level `name` (recursive). `NotFound` if absent.
 pub fn remove(img: &mut [u8], name: &[u8]) -> Result<(), FsError> {
     let i = find(img, name).ok_or(FsError::NotFound)?;
-    img[rec_off(i)] = ST_FREE;
+    purge_slot(img, i);
     Ok(())
 }
 
@@ -161,29 +224,71 @@ pub fn count_trashed(img: &[u8]) -> usize {
     (0..MAX_FILES).filter(|&i| is_trashed(img, i)).count()
 }
 
-/// Move a live `name` to the trash — recoverable with [`restore`]. The slot and
-/// data are kept; only the state changes. `NotFound` if no live file matches.
-pub fn trash(img: &mut [u8], name: &[u8]) -> Result<(), FsError> {
-    let i = (0..MAX_FILES)
-        .find(|&i| is_active(img, i) && name_at(img, i) == name)
-        .ok_or(FsError::NotFound)?;
+/// Move slot `i` (and, for a directory, all its descendants) to the trash.
+pub fn trash_slot(img: &mut [u8], i: usize) {
+    if !is_active(img, i) {
+        return;
+    }
+    if is_dir(img, i) {
+        for c in 0..MAX_FILES {
+            if is_active(img, c) && parent_at(img, c) == i as u8 {
+                trash_slot(img, c);
+            }
+        }
+    }
     img[rec_off(i)] = ST_TRASHED;
+}
+
+/// Restore slot `i` (and its trashed descendants) from the trash.
+pub fn restore_slot(img: &mut [u8], i: usize) {
+    if !is_trashed(img, i) {
+        return;
+    }
+    img[rec_off(i)] = ST_ACTIVE;
+    if is_dir(img, i) {
+        for c in 0..MAX_FILES {
+            if is_trashed(img, c) && parent_at(img, c) == i as u8 {
+                restore_slot(img, c);
+            }
+        }
+    }
+}
+
+/// Permanently delete slot `i` (and, for a directory, its whole subtree).
+pub fn purge_slot(img: &mut [u8], i: usize) {
+    if !is_used(img, i) {
+        return;
+    }
+    if is_dir(img, i) {
+        for c in 0..MAX_FILES {
+            if is_used(img, c) && parent_at(img, c) == i as u8 {
+                purge_slot(img, c);
+            }
+        }
+    }
+    img[rec_off(i)] = ST_FREE;
+}
+
+/// Move a live top-level `name` to the trash (recursive). `NotFound` if absent.
+pub fn trash(img: &mut [u8], name: &[u8]) -> Result<(), FsError> {
+    let i = find_in(img, ROOT, name).ok_or(FsError::NotFound)?;
+    trash_slot(img, i);
     Ok(())
 }
 
-/// Restore a trashed `name` back to a live file. `NotFound` if not in the trash.
+/// Restore a trashed top-level `name`. `NotFound` if not in the trash.
 pub fn restore(img: &mut [u8], name: &[u8]) -> Result<(), FsError> {
     let i = (0..MAX_FILES)
-        .find(|&i| is_trashed(img, i) && name_at(img, i) == name)
+        .find(|&i| is_trashed(img, i) && parent_at(img, i) == ROOT && name_at(img, i) == name)
         .ok_or(FsError::NotFound)?;
-    img[rec_off(i)] = ST_ACTIVE;
+    restore_slot(img, i);
     Ok(())
 }
 
-/// Permanently delete `name` (any state), freeing its slot. Unrecoverable.
+/// Permanently delete top-level `name` (any state, recursive). Unrecoverable.
 pub fn purge(img: &mut [u8], name: &[u8]) -> Result<(), FsError> {
     let i = find(img, name).ok_or(FsError::NotFound)?;
-    img[rec_off(i)] = ST_FREE;
+    purge_slot(img, i);
     Ok(())
 }
 
@@ -245,11 +350,15 @@ mod tests {
         write(&mut img, b"b.txt", b"yo").unwrap();
         assert_eq!(count_active(&img), 2);
 
-        // Trash keeps the data, hides it from the active count.
+        // Trash keeps the data, hides it from the active count and from read().
         trash(&mut img, b"a.txt").unwrap();
         assert_eq!(count_active(&img), 1);
         assert_eq!(count_trashed(&img), 1);
-        assert_eq!(read(&img, b"a.txt"), Some(&b"hi"[..]));
+        assert_eq!(read(&img, b"a.txt"), None); // read() only sees live files now
+        let ti = (0..MAX_FILES)
+            .find(|&i| is_trashed(&img, i) && name_at(&img, i) == b"a.txt")
+            .unwrap();
+        assert_eq!(read_slot(&img, ti), Some(&b"hi"[..])); // data still there
         assert_eq!(trash(&mut img, b"a.txt"), Err(FsError::NotFound)); // already trashed
 
         // Restore brings it back.
@@ -267,6 +376,36 @@ mod tests {
         empty_trash(&mut img);
         assert_eq!(count_trashed(&img), 0);
         assert_eq!(read(&img, b"b.txt"), None);
+    }
+
+    #[test]
+    fn directories_and_recursive_delete() {
+        let mut img = img();
+        let docs = mkdir(&mut img, ROOT, b"docs").unwrap();
+        assert!(is_dir(&img, docs));
+        write_in(&mut img, docs as u8, b"a.txt", b"hi").unwrap();
+        write_in(&mut img, ROOT, b"root.txt", b"r").unwrap();
+
+        // a.txt lives inside docs, not at the root.
+        assert!(find_in(&img, docs as u8, b"a.txt").is_some());
+        assert!(find_in(&img, ROOT, b"a.txt").is_none());
+        let child = find_in(&img, docs as u8, b"a.txt").unwrap();
+        assert_eq!(read_slot(&img, child), Some(&b"hi"[..]));
+        assert_eq!(read_slot(&img, docs), None); // dirs have no payload
+
+        // Trashing the directory takes its contents with it.
+        trash_slot(&mut img, docs);
+        assert!(is_trashed(&img, docs) && is_trashed(&img, child));
+        assert_eq!(count_active(&img), 1); // only root.txt
+
+        // Restore brings the whole subtree back.
+        restore_slot(&mut img, docs);
+        assert!(is_active(&img, docs) && is_active(&img, child));
+
+        // Permanent delete frees the whole subtree.
+        purge_slot(&mut img, docs);
+        assert!(!is_used(&img, docs) && !is_used(&img, child));
+        assert_eq!(count_active(&img), 1);
     }
 
     #[test]
