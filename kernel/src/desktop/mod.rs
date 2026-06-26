@@ -26,7 +26,7 @@ const SLIDE_PX: f32 = 28.0;
 const DOCK_ICON: i32 = 40;
 const DOCK_GAP: i32 = 14;
 const DOCK_PAD: i32 = 12;
-const DOCK_COUNT: i32 = 7; // brand + terminal + editor + taskmgr + calculator + browser + wasm
+const DOCK_COUNT: i32 = 8; // brand + terminal + editor + taskmgr + calculator + browser + wasm + files
 const DOCK_MARGIN: i32 = 16; // gap from screen bottom
 
 // Calculator keypad: the input byte for each cell (0x08 = backspace). Duplicate
@@ -63,7 +63,8 @@ const TASK: usize = 2;
 const CALC: usize = 3;
 const BROWSER: usize = 4;
 const WASM: usize = 5;
-const WIN_COUNT: usize = 6;
+const FILES: usize = 6;
+const WIN_COUNT: usize = 7;
 
 /// Cursor sprite bounding box (used by the dirty-rect overlay path).
 pub const CURSOR_W: i32 = 10;
@@ -73,13 +74,14 @@ pub const CURSOR_H: i32 = 16;
 const MENU_W: i32 = 220;
 const MENU_ITEM_H: i32 = 32;
 const MENU_PAD: i32 = 6;
-const MENU_ITEMS: [(&str, usize); 6] = [
+const MENU_ITEMS: [(&str, usize); 7] = [
     ("Terminal", TERM),
     ("Editor", EDIT),
     ("Task Manager", TASK),
     ("Calculator", CALC),
     ("Navegador", BROWSER),
     ("WASM App", WASM),
+    ("Arquivos", FILES),
 ];
 
 // Start panel (system icon → all apps + power).
@@ -87,13 +89,14 @@ const START_W: i32 = 240;
 const START_ROW_H: i32 = 38;
 const START_PAD: i32 = 10;
 const START_GAP: i32 = 12; // divider gap before the power rows
-const START_APPS: [(&str, usize); 6] = [
+const START_APPS: [(&str, usize); 7] = [
     ("Terminal", TERM),
     ("Editor", EDIT),
     ("Task Manager", TASK),
     ("Calculator", CALC),
     ("Navegador", BROWSER),
     ("WASM App", WASM),
+    ("Arquivos", FILES),
 ];
 
 /// An entry in the start panel.
@@ -125,6 +128,7 @@ enum Kind {
     Calculator,
     Browser,
     WasmApp,
+    Files,
 }
 
 struct Win {
@@ -160,6 +164,11 @@ pub struct Desktop {
     // Rendered web page (display list from the `web` engine) + its pixel scroll.
     web_page: Option<osjeff_core::web::Page>,
     page_scroll: i32,
+    // File manager: selected row, view (0 = files, 1 = trash), and a one-time
+    // snapshot of the two IDE disks (boot + filesystem) for its disk panel.
+    files_sel: usize,
+    files_view: u8,
+    disks: [Option<crate::ata::DiskInfo>; 2],
     clipboard: Clipboard,
     keymap: Keymap,
     procs: ProcessTable,
@@ -191,6 +200,14 @@ impl Desktop {
         // A missing disk simply leaves us with a RAM-only filesystem.
         if !crate::ata::read_image(disk()) || !fs::is_formatted(disk()) {
             fs::format(disk());
+            // Seed a couple of welcome files so the file manager has content on a
+            // fresh disk (and to document its keys).
+            let _ = fs::write(
+                disk(),
+                b"leiame.txt",
+                b"Bem-vindo ao OSjeff. Gerenciador: setas navegam, Del manda pra lixeira, Tab alterna arquivos/lixeira, Enter abre.",
+            );
+            let _ = fs::write(disk(), b"notas.txt", b"Arquivo de exemplo do OSjeff.");
             let _ = crate::ata::write_image(disk());
         }
 
@@ -249,6 +266,15 @@ impl Desktop {
                 anim: None,
                 pid: 0,
             },
+            Win {
+                rect: Rect::new(300, 150, 640, 460),
+                visible: false,
+                kind: Kind::Files,
+                title: "ARQUIVOS",
+                proc_name: b"files",
+                anim: None,
+                pid: 0,
+            },
         ];
 
         Self {
@@ -260,11 +286,17 @@ impl Desktop {
             browser: osjeff_core::Browser::new(),
             web_page: None,
             page_scroll: 0,
+            files_sel: 0,
+            files_view: 0,
+            disks: [
+                crate::ata::identify(0x1F0, 0x3F6, false),
+                crate::ata::identify(0x170, 0x376, false),
+            ],
             clipboard: Clipboard::new(),
             keymap: Keymap::new(),
             procs,
             windows,
-            order: [WASM, BROWSER, TASK, CALC, EDIT, TERM], // terminal focused
+            order: [FILES, WASM, BROWSER, TASK, CALC, EDIT, TERM], // terminal focused
             drag: None,
             menu: None,
             start_open: false,
@@ -401,6 +433,7 @@ impl Desktop {
                     4 => Some(DockAction::Open(CALC)),
                     5 => Some(DockAction::Open(BROWSER)),
                     6 => Some(DockAction::Open(WASM)),
+                    7 => Some(DockAction::Open(FILES)),
                     _ => None,
                 };
             }
@@ -546,10 +579,107 @@ impl Desktop {
             .unwrap_or(0);
         self.page_scroll = (self.page_scroll + dy).clamp(0, max);
     }
+
+    // ---- file manager ----
+
+    /// Rows shown in the current view (active files, or the trash).
+    pub(crate) fn files_rows(&self) -> usize {
+        let img = disk();
+        if self.files_view == 0 {
+            fs::count_active(img)
+        } else {
+            fs::count_trashed(img)
+        }
+    }
+
+    /// The filesystem slot backing visible row `n` of the current view.
+    fn files_slot(&self, n: usize) -> Option<usize> {
+        let img = disk();
+        let active = self.files_view == 0;
+        (0..fs::MAX_FILES)
+            .filter(|&i| {
+                if active {
+                    fs::is_active(img, i)
+                } else {
+                    fs::is_trashed(img, i)
+                }
+            })
+            .nth(n)
+    }
+
+    /// Snapshot the selected row's name into an owned buffer (ends the fs borrow
+    /// before any mutation).
+    fn files_sel_name(&self) -> Option<([u8; fs::MAX_NAME], usize)> {
+        let slot = self.files_slot(self.files_sel)?;
+        let raw = fs::name_at(disk(), slot);
+        let n = raw.len().min(fs::MAX_NAME);
+        let mut buf = [0u8; fs::MAX_NAME];
+        buf[..n].copy_from_slice(&raw[..n]);
+        Some((buf, n))
+    }
+
+    pub(crate) fn files_move(&mut self, delta: i32) {
+        let rows = self.files_rows();
+        if rows == 0 {
+            self.files_sel = 0;
+            return;
+        }
+        let cur = self.files_sel.min(rows - 1) as i32;
+        self.files_sel = (cur + delta).clamp(0, rows as i32 - 1) as usize;
+    }
+
+    /// Toggle between the Files and Trash views.
+    pub(crate) fn files_toggle_view(&mut self) {
+        self.files_view ^= 1;
+        self.files_sel = 0;
+    }
+
+    /// Delete: in Files view, move the selection to the trash; in Trash view,
+    /// delete it permanently.
+    pub(crate) fn files_delete(&mut self) {
+        let Some((buf, n)) = self.files_sel_name() else {
+            return;
+        };
+        let nm = &buf[..n];
+        let _ = if self.files_view == 0 {
+            fs::trash(disk(), nm)
+        } else {
+            fs::purge(disk(), nm)
+        };
+        flush_disk();
+        self.files_move(0);
+    }
+
+    /// Primary action (Enter): in Trash view, restore the selection; in Files
+    /// view, open the file in the editor.
+    pub(crate) fn files_primary(&mut self) {
+        let Some((buf, n)) = self.files_sel_name() else {
+            return;
+        };
+        let nm = &buf[..n];
+        if self.files_view == 1 {
+            let _ = fs::restore(disk(), nm);
+            flush_disk();
+            self.files_move(0);
+        } else if let Some(f) = FileName::parse(nm) {
+            self.editor_file = f;
+            self.fs_load(f);
+            self.open(EDIT);
+        }
+    }
+
+    /// Select the row at content-local `y` within the files list (for clicks).
+    pub(crate) fn files_select_at(&mut self, row: usize) {
+        let rows = self.files_rows();
+        if row < rows {
+            self.files_sel = row;
+        }
+    }
 }
 
 mod apps;
 mod files;
+mod files_ui;
 mod input;
 mod render;
 mod widgets;

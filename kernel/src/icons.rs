@@ -14,6 +14,7 @@ pub enum Icon {
     Calculator,
     Browser,
     WasmApp,
+    Files,
     Power,
 }
 
@@ -26,8 +27,24 @@ pub fn draw(c: &mut Canvas, icon: Icon, x: usize, y: usize, size: usize) {
         Icon::Calculator => calculator(c, x, y, size),
         Icon::Browser => browser(c, x, y, size),
         Icon::WasmApp => wasm_app(c, x, y, size),
+        Icon::Files => files(c, x, y, size),
         Icon::Power => power(c, x, y, size),
     }
+}
+
+/// File manager: a folder with a lighter tab and a sheet peeking out.
+fn files(c: &mut Canvas, x: usize, y: usize, size: usize) {
+    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x12, 0x1A, 0x2E));
+    let pad = size / 6;
+    let fw = size - pad * 2;
+    let fh = size - pad * 2 - size / 12;
+    let fy = y + pad + size / 12;
+    // Folder tab.
+    c.fill_round_rect(x + pad, y + pad, fw / 2, size / 6, 3, theme::ACCENT_2);
+    // White sheet peeking above the folder body.
+    c.fill_round_rect(x + pad + fw / 8, fy - size / 16, fw - fw / 4, fh, 3, theme::WHITE);
+    // Folder body.
+    c.fill_round_rect(x + pad, fy, fw, fh, 4, theme::ACCENT);
 }
 
 /// WebAssembly app: brand-purple squircle with a white "W" glyph.

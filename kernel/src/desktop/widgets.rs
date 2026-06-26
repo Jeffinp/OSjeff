@@ -240,6 +240,7 @@ pub fn paint_background(c: &mut Canvas) {
         Icon::Calculator,
         Icon::Browser,
         Icon::WasmApp,
+        Icon::Files,
     ];
     for (i, kind) in kinds.iter().enumerate() {
         let r = icons[i];

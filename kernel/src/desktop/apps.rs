@@ -33,6 +33,7 @@ impl Desktop {
             Icon::Calculator,
             Icon::Browser,
             Icon::WasmApp,
+            Icon::Files,
         ];
         for (i, (label, _)) in MENU_ITEMS.iter().enumerate() {
             let iy = my + MENU_PAD + i as i32 * MENU_ITEM_H;
@@ -437,6 +438,7 @@ impl Desktop {
             Icon::Calculator,
             Icon::Browser,
             Icon::WasmApp,
+            Icon::Files,
         ];
 
         for (i, (label, win)) in START_APPS.iter().enumerate() {

@@ -69,6 +69,15 @@ impl Desktop {
                 Key::Esc => crate::wasm::on_key(27),
                 _ => {}
             },
+            Kind::Files => match key {
+                Key::Esc => self.request_close(FILES),
+                Key::Up => self.files_move(-1),
+                Key::Down => self.files_move(1),
+                Key::Tab | Key::Left | Key::Right => self.files_toggle_view(),
+                Key::Delete | Key::Backspace => self.files_delete(),
+                Key::Enter => self.files_primary(),
+                _ => {}
+            },
         }
         true
     }
@@ -92,6 +101,25 @@ impl Desktop {
                     break;
                 }
             }
+        }
+    }
+
+    /// Resolve a click in the file manager: the Files/Trash tabs (top) or a row
+    /// in the list below. Mirrors the geometry in `draw_files`.
+    pub(crate) fn files_click(&mut self, rect: Rect, px: i32, py: i32) {
+        let cx = rect.x + 14;
+        let tabs_y = rect.y + TITLE_H + 12 + 78;
+        if (tabs_y..tabs_y + 24).contains(&py) {
+            let v: u8 = if px >= cx + 170 { 1 } else { 0 };
+            if self.files_view != v {
+                self.files_view = v;
+                self.files_sel = 0;
+            }
+            return;
+        }
+        let list_y = tabs_y + 36;
+        if py >= list_y {
+            self.files_select_at(((py - list_y) / 22).max(0) as usize);
         }
     }
 
@@ -137,7 +165,7 @@ impl Desktop {
                 Kind::Editor => self.editor.line(self.editor.cursor().1),
                 Kind::Calculator => self.calc.display(),
                 Kind::Browser => self.browser.url(),
-                Kind::TaskMgr | Kind::WasmApp => &[],
+                Kind::TaskMgr | Kind::WasmApp | Kind::Files => &[],
             };
             n = text.len().min(clipboard::CAP);
             tmp[..n].copy_from_slice(&text[..n]);
@@ -188,7 +216,7 @@ impl Desktop {
                     }
                 }
             }
-            Kind::TaskMgr | Kind::WasmApp => {}
+            Kind::TaskMgr | Kind::WasmApp | Kind::Files => {}
         }
     }
 
@@ -280,6 +308,8 @@ impl Desktop {
                         let lx = cx - (rect.x + pad);
                         let ly = cy - (rect.y + TITLE_H + 12);
                         crate::wasm::on_pointer(lx, ly, 1);
+                    } else if self.windows[w].kind == Kind::Files {
+                        self.files_click(rect, cx, cy);
                     }
                 }
                 scene = true;

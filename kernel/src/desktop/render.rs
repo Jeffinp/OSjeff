@@ -62,11 +62,14 @@ impl Desktop {
     /// animating, and their z-order). When it changes, the cached static layer
     /// must be rebuilt.
     pub fn anim_signature(&self) -> u64 {
-        // Layout (WIN_COUNT = 6, so each window index needs 3 bits):
-        //   bits 0..5    visible flags
-        //   bits 6..11   animating flags
-        //   bits 12..29  z-order (6 entries x 3 bits)
-        //   bits 30..32  drag target (+1, 0 = no drag)
+        // Bit layout, all offsets relative to WIN_COUNT (=7 windows, 3 bits each):
+        //   bits [0, WIN_COUNT)              visible flags
+        //   bits [WIN_COUNT, 2*WIN_COUNT)    animating flags
+        //   bits [2*WIN_COUNT, 5*WIN_COUNT)  z-order (WIN_COUNT entries x 3 bits)
+        //   bits [5*WIN_COUNT, +3)           drag target (+1, 0 = no drag)
+        // For WIN_COUNT = 7 the drag field ends at bit 38, well within the u64.
+        const ZBASE: usize = 2 * WIN_COUNT;
+        const DBASE: usize = 5 * WIN_COUNT;
         let mut s = 0u64;
         for w in 0..WIN_COUNT {
             if self.windows[w].visible {
@@ -77,13 +80,13 @@ impl Desktop {
             }
         }
         for (i, &w) in self.order.iter().enumerate() {
-            s |= (w as u64 & 0x7) << (12 + i * 3);
+            s |= (w as u64 & 0x7) << (ZBASE + i * 3);
         }
         // Fold in the drag target so the static layer is rebuilt when a drag
         // starts (the window leaves the static layer) and ends (it rejoins it),
         // but stays stable mid-drag so it is composed only once.
         if let Some(d) = &self.drag {
-            s |= ((d.win as u64 & 0x7) + 1) << 30;
+            s |= ((d.win as u64 & 0x7) + 1) << DBASE;
         }
         s
     }
@@ -248,6 +251,7 @@ impl Desktop {
             Kind::Calculator => self.draw_calculator(c, r, focused),
             Kind::Browser => self.draw_browser(c, r, focused),
             Kind::WasmApp => self.draw_wasm(c, r),
+            Kind::Files => self.draw_files(c, r),
         }
     }
 }

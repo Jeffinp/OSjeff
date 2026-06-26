@@ -103,12 +103,13 @@ impl Desktop {
 
     pub(crate) fn fs_list(&mut self) {
         let d = disk();
-        if fs::count(d) == 0 {
+        if fs::count_active(d) == 0 {
             self.term.println(b"(no files)");
             return;
         }
         for i in 0..fs::MAX_FILES {
-            if !fs::is_used(d, i) {
+            // Trashed files are hidden from LIST (see the file manager's Trash).
+            if !fs::is_active(d, i) {
                 continue;
             }
             let mut line = [b' '; 28];
