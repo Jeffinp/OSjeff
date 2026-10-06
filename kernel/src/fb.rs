@@ -43,6 +43,10 @@ impl Color {
     }
 }
 
+/// Minimum `w*h` for the table-driven alpha fill (building the table costs
+/// ~3k instructions, which only pays off on large areas).
+const LUT_MIN_PIXELS: usize = 4096;
+
 pub struct Canvas<'a> {
     buf: &'a mut [u8],
     info: FrameBufferInfo,
@@ -289,6 +293,24 @@ impl<'a> Canvas<'a> {
         // Pre-multiply the source contribution (src * a) once per channel.
         let (sa0, sa1, sa2) = (c0 as u16 * a, c1 as u16 * a, c2 as u16 * a);
 
+        // For large areas (window shadows are ~170k pixels, two layers per
+        // window) the blend is a pure function of the destination byte, because
+        // colour and alpha are constant for the whole call. Tabulate it once
+        // (3 x 256 entries, same formula as the scalar loop => bit-identical
+        // output) so the per-pixel work is 3 loads + 3 stores instead of 3
+        // multiplies, 3 divides-by-256 and 6 bounds-checked accesses.
+        let lut = if w * h >= LUT_MIN_PIXELS && (bpp == 3 || bpp == 4) {
+            let mut t = [[0u8; 256]; 3];
+            for v in 0..256usize {
+                t[0][v] = ((v as u16 * ia + sa0) / 256) as u8;
+                t[1][v] = ((v as u16 * ia + sa1) / 256) as u8;
+                t[2][v] = ((v as u16 * ia + sa2) / 256) as u8;
+            }
+            Some(t)
+        } else {
+            None
+        };
+
         for y in 0..h {
             let py = y0 + y;
             if py >= self.info.height {
@@ -314,6 +336,26 @@ impl<'a> Canvas<'a> {
                 continue;
             }
             let row = py * stride;
+            if let Some(t) = &lut {
+                let lo = (row + xs) * bpp;
+                let span = &mut self.buf[lo..lo + (xe - xs) * bpp];
+                if bpp == 3 {
+                    for px in span.as_chunks_mut::<3>().0.iter_mut() {
+                        px[0] = t[0][px[0] as usize];
+                        px[1] = t[1][px[1] as usize];
+                        px[2] = t[2][px[2] as usize];
+                    }
+                } else {
+                    // 4 bytes/pixel: the 4th (padding) byte is left untouched,
+                    // exactly like the scalar path.
+                    for px in span.as_chunks_mut::<4>().0.iter_mut() {
+                        px[0] = t[0][px[0] as usize];
+                        px[1] = t[1][px[1] as usize];
+                        px[2] = t[2][px[2] as usize];
+                    }
+                }
+                continue;
+            }
             for px in xs..xe {
                 let o = (row + px) * bpp;
                 self.buf[o] = ((self.buf[o] as u16 * ia + sa0) / 256) as u8;
