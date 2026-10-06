@@ -231,14 +231,18 @@ pub fn trash_slot(img: &mut [u8], i: usize) {
     if !is_active(img, i) {
         return;
     }
-    if is_dir(img, i) {
+    // Change the state *before* recursing: a corrupted `parent` pointer that
+    // forms a cycle (a dir that is its own ancestor) then terminates, because
+    // every slot is visited at most once.
+    let dir = is_dir(img, i);
+    img[rec_off(i)] = ST_TRASHED;
+    if dir {
         for c in 0..MAX_FILES {
             if is_active(img, c) && parent_at(img, c) == i as u8 {
                 trash_slot(img, c);
             }
         }
     }
-    img[rec_off(i)] = ST_TRASHED;
 }
 
 /// Restore slot `i` (and its trashed descendants) from the trash.
@@ -261,14 +265,17 @@ pub fn purge_slot(img: &mut [u8], i: usize) {
     if !is_used(img, i) {
         return;
     }
-    if is_dir(img, i) {
+    // Free the slot first (see `trash_slot`): cyclic parents must not recurse
+    // forever. Depth is bounded by MAX_FILES since each level frees a slot.
+    let dir = is_dir(img, i);
+    img[rec_off(i)] = ST_FREE;
+    if dir {
         for c in 0..MAX_FILES {
             if is_used(img, c) && parent_at(img, c) == i as u8 {
                 purge_slot(img, c);
             }
         }
     }
-    img[rec_off(i)] = ST_FREE;
 }
 
 /// Move a live top-level `name` to the trash (recursive). `NotFound` if absent.
@@ -477,6 +484,35 @@ mod tests {
             assert_eq!(size_at(&img, slot), MAX_FILE_SIZE);
             assert_eq!(read_slot(&img, slot).map(|d| d.len()), Some(MAX_FILE_SIZE));
         }
+    }
+
+    /// Regression: a directory record whose `parent` points at itself made
+    /// `trash_slot`/`purge_slot` recurse forever (stack overflow in the kernel).
+    #[test]
+    fn parent_self_cycle_does_not_recurse_forever() {
+        let mut img = img();
+        let d = mkdir(&mut img, ROOT, b"d").unwrap();
+        img[rec_off(d) + OFF_PARENT] = d as u8; // corrupt: parent == self
+        trash_slot(&mut img, d);
+        assert!(is_trashed(&img, d));
+        restore_slot(&mut img, d);
+        assert!(is_active(&img, d));
+        purge_slot(&mut img, d);
+        assert!(!is_used(&img, d));
+    }
+
+    /// Same, for a two-directory cycle (a -> b -> a) with a file inside.
+    #[test]
+    fn parent_two_cycle_does_not_recurse_forever() {
+        let mut img = img();
+        let a = mkdir(&mut img, ROOT, b"a").unwrap();
+        let b = mkdir(&mut img, a as u8, b"b").unwrap();
+        write_in(&mut img, b as u8, b"f", b"x").unwrap();
+        img[rec_off(a) + OFF_PARENT] = b as u8; // corrupt: a's parent is its own child
+        trash_slot(&mut img, a);
+        assert_eq!(count_active(&img), 0);
+        purge_slot(&mut img, a);
+        assert_eq!(count(&img), 0);
     }
 
     #[test]
