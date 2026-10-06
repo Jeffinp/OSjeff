@@ -90,7 +90,8 @@ pub fn parse_url(input: &[u8]) -> Option<Url> {
         rest = tail;
         let mut p = 0u32;
         while let [c @ b'0'..=b'9', tt @ ..] = rest {
-            p = p * 10 + (*c - b'0') as u32;
+            // Saturate: anything above 65535 is rejected below anyway.
+            p = p.saturating_mul(10).saturating_add((*c - b'0') as u32);
             rest = tt;
         }
         if p > 0 && p <= 65535 {
@@ -655,6 +656,23 @@ mod tests {
         assert_eq!(u.port, 443);
         assert_eq!(u.host(), b"duckduckgo.com");
         assert_eq!(u.path(), b"/html/?q=rust");
+    }
+
+    /// Regression: an over-long port (`host:99999999999`) overflowed the u32
+    /// accumulator (panic with overflow checks, silent wrap -> wrong port in
+    /// release). Out-of-range ports now fall back to the scheme default.
+    #[test]
+    fn parse_url_oversized_port_falls_back_to_default() {
+        let u = parse_url(b"http://example.com:99999999999/x").unwrap();
+        assert_eq!(u.port, 80);
+        assert_eq!(u.path(), b"/x");
+        // 4294967296 + 80 would wrap to 80 in a u32 accumulator.
+        let u = parse_url(b"https://example.com:4294967376/").unwrap();
+        assert_eq!(u.port, 443);
+        let u = parse_url(b"https://example.com:65536/").unwrap();
+        assert_eq!(u.port, 443);
+        let u = parse_url(b"https://example.com:65535/").unwrap();
+        assert_eq!(u.port, 65535);
     }
 
     #[test]
