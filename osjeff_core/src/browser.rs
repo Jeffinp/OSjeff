@@ -273,7 +273,12 @@ fn dechunk(body: &[u8]) -> alloc::vec::Vec<u8> {
         while i < body.len() {
             let c = body[i];
             if let Some(d) = (c as char).to_digit(16) {
-                size = size * 16 + d as usize;
+                // The size is attacker-controlled: an absurdly long hex run
+                // must end decoding, not overflow (and later wrap `i + size`).
+                match size.checked_mul(16).and_then(|v| v.checked_add(d as usize)) {
+                    Some(v) => size = v,
+                    None => return out,
+                }
                 saw_digit = true;
                 i += 1;
             } else {
@@ -291,7 +296,8 @@ fn dechunk(body: &[u8]) -> alloc::vec::Vec<u8> {
         if size == 0 || i >= body.len() {
             break;
         }
-        let end = (i + size).min(body.len());
+        // `i < body.len()` here, so this cannot underflow or overflow.
+        let end = i + size.min(body.len() - i);
         out.extend_from_slice(&body[i..end]);
         i = end;
         // Skip the CRLF after the chunk data.
@@ -705,6 +711,25 @@ mod tests {
     fn page_body_dechunks() {
         let resp = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n";
         assert_eq!(page_body(resp), b"Wikipedia");
+    }
+
+    /// Regression: a chunk-size line with too many hex digits overflowed
+    /// `size * 16` (debug: panic) and, wrapping in release, made `i + size`
+    /// wrap below `i` so `&body[i..end]` panicked. A remote server controls
+    /// this, so it must be handled without panicking.
+    #[test]
+    fn dechunk_huge_chunk_size_does_not_panic() {
+        // 17 hex digits: overflows usize on the multiply.
+        let resp = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nFFFFFFFFFFFFFFFFF\r\nabc";
+        let _ = page_body(resp);
+        // 16 hex digits == usize::MAX: no multiply overflow, but `i + size`
+        // wraps below `i` in release builds.
+        let resp = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nFFFFFFFFFFFFFFFF\r\nabc";
+        let _ = page_body(resp);
+        // A valid chunk before the bad one is kept.
+        let resp =
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\nFFFFFFFFFFFFFFFFFFFF\r\nxyz";
+        assert_eq!(page_body(resp), b"abc");
     }
 
     #[test]
