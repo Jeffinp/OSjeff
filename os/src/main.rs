@@ -16,8 +16,12 @@ fn main() {
         qemu.arg("-drive")
             .arg(format!("format=raw,file={}", env!("BIOS_IMAGE")));
     }
-    // 128 MiB RAM is plenty for a framebuffer demo.
-    qemu.arg("-m").arg("128M");
+    // The kernel's BSS is ~91 MiB (64 MiB heap + three 1080p render buffers) and
+    // the bootloader zeroes it page by page before jumping in, so the VM needs
+    // more than that in *conventional* RAM. 128M boots under BIOS but the UEFI
+    // path panics in bootloader load_kernel.rs; 192M is the measured minimum
+    // for UEFI. 256M matches run.ps1 and leaves headroom.
+    qemu.arg("-m").arg("256M");
 
     // Persistent filesystem disk on the secondary IDE channel (master). Created
     // blank on first run; the kernel formats it if it holds no filesystem.
