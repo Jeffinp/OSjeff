@@ -36,6 +36,11 @@ impl Rgb {
 pub fn parse_color(s: &str) -> Option<Rgb> {
     let s = s.trim();
     if let Some(hex) = s.strip_prefix('#') {
+        // ASCII hex digits only: the fixed byte-offset slicing below would
+        // otherwise panic on a char boundary (and `from_str_radix` accepts '+').
+        if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
         return match hex.len() {
             3 => {
                 let r = u8::from_str_radix(&hex[0..1], 16).ok()?;
@@ -70,4 +75,29 @@ pub fn parse_color(s: &str) -> Option<Rgb> {
         "transparent" => return None,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_known_colors() {
+        assert_eq!(parse_color("#fff"), Some(Rgb(255, 255, 255)));
+        assert_eq!(parse_color("#1565C0"), Some(Rgb(0x15, 0x65, 0xC0)));
+        assert_eq!(parse_color("rgb(1, 2, 3)"), Some(Rgb(1, 2, 3)));
+        assert_eq!(parse_color("Navy"), Some(Rgb(0x0D, 0x47, 0xA1)));
+        assert_eq!(parse_color("#12"), None);
+    }
+
+    /// Regression: `#` followed by multi-byte UTF-8 whose *byte* length is 3 or
+    /// 6 was sliced at fixed byte offsets (`&hex[0..1]`), landing inside a
+    /// character and panicking. Page CSS is attacker-controlled.
+    #[test]
+    fn non_ascii_hex_color_is_rejected_not_panicking() {
+        assert_eq!(parse_color("#\u{e9}1"), None); // 3 bytes: 0xC3 0xA9 '1'
+        assert_eq!(parse_color("#\u{e9}\u{e9}\u{e9}"), None); // 6 bytes
+        assert_eq!(parse_color("#1\u{e9}\u{e9}1"), None); // 6 bytes, mixed
+        assert_eq!(parse_color("#\u{20ac}\u{20ac}"), None); // 2 x 3-byte chars
+    }
 }
