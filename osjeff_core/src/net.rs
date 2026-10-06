@@ -76,7 +76,16 @@ fn write_eth(out: &mut [u8], dst: Mac, src: Mac, ethertype: u16) {
 
 /// Build a full Ethernet+ARP reply announcing `mac`/`ip` to the requester.
 /// Returns the frame length (42 bytes).
-fn build_arp_reply(out: &mut [u8], mac: Mac, ip: Ipv4, target_mac: Mac, target_ip: Ipv4) -> usize {
+fn build_arp_reply(
+    out: &mut [u8],
+    mac: Mac,
+    ip: Ipv4,
+    target_mac: Mac,
+    target_ip: Ipv4,
+) -> Option<usize> {
+    if out.len() < ETH_HDR + ARP_LEN {
+        return None; // caller's buffer cannot hold the reply
+    }
     write_eth(out, target_mac, mac, ETHERTYPE_ARP);
     let a = &mut out[ETH_HDR..ETH_HDR + ARP_LEN];
     a[0..2].copy_from_slice(&1u16.to_be_bytes()); // htype: Ethernet
@@ -88,7 +97,7 @@ fn build_arp_reply(out: &mut [u8], mac: Mac, ip: Ipv4, target_mac: Mac, target_i
     a[14..18].copy_from_slice(&ip.0); // sender proto
     a[18..24].copy_from_slice(&target_mac.0); // target hw
     a[24..28].copy_from_slice(&target_ip.0); // target proto
-    ETH_HDR + ARP_LEN
+    Some(ETH_HDR + ARP_LEN)
 }
 
 /// Build a broadcast "gratuitous ARP" announcing `mac`/`ip` (sender == target).
@@ -165,6 +174,13 @@ pub fn respond(frame: &[u8], mac: Mac, ip: Ipv4, out: &mut [u8]) -> Option<usize
             if payload.len() < ARP_LEN {
                 return None;
             }
+            // Only Ethernet/IPv4 ARP (htype 1, ptype 0x0800, hlen 6, plen 4):
+            // the field offsets below are only valid for those sizes.
+            let htype = u16::from_be_bytes([payload[0], payload[1]]);
+            let ptype = u16::from_be_bytes([payload[2], payload[3]]);
+            if htype != 1 || ptype != ETHERTYPE_IPV4 || payload[4] != 6 || payload[5] != 4 {
+                return None;
+            }
             let oper = u16::from_be_bytes([payload[6], payload[7]]);
             let tpa = Ipv4([payload[24], payload[25], payload[26], payload[27]]);
             if oper != ARP_REQUEST || tpa != ip {
@@ -179,7 +195,7 @@ pub fn respond(frame: &[u8], mac: Mac, ip: Ipv4, out: &mut [u8]) -> Option<usize
                 payload[13],
             ]);
             let spa = Ipv4([payload[14], payload[15], payload[16], payload[17]]);
-            Some(build_arp_reply(out, mac, ip, sha, spa))
+            build_arp_reply(out, mac, ip, sha, spa)
         }
         ETHERTYPE_IPV4 => {
             if payload.len() < IPV4_HDR {
@@ -622,6 +638,33 @@ mod tests {
         assert_eq!(u16::from_be_bytes([a[6], a[7]]), ARP_REPLY);
         assert_eq!(&a[8..14], &OUR_MAC.0); // sender hw = us
         assert_eq!(&a[14..18], &OUR_IP.0); // sender proto = us
+    }
+
+    /// Regression: `respond` is documented to return `None` when it cannot
+    /// answer, but an ARP request with an output buffer smaller than the 42-byte
+    /// reply sliced `out[..]` out of range and panicked.
+    #[test]
+    fn arp_reply_with_small_out_buffer_returns_none() {
+        let frame = arp_request(OUR_IP);
+        for sz in 0..(ETH_HDR + ARP_LEN) {
+            let mut out = vec![0u8; sz];
+            assert_eq!(respond(&frame, OUR_MAC, OUR_IP, &mut out), None, "out={sz}");
+        }
+        let mut out = vec![0u8; ETH_HDR + ARP_LEN];
+        assert_eq!(
+            respond(&frame, OUR_MAC, OUR_IP, &mut out),
+            Some(ETH_HDR + ARP_LEN)
+        );
+    }
+
+    #[test]
+    fn arp_with_unexpected_hw_or_proto_sizes_ignored() {
+        let mut out = [0u8; 64];
+        for (off, val) in [(0usize, 6u8), (1, 2), (2, 0x86), (4, 8), (5, 16)] {
+            let mut frame = arp_request(OUR_IP);
+            frame[ETH_HDR + off] = val;
+            assert_eq!(respond(&frame, OUR_MAC, OUR_IP, &mut out), None, "off={off}");
+        }
     }
 
     #[test]
