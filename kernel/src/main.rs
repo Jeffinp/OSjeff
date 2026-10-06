@@ -908,6 +908,9 @@ fn halt() -> ! {
 }
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    // Serial is the one channel that survives a dead compositor; without this
+    // every panic (including allocation failure) was a silent `hlt`.
+    serial_println!("KERNEL PANIC: {info}");
     halt();
 }

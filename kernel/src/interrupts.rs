@@ -43,6 +43,11 @@ pub fn init() {
             .set_handler_fn(general_protection);
         idt.page_fault.set_handler_fn(page_fault);
         idt.double_fault.set_handler_fn(double_fault);
+        // Without these, #DE/#UD/#NP/#SS escalate to a silent #DF.
+        idt.divide_error.set_handler_fn(divide_error);
+        idt.invalid_opcode.set_handler_fn(invalid_opcode);
+        idt.segment_not_present.set_handler_fn(segment_not_present);
+        idt.stack_segment_fault.set_handler_fn(stack_segment_fault);
         // The timer uses a naked ISR that performs a full preemptive context
         // switch, so it's installed by raw address instead of `set_handler_fn`.
         idt[TIMER_VECTOR].set_handler_addr(VirtAddr::from_ptr(timer_isr as *const ()));
@@ -154,16 +159,49 @@ extern "x86-interrupt" fn mouse(_f: InterruptStackFrame) {
 
 extern "x86-interrupt" fn breakpoint(_f: InterruptStackFrame) {}
 
-extern "x86-interrupt" fn double_fault(_f: InterruptStackFrame, _code: u64) -> ! {
+/// Report a fatal CPU exception on COM1 (the only channel that still works
+/// when the compositor is dead), then freeze. Uses no allocation or locks.
+fn fatal(name: &str, f: &InterruptStackFrame, code: Option<u64>) -> ! {
+    crate::serial_println!(
+        "FATAL EXCEPTION: {name} code={code:?} rip={:#x} rsp={:#x} rflags={:#x}",
+        f.instruction_pointer.as_u64(),
+        f.stack_pointer.as_u64(),
+        f.cpu_flags.bits()
+    );
     halt()
 }
 
-extern "x86-interrupt" fn general_protection(_f: InterruptStackFrame, _code: u64) {
-    halt()
+extern "x86-interrupt" fn double_fault(f: InterruptStackFrame, code: u64) -> ! {
+    fatal("#DF double fault", &f, Some(code))
 }
 
-extern "x86-interrupt" fn page_fault(_f: InterruptStackFrame, _code: PageFaultErrorCode) {
-    halt()
+extern "x86-interrupt" fn general_protection(f: InterruptStackFrame, code: u64) {
+    fatal("#GP general protection", &f, Some(code))
+}
+
+extern "x86-interrupt" fn page_fault(f: InterruptStackFrame, code: PageFaultErrorCode) {
+    crate::serial_println!(
+        "FATAL EXCEPTION: #PF cr2={:#x} err={:?}",
+        x86_64::registers::control::Cr2::read_raw(),
+        code
+    );
+    fatal("#PF page fault", &f, Some(code.bits()))
+}
+
+extern "x86-interrupt" fn divide_error(f: InterruptStackFrame) {
+    fatal("#DE divide error", &f, None)
+}
+
+extern "x86-interrupt" fn invalid_opcode(f: InterruptStackFrame) {
+    fatal("#UD invalid opcode", &f, None)
+}
+
+extern "x86-interrupt" fn segment_not_present(f: InterruptStackFrame, code: u64) {
+    fatal("#NP segment not present", &f, Some(code))
+}
+
+extern "x86-interrupt" fn stack_segment_fault(f: InterruptStackFrame, code: u64) {
+    fatal("#SS stack segment fault", &f, Some(code))
 }
 
 fn halt() -> ! {
