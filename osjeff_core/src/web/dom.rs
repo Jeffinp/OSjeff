@@ -53,6 +53,12 @@ fn is_void(tag: &str) -> bool {
     )
 }
 
+/// Maximum element nesting depth kept in the DOM (see `parse_element`). Every
+/// level costs roughly 550 bytes of native stack across parse + layout in a
+/// release build, so 40 levels is ~22 KiB — far below the kernel stack, yet
+/// deeper than real-world page structure under `<body>`.
+pub const MAX_DEPTH: usize = 40;
+
 /// Parse an HTML document into a DOM tree plus the concatenated text of every
 /// `<style>` element (the page's CSS). Tolerant of malformed markup: unknown
 /// tags pass through, mismatched close tags pop to the nearest match.
@@ -150,6 +156,14 @@ impl HtmlParser<'_> {
                 attrs,
                 children: Vec::new(),
             }));
+        }
+
+        // Bound the nesting depth. The parser, the style/layout passes and the
+        // tree's `Drop` are all recursive, and a page controls the depth: ~150
+        // nested elements already overflowed the kernel's 80 KiB stack. Past
+        // the limit the wrapper is dropped but its content stays in the parent.
+        if open.len() >= MAX_DEPTH {
+            return None;
         }
 
         open.push(tag.clone());
@@ -399,6 +413,50 @@ mod html_tests {
                 Node::Text(_) => 0,
             })
             .sum()
+    }
+
+    fn depth(nodes: &[Node]) -> usize {
+        nodes
+            .iter()
+            .map(|n| match n {
+                Node::Element(e) => 1 + depth(&e.children),
+                Node::Text(_) => 0,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn contains_text(nodes: &[Node], needle: &str) -> bool {
+        nodes.iter().any(|n| match n {
+            Node::Element(e) => contains_text(&e.children, needle),
+            Node::Text(t) => t.contains(needle),
+        })
+    }
+
+    /// Regression: nesting depth was unbounded, so a page of 20k `<div>` blew
+    /// the native stack in parse_html / render / Drop (~150 levels were enough
+    /// for the kernel's 80 KiB stack). Run on a small stack so an unbounded
+    /// recursion is caught here too.
+    #[test]
+    fn deeply_nested_markup_does_not_overflow_the_stack() {
+        let mut html = String::new();
+        for _ in 0..20_000 {
+            html.push_str("<div><b>");
+        }
+        html.push_str("deep text");
+        let h = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || {
+                let (nodes, _) = parse_html(html.as_bytes());
+                assert!(depth(&nodes) <= MAX_DEPTH, "depth {}", depth(&nodes));
+                // Content past the limit is kept, just not nested further.
+                assert!(contains_text(&nodes, "deep text"));
+                drop(nodes);
+                let page = super::super::render(html.as_bytes(), 600);
+                assert!(page.height > 0);
+            })
+            .unwrap();
+        h.join().unwrap();
     }
 
     #[test]
