@@ -1,0 +1,41 @@
+# Host-side micro-benchmarks for the performance audit (docs/audit/04-desempenho.md).
+#
+# Deliberately NOT a member of the root workspace (own `[workspace]` below), so
+# `cargo build/test/clippy` of the OS never pulls criterion. Run with:
+#
+#     cd bench && cargo bench
+#
+# Host numbers are indicative only: the host compiles with SSE2/AVX available,
+# while the kernel target (x86_64-unknown-none) has SSE disabled.
+[package]
+name = "osjeff-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+osjeff_core = { path = "../osjeff_core" }
+# Same version the kernel uses; only for `FrameBufferInfo`/`PixelFormat`.
+bootloader_api = "0.11"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[profile.bench]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[[bench]]
+name = "core"
+harness = false
+
+[[bench]]
+name = "fb"
+harness = false
+
+[[bench]]
+name = "alloc_count"
+harness = false

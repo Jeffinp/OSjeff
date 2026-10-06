@@ -31,3 +31,7 @@ qlog.txt
 
 # Claude Code local session state / memory
 .claude/
+
+# Performance harness output and the (separate) bench crate build dir
+/tools/perf/runs/
+/bench/target/
