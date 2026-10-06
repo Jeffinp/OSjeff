@@ -38,7 +38,7 @@ built from scratch:
 | **Heap allocator** | [`kernel/src/allocator.rs`](kernel/src/allocator.rs) | Linked free-list + spin lock as `#[global_allocator]` → enables `Vec`/`String`/`Box` |
 | **Hardware interrupts** | [`kernel/src/interrupts.rs`](kernel/src/interrupts.rs) | IDT, exception handlers, remapped 8259 PIC, PIT timer, IRQ-driven input |
 | **Damage-tracking compositor** | [`kernel/src/desktop.rs`](kernel/src/desktop.rs) | Caches the static layer and only repaints the damaged rectangle — O(window) cost |
-| **Pure, testable logic** | [`osjeff_core/`](osjeff_core/) | Every decision (parser, editor, keymap, geometry, allocator, filesystem) tested on the host: **201 tests, 94% line coverage** |
+| **Pure, testable logic** | [`osjeff_core/`](osjeff_core/) | Every decision (parser, editor, keymap, geometry, allocator, filesystem) tested on the host: **201 tests, 93% line coverage** |
 
 ---
 
@@ -188,12 +188,12 @@ All logic lives in `osjeff_core` and is tested on the host:
 
 ```bash
 cargo test-core                          # 201 tests
-cargo llvm-cov -p osjeff_core --summary-only  # coverage (~94% raw)
+cargo llvm-cov -p osjeff_core --summary-only  # coverage (~93% raw)
 cargo lint-kernel                        # bare-metal clippy, -D warnings
 cargo lint-host                          # host clippy, -D warnings
 ```
 
-**201 tests** in `osjeff_core`; line coverage measured with `cargo llvm-cov`: **94%** (raw, includes the test modules themselves) and **~88%** counting production code only; 74% of branches. `kernel/` has no automated tests (see [`docs/audit/`](docs/audit/RELATORIO.md)).
+**201 tests** in `osjeff_core`; line coverage measured with `cargo llvm-cov`: **93%** (raw, includes the test modules themselves) and **~88%** counting production code only; 74% of branches. `kernel/` has no automated tests (see [`docs/audit/`](docs/audit/RELATORIO.md)).
 
 | Module (core) | Tests | Lines |
 |---|---|---|

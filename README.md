@@ -39,7 +39,7 @@ Não é um app rodando sobre um SO — é o SO. Cada peça abaixo foi construíd
 | **Heap allocator** | [`kernel/src/allocator.rs`](kernel/src/allocator.rs) | Free-list linkada + spin lock como `#[global_allocator]` → habilita `Vec`/`String`/`Box` |
 | **Interrupções de hardware** | [`kernel/src/interrupts.rs`](kernel/src/interrupts.rs) | IDT, handlers de exceção, PIC 8259 remapeado, timer PIT, input por IRQ |
 | **Compositor por damage tracking** | [`kernel/src/desktop.rs`](kernel/src/desktop.rs) | Cacheia a camada estática e só redesenha o retângulo danificado — custo O(janela) |
-| **Lógica pura testável** | [`osjeff_core/`](osjeff_core/) | Toda decisão (parser, editor, keymap, geometria, allocator, filesystem) testada no host: **201 testes, 94% de cobertura de linhas** |
+| **Lógica pura testável** | [`osjeff_core/`](osjeff_core/) | Toda decisão (parser, editor, keymap, geometria, allocator, filesystem) testada no host: **201 testes, 93% de cobertura de linhas** |
 
 ---
 
@@ -191,12 +191,12 @@ Toda a lógica vive em `osjeff_core` e é testada no host:
 
 ```bash
 cargo test-core                          # 201 testes
-cargo llvm-cov -p osjeff_core --summary-only  # cobertura (~94% bruto)
+cargo llvm-cov -p osjeff_core --summary-only  # cobertura (~93% bruto)
 cargo lint-kernel                        # clippy bare-metal, -D warnings
 cargo lint-host                          # clippy host, -D warnings
 ```
 
-**201 testes** no `osjeff_core`; cobertura de linhas medida com `cargo llvm-cov`: **94%** (bruto, inclui os próprios módulos de teste) e **~88%** contando só código de produção; 74% dos *branches*. O `kernel/` não tem testes automatizados (veja [`docs/audit/`](docs/audit/RELATORIO.md)).
+**201 testes** no `osjeff_core`; cobertura de linhas medida com `cargo llvm-cov`: **93%** (bruto, inclui os próprios módulos de teste) e **~88%** contando só código de produção; 74% dos *branches*. O `kernel/` não tem testes automatizados (veja [`docs/audit/`](docs/audit/RELATORIO.md)).
 
 | Módulo (core) | Testes | Linhas |
 |---|---|---|

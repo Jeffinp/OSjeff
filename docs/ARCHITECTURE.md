@@ -24,7 +24,7 @@ sem `std`). A solução é mover toda decisão para uma biblioteca que compila c
 
 Resultado: parser de comandos, modelo do editor, mapa de teclado, geometria de
 janelas, easing de animação, tabela de processos e a **matemática do allocator**
-são testados no host (201 testes, 94% de linhas medido com `cargo llvm-cov`; ~88% só em código de produção). O kernel fica só com o glue de
+são testados no host (201 testes, 93% de linhas medido com `cargo llvm-cov`; ~88% só em código de produção). O kernel fica só com o glue de
 hardware — e o `unsafe` fica isolado e auditável.
 
 ```mermaid

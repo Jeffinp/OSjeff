@@ -52,7 +52,7 @@ O ADR recomenda a **Opção C**: endurecer o kernel (S0–S4), tornar o WASM a f
 | Item | Resultado | Como |
 |---|---|---|
 | `cargo test -p osjeff_core` | **201 passam** (README diz 152; os relatórios 00/01/05 viram 189, os +12 são testes de regressão dos fixes) | rodei |
-| Cobertura de linhas `osjeff_core` (bruta, com módulos de teste) | **94,46%** agora (05 mediu 92,33% antes dos novos testes; README diz ~98%) | `cargo llvm-cov -p osjeff_core --summary-only` |
+| Cobertura de linhas `osjeff_core` (bruta, com módulos de teste) | **93,25%** agora (o 94,46% que apareceu em rascunhos é cobertura de *regiões*; 05 mediu 92,33% de linhas antes dos novos testes; README diz ~98%) | `cargo llvm-cov -p osjeff_core --summary-only` |
 | `unsafe` no kernel | **116 ocorrências**; só **2 linhas** com `SAFETY` (`grep -rn SAFETY kernel/src`); `static mut` = 0; `osjeff_core` sem `unsafe` | `grep` |
 | HTML aninhado, pilha de 80 KiB, release+LTO | **antes (`fc89615`): 100 ok, 150 e 300 abortam por estouro de pilha. Depois (HEAD): 100, 150, 300 e 20 000 ok** | crate descartável no scratchpad, 80 KiB |
 | `dechunk("FFFFFFFFFFFFFFFFF")` e `color:#é1` | **antes: panic nos dois. Depois: ok** | idem |
@@ -165,7 +165,7 @@ Resíduo dos fixes: o cap de 40 níveis descarta o *wrapper* e mantém o conteú
 | Onde | Afirma | Realidade |
 |---|---|---|
 | README:12,42,192,198; ARCH:33 | 152 testes | **201** (confirmado por mim) |
-| README:42,193,198; ARCH:27 | ~98% de cobertura; fs·net ~99% | **94,46%** bruta (inclui os próprios módulos de teste), ~88% só produção, 72,5% de branches (05); kernel **0%** |
+| README:42,193,198; ARCH:27 | ~98% de cobertura; fs·net ~99% | **93,25%** bruta de linhas (inclui os próprios módulos de teste), ~88% só produção, 72,5% de branches (05); kernel **0%** |
 | README:13,195,208 | clippy `-D warnings` verde; `lint-host` e `lint-kernel` | os **dois falham** (`render.rs:74`); `lint-host` falha porque `-p os` compila o kernel (confirmado por mim) |
 | README:52; ARCH:183 | `worker-a` e `worker-b` provam preempção com CPU idêntica | os workers não existem mais; a "CPU idêntica" é artefato do round-robin contando fatias de threads dormindo em `hlt` |
 | README:132; ARCH:86; ARCH:314 | exceções fatais "travam visível em vez de triple-fault"; canário gera `panic` com o nome da thread | falso: nada é impresso (serial e tela vazias); estouro da pilha de boot dá **triple fault**; o canário não cobre o compositor, é de 8 B, e o `panic!` roda no ISR e mata a máquina |
