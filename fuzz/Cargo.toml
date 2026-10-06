@@ -1,0 +1,47 @@
+[package]
+name = "osjeff-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+osjeff_core = { path = "../osjeff_core" }
+
+# Standalone workspace: the fuzz crate must NOT be a member of the main
+# workspace (kernel/os are bare-metal builds with their own flags).
+[workspace]
+
+# Profile used by `cargo fuzz run` (it builds with --release).
+# overflow-checks + debug-assertions make arithmetic wraparound panic, so bugs
+# that stay silent in the kernel's `--release` build (overflow-checks off) are
+# reported as crashes here. `debug = 1` keeps line info for ASAN backtraces.
+[profile.release]
+debug = 1
+debug-assertions = true
+overflow-checks = true
+
+[[bin]]
+name = "net_parse"
+path = "fuzz_targets/net_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ojfs_parse"
+path = "fuzz_targets/ojfs_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "web_parse"
+path = "fuzz_targets/web_parse.rs"
+test = false
+doc = false
+bench = false
