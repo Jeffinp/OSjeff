@@ -51,10 +51,18 @@ fn disk() -> &'static mut [u8] {
     unsafe { core::slice::from_raw_parts_mut(DISK.get() as *mut u8, DISK_BYTES) }
 }
 
+/// Whether the in-memory image may be written back to the disk. Cleared when the
+/// boot-time read failed: the image in RAM is then a freshly formatted
+/// placeholder, and flushing it would overwrite a perfectly good filesystem
+/// after a transient ATA error.
+static PERSIST: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
+
 /// Persist the in-memory filesystem image to the ATA disk (best effort: a no-op
-/// if there is no disk).
+/// if there is no disk, or if the disk could not be read at boot).
 fn flush_disk() {
-    let _ = crate::ata::write_image(disk());
+    if PERSIST.load(core::sync::atomic::Ordering::Relaxed) {
+        let _ = crate::ata::write_image(disk());
+    }
 }
 
 const TERM: usize = 0;
@@ -199,7 +207,12 @@ impl Desktop {
         // Load the filesystem from disk. If no disk responds or it holds no
         // valid filesystem (blank / first boot), format and persist a fresh one.
         // A missing disk simply leaves us with a RAM-only filesystem.
-        if !crate::ata::read_image(disk()) || !fs::is_formatted(disk()) {
+        let read_ok = crate::ata::read_image(disk());
+        if !read_ok {
+            PERSIST.store(false, core::sync::atomic::Ordering::Relaxed);
+            crate::serial_println!("OJFS: disk read failed; RAM-only filesystem, disk left untouched");
+        }
+        if !read_ok || !fs::is_formatted(disk()) {
             fs::format(disk());
             // Seed a couple of welcome files so the file manager has content on a
             // fresh disk (and to document its keys).
@@ -212,7 +225,7 @@ impl Desktop {
             if let Ok(d) = fs::mkdir(disk(), fs::ROOT, b"Documentos") {
                 let _ = fs::write_in(disk(), d as u8, b"projeto.txt", b"Arquivo dentro de uma pasta.");
             }
-            let _ = crate::ata::write_image(disk());
+            flush_disk();
         }
 
         let windows = [

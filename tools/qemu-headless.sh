@@ -26,9 +26,12 @@ img=$(find "$root/target/release/build" -path "*/out/osjeff-$mode.img" -printf '
 
 mkdir -p "$out"
 rm -f "$out"/serial.log "$out"/mon.sock "$out"/screen.ppm "$out"/screen.png
-# Fresh persistent-FS disk each run so results are reproducible.
+# Fresh persistent-FS disk each run so results are reproducible (KEEP_FS=1 keeps
+# an existing <outdir>/fs.img, e.g. to test persistence or corrupted disks).
 fsimg="$out/fs.img"
-dd if=/dev/zero of="$fsimg" bs=1k count=64 status=none
+if [ -z "${KEEP_FS:-}" ] || [ ! -f "$fsimg" ]; then
+  dd if=/dev/zero of="$fsimg" bs=1k count=64 status=none
+fi
 
 args=(-m "${QEMU_MEM:-128M}" -display none -no-reboot -no-shutdown
       -serial "file:$out/serial.log"
