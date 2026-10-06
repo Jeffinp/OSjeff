@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # weekly nightly canary
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show # installs the nightly pinned in rust-toolchain.toml
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p osjeff_core
+      # Proves the core really is no_std / bare-metal clean.
+      - run: cargo build -p osjeff_core --target x86_64-unknown-none
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p osjeff_core --all-targets -- -D warnings
+      - run: cargo clippy -p kernel --target x86_64-unknown-none -- -D warnings
+      - run: cargo fmt --all -- --check
+        continue-on-error: true # not yet formatted once; drop after `cargo fmt`
+
+  build-image:
+    runs-on: ubuntu-latest
+    needs: [test-core, lint]
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p os --release # kernel + bootloader + BIOS/UEFI images
+      - uses: actions/upload-artifact@v4
+        with:
+          name: osjeff-images
+          path: target/release/build/os-*/out/*.img
+          if-no-files-found: warn
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: cargo llvm-cov -p osjeff_core --branch --fail-under-lines 90 --summary-only
+
+  # Non-blocking: catches the next toolchain break (like Step::forward_overflowing
+  # in July 2026) before it lands on a pinned build.
+  nightly-canary:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly --profile minimal -c rust-src,llvm-tools,clippy -t x86_64-unknown-none
+      - run: rustup override set nightly
+      - run: cargo build -p os --release

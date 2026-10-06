@@ -24,13 +24,13 @@ sem `std`). A solução é mover toda decisão para uma biblioteca que compila c
 
 Resultado: parser de comandos, modelo do editor, mapa de teclado, geometria de
 janelas, easing de animação, tabela de processos e a **matemática do allocator**
-são testados no host com ~98% de cobertura. O kernel fica só com o glue de
+são testados no host (201 testes, 94% de linhas medido com `cargo llvm-cov`; ~88% só em código de produção). O kernel fica só com o glue de
 hardware — e o `unsafe` fica isolado e auditável.
 
 ```mermaid
 flowchart LR
     subgraph host["cargo test (host, std)"]
-        T["152 testes unitários"]
+        T["201 testes unitários"]
     end
     subgraph prod["kernel (no_std, bare metal)"]
         K["glue de hardware"]
@@ -83,9 +83,11 @@ flowchart TB
 - **PIC 8259** remapeado para os vetores `0x20+` (senão IRQ0 colidiria com a
   exceção `#DF`). Máscaras liberam timer, teclado, cascata e mouse.
 - **PIT** programado para 250 Hz (canal 0, modo 3).
-- **Exceções fatais** (`#GP`, `#PF`, double fault) **travam com `hlt`** em vez de
-  triple-faultar (que reiniciaria a máquina silenciosamente) — bugs ficam
-  visíveis durante o desenvolvimento.
+- **Exceções fatais** (`#DE`, `#UD`, `#NP`, `#SS`, `#GP`, `#PF`, double fault)
+  imprimem vetor/RIP/RSP na serial (COM1) e travam com `hlt`. O #DF roda numa
+  pilha IST própria (`gdt.rs`), então um estouro de pilha não vira triple-fault
+  (reinício silencioso). Panics também são impressos na serial. Antes da
+  auditoria esses caminhos eram `hlt` mudos.
 
 ### Input por IRQ (ring buffer SPSC)
 
@@ -245,7 +247,7 @@ de **Reiniciar**/**Desligar** (`power.rs`).
 ## 8. Filesystem e persistência
 
 A lógica do filesystem (**`osjeff_core::fs`**, "OJFS") é pura e testada: uma
-imagem de bytes fixa com magic + 16 registros `[used][nome][tamanho][dados]`.
+imagem de bytes fixa com magic + 48 registros (`MAX_FILES`; com diretórios) `[used][nome][tamanho][dados]`.
 Operações `format`/`write`/`read`/`remove`/`list` editam a imagem no lugar, sem
 alocação — então rodam idênticas no host (com um array) e no kernel.
 
@@ -264,7 +266,7 @@ O kernel mantém a imagem em RAM (cópia alinhada a setor) e a sincroniza com o
 disco via **`ata.rs`** — um driver **ATA PIO** (LBA de 28 bits) no canal IDE
 secundário, separado do disco de boot. Todas as esperas são limitadas: um disco
 ausente devolve `false` em vez de pendurar o boot, e o sistema cai para um
-filesystem só em RAM. Cada `SAVE`/`RM` faz *flush* da imagem inteira (~17 KiB).
+filesystem só em RAM. Cada `SAVE`/`RM` faz *flush* da imagem inteira (ver `fs::IMAGE_SIZE`).
 
 ---
 
@@ -310,5 +312,5 @@ rede no host.
 | Spin lock com `cli/sti` | Evitar deadlock de alocação sob preempção |
 | Exceções → tela travada | Tornar bugs visíveis em vez de reboot silencioso |
 | `qemu -d int,cpu_reset` | Depurar faults sem hardware de debug |
-| Edition 2024 + zero `static mut` (`RacyCell`) | `static mut` + `&mut` é UB; a 2024 o proíbe (`static_mut_refs`). Estado global mutável passa por um `Sync`-cell que expõe `*mut T`, sem materializar `&mut` aliasável. Soundness justificada (single-core + exclusão por flag de interrupção), não suprimida com `allow` |
-| Stack canary por thread | Overflow de pilha (stacks são heap, sem guard page) sobrescreve o canário no fundo da pilha antes de invadir o heap. Checado em cada troca de contexto → `panic` com o nome da thread, em vez de corrupção silenciosa do heap |
+| Edition 2024 + zero `static mut` (`RacyCell`) | `static mut` + `&mut` é UB; a 2024 o proíbe (`static_mut_refs`). Estado global mutável passa por um `Sync`-cell que expõe `*mut T`, sem materializar `&mut` aliasável. `RacyCell` é o mesmo padrão de `static mut` com outro nome: a soundness depende de cada estático ter um único dono por thread (verificado na auditoria, ver `docs/audit/01-memoria-unsafe.md`), não de exclusão por flag de interrupção, que só vale para o ring de entrada |
+| Stack canary por thread | Overflow de pilha (stacks são heap, sem guard page) sobrescreve o canário no fundo da pilha antes de invadir o heap. Existe só nas threads `fetcher` e `wasmapp` (não no compositor). É checado na troca de contexto, dentro da ISR, e o panic resultante agora aparece na serial; um frame maior que a pilha ainda pode pular o canário (ver `docs/audit/02-interrupcoes-scheduler.md`) |

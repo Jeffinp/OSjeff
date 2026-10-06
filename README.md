@@ -9,7 +9,7 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-152%20passing-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-201%20passing-success?style=for-the-badge)
 ![Clippy](https://img.shields.io/badge/clippy-%2DD%20warnings-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
@@ -39,7 +39,7 @@ Não é um app rodando sobre um SO — é o SO. Cada peça abaixo foi construíd
 | **Heap allocator** | [`kernel/src/allocator.rs`](kernel/src/allocator.rs) | Free-list linkada + spin lock como `#[global_allocator]` → habilita `Vec`/`String`/`Box` |
 | **Interrupções de hardware** | [`kernel/src/interrupts.rs`](kernel/src/interrupts.rs) | IDT, handlers de exceção, PIC 8259 remapeado, timer PIT, input por IRQ |
 | **Compositor por damage tracking** | [`kernel/src/desktop.rs`](kernel/src/desktop.rs) | Cacheia a camada estática e só redesenha o retângulo danificado — custo O(janela) |
-| **Lógica pura testável** | [`osjeff_core/`](osjeff_core/) | Toda decisão (parser, editor, keymap, geometria, allocator, filesystem) testada no host: **152 testes, ~98% de cobertura** |
+| **Lógica pura testável** | [`osjeff_core/`](osjeff_core/) | Toda decisão (parser, editor, keymap, geometria, allocator, filesystem) testada no host: **201 testes, 94% de cobertura de linhas** |
 
 ---
 
@@ -129,7 +129,8 @@ sequenceDiagram
 - **Kernel bare-metal** com identidade visual própria (dock flutuante, mesh
   wallpaper, sombras, logo) e **boot splash animado**
 - **Interrupções de hardware**: IDT + exceções, PIC 8259, timer PIT; exceções
-  fatais travam visível em vez de triple-fault (reboot silencioso)
+  fatais e panics são reportados na serial (COM1) e travam; o #DF roda numa
+  pilha própria (TSS/IST), então estouro de pilha não vira triple-fault mudo
 - **Input por IRQ**: teclado (IRQ1) e mouse (IRQ12) via ring buffer SPSC
 - **Heap allocator** (`alloc`): `Vec`/`String`/`Box` no kernel
 - **Scheduler preemptivo**: threads reais com stacks próprias, troca de contexto
@@ -189,21 +190,21 @@ sudo dd if=osjeff-bios.img of=/dev/sdX bs=4M status=progress && sync
 Toda a lógica vive em `osjeff_core` e é testada no host:
 
 ```bash
-cargo test-core                          # 152 testes
-cargo llvm-cov -p osjeff_core --summary-only  # cobertura (~98%)
+cargo test-core                          # 201 testes
+cargo llvm-cov -p osjeff_core --summary-only  # cobertura (~94% bruto)
 cargo lint-kernel                        # clippy bare-metal, -D warnings
 cargo lint-host                          # clippy host, -D warnings
 ```
 
-**152 testes**, ~98% de cobertura de linhas no `osjeff_core`:
+**201 testes** no `osjeff_core`; cobertura de linhas medida com `cargo llvm-cov`: **94%** (bruto, inclui os próprios módulos de teste) e **~88%** contando só código de produção; 74% dos *branches*. O `kernel/` não tem testes automatizados (veja [`docs/audit/`](docs/audit/RELATORIO.md)).
 
-| Módulo (core) | Testes | Cobertura |
+| Módulo (core) | Testes | Linhas |
 |---|---|---|
-| anim · window · heap · keymap | 56 | ~100% |
-| fs · net | 20 | ~99% |
-| terminal · process | 37 | ~98% |
-| editor | 23 | 96% |
-| calc · clipboard | 23 | ~95% |
+| anim · window · heap · fs | 52 | 100% |
+| keymap · process · terminal | 51 | 98–99% |
+| net | 16 | 97% |
+| editor · clipboard · calc | 46 | 93–95% |
+| web · browser | 36 | 74–92% |
 
 > `cargo clippy` puro falha **de propósito**: o kernel `no_std` não compila no
 > host (sem unwinding). Por isso os aliases acima escopam o alvo correto.

@@ -2,6 +2,7 @@
 name = "osjeff_core"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 description = "Pure, no_std OS logic (keymap, terminal, editor, window geometry). Host-testable."
 
 [lib]
