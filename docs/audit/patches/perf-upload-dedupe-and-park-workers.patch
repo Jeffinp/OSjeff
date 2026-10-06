@@ -1,0 +1,163 @@
+--- /tmp/claude-0/-home-user-OSjeff/0f58a1c9-b4c7-5882-a7fe-882fa852e898/scratchpad/states/S5/kernel/src/main.rs	2026-10-06 23:21:30.829141607 +0000
++++ kernel/src/main.rs	2026-10-06 23:14:16.103296178 +0000
+@@ -525,10 +525,17 @@
+                     let mut up = |r: Rect| {
+                         fb_blit_rect(framebuffer.buffer_mut(), back, info, r.x, r.y, r.w, r.h, n);
+                     };
+-                    if let Some(fb_) = desk.focused_box() {
++                    let focused = desk.focused_box();
++                    if let Some(fb_) = focused {
+                         up(fb_);
+                     }
+-                    if let Some(pf) = prev_focused {
++                    // The window that had focus before only needs its own upload
++                    // when focus actually moved; otherwise it is the very rect
++                    // just uploaded (a keystroke would write the same ~0.5 MiB
++                    // window to VRAM twice).
++                    if let Some(pf) = prev_focused
++                        && Some(pf) != focused
++                    {
+                         up(pf);
+                     }
+                     up(desk.clock_rect());
+--- /tmp/claude-0/-home-user-OSjeff/0f58a1c9-b4c7-5882-a7fe-882fa852e898/scratchpad/states/S5/kernel/src/sched.rs	2026-10-06 23:21:30.830719346 +0000
++++ kernel/src/sched.rs	2026-10-06 22:58:42.148148886 +0000
+@@ -11,7 +11,7 @@
+ use alloc::boxed::Box;
+ use alloc::vec;
+ use alloc::vec::Vec;
+-use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
++use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+ use x86_64::registers::segmentation::{CS, SS, Segment};
+ 
+ // Per-thread stack. Sized generously (128 KiB) because the background fetcher
+@@ -52,6 +52,11 @@
+ 
+ /// Index of the running thread (read by the Task Manager).
+ static CURRENT: AtomicUsize = AtomicUsize::new(0);
++/// Worker threads with nothing to do. The round-robin skips parked slots, so an
++/// idle worker no longer burns its whole 4 ms slice in `hlt` while the
++/// compositor (slot 0, never parked) has frames to render. A worker parks itself
++/// when idle ([`park_current`]); whoever hands it work calls [`unpark`].
++static PARKED: [AtomicBool; MAX_THREADS] = [const { AtomicBool::new(false) }; MAX_THREADS];
+ /// CPU ticks credited per thread slot.
+ static TICKS: [AtomicU64; MAX_THREADS] = [const { AtomicU64::new(0) }; MAX_THREADS];
+ 
+@@ -185,10 +190,18 @@
+     }
+ 
+     let n = s.threads.len();
+-    if n < 2 {
+-        return rsp; // single thread: nothing to restore, state unchanged
++    // Next runnable thread after `cur`, round-robin, skipping parked workers.
++    let mut next = cur;
++    for step in 1..=n {
++        let cand = (cur + step) % n;
++        if cand == cur || !PARKED[cand].load(Ordering::Acquire) {
++            next = cand;
++            break;
++        }
++    }
++    if next == cur {
++        return rsp; // nothing else is runnable: keep the CPU, state unchanged
+     }
+-    let next = (cur + 1) % n;
+     s.current = next;
+     CURRENT.store(next, Ordering::Relaxed);
+ 
+@@ -206,6 +219,32 @@
+ 
+ // ---- introspection for the Task Manager ----
+ 
++/// Mark the calling worker as having nothing to run. It stays on the CPU until
++/// the next timer tick, then the scheduler stops visiting it. To avoid a lost
++/// wake-up the caller must re-check its work condition *after* this call (and
++/// call [`unpark_current`] if work arrived) before it halts.
++pub fn park_current() {
++    PARKED[CURRENT.load(Ordering::Relaxed).min(MAX_THREADS - 1)].store(true, Ordering::SeqCst);
++}
++
++/// Undo [`park_current`] for the calling thread.
++pub fn unpark_current() {
++    PARKED[CURRENT.load(Ordering::Relaxed).min(MAX_THREADS - 1)].store(false, Ordering::SeqCst);
++}
++
++/// Make the worker named `name` runnable again (it is scheduled on the next
++/// timer tick). No-op if it is not parked or does not exist.
++pub fn unpark(name: &str) {
++    let Some(s) = (unsafe { (*SCHED.get()).as_ref() }) else {
++        return;
++    };
++    for (i, t) in s.threads.iter().enumerate().take(MAX_THREADS) {
++        if t.name == name {
++            PARKED[i].store(false, Ordering::SeqCst);
++        }
++    }
++}
++
+ /// Index of the thread that is running right now (timer-ISR attribution).
+ pub fn current() -> usize {
+     CURRENT.load(Ordering::Relaxed)
+--- /tmp/claude-0/-home-user-OSjeff/0f58a1c9-b4c7-5882-a7fe-882fa852e898/scratchpad/states/S5/kernel/src/fetch.rs	2026-10-06 23:21:30.830753552 +0000
++++ kernel/src/fetch.rs	2026-10-06 22:58:42.148908220 +0000
+@@ -56,6 +56,7 @@
+         *REQ_LEN.get() = n;
+     }
+     STATE.store(REQUESTED, Ordering::Release);
++    crate::sched::unpark("fetcher");
+     true
+ }
+ 
+@@ -90,6 +91,13 @@
+             }
+             STATE.store(DONE, Ordering::Release);
+         } else {
++            // Idle: leave the round-robin until a request arrives. Re-check after
++            // parking so a request posted in between is not missed.
++            crate::sched::park_current();
++            if STATE.load(Ordering::Acquire) == REQUESTED {
++                crate::sched::unpark_current();
++                continue;
++            }
+             x86_64::instructions::hlt();
+         }
+     }
+--- /tmp/claude-0/-home-user-OSjeff/0f58a1c9-b4c7-5882-a7fe-882fa852e898/scratchpad/states/S5/kernel/src/wasm/mod.rs	2026-10-06 23:21:30.830809111 +0000
++++ kernel/src/wasm/mod.rs	2026-10-06 22:58:42.149667241 +0000
+@@ -367,7 +367,21 @@
+ 
+ /// Mark the WASM app window open/closed. The worker only runs while open.
+ pub fn set_active(on: bool) {
+-    ACTIVE.store(on, Ordering::Release);
++    let was = ACTIVE.swap(on, Ordering::AcqRel);
++    if on && !was {
++        crate::sched::unpark("wasmapp");
++    }
++}
++
++/// Idle path of the worker: leave the round-robin (see [`crate::sched`]) until the
++/// window opens. Re-checks `ACTIVE` after parking so an open is never missed.
++fn park_worker() {
++    crate::sched::park_current();
++    if ACTIVE.load(Ordering::Acquire) {
++        crate::sched::unpark_current();
++        return;
++    }
++    x86_64::instructions::hlt();
+ }
+ 
+ fn push_ev(ev: Ev) {
+@@ -446,11 +460,11 @@
+ pub extern "C" fn worker() -> ! {
+     loop {
+         if !ACTIVE.load(Ordering::Acquire) {
+-            x86_64::instructions::hlt();
++            park_worker();
+             continue;
+         }
+         let (Some(app), Some(oi)) = (app_mut(), surface_info()) else {
+-            x86_64::instructions::hlt();
++            park_worker();
+             continue;
+         };
+         let back = 1 - FRONT.load(Ordering::Relaxed);

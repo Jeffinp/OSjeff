@@ -1,8 +1,8 @@
 # OSjeff — Relatório consolidado da auditoria (Fase 3, revisão independente)
 
-Branch `audit/performance-security`, HEAD `50c4e16`. Este documento consolida `00-mapa`, `01-memoria-unsafe`, `02-interrupcoes-scheduler`, `03-superficie-ataque`, `05-qualidade-rust` e `adr-isolamento`. O revisor não escreveu nenhum deles e tratou cada achado CRÍTICO/ALTO como hipótese até ver o trecho de código ou reproduzir.
+Branch `audit/performance-security`. Este documento consolida `00-mapa`, `01-memoria-unsafe`, `02-interrupcoes-scheduler`, `03-superficie-ataque`, `04-desempenho`, `05-qualidade-rust` e `adr-isolamento`. Escrito pelo revisor com o HEAD `50c4e16`; **atualizado depois da Fase 4** (correções do kernel e integração do 04): a coluna Status e a seção H refletem o estado final. O revisor não escreveu nenhum deles e tratou cada achado CRÍTICO/ALTO como hipótese até ver o trecho de código ou reproduzir.
 
-**`04-desempenho` ainda não existe na branch.** Tudo que aparece como "desempenho" abaixo vem dos outros relatórios e está marcado `[04 pendente]`. Se o 04 trouxer números diferentes, os dele prevalecem. Ver a seção "A preencher com 04-desempenho" no fim.
+**Números de desempenho:** os do `04-desempenho` prevalecem sobre os dos outros relatórios; resumo na seção H. Todos são de QEMU/TCG sem KVM e valem como proporções, não como valores absolutos de hardware real.
 
 Legenda de prova: **PROVADO** = reproduzido (teste, QEMU, execução) ou trecho conclusivo que li; **SUPOSIÇÃO** = raciocínio sem reprodução. Quando escrevo "confirmado por mim" fui eu quem rodou ou leu.
 
@@ -22,18 +22,18 @@ Legenda de prova: **PROVADO** = reproduzido (teste, QEMU, execução) ou trecho 
 - `http_get` (HTTP puro) não tem teto de corpo; o HTTPS tem 256 KiB. Heap único de 64 MiB; OOM é mudo. Vetor SUPOSIÇÃO.
 - HTTPS **não verifica certificado** e o RNG do handshake é xorshift marcado `CryptoRng`. Hoje isso é integridade do conteúdo, não derrubada (os parsers foram endurecidos). Como a pilha de rede fixa o IP do SLIRP do QEMU, o navegador só funciona sob `-netdev user`, o que limita a exposição real.
 - CSS com milhares de regras é O(regras × elementos) (0,39 s no host com 5 000 × 5 000); no kernel soft-float pode congelar a UI. SUPOSIÇÃO no kernel.
-- Disco: **K4** formata o disco se a leitura falhar ou se não houver o magic `OJF2` (perda do FS); **K3** faz o gerenciador abrir/salvar sempre o arquivo da raiz.
+- Disco: **K4** (formatar o disco se a leitura falhar) foi **corrigido** (`11121bf`): falha de leitura agora deixa o disco intocado. Continua aberto: disco com conteúdo não-OJFS (sem magic `OJF2`) ainda é formatado, por desenho; **K3** (gerenciador abre/salva sempre o arquivo da raiz).
 
 **Interno (sem atacante), o que mais derruba:**
-- Estouro de pilha do compositor (80 KiB, sem IST) vira triple fault (PROVADO no QEMU por 3 relatórios).
+- ~~Estouro de pilha do compositor vira triple fault~~ **corrigido** (`a56218d`): GDT/TSS própria, IST para #DF, pilha de boot de 512 KiB. Reproduzido antes (3 relatórios) e depois (BIOS e UEFI: `FATAL EXCEPTION: #DF`, sem triple fault).
 - Pilhas das outras threads estão no heap sem página de guarda. O canário de 8 bytes é contornável por um frame grande (corrompeu 80 bytes sem ser detectado, PROVADO) e, quando dispara, o `panic!` roda dentro do ISR e trava a máquina inteira.
-- Panic, exceção e OOM são mudos: só `hlt`, nada na serial nem na tela (PROVADO).
+- ~~Panic, exceção e OOM são mudos~~ **corrigido na serial** (`46ab710`): panic, #DE/#UD/#NP/#SS/#GP/#PF/#DF imprimem vetor, RIP, RSP (e CR2) em COM1; verificado com `ud2`, leitura de endereço inválido, `panic!` e alocação de 200 MiB. Continua sem mensagem **na tela**.
 - Um app WASM em laço infinito prende a CPU para sempre e fechar a janela não o encerra; `memory.grow` leva 51% do heap (PROVADO no ADR). Os módulos são embutidos no build, então o vetor é bug do app, não ataque.
-- UEFI: 128 MiB panica (BSS de 91 MiB); framebuffer maior que 1920x1080x4 estoura os buffers estáticos (mecanismo PROVADO, cenário de hardware SUPOSIÇÃO). Ninguém testou em hardware real.
+- UEFI: 128 MiB panica (BSS de 91 MiB; o runner `os` agora usa 256M, `687c08a`); framebuffer maior que 1920x1080x4 estoura os buffers estáticos (mecanismo PROVADO, cenário de hardware SUPOSIÇÃO). Ninguém testou em hardware real.
 
-### (ii) Onde o tempo é gasto? `[04 pendente]`
+### (ii) Onde o tempo é gasto?
 
-Números já medidos pelos outros relatórios (QEMU/TCG sem KVM, **não representativos de hardware real**):
+Resposta curta (detalhe e método no `04-desempenho`, resumo na seção H): **no boot, o splash fixo (4–5 s) e o firmware/bootloader (~3,7 s); o init real do kernel é ~0,18 s. Em regime, o maior custo era escalonamento (o compositor só recebe 1 de cada 3 fatias) e, depois, sombras de janela (~97% do quadro de recomposição) e o repaint da cena inteira a cada segundo por causa do relógio.** Os dois últimos foram corrigidos (seção H). Medições dos outros relatórios (QEMU/TCG sem KVM, **não representativas de hardware real**):
 - **Boot:** desktop em < 14 s. Pelo menos 5 s são o splash fixo (`main.rs:259,671`), mais ~0,1 s de calibração do TSC e até ~0,6 s de DHCP.
 - **Scheduler:** round-robin sem estado "bloqueado". O compositor roda a **83 Hz** em idle (250/3), medido pelo contador de iterações. O app WASM recebe 1/3 da CPU. A coluna "CPU" do Task Manager conta fatias de threads dormindo em `hlt`, então não mede CPU.
 - **ISR do timer:** 6–17 µs por tick (0,15–0,4% do período). Lock do heap: 1–4 µs em média. Nenhum dos dois é gargalo.
@@ -43,7 +43,7 @@ Números já medidos pelos outros relatórios (QEMU/TCG sem KVM, **não represen
 
 ### (iii) Qual o próximo passo de arquitetura que vale o esforço?
 
-O ADR recomenda a **Opção C**: endurecer o kernel (S0–S4), tornar o WASM a fronteira de isolamento com fuel e limites (S5), e **adiar o ring 3** (S7, 22–33 dias de MVP, 50–75 com apps portados) até haver gatilho concreto. **Concordo, com um ajuste.** O S2 (limite de profundidade) já foi feito. A principal motivação do S6 (portar o motor web para wasm porque HTML hostil derrubava a máquina) perdeu força: o cap de 40 níveis mais o fuzz resolvem esse caso por uma fração do custo. Ordem que eu seguiria: **S0 → S1 → S5 → S3/S4**, e só então decidir se S6 ainda é necessário. W^X/NX já funciona (medido pelo ADR), não precisa de código novo.
+O ADR recomenda a **Opção C**: endurecer o kernel (S0–S4), tornar o WASM a fronteira de isolamento com fuel e limites (S5), e **adiar o ring 3** (S7, 22–33 dias de MVP, 50–75 com apps portados) até haver gatilho concreto. **Concordo, com um ajuste.** O S0 (falhas visíveis, só na serial), o S1 (GDT/TSS/IST e pilha de boot) e o S2 (limite de profundidade) já foram feitos. A principal motivação do S6 (portar o motor web para wasm porque HTML hostil derrubava a máquina) perdeu força: o cap de 40 níveis mais o fuzz resolvem esse caso por uma fração do custo. Ordem que eu seguiria agora: **S5 → S3/S4**, e só então decidir se S6 ainda é necessário. W^X/NX já funciona (medido pelo ADR), não precisa de código novo.
 
 ---
 
@@ -59,7 +59,7 @@ O ADR recomenda a **Opção C**: endurecer o kernel (S0–S4), tornar o WASM a f
 | OJFS `parent` auto-referente + `purge_slot` | **antes: stack overflow. Depois: ok** (`alloc` ainda aceita `parent` inválido, mas a recursão não anda mais) | idem |
 | OJFS `size` = 0xFFFF | **antes: panic (`fs.rs:139`). Depois: `size_at` = 1024** | idem |
 | Kernel com os fixes | `cargo build -p kernel --release` ok; imagem BIOS 128 MiB boota ao desktop (screenshot, `thr 3`) | `tools/qemu-headless.sh bios` |
-| `cargo lint-kernel` | **ainda falha** (1 erro, `render.rs:74`) | rodei |
+| `cargo lint-kernel` | falhava (1 erro, `render.rs:74`); **corrigido** em `bfe6166`, hoje `lint-kernel` e `lint-host` passam | rodei |
 | TLS sem verificação | `UnsecureProvider` (`netstack.rs:247`) e `impl CryptoRng for Rdtsc` (`:424`) | li |
 | `panic_handler` mudo | `main.rs:777-780`: só `halt()`. Handlers #PF/#GP/#DF idem (`interrupts.rs:147-159`) | li |
 | Sem GDT/TSS/IST | nenhum `gdt`/`tss`/`set_stack_index` em `kernel/src` | `grep` |
@@ -88,19 +88,19 @@ Ordem: itens abertos por prioridade (alavanca ÷ esforço, depois severidade), d
 
 | # | Sev. | Esforço | Área | Título | Status | Prova |
 |---|---|---|---|---|---|---|
-| 1 | MÉDIA | 1–2 d | Kernel/diagnóstico | Panic, exceções, OOM e canário são mudos (só `hlt`); `panic!` do canário roda no ISR e mata a máquina toda; threads panicadas viram zumbis | A FAZER (ADR S0/S4) | PROVADO (QEMU em 01, 02, ADR; código confirmado por mim) |
-| 2 | MÉDIA ↓ | 1–2 d | Kernel/IRQ | Sem GDT/TSS/IST: estouro da pilha de boot (80 KiB) → #PF → #DF → triple fault; #UD/#DE/#NP e IRQ 7/15 sem handler caem em #DF | A FAZER (ADR S1) | PROVADO (QEMU, 3 relatórios); IRQ espúria SUPOSIÇÃO |
-| 3 | MÉDIA | 0,5 d | Disco | K4: erro transitório de leitura ou disco sem magic `OJF2` → `fs::format` + `write_image` sobrescreve o LBA 0 | A FAZER | PROVADO por leitura (caminho); gatilho real SUPOSIÇÃO |
+| 1 | MÉDIA | 1–2 d | Kernel/diagnóstico | Panic, exceções, OOM e canário são mudos (só `hlt`); `panic!` do canário roda no ISR e mata a máquina toda; threads panicadas viram zumbis | **CORRIGIDO na serial** `46ab710` (falta: tela e tratar thread panicada, ADR S4) | PROVADO antes e depois (QEMU) |
+| 2 | MÉDIA ↓ | 1–2 d | Kernel/IRQ | Sem GDT/TSS/IST: estouro da pilha de boot (80 KiB) → #PF → #DF → triple fault; #UD/#DE/#NP e IRQ 7/15 sem handler caem em #DF | **CORRIGIDO** `a56218d` (#DE/#UD/#NP/#SS em `46ab710`; IRQ espúria 7/15 segue sem handler) | PROVADO antes e depois (BIOS e UEFI) |
+| 3 | MÉDIA | 0,5 d | Disco | K4: erro transitório de leitura ou disco sem magic `OJF2` → `fs::format` + `write_image` sobrescreve o LBA 0 | **CORRIGIDO** `11121bf` (falha de leitura); disco não-OJFS ainda formatado | PROVADO (hash do disco igual após falha injetada) |
 | 4 | MÉDIA | 1 d | Disco/UI | K3: gerenciador abre/salva por nome na raiz; arquivo dentro de pasta não abre e Ctrl+S cria ou sobrescreve o homônimo da raiz | A FAZER | PROVADO por leitura |
 | 5 | MÉDIA ↓ | 0,5 d | Rede/UI | `https://` sem aviso de "não verificado"; RNG xorshift declarado `CryptoRng` (chave efêmera previsível) | A FAZER | PROVADO por leitura; ataque SUPOSIÇÃO |
 | 6 | MÉDIA | 2–3 d | WASM | Sem fuel, `ResourceLimiter`, kill/restart; fechar a janela não libera a `Store`; laços `n`/`len` do guest nas host fns; `proc_exit` finge | PROPOSTA-ADR (S5) | PROVADO (ADR: laço infinito, grow 513 pág.; mitigação validada) |
 | 7 | MÉDIA | 0,5 d | Rede/memória | `http_get` sem teto de corpo (HTTPS tem 256 KiB) e DOM/CSS sem teto de nós/regras; heap único de 64 MiB sem cota | A FAZER | OOM PROVADO (mudo); vetor SUPOSIÇÃO |
-| 8 | MÉDIA | 2–3 d | Scheduler/perf | Round-robin sem estado bloqueado: compositor a 83 Hz idle, WASM com 1/3 da CPU, Task Manager "CPU" conta fatias dormindo | A FAZER | PROVADO (medido, 02) `[04 pendente]` |
+| 8 | MÉDIA | 2–3 d | Scheduler/perf | Round-robin sem estado bloqueado: compositor a 83 Hz idle, WASM com 1/3 da CPU, Task Manager "CPU" conta fatias dormindo | A FAZER (patch pronto, sem A/B: `perf-upload-dedupe-and-park-workers.patch` do 04) | PROVADO (medido, 02 e 04) |
 | 9 | MÉDIA ↓ | 4–6 d | Kernel/threads | Pilhas de thread no heap sem guard page; canário de 8 B contornável (corrompeu 80 B sem detecção); uso real 9–13 KiB de 128 KiB | PROPOSTA-ADR (S3/S4) | mecanismo PROVADO; gatilho real SUPOSIÇÃO |
-| 10 | MÉDIA | 2–3 d | Boot/hardware | UEFI com 128 MiB panica (BSS 91 MiB; `os/src/main.rs` usa `-m 128M`); framebuffer > 1920x1080x4 estoura buffers estáticos → panic mudo no splash | A FAZER | RAM PROVADO (medido); resolução: mecanismo PROVADO, cenário SUPOSIÇÃO |
-| 11 | BAIXA | 1 d | CI/qualidade | Não há CI; `lint-kernel` e `lint-host` falham (`render.rs:74`); `fmt` com 27 diffs; badges do README mentem | A FAZER | PROVADO (rodei) |
-| 12 | BAIXA | 0,5 d | Deps | `spin 0.9.8` (yanked) linkado no kernel via wasmi; `bootloader_api` 0.11.15 vs 0.11.17; `license` ausente nos 3 crates; sem `deny.toml` | A FAZER | PROVADO (`cargo audit`/`deny`, 05) |
-| 13 | BAIXA | 1 d | Docs | README/ARCHITECTURE com afirmações falsas (seção F) | A FAZER | PROVADO |
+| 10 | MÉDIA | 2–3 d | Boot/hardware | UEFI com 128 MiB panica (BSS 91 MiB; `os/src/main.rs` usa `-m 128M`); framebuffer > 1920x1080x4 estoura buffers estáticos → panic mudo no splash | RAM: **CORRIGIDO** `687c08a`; resolução > 1080p: A FAZER | RAM PROVADO; resolução: mecanismo PROVADO, cenário SUPOSIÇÃO |
+| 11 | BAIXA | 1 d | CI/qualidade | Não há CI; `lint-kernel` e `lint-host` falham (`render.rs:74`); `fmt` com 27 diffs; badges do README mentem | **CORRIGIDO** `bfe6166` (lint), `ea1c4c6` (CI; `fmt` ainda com 23 diffs) | PROVADO (rodei) |
+| 12 | BAIXA | 0,5 d | Deps | `spin 0.9.8` (yanked) linkado no kernel via wasmi; `bootloader_api` 0.11.15 vs 0.11.17; `license` ausente nos 3 crates; sem `deny.toml` | **CORRIGIDO** `3f679af`, `677af15`, `ea1c4c6` (`cargo audit`: 4 avisos → 1, `bincode` sem correção; falta `deny.toml`) | PROVADO |
+| 13 | BAIXA | 1 d | Docs | README/ARCHITECTURE com afirmações falsas (seção F) | **CORRIGIDO** `ea1c4c6` | PROVADO |
 | 14 | MÉDIA ↓ | 5–10 d (incremental) | Qualidade | Kernel com 0 testes; 6 682 linhas sem cobertura; ~2 800 migráveis para o core (regras de janela e entrada, ring SPSC, DHCP, redirect); fuzz agora existe (`6c88b95`) mas só roda a mão | PROPOSTA | PROVADO |
 | 15 | BAIXA | 2–4 d | `unsafe` | 114 de 116 sem `SAFETY:`; `fn` seguras devolvem `&'static mut` (`disk()`, `scratch_slice()`, `scheduler()`, `app_mut()`); aliasing real em `files_rows`; `RacyCell: Sync` sem `T: Send`; `outb` seguro | A FAZER | PROVADO por leitura (UB formal; nenhuma miscompilação demonstrada) |
 | 16 | BAIXA ↓ | 1 d | Rede/DHCP | K2: DHCP lido e descartado; IP/gateway/DNS fixos do SLIRP, browser só funciona sob QEMU user-net | A FAZER | PROVADO por leitura |
@@ -123,15 +123,17 @@ Resíduo dos fixes: o cap de 40 níveis descarta o *wrapper* e mantém o conteú
 
 ---
 
-## D. As 10 primeiras coisas a fazer (considerando o que já foi corrigido)
+## D. As 10 primeiras coisas a fazer
 
-1. **Tornar falhas visíveis (#1, ADR S0).** Imprimir `PanicInfo`, vetor, RIP, CR2 e código de erro na serial (e uma tela de erro simples) nos handlers de panic/#PF/#GP/#DF; preencher o resto da IDT com um handler genérico; `cli` antes do `hlt`. Porquê: todo o resto falha em silêncio hoje; sem isso você não consegue nem provar que os outros fixes funcionam. Transforme as teclas de falha do ADR (F1–F12) em `selftest` para regressão, incluindo o HTML aninhado pós-fix.
-2. **Parar de formatar o disco por engano (#3).** Só formatar se a leitura teve sucesso **e** os primeiros setores estão zerados; falha de leitura mantém o FS só em RAM sem gravar. Porquê: é a única perda de dado em uso normal, e custa meio dia.
+**Estado após a Fase 4:** feitos o 1 (na serial), o 2 (falha de leitura), o 4, o 7 (menos `fmt` e `deny.toml`) e o RAM do 10. Restam, em ordem: **3, 5, 6, 8, 9** e o resto do 10 (+ tela de erro do 1). A lista original segue abaixo; o texto riscado é o que já foi entregue.
+
+1. ~~**Tornar falhas visíveis (#1, ADR S0).**~~ *Feito na serial em `46ab710`; falta a tela de erro e o `cli` explícito.* Imprimir `PanicInfo`, vetor, RIP, CR2 e código de erro na serial (e uma tela de erro simples) nos handlers de panic/#PF/#GP/#DF; preencher o resto da IDT com um handler genérico; `cli` antes do `hlt`. Porquê: todo o resto falha em silêncio hoje; sem isso você não consegue nem provar que os outros fixes funcionam. Transforme as teclas de falha do ADR (F1–F12) em `selftest` para regressão, incluindo o HTML aninhado pós-fix.
+2. ~~**Parar de formatar o disco por engano (#3).**~~ *Feito para falha de leitura em `11121bf`; falta exigir setores zerados antes de formatar um disco sem magic (muda comportamento de primeiro boot, pergunte antes).* Só formatar se a leitura teve sucesso **e** os primeiros setores estão zerados; falha de leitura mantém o FS só em RAM sem gravar. Porquê: é a única perda de dado em uso normal, e custa meio dia.
 3. **Corrigir K3 no gerenciador de arquivos (#4).** Guardar o slot (ou o `parent`) do arquivo aberto e usar `read_slot`/`write_in`. Porquê: a hierarquia de pastas é o commit mais recente e hoje não dá para abrir um arquivo dentro de uma pasta; é bug em fluxo comum.
-4. **GDT própria + TSS + IST para #DF/#PF e pilha de boot maior (#2, ADR S1).** `kernel_stack_size = 512 KiB` no `BOOT_CONFIG`. Porquê: transforma triple fault (reset sem pista) em mensagem e `hlt`. Teste em BIOS **e** UEFI (a GDT do bootloader fica em endereços diferentes).
+4. ~~**GDT própria + TSS + IST para #DF/#PF e pilha de boot maior (#2, ADR S1).**~~ *Feito em `a56218d` (IST só no #DF).* `kernel_stack_size = 512 KiB` no `BOOT_CONFIG`. Porquê: transforma triple fault (reset sem pista) em mensagem e `hlt`. Teste em BIOS **e** UEFI (a GDT do bootloader fica em endereços diferentes).
 5. **Honestidade no HTTPS (#5).** Rótulo "conexão não verificada" na barra, nunca mostrar cadeado; remover `impl CryptoRng for Rdtsc` e semear com `RDRAND` (checando CPUID); não rebaixar https→http no redirect. Porquê: custa meio dia e remove a falsa sensação de segurança. A verificação completa de certificado fica para depois (ver seção E).
 6. **Limites baratos de recurso (#6 e #7, parte do ADR S5).** `consume_fuel` com orçamento por `render`/`on_key`, `StoreLimitsBuilder::memory_size(24 MiB)` (protótipo já validado: `OutOfFuel` e 513 → 321 páginas), teto de 256 KiB no `http_get`, teto de iovecs/`len` nas host functions, teto de nós/regras no `web::render`. Porquê: poucas linhas cada, validados em protótipo, e fecham os travamentos que sobraram.
-7. **CI mínimo e higiene (#11, #12, #13).** `.github/workflows/ci.yml` com `cargo test -p osjeff_core`, build `no_std` do core, clippy (`lint-host` só com `-p osjeff_core`), `lint-kernel` (corrigir `render.rs:74`), build da imagem, `cargo fmt --check`; um job curto rodando as entradas de `fuzz/regressions/`. `cargo update -p spin -p anyhow -p bootloader_api`, `license = "MIT"` nos 3 crates, e corrigir o README (seção F). O YAML pronto está em 05 §2. Porquê: os badges do README passaram mentindo justamente porque nada roda sozinho.
+7. ~~**CI mínimo e higiene (#11, #12, #13).**~~ *Feito em `bfe6166`, `3f679af`, `677af15`, `ea1c4c6`; falta `cargo fmt` (23 diffs) e `deny.toml`.* `.github/workflows/ci.yml` com `cargo test -p osjeff_core`, build `no_std` do core, clippy (`lint-host` só com `-p osjeff_core`), `lint-kernel` (corrigir `render.rs:74`), build da imagem, `cargo fmt --check`; um job curto rodando as entradas de `fuzz/regressions/`. `cargo update -p spin -p anyhow -p bootloader_api`, `license = "MIT"` nos 3 crates, e corrigir o README (seção F). O YAML pronto está em 05 §2. Porquê: os badges do README passaram mentindo justamente porque nada roda sozinho.
 8. **Estado "bloqueada" no scheduler (#8).** `Ready`/`Blocked(wake_tick)`, `hlt` nos workers vira `yield`/`block_until`, e o Task Manager passa a contar CPU útil. Porquê: é o maior ganho de desempenho identificado (compositor 83 Hz → 250 Hz; app WASM de 1/3 para o resto da CPU) e destrava uma métrica honesta. Confirmar com o 04 antes de medir "depois".
 9. **Guard page nas pilhas de thread e thread morta em vez de máquina morta (#9, ADR S3/S4).** Pilha alinhada a 4 KiB com página não presente abaixo; #PF/panic em thread com IF=1 marca a thread como morta, imprime e troca de contexto. Porquê: é o que separa "um app caiu" de "o sistema caiu" e elimina o único caminho real de corrupção silenciosa do heap. Depende dos itens 1 e 4.
 10. **Boot robusto em UEFI e telas grandes (#10).** Dimensionar os buffers pelo framebuffer (ou recusar/reduzir a resolução com mensagem), validar `Canvas::new` contra `stride*height*bpp`, e usar `-m 512M` em `os/src/main.rs` quando for UEFI (ou reduzir o BSS). Porquê: o README promete "boota num PC real", e nenhum teste em hardware foi feito; é o ponto mais provável de falhar na primeira demonstração.
@@ -201,10 +203,27 @@ Resíduo dos fixes: o cap de 40 níveis descarta o *wrapper* e mantém o conteú
 
 ---
 
-## H. A preencher com 04-desempenho
+## H. Desempenho (resumo do `04-desempenho`)
 
-Pendente: o arquivo `docs/audit/04-desempenho.md` não existia quando esta revisão terminou. Quando chegar, incorporar:
-- Tempo de frame e FPS por cenário (idle, janela arrastando, navegador, WASM) e quanto o caminho de 24 bpp custa em BIOS. O HUD da minha captura mostra `15,4 ms / ~64 fps` em idle no TCG, **sem valor como medida** (TCG, sem KVM).
-- Custo de boot por etapa (splash, DHCP, TSC, demo WASM) e se vale tirar o splash fixo de 5 s e a demo WASM do caminho crítico.
-- Se o ganho do item 8 (scheduler com estado bloqueado) se confirma e de quanto.
-- Qualquer gargalo novo (render, cópia BACK→FB, `free_bytes()` no HUD) que mude a ordem da tabela C.
+Método: QEMU/TCG sem KVM, mediana de 3 execuções, comparação por proporção e `compare` de screenshots. **Não representa hardware real.** Entregue pelo agente D e integrado na branch; cada otimização foi aceita só com screenshot idêntico (AE = 0 depois de mascarar HUD e relógio, reconferido por mim no HEAD, BIOS e UEFI).
+
+**Onde o tempo é gasto (medido):**
+
+| # | Onde | Número | Estado |
+|---|---|---|---|
+| 1 | Boot até o desktop | ≈ 8,3 s: firmware + bootloader ≈ 3,7 s, splash artificial 4,1–5,2 s, **init real do kernel ≈ 0,18 s** (demo WASM 38 ms, calibração do TSC 104 ms por espera ocupada, `Desktop::new` ≈ 105 ms) | splash não alterado (muda comportamento visível) |
+| 2 | Scheduler | `fetcher` e `wasmapp` dão `hlt` dentro da fatia; o compositor recebe 1 de cada 3 fatias de 4 ms. Quadro de tecla: 13,4 ms de parede para 5,2 ms de CPU. Sem as duas threads: 5,06 ms, latência IRQ→captura 9,25 → 0,014 ms, 238 vs 48 quadros de animação em 16 s. O HUD mostra tempo de parede e superestima o custo ≈ 2,6x | **aberto** (item 8 da tabela C; patch em `docs/audit/patches/`, sem A/B) |
+| 3 | Sombras de janela | ≈ 97% do quadro de recomposição (≈ 346 mil pixels por janela a 24 ciclos/px) | **corrigido**: tabela de blend (24 → 10 ciclos/px, `b55c6ac`) e sem sombra sob o corpo opaco (`81ab639`) |
+| 4 | Tick do relógio (1x/s) recompunha a cena inteira | 15,6 ms (BIOS) / 15,3 ms (UEFI) → **0,21 / 0,22 ms** | **corrigido** `77c8b8c` |
+| 5 | Tecla no terminal | 26,2 → 13,4 ms (BIOS), 26,5 → 16,1 ms (UEFI); CPU ocupada digitando 5,3% → 2,5% | **corrigido** (efeito dos itens 3–4) |
+| 6 | Preenchimento 24 bpp (BIOS entrega 3 bytes/pixel) | 14 → 3 ciclos/px; UEFI já estava em 1 | **corrigido** `148f6d9` |
+| 7 | Texto 8x8, sem cache de glifos | ≈ 1,9 mil ciclos/caractere, ≈ 1/3 do quadro de digitação já otimizado | aberto |
+| 8 | Upload à VRAM | ≈ 1 MB por tecla (janela focada vai 2x) para ≈ 0,3 KB que mudam; framebuffer WB, sem PAT/WC; o HUD lê e escreve VRAM 10x/s. Custo em hardware real é **suposição** | aberto (WC/PAT não medido) |
+| 9 | ATA PIO | flush reescreve 99 setores e trava o compositor: 45 ms no TCG (1 amostra) | aberto |
+| 10 | Allocator | **0 alocações por quadro** em todos os cenários medidos, então não é gargalo do desktop; O(n): com 2 000 buracos, 4 KiB custa 44 mil ciclos contra 114 com a heap limpa. `web::render` faz ≈ 0,7 alocações por byte de HTML | aberto, baixa prioridade |
+
+**Não medido** (hipótese e como medir no próprio 04): variações de profile (`panic=abort`, `strip`, LTO thin), benchmarks `criterion` no host, navegador com página real, WC/PAT, custo de VRAM em hardware real.
+
+**Achados incidentais (BAIXA):** a faixa de sombra do HUD escurece a cada refresh; o menu de contexto deixa "fantasma"; o comentário do splash diz "≥ 5 s" mas ele dura 4–5 s.
+
+**Infraestrutura entregue:** `kernel/src/trace.rs` (marcos de boot na serial, estatísticas opcionais com `--features perf-trace`), `tools/perf/` (harness de cenários, A/B) e `bench/` (criterion, crate fora do workspace). Ver `5acff24` e `6587db6`.
