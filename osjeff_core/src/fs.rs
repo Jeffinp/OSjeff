@@ -96,7 +96,9 @@ pub fn size_at(img: &[u8], i: usize) -> usize {
         return 0;
     }
     let o = rec_off(i);
-    u16::from_le_bytes([img[o + OFF_SIZE], img[o + OFF_SIZE + 1]]) as usize
+    // The size comes straight off the disk: clamp it so a corrupted record can
+    // never make `read_slot` slice past its own payload (or past the image).
+    (u16::from_le_bytes([img[o + OFF_SIZE], img[o + OFF_SIZE + 1]]) as usize).min(MAX_FILE_SIZE)
 }
 
 /// True if slot `i` is a directory.
@@ -458,6 +460,23 @@ mod tests {
         let slot = find(&img, b"hi").unwrap();
         assert_eq!(name_at(&img, slot), b"hi");
         assert_eq!(size_at(&img, slot), 4);
+    }
+
+    /// Regression: a corrupted on-disk `size` (> MAX_FILE_SIZE) used to make
+    /// `read_slot` slice past the record (leaking the next records' bytes) and,
+    /// for the last slot, past the end of the image (panic in the kernel).
+    #[test]
+    fn corrupted_size_field_is_clamped() {
+        for slot in [0, 1, MAX_FILES - 1] {
+            let mut img = img();
+            let o = rec_off(slot);
+            img[o] = ST_ACTIVE;
+            img[o + OFF_NAMELEN] = 1;
+            img[o + OFF_NAME] = b'a';
+            img[o + OFF_SIZE..o + OFF_SIZE + 2].copy_from_slice(&0xFFFFu16.to_le_bytes());
+            assert_eq!(size_at(&img, slot), MAX_FILE_SIZE);
+            assert_eq!(read_slot(&img, slot).map(|d| d.len()), Some(MAX_FILE_SIZE));
+        }
     }
 
     #[test]
