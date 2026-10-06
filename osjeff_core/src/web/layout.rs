@@ -338,6 +338,29 @@ mod layout_tests {
         assert!(ys.iter().max() > ys.iter().min());
     }
 
+    /// Regression: CSS lengths were unbounded i32s fed straight into layout
+    /// arithmetic (`y += margin`, `width - 2 * padding`, ...). A page with
+    /// `margin:2147483647` panicked with overflow checks and, in the kernel's
+    /// release build, wrapped into garbage (negative) coordinates that the
+    /// rasterizer then cast to usize.
+    #[test]
+    fn huge_css_lengths_do_not_overflow_layout() {
+        let html = b"<div style='margin:2147483647;padding:2147483647'>\
+            <p style='margin:2147483647;padding:2147483647'>x</p>\
+            <p style='margin:2147483647'>y</p></div>\
+            <p style='font-size:2147483647px;margin:99999999999999999999'>z</p>";
+        let page = render(html, 600);
+        assert!(page.height >= 0);
+        for c in &page.cmds {
+            match c {
+                Cmd::Rect { x, y, w, h, .. } => {
+                    assert!(*x >= 0 && *y >= 0 && *w >= 0 && *h >= 0);
+                }
+                Cmd::Text { x, y, .. } => assert!(*x >= 0 && *y >= 0),
+            }
+        }
+    }
+
     #[test]
     fn links_get_the_ua_blue() {
         let page = render(b"<p>see <a href=x>this link</a> ok</p>", 600);

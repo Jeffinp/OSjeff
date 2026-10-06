@@ -89,8 +89,15 @@ fn scale_from_px(px: i32) -> u8 {
 fn parse_px(s: &str) -> Option<i32> {
     let s = s.trim().trim_end_matches("px").trim();
     let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse::<i32>().ok()
+    // Page-controlled: clamp so layout's i32 arithmetic (margins, paddings,
+    // accumulated y/x over thousands of boxes) can never overflow or wrap.
+    // A `parse` overflow (e.g. 20 digits) just means "ignore the declaration".
+    digits.parse::<i32>().ok().map(|v| v.min(MAX_PX))
 }
+
+/// Upper bound for any CSS length we honour (px). Far beyond any real layout
+/// value, and small enough that summing it over a whole page stays in `i32`.
+const MAX_PX: i32 = 4096;
 
 /// Collect the declarations matching `el` from `sheet`, lowest specificity
 /// first, so later (higher-specificity) declarations override earlier ones.
