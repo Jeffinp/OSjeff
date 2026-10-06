@@ -193,17 +193,32 @@ impl Desktop {
         let h = r.h as usize;
         let th = TITLE_H as usize;
 
+        let radius = 12usize;
+
         // Soft drop shadow (two layers). Skipped while dragging/animating so the
-        // alpha fill never costs on the hot path.
+        // alpha fill never costs on the hot path. The window body painted below
+        // is opaque on every full-width row, i.e. rows `[y + r, y + h - r)` of
+        // `fill_round_rect` (r = corner radius actually used), so the shadow is
+        // not blended under it: the body would overwrite those pixels anyway,
+        // and skipping them removes ~85 % of the blend work for identical output.
         if shadow {
+            let r = radius.min(w / 2).min(h / 2);
+            let hole = (x, y + r, w, h.saturating_sub(2 * r));
             for &(off, exp, a) in &[(6usize, 4usize, 28u16), (14, 12, 14)] {
                 let sx = x.saturating_sub(exp);
                 let sy = y + off;
-                c.fill_round_rect_alpha(sx, sy, w + exp * 2, h + exp, 14 + exp, theme::SHADOW, a);
+                c.fill_round_rect_alpha_skip(
+                    sx,
+                    sy,
+                    w + exp * 2,
+                    h + exp,
+                    14 + exp,
+                    theme::SHADOW,
+                    a,
+                    hole,
+                );
             }
         }
-
-        let radius = 12usize;
         // Body + dark header.
         c.fill_round_rect(x, y, w, h, radius, theme::WINDOW_BODY);
         let header = if focused {
