@@ -71,11 +71,11 @@ impl Desktop {
         const ZBASE: usize = 2 * WIN_COUNT;
         const DBASE: usize = 5 * WIN_COUNT;
         let mut s = 0u64;
-        for w in 0..WIN_COUNT {
-            if self.windows[w].visible {
+        for (w, win) in self.windows.iter().enumerate() {
+            if win.visible {
                 s |= 1 << w;
             }
-            if self.windows[w].anim.is_some() {
+            if win.anim.is_some() {
                 s |= 1 << (w + WIN_COUNT);
             }
         }
