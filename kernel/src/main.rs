@@ -11,6 +11,7 @@ mod desktop;
 mod fb;
 mod fetch;
 mod font;
+mod gdt;
 mod icons;
 mod interrupts;
 mod io;
@@ -51,6 +52,11 @@ use ps2::Event;
 static BOOT_CONFIG: BootloaderConfig = {
     let mut c = BootloaderConfig::new_default();
     c.mappings.physical_memory = Some(Mapping::Dynamic);
+    // The default 80 KiB boot stack (which the compositor thread runs on) has
+    // only ~11 KiB in use but no canary; the recursive HTML/CSS layout and the
+    // TLS stack are the deepest users. 512 KiB keeps a wide margin; the
+    // bootloader still adds a guard page below it.
+    c.kernel_stack_size = 512 * 1024;
     c
 };
 
@@ -212,6 +218,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // whether each disk is a spinning HD or an SSD, so storage can adapt.
     ata::detect_and_log();
     trace::mark("ata detect done");
+
+    // Own GDT + TSS (IST stack for #DF) before anything captures CS/SS.
+    gdt::init();
 
     sched::init();
 

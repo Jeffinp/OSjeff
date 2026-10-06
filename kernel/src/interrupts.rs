@@ -42,7 +42,9 @@ pub fn init() {
         idt.general_protection_fault
             .set_handler_fn(general_protection);
         idt.page_fault.set_handler_fn(page_fault);
-        idt.double_fault.set_handler_fn(double_fault);
+        idt.double_fault
+            .set_handler_fn(double_fault)
+            .set_stack_index(crate::gdt::DOUBLE_FAULT_IST_INDEX);
         // Without these, #DE/#UD/#NP/#SS escalate to a silent #DF.
         idt.divide_error.set_handler_fn(divide_error);
         idt.invalid_opcode.set_handler_fn(invalid_opcode);
