@@ -99,9 +99,9 @@ dependencies = [
 
 [[package]]
 name = "bootloader"
-version = "0.11.15"
+version = "0.11.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5fb69232f250c0d5b74eeb285702b4b0479f574980f45dc9bef97b2c65e2021"
+checksum = "d861319d747a01da5d4d680500b7f808607f902a286b476bd51f991612e39d8e"
 dependencies = [
  "anyhow",
  "bootloader-boot-config",
@@ -115,9 +115,9 @@ dependencies = [
 
 [[package]]
 name = "bootloader-boot-config"
-version = "0.11.15"
+version = "0.11.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10a5e475c13d3d988e105b76b92aeea94614c12590c33495165c02b16e895375"
+checksum = "4b688f587df1a3157a22f82d5f6426e8625d13d0706a4672424398aaee7e33cd"
 dependencies = [
  "serde",
 ]
@@ -1411,9 +1411,9 @@ dependencies = [
 
 [[package]]
 name = "x86_64"
-version = "0.15.4"
+version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7841fa0098ceb15c567d93d3fae292c49e10a7662b4936d5f6a9728594555ba"
+checksum = "be4ec631e1a81d50e46c35a4a00322bd076c47491b64c2fb10a7ffa89002c697"
 dependencies = [
  "bit_field",
  "bitflags 2.11.1",
