@@ -76,7 +76,9 @@ pub fn is_formatted(img: &[u8]) -> bool {
 
 /// True if record slot `i` holds a file.
 pub fn is_used(img: &[u8], i: usize) -> bool {
-    i < MAX_FILES && img[rec_off(i)] != 0
+    // Every other accessor is gated on this check, so requiring a full-size
+    // image here keeps the whole read API total (no panic on a short buffer).
+    i < MAX_FILES && img.len() >= IMAGE_SIZE && img[rec_off(i)] != 0
 }
 
 /// Name bytes of slot `i` (empty if unused / out of range).
@@ -208,12 +210,12 @@ pub fn remove(img: &mut [u8], name: &[u8]) -> Result<(), FsError> {
 
 /// True if slot `i` holds a live (non-trashed) file.
 pub fn is_active(img: &[u8], i: usize) -> bool {
-    i < MAX_FILES && img[rec_off(i)] == ST_ACTIVE
+    i < MAX_FILES && img.len() >= IMAGE_SIZE && img[rec_off(i)] == ST_ACTIVE
 }
 
 /// True if slot `i` holds a file currently in the trash.
 pub fn is_trashed(img: &[u8], i: usize) -> bool {
-    i < MAX_FILES && img[rec_off(i)] == ST_TRASHED
+    i < MAX_FILES && img.len() >= IMAGE_SIZE && img[rec_off(i)] == ST_TRASHED
 }
 
 /// Number of live (non-trashed) files.
@@ -513,6 +515,34 @@ mod tests {
         assert_eq!(count_active(&img), 0);
         purge_slot(&mut img, a);
         assert_eq!(count(&img), 0);
+    }
+
+    /// Regression (found by the ojfs_parse fuzzer): every accessor indexed the
+    /// image directly, so any buffer shorter than IMAGE_SIZE (e.g. a failed or
+    /// partial disk read) panicked in `is_used` / `is_active` / `is_trashed`.
+    #[test]
+    fn short_image_never_panics() {
+        for len in [0, 1, 4, 5, 1000, IMAGE_SIZE - 1] {
+            let mut short = vec![0u8; len];
+            short[..len.min(4)].copy_from_slice(&MAGIC[..len.min(4)]);
+            assert!(!is_formatted(&short));
+            assert_eq!(count(&short), 0);
+            assert_eq!(count_active(&short), 0);
+            assert_eq!(count_trashed(&short), 0);
+            assert_eq!(find(&short, b"a"), None);
+            assert_eq!(read(&short, b"a"), None);
+            assert_eq!(name_at(&short, 0), b"");
+            assert_eq!(size_at(&short, 0), 0);
+            assert!(!is_dir(&short, 0));
+            assert_eq!(parent_at(&short, 0), ROOT);
+            assert_eq!(write(&mut short, b"a", b"b"), Err(FsError::NotFormatted));
+            assert_eq!(mkdir(&mut short, ROOT, b"d"), Err(FsError::NotFormatted));
+            assert_eq!(remove(&mut short, b"a"), Err(FsError::NotFound));
+            trash_slot(&mut short, 0);
+            restore_slot(&mut short, 0);
+            purge_slot(&mut short, 0);
+            empty_trash(&mut short);
+        }
     }
 
     #[test]
