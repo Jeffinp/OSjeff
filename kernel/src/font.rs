@@ -110,6 +110,12 @@ fn glyph(c: u8) -> [u8; 8] {
 
 /// Draws a single character. `scale` enlarges each font pixel into a square block.
 pub fn draw_char(c: &mut Canvas, x: usize, y: usize, ch: u8, color: Color, scale: usize) {
+    let t0 = crate::trace::t();
+    draw_char_inner(c, x, y, ch, color, scale);
+    crate::trace::prim(crate::trace::Prim::Glyph, t0);
+}
+
+fn draw_char_inner(c: &mut Canvas, x: usize, y: usize, ch: u8, color: Color, scale: usize) {
     let g = glyph(ch);
     for (row, bits) in g.iter().enumerate() {
         for col in 0..8usize {

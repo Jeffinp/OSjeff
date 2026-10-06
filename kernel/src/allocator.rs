@@ -171,16 +171,25 @@ impl LinkedListAllocator {
     /// Remove and return the first region that fits, plus the chosen start.
     fn find_region(&mut self, size: usize, align: usize) -> Option<(&'static mut FreeNode, usize)> {
         let mut current = &mut self.head;
+        let mut scanned = 0u64;
         while let Some(ref mut region) = current.next {
+            scanned += 1;
             if let Some((alloc_start, _excess)) =
                 fit_region(region.start_addr(), region.size, size, align, node_size())
             {
                 let next = region.next.take();
                 let region = current.next.take().unwrap();
                 current.next = next;
+                if crate::trace::ON {
+                    crate::trace::ALLOC_SCANNED
+                        .fetch_add(scanned, core::sync::atomic::Ordering::Relaxed);
+                }
                 return Some((region, alloc_start));
             }
             current = current.next.as_mut().unwrap();
+        }
+        if crate::trace::ON {
+            crate::trace::ALLOC_SCANNED.fetch_add(scanned, core::sync::atomic::Ordering::Relaxed);
         }
         None
     }
@@ -248,9 +257,28 @@ impl LockedHeap {
 
 unsafe impl GlobalAlloc for LockedHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if crate::trace::ON {
+            use core::sync::atomic::Ordering::Relaxed;
+            let t0 = crate::io::rdtsc();
+            let p = self.0.lock().alloc(layout);
+            let d = crate::io::rdtsc().wrapping_sub(t0);
+            crate::trace::ALLOC_N.fetch_add(1, Relaxed);
+            crate::trace::ALLOC_BYTES.fetch_add(layout.size() as u64, Relaxed);
+            crate::trace::ALLOC_CYC.fetch_add(d, Relaxed);
+            crate::trace::max_to(&crate::trace::ALLOC_MAX, d);
+            return p;
+        }
         self.0.lock().alloc(layout)
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        if crate::trace::ON {
+            use core::sync::atomic::Ordering::Relaxed;
+            let t0 = crate::io::rdtsc();
+            self.0.lock().dealloc(ptr, layout);
+            crate::trace::FREE_N.fetch_add(1, Relaxed);
+            crate::trace::FREE_CYC.fetch_add(crate::io::rdtsc().wrapping_sub(t0), Relaxed);
+            return;
+        }
         self.0.lock().dealloc(ptr, layout);
     }
 }

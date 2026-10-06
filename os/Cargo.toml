@@ -3,6 +3,11 @@ name = "os"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# `cargo build --release -p os --features perf-trace` bakes the kernel's
+# measurement build (serial `[trace]` lines) into the image.
+perf-trace = ["kernel/perf-trace"]
+
 # The kernel is built for bare metal and embedded by the build script.
 # Artifact deps consumed in build.rs must live under [build-dependencies].
 [build-dependencies]

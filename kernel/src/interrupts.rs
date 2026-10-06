@@ -122,20 +122,30 @@ unsafe extern "C" {
 /// Rust half of the timer ISR: advance the clock, round-robin to the next
 /// thread, and acknowledge the interrupt. Returns the next thread's `rsp`.
 extern "C" fn timer_schedule(rsp: u64) -> u64 {
+    let t0 = crate::trace::t();
     TICKS.fetch_add(1, Ordering::Relaxed);
+    crate::trace::timer_sample(rsp, crate::sched::current());
     let next = crate::sched::switch_current(rsp);
     outb(PIC1_CMD, PIC_EOI); // EOI before iretq re-enables interrupts
+    if crate::trace::ON {
+        let d = crate::io::rdtsc().wrapping_sub(t0);
+        crate::trace::ISR_N.fetch_add(1, Ordering::Relaxed);
+        crate::trace::ISR_CYC.fetch_add(d, Ordering::Relaxed);
+        crate::trace::max_to(&crate::trace::ISR_MAX, d);
+    }
     next
 }
 
 extern "x86-interrupt" fn keyboard(_f: InterruptStackFrame) {
     let byte = inb(PS2_DATA);
+    crate::trace::input_irq();
     ring_push((SRC_KEYBOARD << 8) | byte as u16);
     outb(PIC1_CMD, PIC_EOI);
 }
 
 extern "x86-interrupt" fn mouse(_f: InterruptStackFrame) {
     let byte = inb(PS2_DATA);
+    crate::trace::input_irq();
     ring_push((SRC_MOUSE << 8) | byte as u16);
     // IRQ12 is on the slave PIC: EOI to both slave and master.
     outb(PIC2_CMD, PIC_EOI);

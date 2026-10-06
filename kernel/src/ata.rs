@@ -240,6 +240,17 @@ pub fn detect_and_log() {
 /// Read `buf` (a multiple of 512 bytes) from LBA 0. Returns `false` if no drive
 /// responds or a transfer stalls.
 pub fn read_image(buf: &mut [u8]) -> bool {
+    let t0 = crate::trace::t();
+    let ok = read_image_inner(buf);
+    if crate::trace::ON {
+        use core::sync::atomic::Ordering::Relaxed;
+        crate::trace::ATA_R_N.fetch_add(1, Relaxed);
+        crate::trace::ATA_R_CYC.fetch_add(crate::io::rdtsc().wrapping_sub(t0), Relaxed);
+    }
+    ok
+}
+
+fn read_image_inner(buf: &mut [u8]) -> bool {
     let sectors = buf.len() / SECTOR;
     if sectors == 0 || sectors > 255 {
         return false;
@@ -264,6 +275,17 @@ pub fn read_image(buf: &mut [u8]) -> bool {
 
 /// Write `buf` (a multiple of 512 bytes) to LBA 0 and flush the drive cache.
 pub fn write_image(buf: &[u8]) -> bool {
+    let t0 = crate::trace::t();
+    let ok = write_image_inner(buf);
+    if crate::trace::ON {
+        use core::sync::atomic::Ordering::Relaxed;
+        crate::trace::ATA_W_N.fetch_add(1, Relaxed);
+        crate::trace::ATA_W_CYC.fetch_add(crate::io::rdtsc().wrapping_sub(t0), Relaxed);
+    }
+    ok
+}
+
+fn write_image_inner(buf: &[u8]) -> bool {
     let sectors = buf.len() / SECTOR;
     if sectors == 0 || sectors > 255 {
         return false;

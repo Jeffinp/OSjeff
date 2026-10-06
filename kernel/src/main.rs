@@ -26,6 +26,7 @@ mod sched;
 mod serial;
 mod sync;
 mod theme;
+mod trace;
 mod virtio;
 mod virtio_gpu;
 mod wasm;
@@ -86,6 +87,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Serial first: a text log on COM1 that survives even if the framebuffer is
     // missing, so driver bring-up is observable without the screen.
     serial::init();
+    trace::mark("kernel entry");
     serial_println!("OSjeff boot: kernel entry");
 
     // Capture the physical-memory offset before `boot_info` is borrowed for the
@@ -107,6 +109,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // (PCI scan, TSC calibration, DHCP) shows a clean screen instead of a frozen
     // wall of text until the splash takes over.
     framebuffer.buffer_mut()[..n].fill(0);
+    trace::mark("framebuffer cleared");
 
     let back: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(BACK.get() as *mut u8, n) };
     let bg: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(BG.get() as *mut u8, n) };
@@ -118,12 +121,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ALLOCATOR.init(HEAP.get() as usize, HEAP_SIZE);
     }
     heap_smoke_test();
+    trace::mark("heap init + smoke test");
 
     // First run through the native WebAssembly app engine: prove the OS can load
     // and execute a `.wasm` program (its native app format) end to end. Output
     // lands on serial. The graphics/input ABI (windowed apps) builds on this.
     serial_println!("OSjeff boot: running native WASM demo");
     wasm::run_demo();
+    trace::mark("wasm demo done");
 
     // Enumerate the PCI bus — groundwork for the virtio-gpu driver: locate the
     // device and, when present, enable bus mastering so a later DMA-capable
@@ -196,6 +201,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         None => serial_println!("virtio-gpu: absent — using the VBE framebuffer"),
     }
+    trace::mark("pci scan + virtio-gpu probe done");
 
     // Kernel scheduler: register the boot context (the compositor) as thread 0.
     // The preemptive round-robin is in place for real future threads, but we no
@@ -205,6 +211,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Probe the IDE channels: report where the OS is installed (boot disk) and
     // whether each disk is a spinning HD or an SSD, so storage can adapt.
     ata::detect_and_log();
+    trace::mark("ata detect done");
 
     sched::init();
 
@@ -216,11 +223,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Real interrupts: IDT + exception handlers, PIC remap, PIT timer, and
     // IRQ-driven keyboard (IRQ1) + mouse (IRQ12).
     interrupts::init();
+    trace::mark("sched + ps2 + idt/pic/pit init");
 
     // Calibrate the TSC against the now-running PIT so the perf HUD can report
     // frame time in real milliseconds.
     let tsc_khz = perf::calibrate_khz();
     serial_println!("TSC calibrated: {} kHz", tsc_khz);
+    trace::mark("tsc calibrated (25 PIT ticks)");
+    trace::calibrated(tsc_khz);
+    trace::bench_prims(back, info, tsc_khz);
+    trace::bench_alloc(tsc_khz);
     let mut perf = perf::Perf::new(tsc_khz);
 
     // Bring up the NIC (if present), lease an IP over DHCP (falling back to the
@@ -228,7 +240,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // gratuitous ARP so the network is visible on the wire from boot. No card ->
     // skip and keep the static IP.
     let net_up = ne2000::init();
+    trace::mark("ne2000 init done");
     let net_ip = if net_up { dhcp_acquire(NET_IP) } else { NET_IP };
+    trace::mark("dhcp done");
     if net_up {
         let mut frame = [0u8; 64];
         let len = net::arp_announce(&mut frame, ne2000::MAC, net_ip);
@@ -255,16 +269,21 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         sched::spawn("wasmapp", wasm::worker);
     });
 
+    trace::mark("threads spawned (fetcher, wasmapp)");
+
     // Boot splash: progress tracks real elapsed time (>= 5 seconds).
     run_splash(&mut *framebuffer, &mut *back, info, n);
+    trace::mark("splash end (artificial >= 5 s)");
 
     // Static layer painted once.
     {
         let mut c = Canvas::new(bg, info);
         desktop::paint_background(&mut c);
     }
+    trace::mark("wallpaper painted");
 
     let mut desk = Desktop::new(info.width as i32, info.height as i32);
+    trace::mark("Desktop::new (fs load from ATA) done");
     let mut last_sec = 0xFFu8; // force first render
     let mut prev_cursor = desk.cursor();
     // Seed from the live tick count, NOT 0: the splash ran for ~5 s with the
@@ -290,6 +309,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Wall-clock animation speed, independent of how often the GUI thread is
     // scheduled (the timer preempts round-robin across all threads).
     const DT_PER_TICK: f32 = 0.03;
+    let mut first_frame = true;
 
     loop {
         let rt = rtc::now();
@@ -312,7 +332,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let mut scene_dirty = core::mem::take(&mut browser_redraw);
         let mut cursor_moved = false;
         let mut clock_tick = false;
+        let mut got_input = false;
+        trace::loop_iter();
         while let Some(event) = ps2::poll() {
+            got_input = true;
             match event {
                 Event::Mouse(p) => {
                     let r = desk.handle_mouse(p.dx, p.dy, p.left, p.right);
@@ -327,8 +350,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
 
+        let input_irq_tsc = if got_input { trace::input_taken() } else { 0 };
+        let mut report_due = false;
         if rt.s != last_sec {
             last_sec = rt.s;
+            report_due = true;
             desk.tick_processes();
             clock_tick = true;
             perf.second_tick();
@@ -350,13 +376,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Did this iteration do real rendering work? (Used to time frames.)
         let work = any_anim || scene_dirty || clock_tick || cursor_moved || was_anim;
         let frame_start = io::rdtsc();
+        let cpu_start = trace::cpu_now();
+        let mut path: Option<trace::Path> = None;
 
         if any_anim {
             // ---- Animation fast-path: cache the static scene, then each frame
             // only touch the small damaged region around the animating window.
             let sig = desk.anim_signature();
             if !static_valid || sig != last_sig || scene_dirty {
-                static_buf.copy_from_slice(bg);
+                path = Some(trace::Path::AnimRebuild);
+                let tc = trace::t();
+                copy_bg(static_buf, bg);
                 desk.compose_static(static_buf, info, time);
                 back.copy_from_slice(static_buf);
                 // Draw the animating window(s) into `back` BEFORE the full blit
@@ -365,11 +395,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 // full-screen blit (a visible blink) before the damage pass
                 // redraws it — the static layer excludes animating windows.
                 let dmg = desk.render_anim_frame(back, static_buf, info, Rect::new(0, 0, 0, 0));
-                framebuffer.buffer_mut()[..n].copy_from_slice(back);
-                {
-                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
-                    desk.draw_cursor_overlay(&mut c);
-                }
+                trace::stage(trace::Stage::Compose, tc);
+                fb_full_blit(framebuffer.buffer_mut(), back, n);
+                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
                 prev_cursor = desk.cursor();
                 static_valid = true;
                 last_sig = sig;
@@ -377,8 +405,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
 
             if tick_changed || cursor_moved {
+                path.get_or_insert(trace::Path::AnimDamage);
+                let tc = trace::t();
                 let damage = desk.render_anim_frame(back, static_buf, info, prev_damage);
-                blit_rect(
+                trace::stage(trace::Stage::Compose, tc);
+                fb_blit_rect(
                     framebuffer.buffer_mut(),
                     back,
                     info,
@@ -391,7 +422,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 // Repaint the cursor (the damage blit may have covered it, and the
                 // cursor itself may have moved).
                 let (ox, oy) = prev_cursor;
-                blit_rect(
+                fb_blit_rect(
                     framebuffer.buffer_mut(),
                     back,
                     info,
@@ -401,10 +432,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     CURSOR_H,
                     n,
                 );
-                {
-                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
-                    desk.draw_cursor_overlay(&mut c);
-                }
+                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
                 prev_cursor = desk.cursor();
                 prev_damage = damage;
             }
@@ -416,30 +444,33 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             let sig = desk.anim_signature();
             let ov = desk.overlay_bounds();
             if !static_valid || sig != last_sig || scene_dirty {
-                static_buf.copy_from_slice(bg);
+                path = Some(trace::Path::OverlayRebuild);
+                let tc = trace::t();
+                copy_bg(static_buf, bg);
                 desk.compose_static(static_buf, info, time);
                 back.copy_from_slice(static_buf);
                 {
                     let mut c = Canvas::new(back, info);
                     desk.draw_overlay(&mut c);
                 }
-                framebuffer.buffer_mut()[..n].copy_from_slice(back);
-                {
-                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
-                    desk.draw_cursor_overlay(&mut c);
-                }
+                trace::stage(trace::Stage::Compose, tc);
+                fb_full_blit(framebuffer.buffer_mut(), back, n);
+                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
                 prev_cursor = desk.cursor();
                 static_valid = true;
                 last_sig = sig;
             } else if cursor_moved {
                 // Restore the overlay-less scene under the overlay rect, redraw
                 // the overlay (updated hover), and blit just that rect.
+                path = Some(trace::Path::OverlayHover);
+                let tc = trace::t();
                 blit_rect(back, static_buf, info, ov.x, ov.y, ov.w, ov.h, n);
                 {
                     let mut c = Canvas::new(back, info);
                     desk.draw_overlay(&mut c);
                 }
-                blit_rect(
+                trace::stage(trace::Stage::Compose, tc);
+                fb_blit_rect(
                     framebuffer.buffer_mut(),
                     back,
                     info,
@@ -451,7 +482,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 );
                 // Repaint the cursor (it may have moved off the overlay).
                 let (ox, oy) = prev_cursor;
-                blit_rect(
+                fb_blit_rect(
                     framebuffer.buffer_mut(),
                     back,
                     info,
@@ -461,10 +492,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     CURSOR_H,
                     n,
                 );
-                {
-                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
-                    desk.draw_cursor_overlay(&mut c);
-                }
+                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
                 prev_cursor = desk.cursor();
             }
         } else {
@@ -475,12 +503,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
 
             if scene_dirty {
-                back.copy_from_slice(bg);
+                path = Some(if was_anim {
+                    trace::Path::Settle
+                } else {
+                    trace::Path::Steady
+                });
+                let tc = trace::t();
+                copy_bg(back, bg);
                 desk.render(back, info, time);
+                trace::stage(trace::Stage::Compose, tc);
                 if was_anim {
                     // Settle frame after an animation (and the first desktop
                     // frame): the whole scene may differ, so blit it all.
-                    framebuffer.buffer_mut()[..n].copy_from_slice(back);
+                    fb_full_blit(framebuffer.buffer_mut(), back, n);
                 } else {
                     // Steady content change (a keystroke, a calc button, a
                     // focus/z-order switch): the only pixels that differ live in
@@ -488,7 +523,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     // de-highlights), and the clock. Upload just those rects
                     // instead of the whole ~8 MiB framebuffer.
                     let mut up = |r: Rect| {
-                        blit_rect(framebuffer.buffer_mut(), back, info, r.x, r.y, r.w, r.h, n);
+                        fb_blit_rect(framebuffer.buffer_mut(), back, info, r.x, r.y, r.w, r.h, n);
                     };
                     if let Some(fb_) = desk.focused_box() {
                         up(fb_);
@@ -498,20 +533,20 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     }
                     up(desk.clock_rect());
                 }
-                {
-                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
-                    desk.draw_cursor_overlay(&mut c);
-                }
+                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
                 prev_cursor = desk.cursor();
             } else if clock_tick {
+                path = Some(trace::Path::Clock);
+                let tc = trace::t();
                 // Per-second tick, nothing else changed: recompose `back` (cheap
                 // host-RAM work) but upload only the clock pill — plus the Task
                 // Manager window if open — to VRAM, skipping the ~8 MiB
                 // full-screen blit that made the clock tick hitch every second.
-                back.copy_from_slice(bg);
+                copy_bg(back, bg);
                 desk.render(back, info, time);
+                trace::stage(trace::Stage::Compose, tc);
                 let cr = desk.clock_rect();
-                blit_rect(
+                fb_blit_rect(
                     framebuffer.buffer_mut(),
                     back,
                     info,
@@ -522,7 +557,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     n,
                 );
                 if let Some(tr) = desk.task_window_rect() {
-                    blit_rect(
+                    fb_blit_rect(
                         framebuffer.buffer_mut(),
                         back,
                         info,
@@ -536,7 +571,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 // The cursor isn't in `back`; repaint it in case it overlaps the
                 // regions just blitted.
                 let (ox, oy) = prev_cursor;
-                blit_rect(
+                fb_blit_rect(
                     framebuffer.buffer_mut(),
                     back,
                     info,
@@ -546,15 +581,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     CURSOR_H,
                     n,
                 );
-                {
-                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
-                    desk.draw_cursor_overlay(&mut c);
-                }
+                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
                 prev_cursor = desk.cursor();
             } else if cursor_moved {
+                path = Some(trace::Path::Cursor);
                 // Cheap path: restore under the old cursor, draw at the new spot.
                 let (ox, oy) = prev_cursor;
-                blit_rect(
+                fb_blit_rect(
                     framebuffer.buffer_mut(),
                     back,
                     info,
@@ -564,10 +597,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     CURSOR_H,
                     n,
                 );
-                {
-                    let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
-                    desk.draw_cursor_overlay(&mut c);
-                }
+                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
                 prev_cursor = desk.cursor();
             }
             prev_focused = desk.focused_box();
@@ -577,6 +607,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Record the frame time (only when we actually rendered).
         if work {
             perf.record(io::rdtsc().wrapping_sub(frame_start));
+            if let Some(p) = path {
+                trace::frame(p, frame_start, cpu_start);
+            }
+            trace::input_done(input_irq_tsc);
+            if first_frame {
+                first_frame = false;
+                trace::mark("first desktop frame composed + blitted");
+            }
         }
 
         // Perf HUD: refresh ~10x/s as a framebuffer overlay restored from `back`,
@@ -586,6 +624,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             let used = HEAP_SIZE - ALLOCATOR.free_bytes().min(HEAP_SIZE);
             let heap_pct = (used * 100 / HEAP_SIZE) as u32;
             let hr = perf::Perf::rect(info.width as i32);
+            let th = trace::t();
             blit_rect(
                 framebuffer.buffer_mut(),
                 back,
@@ -598,6 +637,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             );
             let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
             perf.draw(&mut c, heap_pct, sched::thread_count());
+            trace::stage(trace::Stage::Hud, th);
+        }
+        if report_due {
+            trace::report(tsc_khz, tick);
         }
 
         // Browser navigation: hand any pending request to the background fetcher
@@ -636,6 +679,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // the tick rate and stops the compositor from burning a full core — a
         // real system halts when it has nothing to draw.
         x86_64::instructions::hlt();
+        trace::hlt_wake();
     }
 }
 
@@ -654,6 +698,7 @@ fn run_splash(
     let start = secs_of_day(rtc::now());
     let mut prev_el = 0u32;
     let mut frac = 0.0f32;
+    let (mut frames, mut draw_cyc, mut blit_cyc) = (0u64, 0u64, 0u64);
     loop {
         let el = (secs_of_day(rtc::now()) + 86_400 - start) % 86_400;
         if el != prev_el {
@@ -661,17 +706,96 @@ fn run_splash(
             prev_el = el;
         }
         let p = ((el as f32) + frac.min(0.99)) / 5.0;
+        let t0 = trace::t();
         {
             let mut c = Canvas::new(back, info);
             boot::draw_splash(&mut c, p);
         }
-        framebuffer.buffer_mut()[..n].copy_from_slice(back);
+        let t1 = trace::t();
+        fb_full_blit(framebuffer.buffer_mut(), back, n);
+        let t2 = trace::t();
+        if trace::ON {
+            frames += 1;
+            draw_cyc += t1 - t0;
+            blit_cyc += t2 - t1;
+        }
         io::delay_cycles(20_000_000);
         frac += 0.06;
         if el >= 5 {
             break;
         }
     }
+    if trace::ON {
+        // Raw TSC cycles (the TSC rate is printed on the "TSC calibrated" line).
+        serial_println!(
+            "[trace] splash: {} frames, draw avg {} cyc, blit avg {} cyc, delay_cycles 20000000 per frame",
+            frames,
+            draw_cyc / frames.max(1),
+            blit_cyc / frames.max(1)
+        );
+    }
+}
+
+/// Restore the cached wallpaper into a render buffer (timed as `Prim::BgCopy`).
+fn copy_bg(dst: &mut [u8], bg: &[u8]) {
+    let t0 = trace::t();
+    dst.copy_from_slice(bg);
+    trace::prim(trace::Prim::BgCopy, t0);
+}
+
+/// Draw the cursor straight into the framebuffer (timed as `Stage::Cursor`).
+fn cursor_to_fb(desk: &Desktop, fb: &mut [u8], info: FrameBufferInfo, n: usize) {
+    let t0 = trace::t();
+    let mut c = Canvas::new(&mut fb[..n], info);
+    desk.draw_cursor_overlay(&mut c);
+    trace::stage(trace::Stage::Cursor, t0);
+}
+
+/// Upload the whole back buffer to the framebuffer (timed as `Stage::Blit`).
+fn fb_full_blit(fb: &mut [u8], back: &[u8], n: usize) {
+    if trace::ON {
+        trace::vram_upload(n as u64, trace::count_diff(&fb[..n], &back[..n]));
+    }
+    let t0 = trace::t();
+    fb[..n].copy_from_slice(back);
+    trace::stage(trace::Stage::Blit, t0);
+}
+
+/// `blit_rect` into the framebuffer (timed as `Stage::Blit`).
+#[allow(clippy::too_many_arguments)]
+fn fb_blit_rect(
+    fb: &mut [u8],
+    back: &[u8],
+    info: FrameBufferInfo,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    n: usize,
+) {
+    if trace::ON {
+        // Bytes this rect uploads vs how many of them actually differ from what
+        // is already in the framebuffer (what a diff-based upload could skip).
+        let bpp = info.bytes_per_pixel;
+        let (x0, y0) = (x.max(0) as usize, y.max(0) as usize);
+        if x0 < info.width && y0 < info.height {
+            let x_end = (x0 + w.max(0) as usize).min(info.width);
+            let y_end = (y0 + h.max(0) as usize).min(info.height);
+            let (mut up, mut chg) = (0u64, 0u64);
+            for row in y0..y_end {
+                let off = (row * info.stride + x0) * bpp;
+                let end = off + (x_end - x0) * bpp;
+                if end <= n {
+                    up += (end - off) as u64;
+                    chg += trace::count_diff(&fb[off..end], &back[off..end]);
+                }
+            }
+            trace::vram_upload(up, chg);
+        }
+    }
+    let t0 = trace::t();
+    blit_rect(fb, back, info, x, y, w, h, n);
+    trace::stage(trace::Stage::Blit, t0);
 }
 
 /// Copy a rectangular region from `src` into `dst` (same framebuffer layout).

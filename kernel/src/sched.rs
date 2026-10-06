@@ -154,6 +154,13 @@ pub extern "C" fn switch_current(rsp: u64) -> u64 {
         None => return rsp,
     };
     let cur = s.current;
+    if crate::trace::ON {
+        let now = crate::io::rdtsc();
+        let start = crate::trace::SLICE_START.swap(now, Ordering::Relaxed);
+        if cur < MAX_THREADS && start != 0 {
+            crate::trace::THREAD_CYC[cur].fetch_add(now.wrapping_sub(start), Ordering::Relaxed);
+        }
+    }
 
     // Catch a stack overflow the instant the offending thread is preempted,
     // before its wild writes corrupt the heap and detonate elsewhere.
@@ -198,6 +205,11 @@ pub extern "C" fn switch_current(rsp: u64) -> u64 {
 }
 
 // ---- introspection for the Task Manager ----
+
+/// Index of the thread that is running right now (timer-ISR attribution).
+pub fn current() -> usize {
+    CURRENT.load(Ordering::Relaxed)
+}
 
 pub fn thread_count() -> usize {
     unsafe { (*SCHED.get()).as_ref() }.map_or(0, |s| s.threads.len())

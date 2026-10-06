@@ -35,6 +35,11 @@ wasmi = { version = "1", default-features = false }
 [build-dependencies]
 wat = "1"
 
+[features]
+# Per-second runtime statistics on COM1 (frame paths, allocator, timer ISR, idle
+# sampling, input latency). Off by default: every hook folds away. See trace.rs.
+perf-trace = []
+
 # The kernel binary is bare-metal: never built or run as a host test target.
 [[bin]]
 name = "kernel"

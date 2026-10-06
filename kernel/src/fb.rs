@@ -146,6 +146,12 @@ impl<'a> Canvas<'a> {
     }
 
     pub fn fill_rect(&mut self, x0: usize, y0: usize, w: usize, h: usize, c: Color) {
+        let t0 = crate::trace::t();
+        self.fill_rect_inner(x0, y0, w, h, c);
+        crate::trace::prim(crate::trace::Prim::FillRect, t0);
+    }
+
+    fn fill_rect_inner(&mut self, x0: usize, y0: usize, w: usize, h: usize, c: Color) {
         if x0 >= self.info.width || y0 >= self.info.height {
             return;
         }
@@ -242,6 +248,22 @@ impl<'a> Canvas<'a> {
         c: Color,
         alpha: u16,
     ) {
+        let t0 = crate::trace::t();
+        self.fill_round_rect_alpha_inner(x0, y0, w, h, r, c, alpha);
+        crate::trace::prim(crate::trace::Prim::Alpha, t0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn fill_round_rect_alpha_inner(
+        &mut self,
+        x0: usize,
+        y0: usize,
+        w: usize,
+        h: usize,
+        r: usize,
+        c: Color,
+        alpha: u16,
+    ) {
         let r = r.min(w / 2).min(h / 2);
         let a = alpha.min(256);
         if a == 0 {
@@ -311,6 +333,20 @@ impl<'a> Canvas<'a> {
         r: usize,
         c: Color,
     ) {
+        let t0 = crate::trace::t();
+        self.fill_round_rect_inner(x0, y0, w, h, r, c);
+        crate::trace::prim(crate::trace::Prim::RoundRect, t0);
+    }
+
+    fn fill_round_rect_inner(
+        &mut self,
+        x0: usize,
+        y0: usize,
+        w: usize,
+        h: usize,
+        r: usize,
+        c: Color,
+    ) {
         let r = r.min(w / 2).min(h / 2);
         // Per-row spans: corner rows inset by the circle, middle rows full
         // width. Each span is one fast `fill_rect` instead of per-pixel `put`.
@@ -336,6 +372,12 @@ impl<'a> Canvas<'a> {
     /// (`w*bpp` stride). Used to snapshot what is behind a window before it is
     /// composited, so a fade blends toward the real backdrop, not the wallpaper.
     pub fn snapshot_region(&self, dst: &mut [u8], x0: usize, y0: usize, w: usize, h: usize) {
+        let t0 = crate::trace::t();
+        self.snapshot_region_inner(dst, x0, y0, w, h);
+        crate::trace::prim(crate::trace::Prim::Fade, t0);
+    }
+
+    fn snapshot_region_inner(&self, dst: &mut [u8], x0: usize, y0: usize, w: usize, h: usize) {
         let bpp = self.info.bytes_per_pixel;
         let stride = self.info.stride;
         let x_end = (x0 + w).min(self.info.width);
@@ -353,6 +395,20 @@ impl<'a> Canvas<'a> {
     /// `alpha` (0..=256). `alpha=0` shows `src` (the backdrop), `256` keeps the
     /// canvas (the window). Inverse of [`snapshot_region`].
     pub fn blend_from_local(
+        &mut self,
+        src: &[u8],
+        x0: usize,
+        y0: usize,
+        w: usize,
+        h: usize,
+        alpha: u16,
+    ) {
+        let t0 = crate::trace::t();
+        self.blend_from_local_inner(src, x0, y0, w, h, alpha);
+        crate::trace::prim(crate::trace::Prim::Fade, t0);
+    }
+
+    fn blend_from_local_inner(
         &mut self,
         src: &[u8],
         x0: usize,
