@@ -206,6 +206,24 @@ impl<'a> Canvas<'a> {
             }
             return;
         };
+        // 24-bit framebuffers (BIOS/VBE, `bytes_per_pixel == 3`): store four
+        // pixels (12 bytes) per step from a prebuilt pattern instead of three
+        // bounds-checked byte stores per pixel. Same bytes written.
+        if bpp == 3 {
+            let quad = [p0, p1, p2, p0, p1, p2, p0, p1, p2, p0, p1, p2];
+            for y in y0..y_end {
+                let o = (y * stride + x0) * 3;
+                let row = &mut self.buf[o..o + count * 3];
+                let (quads, rest) = row.as_chunks_mut::<12>();
+                for q in quads {
+                    *q = quad;
+                }
+                for px in rest.as_chunks_mut::<3>().0 {
+                    *px = [p0, p1, p2];
+                }
+            }
+            return;
+        }
         for y in y0..y_end {
             let mut o = (y * stride + x0) * bpp;
             for _ in x0..x_end {
