@@ -465,6 +465,44 @@ impl Desktop {
         Rect::new(px, py, pw, ph + 8)
     }
 
+    /// True when the per-second clock tick can be repainted locally: nothing else
+    /// that changes each second is on screen (the Task Manager redraws its CPU
+    /// figures), and no visible window — including the drop shadow it casts
+    /// (up to 12 px to the sides, 26 px below) — reaches the clock pill, so the
+    /// pixels under the pill are exactly the wallpaper. The caller must also
+    /// know `back` holds the last fully composed scene (steady frame, no
+    /// animation or overlay).
+    pub fn clock_repaint_is_local(&self) -> bool {
+        /// Generous bound on how far a window's shadow extends past its rect.
+        const SHADOW_REACH: i32 = 32;
+        if self.windows[TASK].visible {
+            return false;
+        }
+        let pill = self.clock_rect();
+        !(0..WIN_COUNT).any(|w| {
+            self.windows[w].visible
+                && self
+                    .window_box(w)
+                    .inflated(SHADOW_REACH)
+                    .intersection(&pill)
+                    .is_some()
+        })
+    }
+
+    /// Redo only the clock pill in `back`: restore the wallpaper under it, then
+    /// draw the pill. Valid when [`clock_repaint_is_local`] holds.
+    pub fn repaint_clock(
+        &self,
+        back: &mut [u8],
+        bg: &[u8],
+        info: bootloader_api::info::FrameBufferInfo,
+        time: Time,
+    ) {
+        copy_region(back, bg, info, self.clock_rect());
+        let mut c = Canvas::new(back, info);
+        draw_clock(&mut c, time);
+    }
+
     /// Screen rect of the Task Manager window when it is visible — its CPU
     /// figures refresh every second, so the cheap clock-tick path must repaint
     /// it too. `None` when the window is hidden.

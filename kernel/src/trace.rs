@@ -111,12 +111,14 @@ pub enum Path {
     Steady,
     /// Per-second clock tick: full recompose, clock-rect blit.
     Clock,
+    /// Per-second clock tick repainted locally (wallpaper + pill only).
+    ClockLocal,
     /// Cursor only.
     Cursor,
 }
-const PATHS: usize = 8;
+const PATHS: usize = 9;
 const PATH_NAMES: [&str; PATHS] = [
-    "animrb", "animdm", "ovrb", "ovhov", "settle", "steady", "clock", "cursor",
+    "animrb", "animdm", "ovrb", "ovhov", "settle", "steady", "clock", "clockl", "cursor",
 ];
 
 /// Work stages inside a frame (cycles are summed per second).

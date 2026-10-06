@@ -536,14 +536,23 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
                 prev_cursor = desk.cursor();
             } else if clock_tick {
-                path = Some(trace::Path::Clock);
                 let tc = trace::t();
-                // Per-second tick, nothing else changed: recompose `back` (cheap
-                // host-RAM work) but upload only the clock pill — plus the Task
-                // Manager window if open — to VRAM, skipping the ~8 MiB
-                // full-screen blit that made the clock tick hitch every second.
-                copy_bg(back, bg);
-                desk.render(back, info, time);
+                // Per-second tick, nothing else changed: refresh `back` but upload
+                // only the clock pill — plus the Task Manager window if open — to
+                // VRAM, skipping the ~8 MiB full-screen blit that made the clock
+                // tick hitch every second.
+                if desk.clock_repaint_is_local() {
+                    // `back` still holds the scene composed by the last full
+                    // frame (nothing animates, no overlay) and no window or
+                    // shadow reaches the pill: wallpaper + clock is the whole
+                    // difference, so redo just that rectangle.
+                    path = Some(trace::Path::ClockLocal);
+                    desk.repaint_clock(back, bg, info, time);
+                } else {
+                    path = Some(trace::Path::Clock);
+                    copy_bg(back, bg);
+                    desk.render(back, info, time);
+                }
                 trace::stage(trace::Stage::Compose, tc);
                 let cr = desk.clock_rect();
                 fb_blit_rect(
