@@ -82,7 +82,6 @@ pub fn is_v3() -> bool {
 ///
 /// Holds a lock that other threads wait on, so keep `f` to filesystem work.
 /// Every `Fs3` call is already durable when it returns `Ok`.
-#[allow(dead_code)] // API for the desktop/terminal/editor migration
 pub fn with_fs<R>(f: impl FnOnce(&mut Fs3<AtaDisk>) -> R) -> Option<R> {
     if !is_v3() {
         return None;
@@ -116,6 +115,13 @@ fn format_options() -> FormatOptions {
 /// Bring the storage service up. Never panics and never hangs: every failure is
 /// logged and leaves the machine on the RAM/v2 path it had before.
 pub fn init() {
+    init_volume();
+    if crate::trace::ON && option_env!("OSJ_STORAGE_SELFTEST").is_some() && is_v3() {
+        selftest();
+    }
+}
+
+fn init_volume() {
     let Some(mut dev) = AtaDisk::open() else {
         set_state(State::NoDisk);
         crate::serial_println!("storage: no filesystem disk");
@@ -273,4 +279,120 @@ fn seed(fs: &mut Fs3<AtaDisk>, now: u64) -> Result<(), FsError> {
     fs.mkdir("/Documentos", now)?;
     fs.write_file("/Documentos/projeto.txt", SEED_PROJECT, now)?;
     Ok(())
+}
+
+/// Boot-time storage self-test (perf-trace builds with `OSJ_STORAGE_SELFTEST` set at
+/// compile time): create `/selftest`, write 2 MiB with a pattern, read it back and
+/// compare, `fsck`, a burst of small files, delete everything, `fsck` again. Logs
+/// times and MiB/s on the serial. Real ATA PIO, so under TCG it measures the whole
+/// stack: cache, journal, driver and the emulated controller.
+fn selftest() {
+    use crate::interrupts::{TIMER_HZ, ticks};
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    const SIZE: usize = 2 * 1024 * 1024;
+    const SMALL: usize = 16;
+    let ms = |t0: u64| (ticks() - t0) * 1000 / TIMER_HZ as u64;
+    // MiB/s with one decimal, as tenths.
+    let tenths = |ms: u64| (SIZE as u64 * 10_000 / ms.max(1)) / MIB;
+    let data: Vec<u8> = (0..SIZE)
+        .map(|i| (i as u32).wrapping_mul(2_654_435_761).to_le_bytes()[2] ^ (i >> 12) as u8)
+        .collect();
+
+    // Small-file names, shared by the burst and the cleanup.
+    let small_name = |i: usize| {
+        let mut name = *b"/selftest-00";
+        name[10] = b'0' + (i / 10) as u8;
+        name[11] = b'0' + (i % 10) as u8;
+        name
+    };
+
+    let res = with_fs(|fs| -> Result<(), FsError> {
+        let now = now();
+        // Leftovers of an earlier run that lost power half-way are not an error.
+        let _ = fs.remove("/selftest");
+        for i in 0..SMALL {
+            let _ = fs.remove(&small_name(i)[..]);
+        }
+        let t0 = ticks();
+        let ino = fs.create("/selftest", now)?;
+        fs.write_at(ino, 0, &data, now)?;
+        fs.sync()?;
+        let w = ms(t0);
+
+        let t1 = ticks();
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut bad = 0usize;
+        let mut off = 0usize;
+        while off < SIZE {
+            let n = fs.read_at(ino, off as u64, &mut buf)?;
+            if n == 0 {
+                break;
+            }
+            bad += buf[..n]
+                .iter()
+                .zip(&data[off..off + n])
+                .filter(|(a, b)| a != b)
+                .count();
+            off += n;
+        }
+        let r = ms(t1);
+        crate::serial_println!(
+            "storage: selftest write 2 MiB in {} ms ({}.{} MiB/s), read in {} ms ({}.{} MiB/s), {}",
+            w,
+            tenths(w) / 10,
+            tenths(w) % 10,
+            r,
+            tenths(r) / 10,
+            tenths(r) % 10,
+            if bad == 0 && off == SIZE {
+                "contents match"
+            } else {
+                "CONTENT MISMATCH"
+            }
+        );
+
+        let t2 = ticks();
+        let rep = fs.fsck()?;
+        crate::serial_println!(
+            "storage: selftest fsck {} in {} ms ({} files, {} dirs, {} problems)",
+            if rep.is_clean() { "clean" } else { "DIRTY" },
+            ms(t2),
+            rep.files,
+            rep.dirs,
+            rep.total_issues
+        );
+
+        let t3 = ticks();
+        for i in 0..SMALL {
+            fs.write_file(&small_name(i)[..], b"0123456789abcdef", now)?;
+        }
+        let small = ms(t3);
+        crate::serial_println!(
+            "storage: selftest {} small files in {} ms ({} ms each)",
+            SMALL,
+            small,
+            small / SMALL as u64
+        );
+
+        let t4 = ticks();
+        fs.remove("/selftest")?;
+        for i in 0..SMALL {
+            fs.remove(&small_name(i)[..])?;
+        }
+        let rep = fs.fsck()?;
+        crate::serial_println!(
+            "storage: selftest removed in {} ms, fsck {} ({} free MiB)",
+            ms(t4),
+            if rep.is_clean() { "clean" } else { "DIRTY" },
+            fs.statfs().free_bytes() / MIB
+        );
+        Ok(())
+    });
+    match res {
+        Some(Ok(())) => crate::serial_println!("storage: selftest done"),
+        Some(Err(e)) => crate::serial_println!("storage: selftest FAILED ({:?})", e),
+        None => crate::serial_println!("storage: selftest skipped (v3 not available)"),
+    }
 }

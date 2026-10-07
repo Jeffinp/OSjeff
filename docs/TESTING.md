@@ -188,6 +188,21 @@ introduziu; a serial tem `net:` e `dns:`):
 Os ganchos são do padrão acima (remova antes de commitar); o lease de 20 s existe só para
 a prova (o mínimo de retransmissão do RFC é 60 s, mas é limitado pelo fim da etapa).
 
+**Autoteste de armazenamento** (build `perf-trace` com `OSJ_STORAGE_SELFTEST=1`):
+
+```bash
+OSJ_STORAGE_SELFTEST=1 cargo build --release -p os --features perf-trace
+```
+
+depois do mount o boot cria `/selftest`, escreve 2 MiB com um padrão, relê e compara,
+roda `fsck`, apaga e loga na serial `storage: selftest ...` com os tempos e MiB/s
+(em TCG, PIO de verdade). É a única forma de exercitar o v3 no kernel enquanto o desktop
+ainda usa o v2. Medido num host compartilhado (varia 30%): escrita de 2 MiB em 0,4 a 0,6 s
+(3,4 a 5,3 MiB/s), leitura de 2 MiB de 0,4 a 0,6 s (3,2 a 5,3 MiB/s), `fsck` de um volume
+pequeno abaixo de 5 ms, 13 a 23 ms por arquivo pequeno (4 barreiras de flush cada).
+O gargalo é o PIO emulado (um setor por trânsito de porta), não o ceder a CPU entre
+setores: sem o `yield` deu o mesmo.
+
 ### Provando falhas (padrão usado na auditoria)
 
 Para provar que uma falha é reportada, use um gancho **temporário** de build, rode,
