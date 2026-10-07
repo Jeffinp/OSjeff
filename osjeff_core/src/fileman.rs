@@ -257,6 +257,18 @@ impl Selection {
         self.anchor = i;
     }
 
+    /// Select exactly the rows `idx` (ascending, in range), cursor and anchor on the first.
+    pub fn select_set(&mut self, idx: &[usize]) {
+        self.clear();
+        for &i in idx {
+            self.set(i, true);
+        }
+        if let Some(&f) = idx.first() {
+            self.cursor = f.min(self.mask.len().saturating_sub(1));
+            self.anchor = self.cursor;
+        }
+    }
+
     /// A mouse click on row `i` with the modifier state: plain selects only it,
     /// Ctrl toggles it, Shift selects the range from the anchor (Ctrl+Shift adds the
     /// range to what is selected).
@@ -897,8 +909,8 @@ pub const HEADER_H: i32 = 24;
 pub const ROW_H: i32 = 24;
 pub const STATUS_H: i32 = 30;
 pub const SCROLL_W: i32 = 12;
-pub const SIZE_COL_W: i32 = 92;
-pub const DATE_COL_W: i32 = 148;
+pub const SIZE_COL_W: i32 = 104;
+pub const DATE_COL_W: i32 = 204;
 pub const SIDE_ROW_H: i32 = 28;
 /// Advance of one character of the 2x font.
 pub const CELL: i32 = 12;
@@ -1203,7 +1215,15 @@ impl FileView {
             return Err(e);
         }
         self.history.push(&self.cwd);
+        self.select_first();
         Ok(())
+    }
+
+    /// Put the cursor (and the selection) on the first row, if there is one.
+    pub fn select_first(&mut self) {
+        if !self.rows.is_empty() {
+            self.sel.only(0);
+        }
     }
 
     /// The parent folder (from the trash: the root).
@@ -1241,7 +1261,9 @@ impl FileView {
         self.cwd = p.to_vec();
         self.scroll = 0;
         self.sel.reset(0);
-        self.refresh(b)
+        let r = self.refresh(b);
+        self.select_first();
+        r
     }
 
     /// Change the sort column (header click) keeping the selection.
@@ -1314,6 +1336,23 @@ impl FileView {
             self.sel.only(i);
             self.ensure_visible(visible);
         }
+    }
+
+    /// Select every row whose name is in `names` (after a paste: the new items), the
+    /// cursor on the first of them, scrolled into view. Does nothing if none match.
+    pub fn select_names(&mut self, names: &[Vec<u8>], visible: usize) {
+        let idx: Vec<usize> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| names.contains(&r.name))
+            .map(|(i, _)| i)
+            .collect();
+        if idx.is_empty() {
+            return;
+        }
+        self.sel.select_set(&idx);
+        self.ensure_visible(visible);
     }
 
     /// Keep the cursor row on screen.

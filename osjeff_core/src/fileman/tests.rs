@@ -780,6 +780,8 @@ fn summary_counts_items_and_selection() {
     let mut fs = populated();
     let mut v = FileView::new();
     v.navigate(&mut fs, b"/Docs").unwrap();
+    assert_eq!(v.summary(), "1 selecionado (0 B)"); // navigating selects the first row
+    v.sel.clear();
     assert_eq!(v.summary(), "3 itens");
     v.sel.click(1, false, false);
     assert_eq!(v.summary(), "1 selecionado (3 B)");
@@ -846,4 +848,30 @@ fn file_names_of_255_bytes_list_and_fold() {
     assert_eq!(v.rows[0].name.len(), 254);
     assert_eq!(display_ascii(&v.rows[0].name).len(), 127);
     assert_eq!(ellipsize(&display_ascii(&v.rows[0].name), 20).len(), 20);
+}
+
+#[test]
+fn select_names_selects_the_new_items() {
+    let mut fs = fresh();
+    for n in ["a", "b", "c", "d"] {
+        fs.write_file(alloc::format!("/{n}").as_str(), b"", NOW)
+            .unwrap();
+    }
+    let mut v = FileView::new();
+    v.refresh(&mut fs).unwrap();
+    v.select_names(&[b"d".to_vec(), b"b".to_vec()], 10);
+    assert_eq!(v.sel.selected(), vec![1, 3]);
+    assert_eq!(v.sel.cursor(), 1);
+    v.select_names(&[b"zzz".to_vec()], 10);
+    assert_eq!(v.sel.selected(), vec![1, 3]);
+}
+
+#[test]
+fn select_set_sets_cursor_and_anchor() {
+    let mut s = sel(6);
+    s.select_set(&[2, 4]);
+    assert_eq!(s.selected(), vec![2, 4]);
+    assert_eq!(s.cursor(), 2);
+    s.click(5, false, true);
+    assert_eq!(s.selected(), vec![2, 3, 4, 5]);
 }
