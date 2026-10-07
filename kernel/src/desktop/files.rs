@@ -509,11 +509,11 @@ impl Desktop {
         }
     }
 
-    /// Mouse wheel over a file manager: three rows per notch.
+    /// Mouse wheel over a file manager: three rows per notch (`notches` > 0 scrolls down).
     pub(crate) fn files_wheel(&mut self, id: WindowId, notches: i32) {
         let vis = self.files_visible(id);
         if let Some(f) = self.files_mut(id) {
-            f.view.scroll_by(-3 * notches as isize, vis);
+            f.view.scroll_by(3 * notches as isize, vis);
         }
     }
 

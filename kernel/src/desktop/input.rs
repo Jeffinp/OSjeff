@@ -199,8 +199,12 @@ impl Desktop {
                 Key::Esc => self.request_close(top),
                 // Arrows scroll the rendered page (a pixel at a time feels slow,
                 // so step by a few lines).
-                Key::Up => self.scroll_page(top, -48),
-                Key::Down => self.scroll_page(top, 48),
+                Key::Up => {
+                    self.scroll_page(top, -48);
+                }
+                Key::Down => {
+                    self.scroll_page(top, 48);
+                }
                 _ => {
                     if let Some(b) = self.browser_state_mut(top) {
                         b.browser.on_key(key);
@@ -425,6 +429,69 @@ impl Desktop {
 
     // ---- mouse ----
 
+    /// A mouse-wheel step (`dz` > 0 = wheel toward the user = scroll down). As on desktop
+    /// systems the window *under the pointer* gets it, focused or not, and the wheel does not
+    /// change focus. Returns whether anything changed (the caller repaints). Ignored while a menu,
+    /// the start panel or the Alt+Tab switcher is up, or a window is being dragged.
+    pub fn handle_wheel(&mut self, dz: i32) -> bool {
+        if dz == 0 || self.overlay_open() || self.drag.is_some() {
+            return false;
+        }
+        let Some(w) = self.topmost_at(self.cursor_x, self.cursor_y) else {
+            return false;
+        };
+        let Some(kind) = self.kind_of(w) else {
+            return false;
+        };
+        let notches = dz.clamp(-8, 8);
+        let changed = match kind {
+            Kind::Browser => self.browser_wheel(w, notches),
+            Kind::TaskMgr => {
+                // The process list scrolls with its selection.
+                for _ in 0..notches.abs() {
+                    if notches > 0 {
+                        self.procs.select_next();
+                    } else {
+                        self.procs.select_prev();
+                    }
+                }
+                true
+            }
+            Kind::Files => {
+                self.files_wheel(w, notches);
+                true
+            }
+            Kind::Viewer => {
+                // Wheel away from the user zooms in.
+                self.viewer_wheel(w, -notches);
+                true
+            }
+            Kind::Editor => match self.editor_mut(w) {
+                Some(e) => {
+                    // Three lines per notch (the editor scrolls with its cursor).
+                    for _ in 0..notches.abs() * 3 {
+                        e.editor
+                            .on_key(if notches > 0 { Key::Down } else { Key::Up });
+                    }
+                    true
+                }
+                None => false,
+            },
+            // No scrollback / nothing to scroll (the WASM guest has no wheel ABI).
+            Kind::Terminal
+            | Kind::Calculator
+            | Kind::WasmApp
+            | Kind::Monitor
+            | Kind::Settings
+            | Kind::LogViewer => false,
+        };
+        if changed && let Some(r) = self.wm.get(w).map(|win| self.window_box(win)) {
+            // The target may not be the focused window: make sure it is uploaded.
+            self.mark_dirty(r);
+        }
+        changed
+    }
+
     /// Maximize / restore window `id` and make the next frame repaint the whole
     /// screen (the window and everything it uncovers change).
     pub(crate) fn toggle_maximize(&mut self, id: WindowId) {
@@ -513,24 +580,6 @@ impl Desktop {
             Kind::LogViewer => self.log_click(w, rect, cx, cy),
             Kind::Terminal | Kind::Editor | Kind::TaskMgr => {}
         }
-    }
-
-    /// Mouse wheel (`notches` > 0 is away from the user): scroll a file manager,
-    /// zoom the image viewer, whichever is under the cursor. `true` when it
-    /// changed something.
-    pub fn handle_wheel(&mut self, notches: i32) -> bool {
-        if notches == 0 {
-            return false;
-        }
-        let Some(w) = self.topmost_at(self.cursor_x, self.cursor_y) else {
-            return false;
-        };
-        match self.kind_of(w) {
-            Some(Kind::Files) => self.files_wheel(w, notches),
-            Some(Kind::Viewer) => self.viewer_wheel(w, notches),
-            _ => return false,
-        }
-        true
     }
 
     pub fn handle_mouse(&mut self, dx: i32, dy: i32, left: bool, right: bool) -> MouseResult {

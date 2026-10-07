@@ -735,19 +735,27 @@ impl Desktop {
 
     /// Scroll the rendered page of browser window `id` by `dy` pixels, clamped
     /// to its content height.
-    pub(crate) fn scroll_page(&mut self, id: WindowId, dy: i32) {
+    pub(crate) fn scroll_page(&mut self, id: WindowId, dy: i32) -> bool {
         let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
-            return;
+            return false;
         };
         let view_h = BrowserChrome::of(rect).content.h;
-        if let Some(b) = self.browser_state_mut(id) {
-            let max = b
-                .page
-                .as_ref()
-                .map(|p| (p.height - view_h).max(0))
-                .unwrap_or(0);
-            b.scroll = (b.scroll + dy).clamp(0, max);
-        }
+        let Some(b) = self.browser_state_mut(id) else {
+            return false;
+        };
+        let max = b
+            .page
+            .as_ref()
+            .map(|p| (p.height - view_h).max(0))
+            .unwrap_or(0);
+        let before = b.scroll;
+        b.scroll = (b.scroll + dy).clamp(0, max);
+        b.scroll != before
+    }
+
+    /// Wheel over browser window `id`: three text lines per notch.
+    pub(crate) fn browser_wheel(&mut self, id: WindowId, notches: i32) -> bool {
+        self.scroll_page(id, notches * 54)
     }
 
     /// Lay the browser page out again for the window's current width (after a

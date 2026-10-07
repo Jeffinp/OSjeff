@@ -431,10 +431,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 Event::Mouse(p) => {
                     let r = desk.handle_mouse(p.dx, p.dy, p.left, p.right);
                     scene_dirty |= r.scene_dirty;
-                    if p.wheel != 0 && desk.handle_wheel(p.wheel) {
+                    cursor_moved |= r.cursor_moved;
+                    // The wheel goes to the window under the pointer.
+                    if p.dz != 0 && desk.handle_wheel(p.dz) {
                         scene_dirty = true;
                     }
-                    cursor_moved |= r.cursor_moved;
                 }
                 Event::Key(k) => {
                     if desk.handle_key(k.scan_code, k.extended, k.pressed, time) {
