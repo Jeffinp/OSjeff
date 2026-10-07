@@ -1,16 +1,18 @@
 //! NE2000 (DP8390) ISA NIC driver — polled, byte-wide remote DMA.
 //!
 //! The NE2000 is the simplest NIC to drive: plain port I/O, no PCI enumeration
-//! and no DMA descriptor rings. We poll (no IRQ): the compositor loop calls
-//! [`poll`] each wake and transmits replies with [`send`]. Every wait is bounded
-//! and [`init`] returns `false` when no card answers, so a build with no NIC
-//! simply runs without networking.
+//! and no DMA descriptor rings. We poll (no IRQ): the network owner calls
+//! [`Nic::poll`] and transmits with [`Nic::send`]. Every wait is bounded and
+//! [`Ne2000::probe`] returns `None` when no card answers, so a build with no NIC
+//! simply runs without networking. The driver is a value ([`Ne2000`]) that holds
+//! the ring read pointer, and `nic::Port` owns it: no second handle exists.
 //!
 //! QEMU: `-device ne2k_isa,netdev=...,mac=52:54:00:12:34:56` (I/O base 0x300).
 
 use crate::io::{inb, outb};
-use crate::sync::RacyCell;
+use crate::nic::{Nic, STATS, TxError};
 use osjeff_core::net::{Mac, ring_prev_page, tx_len};
+use osjeff_core::netstats::NicKind;
 
 const IO: u16 = 0x300; // ISA I/O base (QEMU ne2k_isa default)
 const DATA: u16 = IO + 0x10; // NE2000 data port (remote DMA window)
@@ -59,12 +61,45 @@ const SPIN: u32 = 1_000_000;
 /// Our hardware address (must match the QEMU `mac=` option).
 pub const MAC: Mac = Mac([0x52, 0x54, 0x00, 0x12, 0x34, 0x56]);
 
-/// Next ring page to read (the software read pointer). Touched only by `poll`
-/// and `init`, never from an ISR. `poll` runs on the compositor thread (boot, then
-/// the main loop while `fetch::is_idle()`) or on the `fetcher` thread (through
-/// `netstack`, while a fetch is running); the fetch state machine keeps the two
-/// mutually exclusive.
-static NEXT: RacyCell<u8> = RacyCell::new(RX_START + 1);
+/// A probed NE2000. Holds the software ring read pointer, so it cannot be
+/// duplicated: `probe` is called once, at boot, and the result is moved into the
+/// network owner.
+pub struct Ne2000 {
+    /// Next ring page to read.
+    next: u8,
+}
+
+impl Ne2000 {
+    /// Reset and configure the card; `None` if none answers.
+    pub fn probe() -> Option<Ne2000> {
+        init().then_some(Ne2000 { next: RX_START + 1 })
+    }
+}
+
+impl Nic for Ne2000 {
+    fn kind(&self) -> NicKind {
+        NicKind::Ne2000
+    }
+    fn mac(&self) -> Mac {
+        MAC
+    }
+    fn send(&mut self, frame: &[u8]) -> Result<(), TxError> {
+        if frame.is_empty() || frame.len() > osjeff_core::net::MAX_TX_FRAME {
+            return Err(TxError::BadLength);
+        }
+        if send(frame) {
+            Ok(())
+        } else {
+            Err(TxError::Full)
+        }
+    }
+    fn poll(&mut self, buf: &mut [u8]) -> Option<usize> {
+        poll(&mut self.next, buf)
+    }
+    fn link_up(&self) -> bool {
+        true // the DP8390 has no link-status register we read
+    }
+}
 
 #[inline]
 fn r(reg: u16) -> u8 {
@@ -76,7 +111,7 @@ fn w(reg: u16, v: u8) {
 }
 
 /// Reset and configure the NIC. Returns `false` if no card responds.
-pub fn init() -> bool {
+fn init() -> bool {
     // Pulse reset and wait (bounded) for the chip to acknowledge.
     outb(RESET, inb(RESET));
     let mut ok = false;
@@ -115,9 +150,6 @@ pub fn init() -> bool {
     w(TCR, 0x00); // normal transmit
     w(RCR, 0x04); // accept broadcast (unicast matches PAR)
     w(CR, CR_START | CR_RD_ABORT); // start
-
-    // SAFETY: `init` runs once at boot, before any thread is spawned, so nothing else touches NEXT.
-    unsafe { *NEXT.get() = RX_START + 1 };
     true
 }
 
@@ -138,17 +170,13 @@ fn dma_read(src: u16, buf: &mut [u8]) {
 /// Receive one frame into `buf`, returning its length, or `None` if the ring is
 /// empty. Each ring entry is a 4-byte header (status, next page, len lo/hi)
 /// followed by the frame.
-pub fn poll(buf: &mut [u8]) -> Option<usize> {
+fn poll(next_page_ptr: &mut u8, buf: &mut [u8]) -> Option<usize> {
     // Read CURR from page 1.
     w(CR, CR_PAGE1 | CR_START | CR_RD_ABORT);
     let curr = r(CURR);
     w(CR, CR_START | CR_RD_ABORT);
 
-    // SAFETY: NEXT is only used by `init`/`poll`, never by an ISR. `poll` runs on the compositor
-    // (at boot, then in the main loop only while `fetch::is_idle()`) or on the fetcher via
-    // netstack (while a fetch is RUNNING); the fetch state machine keeps them mutually exclusive.
-    // NOTE: the exclusion comes from that state machine, not from the type.
-    let next = unsafe { *NEXT.get() };
+    let next = *next_page_ptr;
     if next == curr {
         return None; // ring empty
     }
@@ -160,26 +188,28 @@ pub fn poll(buf: &mut [u8]) -> Option<usize> {
 
     // Sanity-check the length; on garbage, drop the whole ring to resync.
     if !(4..=1518 + 4).contains(&total) || !(RX_START..=RX_STOP).contains(&next_page) {
-        // SAFETY: same single-NIC-owner exclusivity as the read of NEXT above.
-        unsafe { *NEXT.get() = curr };
+        *next_page_ptr = curr;
+        STATS.on_rx_error();
         w(BNRY, ring_prev_page(curr, RX_START, RX_STOP));
         return None;
     }
 
     let data_len = total - 4;
     let n = data_len.min(buf.len());
+    if n < data_len {
+        STATS.on_rx_dropped(); // truncated: the caller's buffer was too small
+    }
     dma_read(((next as u16) << 8) + 4, &mut buf[..n]);
 
     // Advance the read pointer and the hardware boundary.
-    // SAFETY: same single-NIC-owner exclusivity as the read of NEXT above.
-    unsafe { *NEXT.get() = next_page };
+    *next_page_ptr = next_page;
     w(BNRY, ring_prev_page(next_page, RX_START, RX_STOP));
     Some(n)
 }
 
 /// Transmit `frame` (padded to the 60-byte Ethernet minimum, cut at the
 /// 1514-byte maximum: the transmit buffer is only 6 pages wide).
-pub fn send(frame: &[u8]) {
+fn send(frame: &[u8]) -> bool {
     let len = tx_len(frame.len());
 
     // Remote-DMA write the frame into the transmit page.
@@ -194,10 +224,15 @@ pub fn send(frame: &[u8]) {
         let byte = if i < frame.len() { frame[i] } else { 0 };
         outb(DATA, byte);
     }
+    let mut loaded = false;
     for _ in 0..SPIN {
         if r(ISR) & ISR_RDC != 0 {
+            loaded = true;
             break;
         }
+    }
+    if !loaded {
+        return false; // the chip never finished the copy: do not transmit garbage
     }
 
     // Issue the transmit.
@@ -205,4 +240,5 @@ pub fn send(frame: &[u8]) {
     w(TBCR0, (len & 0xFF) as u8);
     w(TBCR1, (len >> 8) as u8);
     w(CR, CR_START | CR_TXP | CR_RD_ABORT);
+    true
 }

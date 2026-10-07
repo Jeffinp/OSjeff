@@ -1,6 +1,8 @@
-//! TCP/IP networking via smoltcp, layered over the NE2000 driver. This is the
-//! browser's transport: DNS resolution, TCP connections, and a blocking HTTP
-//! GET that drives the smoltcp poll loop until the request completes.
+//! TCP/IP networking via smoltcp, layered over a [`Port`] (whichever NIC driver
+//! the boot picked). This is the browser's transport: DNS resolution, TCP
+//! connections, and a blocking HTTP GET that drives the smoltcp poll loop until
+//! the request completes. The `Net` *owns* the port, so nothing else can touch
+//! the NIC while it exists unless it goes through [`Net::port`].
 //!
 //! The interface address, default route and DNS server come from the
 //! [`NetConfig`] the boot obtained over DHCP (or its static fallback, QEMU's
@@ -8,8 +10,9 @@
 //! DHCP client is `osjeff_core::net` run once at boot; smoltcp's own DHCP socket
 //! is deliberately not used, so there is a single owner of the IP address.
 
+use crate::nic::Port;
 use crate::sync::RacyCell;
-use crate::{interrupts, io, ne2000};
+use crate::{interrupts, io};
 use alloc::vec;
 use alloc::vec::Vec;
 use embedded_tls::blocking::*;
@@ -21,7 +24,7 @@ use smoltcp::socket::{dns, tcp};
 use smoltcp::time::Instant;
 use smoltcp::wire::{DnsQueryType, EthernetAddress, IpAddress, IpCidr};
 
-use osjeff_core::net::{NetConfig, parse_ipv4};
+use osjeff_core::net::{self, NetConfig, parse_ipv4};
 
 /// smoltcp `Instant` from the monotonic timer tick (TIMER_HZ).
 fn now() -> Instant {
@@ -36,23 +39,27 @@ pub struct Fetched {
     pub truncated: bool,
 }
 
-// ---- NE2000 as a smoltcp phy::Device ----
+// ---- a Port as a smoltcp phy::Device ----
 
-pub struct Nic;
+/// The device smoltcp drives: it owns the [`Port`].
+pub struct Phy {
+    port: Port,
+}
 pub struct Rx(Vec<u8>);
-pub struct Tx;
+pub struct Tx<'a>(&'a mut Port);
 
-impl Device for Nic {
+impl Device for Phy {
     type RxToken<'a> = Rx;
-    type TxToken<'a> = Tx;
+    type TxToken<'a> = Tx<'a>;
 
-    fn receive(&mut self, _t: Instant) -> Option<(Rx, Tx)> {
+    fn receive(&mut self, _t: Instant) -> Option<(Rx, Tx<'_>)> {
         let mut buf = [0u8; 1600];
-        ne2000::poll(&mut buf).map(|len| (Rx(buf[..len].to_vec()), Tx))
+        let len = self.port.poll(&mut buf)?;
+        Some((Rx(buf[..len].to_vec()), Tx(&mut self.port)))
     }
 
-    fn transmit(&mut self, _t: Instant) -> Option<Tx> {
-        Some(Tx)
+    fn transmit(&mut self, _t: Instant) -> Option<Tx<'_>> {
+        Some(Tx(&mut self.port))
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
@@ -69,11 +76,11 @@ impl RxToken for Rx {
     }
 }
 
-impl TxToken for Tx {
+impl TxToken for Tx<'_> {
     fn consume<R, F: FnOnce(&mut [u8]) -> R>(self, len: usize, f: F) -> R {
         let mut buf = vec![0u8; len];
         let r = f(&mut buf);
-        ne2000::send(&buf);
+        self.0.send(&buf);
         r
     }
 }
@@ -83,7 +90,8 @@ impl TxToken for Tx {
 pub struct Net {
     iface: Interface,
     sockets: SocketSet<'static>,
-    device: Nic,
+    device: Phy,
+    cfg: NetConfig,
     tcp: SocketHandle,
     dns: SocketHandle,
 }
@@ -91,9 +99,9 @@ pub struct Net {
 impl Net {
     /// Build the stack for `cfg`: interface address with its prefix, a default
     /// route through the gateway (if any) and the DNS server (if any).
-    pub fn new(cfg: &NetConfig) -> Net {
-        let mut device = Nic;
-        let config = Config::new(EthernetAddress(ne2000::MAC.0).into());
+    pub fn new(port: Port, cfg: &NetConfig) -> Net {
+        let mut device = Phy { port };
+        let config = Config::new(EthernetAddress(device.port.mac().0).into());
         let mut iface = Interface::new(config, &mut device, now());
         iface.update_ip_addrs(|addrs| {
             let _ = addrs.push(IpCidr::new(IpAddress::Ipv4(cfg.ip.0.into()), cfg.prefix));
@@ -127,8 +135,29 @@ impl Net {
             iface,
             sockets,
             device,
+            cfg: *cfg,
             tcp,
             dns,
+        }
+    }
+
+    /// Answer ARP requests and echo requests for our address (the OS is
+    /// pingable), for at most `budget` received frames. Called by the network
+    /// owner while no fetch is running; during a fetch smoltcp itself answers.
+    pub fn respond_idle(&mut self, budget: usize) {
+        let mac = self.device.port.mac();
+        if !self.device.port.link_up() {
+            return;
+        }
+        let mut rx = [0u8; 1600];
+        let mut tx = [0u8; 1600];
+        for _ in 0..budget {
+            let Some(len) = self.device.port.poll(&mut rx) else {
+                break;
+            };
+            if let Some(reply) = net::respond(&rx[..len], mac, self.cfg.ip, &mut tx) {
+                self.device.port.send(&tx[..reply]);
+            }
         }
     }
 

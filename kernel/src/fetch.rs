@@ -16,9 +16,10 @@
 //! compositor stops polling the NIC the worker may have left half-programmed.
 //! The main loop turns later navigations into the same error via [`worker_dead`].
 //!
-//! Only one fetch is ever in flight, and the NIC is touched solely by the worker
-//! while a fetch runs (the main loop gates its ARP responder on [`is_idle`]), so
-//! there is no concurrent access to the single NE2000 from the two threads.
+//! The worker thread is also the network owner: the NIC lives inside the `Net` it
+//! holds (a `nic::Port`, moved in by [`init`]), so nothing else can reach the
+//! hardware. Between fetches it wakes every few ticks to answer ARP and ping
+//! (`Net::respond_idle`); the compositor never touches the NIC.
 
 use crate::sync::RacyCell;
 use crate::{netstack, serial_println};
@@ -34,6 +35,11 @@ const DONE: u8 = 3;
 const WORKER_DEAD: u8 = 4;
 
 const URL_CAP: usize = 512;
+
+/// While idle the worker wakes this often (ticks of 4 ms) to service the NIC.
+const IDLE_POLL_TICKS: u64 = 4;
+/// Frames answered per idle wake: a flood must not starve the rest of the system.
+const IDLE_RX_BUDGET: usize = 32;
 
 static STATE: AtomicU8 = AtomicU8::new(IDLE);
 /// Scheduler slot of the worker thread (`usize::MAX` until it has started), so
@@ -66,8 +72,8 @@ pub fn init(net: netstack::Net) {
     }
 }
 
-/// True when no fetch is in flight — the main loop may safely poll the NIC for
-/// its ARP/ping responder only in this state.
+/// True when no fetch is in flight and the worker is alive, so a navigation
+/// request can be posted.
 pub fn is_idle() -> bool {
     STATE.load(Ordering::Acquire) == IDLE && !worker_dead()
 }
@@ -137,8 +143,6 @@ pub extern "C" fn worker() -> ! {
             };
             // SAFETY: NET is set once, before this thread exists (`fetch::init`), and used only by this
             // worker, one request at a time, so the `&mut` is unique.
-            // NOTE: the NIC underneath is shared with the compositor's ARP responder; exclusion comes from
-            // `STATE`/`is_idle()`, not from the type.
             let result = match unsafe { (*NET.get()).as_mut() } {
                 Some(net) => fetch_url(net, &url),
                 None => Err(FailReason::Network),
@@ -150,10 +154,15 @@ pub extern "C" fn worker() -> ! {
             }
             STATE.store(DONE, Ordering::Release);
         } else {
-            // Nothing queued: leave the run queue until `try_post` wakes us. The
-            // scheduler re-checks the condition after announcing the block, so a
+            // Idle: answer ARP/ping for our address, then leave the run queue until
+            // a request is posted (`try_post` wakes us) or the poll interval ends.
+            // The scheduler re-checks the condition after announcing the block, so a
             // request posted in between is not missed.
-            crate::sched::block(crate::sched::FOREVER, || {
+            // SAFETY: as above: NET is used only by this worker thread.
+            if let Some(net) = unsafe { (*NET.get()).as_mut() } {
+                net.respond_idle(IDLE_RX_BUDGET);
+            }
+            crate::sched::block(crate::interrupts::ticks() + IDLE_POLL_TICKS, || {
                 STATE.load(Ordering::Acquire) != REQUESTED
             });
         }

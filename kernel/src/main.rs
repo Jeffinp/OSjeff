@@ -20,6 +20,7 @@ mod io;
 mod logo;
 mod ne2000;
 mod netstack;
+mod nic;
 mod pci;
 mod perf;
 mod power;
@@ -285,31 +286,27 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Bring up the NIC (if present), lease an IP over DHCP (falling back to the
     // static address if no server answers), and announce ourselves with a
     // gratuitous ARP so the network is visible on the wire from boot. No card ->
-    // skip and keep the static IP.
-    let net_up = ne2000::init();
-    trace::mark("ne2000 init done");
-    let net_cfg = if net_up {
-        dhcp_acquire()
-    } else {
-        NetConfig::STATIC_FALLBACK
+    // skip and keep the static IP. The `Port` is then moved into the network stack
+    // that the `fetcher` thread owns: from there on it is the only party that can
+    // touch the hardware.
+    let mut port = nic::probe(phys_offset);
+    trace::mark("nic init done");
+    let net_cfg = match port.as_mut() {
+        Some(p) => dhcp_acquire(p),
+        None => NetConfig::STATIC_FALLBACK,
     };
-    let net_ip = net_cfg.ip;
-    let lease_start = interrupts::ticks();
-    let mut lease_expiry_logged = false;
     trace::mark("dhcp done");
-    if net_up {
-        let mut frame = [0u8; 64];
-        let len = net::arp_announce(&mut frame, ne2000::MAC, net_ip);
-        ne2000::send(&frame[..len]);
-    }
 
     // Hand the browser's TCP/IP + TLS stack to the background fetcher and spawn
     // its worker thread, so page loads (and the slow software TLS handshake) run
     // off the compositor thread and never freeze the UI. Interrupts are disabled
     // around `spawn` because it mutates the scheduler's thread list, which the
     // timer ISR also reads.
-    if net_up {
-        fetch::init(netstack::Net::new(&net_cfg));
+    if let Some(mut p) = port.take() {
+        let mut frame = [0u8; 64];
+        let len = net::arp_announce(&mut frame, p.mac(), net_cfg.ip);
+        p.send(&frame[..len]);
+        fetch::init(netstack::Net::new(p, &net_cfg));
         x86_64::instructions::interrupts::without_interrupts(|| {
             sched::spawn("fetcher", fetch::worker);
         });
@@ -747,39 +744,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             browser_redraw = true;
         }
 
-        // The lease is not renewed (the boot-time DHCP exchange is the only one;
-        // see `dhcp_acquire`): log once when it runs out. The address stays in
-        // use afterwards, best effort, as renewing would need a second party
-        // on the NIC while a fetch owns it.
-        if net_up && !lease_expiry_logged {
-            let secs = (interrupts::ticks() - lease_start) / interrupts::TIMER_HZ as u64;
-            if net_cfg.lease_expired(secs) {
-                lease_expiry_logged = true;
-                serial_println!(
-                    "net: DHCP lease for {} expired (not renewed; keeping the address)",
-                    net_cfg.ip
-                );
-            }
-        }
-
-        // Service the network: answer ARP/ping for received frames — but only
-        // while no fetch is running, so the NIC has a single owner (the worker
-        // owns it during a fetch).
-        if net_up && fetch::is_idle() {
-            let mut rx = [0u8; 1600];
-            // Bounded per wake: a flood of frames must not keep the compositor
-            // from drawing; whatever is left is handled on the next wake.
-            for _ in 0..NET_RX_BUDGET {
-                let Some(len) = ne2000::poll(&mut rx) else {
-                    break;
-                };
-                let mut tx = [0u8; 1600];
-                if let Some(reply) = net::respond(&rx[..len], ne2000::MAC, net_ip, &mut tx) {
-                    ne2000::send(&tx[..reply]);
-                }
-            }
-        }
-
         // Idle until the next interrupt instead of busy-spinning. The timer
         // (250 Hz) wakes us to step animations and the per-second clock; the
         // keyboard/mouse IRQs wake us immediately on input. This paces frames to
@@ -794,9 +758,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         trace::hlt_wake();
     }
 }
-
-/// Max frames handled per compositor wake by the ARP/ping responder.
-const NET_RX_BUDGET: usize = 32;
 
 fn secs_of_day(t: rtc::Time) -> u32 {
     t.h as u32 * 3600 + t.m as u32 * 60 + t.s as u32
@@ -951,14 +912,14 @@ fn blit_rect(
 /// (QEMU's user-mode defaults). An offer without a server id, or an ACK that does
 /// not make a valid config (bad mask, unusable address, zero lease), also falls
 /// back. The outcome is logged on the serial port either way.
-fn dhcp_acquire() -> NetConfig {
+fn dhcp_acquire(port: &mut nic::Port) -> NetConfig {
     let xid = (io::rdtsc() as u32) | 1; // any non-zero transaction id
     let mut tx = [0u8; 600];
     let mut rx = [0u8; 1600];
 
-    let len = net::dhcp_discover(&mut tx, ne2000::MAC, xid);
-    ne2000::send(&tx[..len]);
-    let Some(offer) = poll_dhcp(&mut rx, xid, net::DHCP_OFFER) else {
+    let len = net::dhcp_discover(&mut tx, port.mac(), xid);
+    port.send(&tx[..len]);
+    let Some(offer) = poll_dhcp(port, &mut rx, xid, net::DHCP_OFFER) else {
         serial_println!("net: static fallback (no DHCP offer)");
         return NetConfig::STATIC_FALLBACK;
     };
@@ -967,9 +928,9 @@ fn dhcp_acquire() -> NetConfig {
         return NetConfig::STATIC_FALLBACK;
     };
 
-    let len = net::dhcp_request(&mut tx, ne2000::MAC, xid, offer.your_ip, server_id);
-    ne2000::send(&tx[..len]);
-    let Some(ack) = poll_dhcp(&mut rx, xid, net::DHCP_ACK) else {
+    let len = net::dhcp_request(&mut tx, port.mac(), xid, offer.your_ip, server_id);
+    port.send(&tx[..len]);
+    let Some(ack) = poll_dhcp(port, &mut rx, xid, net::DHCP_ACK) else {
         serial_println!("net: static fallback (no DHCP ack)");
         return NetConfig::STATIC_FALLBACK;
     };
@@ -990,11 +951,11 @@ fn dhcp_acquire() -> NetConfig {
 }
 
 /// Poll the NIC for up to ~300 ms for a DHCP reply of type `want` matching `xid`.
-fn poll_dhcp(rx: &mut [u8], xid: u32, want: u8) -> Option<net::DhcpReply> {
+fn poll_dhcp(port: &mut nic::Port, rx: &mut [u8], xid: u32, want: u8) -> Option<net::DhcpReply> {
     let deadline = interrupts::ticks() + 75; // 75 ticks / 250 Hz ≈ 300 ms
     while interrupts::ticks() < deadline {
-        if let Some(n) = ne2000::poll(rx)
-            && let Some(r) = net::parse_dhcp(&rx[..n], ne2000::MAC)
+        if let Some(n) = port.poll(rx)
+            && let Some(r) = net::parse_dhcp(&rx[..n], port.mac())
             && r.xid == xid
             && r.msg_type == want
         {
