@@ -1,5 +1,5 @@
 # Scenario helpers. Needs $OUT (run dir) and $MODE.
-mon() { echo "$@" | socat - "UNIX-CONNECT:$OUT/mon.sock" >/dev/null 2>&1; }
+mon() { echo "$@" | socat - "UNIX-CONNECT:${MON_SOCK:-$(cat "$OUT/mon.path")}" >/dev/null 2>&1; }
 wait_first_frame() {
   until grep -aq "first desktop frame" "$OUT/serial.log" 2>/dev/null; do sleep 0.2; done
   sleep 2.5   # let the first (animated) frames settle
