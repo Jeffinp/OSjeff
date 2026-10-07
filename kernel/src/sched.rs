@@ -552,6 +552,24 @@ pub fn thread_dead(i: usize) -> bool {
     is_dead(i)
 }
 
+/// Cumulative "ticks found running" of every scheduler slot (the resource monitor
+/// turns the deltas into CPU shares).
+pub fn busy_ticks() -> [u64; osjeff_core::sysmon::MAX_THREADS] {
+    core::array::from_fn(|i| TICKS[i].load(Ordering::Relaxed))
+}
+
+/// Stack size of slot `i` in KiB: the compositor runs on the bootloader's stack
+/// (`BOOT_CONFIG.kernel_stack_size`), the others on a `STACK_SIZE` block.
+pub fn thread_stack_kib(i: usize) -> u32 {
+    if i == 0 {
+        512
+    } else {
+        (STACK_SIZE / 1024) as u32
+    }
+}
+
+const _: () = assert!(MAX_THREADS == osjeff_core::sysmon::MAX_THREADS);
+
 pub fn thread_ticks(i: usize) -> u64 {
     if i < MAX_THREADS {
         TICKS[i].load(Ordering::Relaxed)

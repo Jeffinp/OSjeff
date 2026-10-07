@@ -35,6 +35,7 @@ pub(crate) enum Kind {
     Browser,
     WasmApp,
     Files,
+    Monitor,
     LogViewer,
 }
 
@@ -44,7 +45,7 @@ pub(crate) enum Kind {
 pub(crate) const DOCK_APPS: usize = 7;
 
 impl Kind {
-    pub(crate) const ALL: [Kind; 8] = [
+    pub(crate) const ALL: [Kind; 9] = [
         Kind::Terminal,
         Kind::Editor,
         Kind::TaskMgr,
@@ -52,13 +53,14 @@ impl Kind {
         Kind::Browser,
         Kind::WasmApp,
         Kind::Files,
+        Kind::Monitor,
         Kind::LogViewer,
     ];
 
     /// Does the window's content change on its own every second (so the
     /// per-second tick must repaint it)?
     pub(crate) const fn is_live(self) -> bool {
-        matches!(self, Kind::TaskMgr | Kind::LogViewer)
+        matches!(self, Kind::TaskMgr | Kind::Monitor | Kind::LogViewer)
     }
 
     /// Does this app have a dock icon?
@@ -81,6 +83,7 @@ impl Kind {
             Kind::Browser => "browser",
             Kind::WasmApp => "wasmapp",
             Kind::Files => "files",
+            Kind::Monitor => "monitor",
             Kind::LogViewer => "syslog",
         }
     }
@@ -95,6 +98,7 @@ impl Kind {
             Kind::Browser => "NAVEGADOR",
             Kind::WasmApp => "WASM APP",
             Kind::Files => "ARQUIVOS",
+            Kind::Monitor => "MONITOR DO SISTEMA",
             Kind::LogViewer => "LOG DO SISTEMA",
         }
     }
@@ -109,6 +113,7 @@ impl Kind {
             Kind::Browser => "Navegador",
             Kind::WasmApp => "WASM App",
             Kind::Files => "Arquivos",
+            Kind::Monitor => "Monitor",
             Kind::LogViewer => "Log do sistema",
         }
     }
@@ -122,6 +127,7 @@ impl Kind {
             Kind::Browser => Icon::Browser,
             Kind::WasmApp => Icon::WasmApp,
             Kind::Files => Icon::Files,
+            Kind::Monitor => Icon::Monitor,
             Kind::LogViewer => Icon::Log,
         }
     }
@@ -147,6 +153,7 @@ impl Kind {
             Kind::Browser => Rect::new(150, 60, 916, 560),
             Kind::WasmApp => Rect::new(240, 130, 720, 470),
             Kind::Files => Rect::new(250, 120, 780, 520),
+            Kind::Monitor => Rect::new(210, 90, 800, 560),
             Kind::LogViewer => Rect::new(180, 110, 860, 460),
         }
     }
@@ -161,6 +168,7 @@ impl Kind {
             Kind::Browser => (420, 260),
             Kind::WasmApp => (720, 470),
             Kind::Files => (440, 260),
+            Kind::Monitor => (660, 420),
             Kind::LogViewer => (520, 280),
         }
     }
@@ -219,6 +227,7 @@ pub(crate) enum App {
     Browser(Box<BrowserState>),
     Wasm(Box<WasmWin>),
     Files(FilesState),
+    Monitor(Box<MonitorState>),
     Log(Box<LogState>),
 }
 
@@ -251,6 +260,7 @@ impl App {
                 view: 0,
                 cwd: fs::ROOT,
             }),
+            Kind::Monitor => App::Monitor(Box::new(MonitorState::new())),
             Kind::LogViewer => App::Log(Box::new(LogState::new())),
         }
     }
@@ -264,6 +274,7 @@ impl App {
             App::Browser(_) => Kind::Browser,
             App::Wasm(_) => Kind::WasmApp,
             App::Files(_) => Kind::Files,
+            App::Monitor(_) => Kind::Monitor,
             App::Log(_) => Kind::LogViewer,
         }
     }
@@ -277,6 +288,11 @@ pub(crate) struct Inst {
     /// 1-based instance number within its kind (`shell` = 1, `shell 2` = 2...).
     pub index: u8,
     pub title: String,
+    /// TSC cycles spent drawing this window since the last once-a-second sample
+    /// (the resource monitor's per-app figure).
+    pub cost: core::cell::Cell<u64>,
+    /// Draw cost of the last full second, in tenths of a percent of wall time.
+    pub cost_pm: core::cell::Cell<u16>,
 }
 
 impl Inst {

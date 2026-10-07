@@ -15,6 +15,7 @@ pub enum Icon {
     Browser,
     WasmApp,
     Files,
+    Monitor,
     Log,
     Power,
 }
@@ -29,8 +30,45 @@ pub fn draw(c: &mut Canvas, icon: Icon, x: usize, y: usize, size: usize) {
         Icon::Browser => browser(c, x, y, size),
         Icon::WasmApp => wasm_app(c, x, y, size),
         Icon::Files => files(c, x, y, size),
+        Icon::Monitor => monitor(c, x, y, size),
         Icon::Log => log(c, x, y, size),
         Icon::Power => power(c, x, y, size),
+    }
+}
+
+/// Resource monitor: a dark tile with a framed screen and a zig-zag load line.
+fn monitor(c: &mut Canvas, x: usize, y: usize, size: usize) {
+    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x10, 0x18, 0x2A));
+    let pad = size / 6;
+    let (fx, fy, fw, fh) = (x + pad, y + pad, size - pad * 2, size - pad * 2);
+    c.fill_round_rect(fx, fy, fw, fh, size / 10, Color::rgb(0x2A, 0x33, 0x52));
+    let b = (size / 14).max(1);
+    c.fill_round_rect(
+        fx + b,
+        fy + b,
+        fw - 2 * b,
+        fh - 2 * b,
+        size / 12,
+        Color::rgb(0x0B, 0x12, 0x22),
+    );
+    // Load line: rises, dips, spikes (y in eighths, 0 = top).
+    let t = (size / 12).max(2);
+    let pts: [isize; 5] = [7, 4, 6, 1, 5];
+    let seg_w = (fw - 2 * b - 2 * t) / 4;
+    let top = (fy + b + t) as isize;
+    let h = (fh - 2 * b - 2 * t) as isize;
+    for (i, w) in pts.windows(2).enumerate() {
+        for k in 0..seg_w {
+            let num = w[0] * seg_w as isize + (w[1] - w[0]) * k as isize;
+            let py = top + num * h / (8 * seg_w as isize);
+            c.fill_rect(
+                fx + b + t + i * seg_w + k,
+                py as usize,
+                t,
+                t,
+                theme::accent(),
+            );
+        }
     }
 }
 

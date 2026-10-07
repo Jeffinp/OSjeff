@@ -23,6 +23,7 @@ mod logo;
 mod ne2000;
 mod netd;
 mod netstack;
+mod netstats;
 mod nic;
 mod pci;
 mod perf;
@@ -33,6 +34,7 @@ mod sched;
 mod serial;
 mod storage;
 mod sync;
+mod sysinfo;
 mod theme;
 mod tlsv;
 mod trace;
@@ -105,6 +107,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Capture the physical-memory offset before `boot_info` is borrowed for the
     // framebuffer. Needed for DMA (virtio-gpu addresses memory physically).
     let phys_offset = boot_info.physical_memory_offset.into_option();
+    let kernel_len = boot_info.kernel_len;
     klog!(Info, "physical_memory_offset: {:#x?}", phys_offset);
     // The page tables are reached through that mapping (thread-stack guard pages, see `vm`).
     vm::init(phys_offset);
@@ -117,6 +120,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
     };
     let info = framebuffer.info();
+    sysinfo::capture(
+        &boot_info.memory_regions,
+        kernel_len,
+        info.width,
+        info.height,
+    );
     // From here on a panic or fatal exception paints an error page on this framebuffer.
     crash::register_framebuffer(framebuffer.buffer_mut(), info);
     let n = framebuffer.buffer().len().min(MAX_BYTES);
@@ -306,6 +315,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // around the port. The result is handed to the `fetcher` thread, which is from then on the only
     // party that can touch the hardware (DHCP renewal, ARP/ping and fetches all run there).
     let netd = port.map(netd::Netd::boot);
+    netstats::set_nic_present(netd.is_some());
     trace::mark("dhcp done");
     // Capture the RTC (UTC) once, before any other thread can touch the CMOS
     // ports: it is the local clock that SNTP then corrects for TLS date checks.
@@ -431,6 +441,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             desk.tick_processes();
             clock_tick = true;
             perf.second_tick();
+            let (fps, frame_us, max_us) = perf.stats();
+            desk.sample_system(&desktop::SysInputs {
+                ticks: interrupts::ticks(),
+                busy: sched::busy_ticks(),
+                heap_used: HEAP_SIZE - ALLOCATOR.free_bytes().min(HEAP_SIZE),
+                heap_total: HEAP_SIZE,
+                fps,
+                frame_us,
+                max_us,
+                tsc_khz,
+            });
         }
 
         // Tell the app manager each WASM window's size / visibility; reap finished apps.

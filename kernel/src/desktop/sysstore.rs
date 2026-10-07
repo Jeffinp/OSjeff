@@ -5,7 +5,7 @@
 //! traits (see `docs/design/sysmgmt.md`).
 
 use super::*;
-use osjeff_core::sysif::{LogSink, SinkError};
+use osjeff_core::sysif::{DiskUsage, DiskUsageInfo, LogSink, NetCounters, NetStats, SinkError};
 
 fn map_fs_error(e: fs::FsError) -> SinkError {
     match e {
@@ -30,5 +30,40 @@ impl LogSink for FsV2Sink {
         } else {
             Ok(())
         }
+    }
+}
+
+/// Space accounting of the FS v2 image: 48 slots of up to 1 KiB each (a
+/// trashed file still holds its slot until it is purged).
+pub(crate) struct FsV2Usage;
+
+impl DiskUsage for FsV2Usage {
+    fn label(&self) -> &str {
+        "FS v2 (IDE 1)"
+    }
+
+    fn usage(&self) -> DiskUsageInfo {
+        let img = disk();
+        let used_slots = (0..fs::MAX_FILES).filter(|&i| fs::is_used(img, i));
+        let (mut slots, mut bytes) = (0u32, 0u64);
+        for i in used_slots {
+            slots += 1;
+            bytes += fs::size_at(img, i) as u64;
+        }
+        DiskUsageInfo {
+            total_bytes: Some((fs::MAX_FILES * fs::MAX_FILE_SIZE) as u64),
+            used_bytes: Some(bytes),
+            items_used: Some(slots),
+            items_total: Some(fs::MAX_FILES as u32),
+        }
+    }
+}
+
+/// The NE2000 byte counters (`crate::netstats`); `None` when there is no NIC.
+pub(crate) struct KernelNetStats;
+
+impl NetStats for KernelNetStats {
+    fn counters(&self) -> Option<NetCounters> {
+        crate::netstats::counters()
     }
 }

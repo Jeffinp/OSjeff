@@ -39,6 +39,12 @@ impl Perf {
         self.0.second_tick();
     }
 
+    /// `(frames drawn in the last second, last frame time in microseconds, worst
+    /// frame time this second)`: what the resource monitor graphs.
+    pub fn stats(&self) -> (u32, u64, u64) {
+        (self.0.fps, self.0.frame_us, self.0.max_us)
+    }
+
     /// Screen rect of the HUD panel (top-right corner).
     pub fn rect(width: i32) -> osjeff_core::Rect {
         osjeff_core::Rect::new(width - HUD_W - 12, 12, HUD_W, HUD_H)

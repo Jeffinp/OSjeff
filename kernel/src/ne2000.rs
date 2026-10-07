@@ -206,6 +206,7 @@ fn poll(next_page_ptr: &mut u8, buf: &mut [u8]) -> Option<usize> {
     // Advance the read pointer and the hardware boundary.
     *next_page_ptr = next_page;
     w(BNRY, ring_prev_page(next_page, RX_START, RX_STOP));
+    crate::netstats::record_rx(n);
     Some(n)
 }
 
@@ -213,6 +214,7 @@ fn poll(next_page_ptr: &mut u8, buf: &mut [u8]) -> Option<usize> {
 /// 1514-byte maximum: the transmit buffer is only 6 pages wide).
 fn send(frame: &[u8]) -> bool {
     let len = tx_len(frame.len());
+    crate::netstats::record_tx(frame.len());
 
     // Remote-DMA write the frame into the transmit page.
     w(CR, CR_START | CR_RD_ABORT);

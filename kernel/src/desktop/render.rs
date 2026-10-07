@@ -276,6 +276,7 @@ impl Desktop {
             self.draw_title_buttons(c, win, r);
         }
 
+        let cost_t0 = crate::io::rdtsc();
         match &win.app.app {
             App::Terminal(t) => self.draw_terminal(c, r, t, focused),
             App::Editor(e) => self.draw_editor(c, r, e, focused),
@@ -284,8 +285,13 @@ impl Desktop {
             App::Browser(b) => self.draw_browser(c, r, focused, b),
             App::Wasm(w) => self.draw_wasm(c, r, w),
             App::Files(f) => self.draw_files(c, r, f),
+            App::Monitor(m) => self.draw_monitor(c, r, m),
             App::Log(l) => self.draw_log(c, r, l),
         }
+        // What this window cost to draw (the monitor's per-app CPU figure).
+        win.app
+            .cost
+            .set(win.app.cost.get() + crate::io::rdtsc().wrapping_sub(cost_t0));
     }
 
     /// Minimize and maximize / restore buttons plus the glyphs on all three.

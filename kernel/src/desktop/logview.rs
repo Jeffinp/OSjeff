@@ -41,6 +41,11 @@ impl LogState {
         s
     }
 
+    /// Approximate heap held by this window (for the resource monitor).
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.snap.capacity()
+    }
+
     fn reload(&mut self, rows: usize) {
         crate::klog::snapshot(&mut self.snap);
         self.seen = crate::klog::seq();

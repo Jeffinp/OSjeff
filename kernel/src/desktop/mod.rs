@@ -180,6 +180,8 @@ pub struct Desktop {
     clipboard: Clipboard,
     keymap: Keymap,
     procs: ProcessTable,
+    /// Sampled system history for the resource monitor.
+    sysmon: SysMon,
     /// The dynamic window table; every window owns an app instance.
     wm: WindowManager<Inst>,
     drag: Option<Drag>,
@@ -263,6 +265,7 @@ impl Desktop {
             clipboard: Clipboard::new(),
             keymap: Keymap::new(),
             procs,
+            sysmon: SysMon::new(),
             wm: WindowManager::new(osjeff_core::winman::DEFAULT_MAX_WINDOWS),
             drag: None,
             menu: None,
@@ -347,6 +350,8 @@ impl Desktop {
             pid,
             index,
             title,
+            cost: core::cell::Cell::new(0),
+            cost_pm: core::cell::Cell::new(0),
         };
         let spec = WindowSpec {
             rect,
@@ -796,6 +801,7 @@ mod files_ui;
 mod input;
 mod instance;
 mod logview;
+mod monitor;
 mod render;
 mod sysstore;
 mod ui;
@@ -803,6 +809,8 @@ mod wasmwin;
 mod widgets;
 pub(crate) use instance::*;
 pub(crate) use logview::LogState;
+pub use monitor::SysInputs;
+pub(crate) use monitor::{MonitorState, SysMon};
 pub(crate) use sysstore::*;
 pub(crate) use wasmwin::*;
 pub(crate) use widgets::*;
