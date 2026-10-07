@@ -20,8 +20,56 @@ use crate::fb::{Canvas, Color};
 use crate::sync::RacyCell;
 use crate::{font, serial_print};
 use bootloader_api::info::FrameBufferInfo;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use wasmi::{Caller, Engine, Extern, Instance, Linker, Module, Store};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use wasmi::{
+    Caller, Config, Engine, Extern, Instance, Linker, Module, Store, StoreLimits,
+    StoreLimitsBuilder,
+};
+
+// ---- guest resource limits ----
+//
+// A guest is untrusted code running inside the kernel: without limits a loop or
+// a runaway `memory.grow` takes the whole machine down with it. Every guest gets
+//   * fuel (one unit per wasm instruction) per call into it,
+//   * a hard cap on its linear memory, and
+//   * caps on the work the host does on its behalf (see `wasi.rs`, `host_blit`).
+
+/// Fuel for one call into the guest (`render`, `on_key`, `on_pointer`). About
+/// 20 million wasm instructions: DOOM's steady-state frame is 4.5-9 M (see
+/// docs/audit/adr-isolamento.md), so this leaves ~2x headroom, yet a guest stuck
+/// in a loop is stopped within a few frames' worth of CPU.
+const FRAME_FUEL: u64 = 20_000_000;
+/// Fuel for module start-up: `_initialize` and the first `render`, where C apps do
+/// their one-time setup (DOOM's `doomgeneric_Create` costs ~39 M). About 6x that.
+const INIT_FUEL: u64 = 256_000_000;
+/// Cap on a guest's linear memory, in bytes. DOOM peaks at ~16-20 MiB; 24 MiB
+/// keeps ~20% headroom while bounding a hostile `memory.grow` to well under half
+/// of the kernel's shared 64 MiB heap (without a cap it reached 32 MiB, 51%).
+const MEM_LIMIT: usize = 24 << 20;
+/// Cap on a guest's table size (DOOM's indirect-call table has a few thousand).
+const TABLE_LIMIT: usize = 100_000;
+/// Longest string (bytes) a guest may pass to `host.log` / `host.draw_text`.
+const MAX_TEXT: i32 = 4096;
+/// Largest image (pixels) one `host.blit` will copy: more than any window here.
+const MAX_BLIT_PIXELS: i64 = 1 << 20;
+
+/// The limits applied to every guest `Store`.
+fn guest_limits() -> StoreLimits {
+    StoreLimitsBuilder::new()
+        .memory_size(MEM_LIMIT)
+        .table_elements(TABLE_LIMIT)
+        .instances(1)
+        .memories(1)
+        .tables(1)
+        .build()
+}
+
+/// An engine with fuel metering switched on (off by default in wasmi).
+fn guest_engine() -> Engine {
+    let mut cfg = Config::default();
+    cfg.consume_fuel(true);
+    Engine::new(&cfg)
+}
 
 /// The console demo (boot smoke-test) and the windowed app, assembled from WAT
 /// at build time (see `build.rs`).
@@ -54,6 +102,8 @@ struct HostState {
     wad_pos: usize,
     /// Seed for `random_get` (reseeded from the clock on first use).
     rng: u32,
+    /// Memory/table/instance caps, enforced by the `Store`'s resource limiter.
+    limits: StoreLimits,
 }
 
 impl HostState {
@@ -70,6 +120,7 @@ impl HostState {
             wad_fd: -1,
             wad_pos: 0,
             rng: 0,
+            limits: guest_limits(),
         }
     }
 
@@ -140,16 +191,30 @@ fn host_text(st: &HostState, s: &str, x: i32, y: i32, color: i32, scale: i32) {
 /// the surface at content-local `(dx, dy)`, translated by the surface origin and
 /// clipped to the content box. The per-frame primitive for framebuffer apps
 /// (a game pushes its rendered frame this way).
-fn host_blit(caller: &Caller<'_, HostState>, off: i32, w: i32, h: i32, dx: i32, dy: i32) {
-    if w <= 0 || h <= 0 {
-        return;
+///
+/// The copy is host work the fuel meter cannot see, so it is capped
+/// ([`MAX_BLIT_PIXELS`]) and charged to the guest's fuel (one unit per 8 pixels).
+fn host_blit(
+    caller: &mut Caller<'_, HostState>,
+    off: i32,
+    w: i32,
+    h: i32,
+    dx: i32,
+    dy: i32,
+) -> Result<(), wasmi::Error> {
+    if w <= 0 || h <= 0 || (w as i64) * (h as i64) > MAX_BLIT_PIXELS {
+        return Ok(());
     }
+    charge(caller, (w as u64) * (h as u64) / 8)?;
+    let caller = &*caller;
     let st = caller.data();
     let (ox, oy, cw, ch) = (st.ox, st.oy, st.cw, st.ch);
-    let Some(mut c) = st.canvas() else { return };
+    let Some(mut c) = st.canvas() else {
+        return Ok(());
+    };
     let need = (w as i64) * (h as i64) * 4;
     let Some(px) = guest_bytes(caller, off, need.min(i32::MAX as i64) as i32) else {
-        return;
+        return Ok(());
     };
     // Integer nearest-neighbor upscale to fill the content box starting at
     // `(dx, dy)`, aspect-preserved and centered horizontally — so a small guest
@@ -171,6 +236,17 @@ fn host_blit(caller: &Caller<'_, HostState>, off: i32, w: i32, h: i32, dx: i32, 
             c.fill_rect((ox + x_off + col * scale) as usize, py0, s, s, color);
         }
     }
+    Ok(())
+}
+
+/// Charge `units` of fuel for host work done on the guest's behalf. Fails with
+/// the `OutOfFuel` trap when the guest's budget for this call is spent.
+fn charge(caller: &mut Caller<'_, HostState>, units: u64) -> Result<(), wasmi::Error> {
+    let left = caller.get_fuel()?;
+    if left < units {
+        return Err(wasmi::Error::from(wasmi::TrapCode::OutOfFuel));
+    }
+    caller.set_fuel(left - units)
 }
 
 /// Register the OS ABI on `linker`. Shared by one-shot runs and the persistent
@@ -181,6 +257,9 @@ fn install_abi(linker: &mut Linker<HostState>) -> Result<(), &'static str> {
             "host",
             "log",
             |caller: Caller<'_, HostState>, ptr: i32, len: i32| {
+                if len > MAX_TEXT {
+                    return;
+                }
                 if let Some(s) = guest_str(&caller, ptr, len) {
                     serial_print!("{}", s);
                 }
@@ -207,6 +286,9 @@ fn install_abi(linker: &mut Linker<HostState>) -> Result<(), &'static str> {
              len: i32,
              color: i32,
              scale: i32| {
+                if len > MAX_TEXT {
+                    return;
+                }
                 if let Some(s) = guest_str(&caller, ptr, len) {
                     host_text(caller.data(), s, x, y, color, scale);
                 }
@@ -218,9 +300,13 @@ fn install_abi(linker: &mut Linker<HostState>) -> Result<(), &'static str> {
         .func_wrap(
             "host",
             "blit",
-            |caller: Caller<'_, HostState>, off: i32, w: i32, h: i32, dx: i32, dy: i32| {
-                host_blit(&caller, off, w, h, dx, dy);
-            },
+            |mut caller: Caller<'_, HostState>,
+             off: i32,
+             w: i32,
+             h: i32,
+             dx: i32,
+             dy: i32|
+             -> Result<(), wasmi::Error> { host_blit(&mut caller, off, w, h, dx, dy) },
         )
         .map_err(|_| "link host.blit")?;
     // host.time_ms(): milliseconds since boot. The PIT ticks at 250 Hz, so each
@@ -246,9 +332,11 @@ pub fn run_demo() {
 
 /// Instantiate `bytes`, granting it the OS ABI, and call its `entry` export.
 fn run(bytes: &[u8], entry: &str, state: HostState) -> Result<(), &'static str> {
-    let engine = Engine::default();
+    let engine = guest_engine();
     let module = Module::new(&engine, bytes).map_err(|_| "module decode")?;
     let mut store = Store::new(&engine, state);
+    store.limiter(|st| &mut st.limits);
+    store.set_fuel(INIT_FUEL).map_err(|_| "set fuel")?;
     let mut linker = <Linker<HostState>>::new(&engine);
     install_abi(&mut linker)?;
     let instance = linker
@@ -266,6 +354,35 @@ fn run(bytes: &[u8], entry: &str, state: HostState) -> Result<(), &'static str> 
 struct App {
     store: Store<HostState>,
     instance: Instance,
+    /// The next `render` is the first one: it gets [`INIT_FUEL`] (one-time setup).
+    first_render: bool,
+}
+
+/// Why a guest call failed (for the serial log) and, by returning at all, that the
+/// app must be terminated.
+fn describe(e: &wasmi::Error) -> &'static str {
+    if e.as_trap_code() == Some(wasmi::TrapCode::OutOfFuel) {
+        "out of fuel"
+    } else if e.i32_exit_status().is_some() {
+        "exited (proc_exit)"
+    } else {
+        "trapped"
+    }
+}
+
+/// Call the guest export `name(params)` with a fresh fuel budget. A missing
+/// export is not an error (apps implement only the hooks they need).
+fn guest_call<P: wasmi::WasmParams>(
+    app: &mut App,
+    name: &str,
+    params: P,
+    fuel: u64,
+) -> Result<(), wasmi::Error> {
+    let Ok(f) = app.instance.get_typed_func::<P, ()>(&app.store, name) else {
+        return Ok(());
+    };
+    app.store.set_fuel(fuel)?;
+    f.call(&mut app.store, params)
 }
 
 /// The desktop's WASM app, built lazily on first paint and kept resident so the
@@ -274,7 +391,7 @@ static APP: RacyCell<Option<App>> = RacyCell::new(None);
 
 /// Build the resident windowed app from `APP_WASM`. `None` if it fails to load.
 fn build_app() -> Option<App> {
-    let engine = Engine::default();
+    let engine = guest_engine();
     let module = match Module::new(&engine, APP_WASM) {
         Ok(m) => m,
         Err(e) => {
@@ -283,6 +400,8 @@ fn build_app() -> Option<App> {
         }
     };
     let mut store = Store::new(&engine, HostState::console());
+    store.limiter(|st| &mut st.limits);
+    store.set_fuel(INIT_FUEL).ok()?;
     let mut linker = <Linker<HostState>>::new(&engine);
     install_abi(&mut linker).ok()?;
     let instance = match linker.instantiate_and_start(&mut store, &module) {
@@ -298,10 +417,24 @@ fn build_app() -> Option<App> {
     if let Ok(init) = instance.get_typed_func::<(), ()>(&store, "_initialize")
         && let Err(e) = init.call(&mut store, ())
     {
-        crate::serial_println!("wasm app: _initialize trap: {:?}", e);
+        crate::serial_println!("wasm app: _initialize {}: {:?}", describe(&e), e);
         return None;
     }
-    Some(App { store, instance })
+    Some(App {
+        store,
+        instance,
+        first_render: true,
+    })
+}
+
+/// Terminate the resident app: drop its `Store` (frees the guest's linear memory
+/// back to the kernel heap) and forget its queued input. Worker thread only.
+fn drop_app() {
+    // SAFETY: APP is only touched by the `wasmapp` worker thread (see `app_mut`), and no reference
+    // obtained from `app_mut` is live here (the worker's loop iteration is over).
+    unsafe { *APP.get() = None };
+    EV_TAIL.store(EV_HEAD.load(Ordering::Acquire), Ordering::Release);
+    READY.store(false, Ordering::Release);
 }
 
 /// The resident app, built lazily on first access. `None` if it fails to load.
@@ -429,31 +562,21 @@ pub fn on_key(code: i32) {
     });
 }
 
-/// Drain queued input into the app's `on_key` / `on_pointer` exports.
-fn drain_input(app: &mut App) {
+/// Drain queued input into the app's `on_key` / `on_pointer` exports, each call
+/// with its own fuel budget. The first guest failure aborts the drain.
+fn drain_input(app: &mut App) -> Result<(), wasmi::Error> {
     loop {
         let t = EV_TAIL.load(Ordering::Relaxed);
         if t == EV_HEAD.load(Ordering::Acquire) {
-            break;
+            return Ok(());
         }
         // SAFETY: SPSC consumer (worker only): `t != EV_HEAD` (Acquire) means the producer already wrote
         // slot `t` and will not reuse it until EV_TAIL advances.
         let ev = unsafe { (*EVENTS.get())[t] };
         EV_TAIL.store((t + 1) % EV_CAP, Ordering::Release);
         match ev.kind {
-            1 => {
-                if let Ok(f) = app.instance.get_typed_func::<i32, ()>(&app.store, "on_key") {
-                    let _ = f.call(&mut app.store, ev.a);
-                }
-            }
-            2 => {
-                if let Ok(f) = app
-                    .instance
-                    .get_typed_func::<(i32, i32, i32), ()>(&app.store, "on_pointer")
-                {
-                    let _ = f.call(&mut app.store, (ev.a, ev.b, ev.c));
-                }
-            }
+            1 => guest_call(app, "on_key", ev.a, FRAME_FUEL)?,
+            2 => guest_call(app, "on_pointer", (ev.a, ev.b, ev.c), FRAME_FUEL)?,
             _ => {}
         }
     }
@@ -470,21 +593,47 @@ fn surface_info() -> Option<FrameBufferInfo> {
     Some(oi)
 }
 
+/// What the window shows instead of a frame (see [`blit_surface`]): still loading.
+const MSG_LOADING: u8 = 0;
+/// The app could not be loaded (decode/instantiate/`_initialize` failed).
+const MSG_LOAD_FAILED: u8 = 1;
+/// The app was terminated (trap, out of fuel, `proc_exit`).
+const MSG_TERMINATED: u8 = 2;
+static MSG: AtomicU8 = AtomicU8::new(MSG_LOADING);
+
+/// Kill the resident app: log why, free its `Store`, and leave the window showing
+/// `msg` until it is closed (closing and reopening starts a fresh instance).
+fn terminate(msg: u8, what: &str, e: Option<&wasmi::Error>) {
+    match e {
+        Some(e) => crate::serial_println!("wasm app: terminated: {} ({:?})", what, e),
+        None => crate::serial_println!("wasm app: terminated: {}", what),
+    }
+    drop_app();
+    MSG.store(msg, Ordering::Release);
+}
+
 /// Worker-thread entry: build the app, then loop — drain input, render one frame
-/// into the back surface, publish it. While the window is closed (or the app
-/// failed to load) the thread is blocked in the scheduler and costs no CPU.
+/// into the back surface, publish it. While the window is closed, or the app has
+/// been terminated, the thread is blocked in the scheduler and costs no CPU.
+/// Closing the window drops the instance (and its memory); reopening rebuilds it.
 pub extern "C" fn worker() -> ! {
     TID.store(crate::sched::current(), Ordering::Release);
     loop {
         if !ACTIVE.load(Ordering::Acquire) {
-            // Closed: sleep until `set_active(true)` wakes us.
+            // Closed: end the app for real, then sleep until `set_active(true)`.
+            drop_app();
+            MSG.store(MSG_LOADING, Ordering::Release);
             crate::sched::block(crate::sched::FOREVER, || !ACTIVE.load(Ordering::Acquire));
             continue;
         }
-        let (Some(app), Some(oi)) = (app_mut(), surface_info()) else {
-            // The app failed to load (already logged): wait for the window to be
-            // closed and reopened rather than retrying the build in a loop.
+        if MSG.load(Ordering::Acquire) != MSG_LOADING {
+            // Terminated or failed to load: nothing to run until the window is
+            // closed (`set_active(false)` wakes us) and reopened.
             crate::sched::block(crate::sched::FOREVER, || ACTIVE.load(Ordering::Acquire));
+            continue;
+        }
+        let (Some(app), Some(oi)) = (app_mut(), surface_info()) else {
+            terminate(MSG_LOAD_FAILED, "failed to load", None);
             continue;
         };
         let frame_start = crate::interrupts::ticks();
@@ -504,14 +653,18 @@ pub extern "C" fn worker() -> ! {
             st.cw = WASM_SW as i32;
             st.ch = WASM_SH as i32;
         }
-        drain_input(app);
-        if let Ok(func) = app.instance.get_typed_func::<(), ()>(&app.store, "render")
-            && let Err(e) = func.call(&mut app.store, ())
-        {
-            static LOGGED: AtomicBool = AtomicBool::new(false);
-            if !LOGGED.swap(true, Ordering::Relaxed) {
-                crate::serial_println!("wasm app: render trap: {:?}", e);
-            }
+        if let Err(e) = drain_input(app) {
+            terminate(MSG_TERMINATED, describe(&e), Some(&e));
+            continue;
+        }
+        let fuel = if core::mem::take(&mut app.first_render) {
+            INIT_FUEL
+        } else {
+            FRAME_FUEL
+        };
+        if let Err(e) = guest_call(app, "render", (), fuel) {
+            terminate(MSG_TERMINATED, describe(&e), Some(&e));
+            continue;
         }
         app.store.data_mut().info = None;
         FRONT.store(back, Ordering::Release);
@@ -540,11 +693,16 @@ pub fn blit_surface(c: &mut Canvas, cx: i32, cy: i32) {
             WASM_SH,
             Color::rgb(0x10, 0x14, 0x20),
         );
+        let text = match MSG.load(Ordering::Acquire) {
+            MSG_LOAD_FAILED => "App WASM nao carregou",
+            MSG_TERMINATED => "App WASM encerrado",
+            _ => "Carregando app WASM...",
+        };
         font::draw_text(
             c,
             (cx + 16).max(0) as usize,
             (cy + 16).max(0) as usize,
-            "Carregando app WASM...",
+            text,
             Color::rgb(0x9a, 0xa6, 0xbd),
             2,
         );
