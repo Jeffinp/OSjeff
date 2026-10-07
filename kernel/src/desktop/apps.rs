@@ -150,10 +150,40 @@ impl Desktop {
             theme::WHITE,
         );
         glyph_globe(c, Rect::new(bar.x + 10, bar.y + (bar.h - 18) / 2, 18, 18));
+
+        // Connection badge, right-aligned inside the bar. The TLS client never
+        // validates server certificates, so `https://` is NEVER shown as
+        // secure: no padlock, an explicit "not verified" warning instead (and
+        // plain http says it is not encrypted). Text is ASCII (bitmap font).
+        let mut badge_reserved = 0;
+        if let Some(label) = self.browser.security().label() {
+            use osjeff_core::browser::Security;
+            let (bg, fg) = match self.browser.security() {
+                Security::Http => (Color::rgb(0xFF, 0xD9, 0xD9), Color::rgb(0xA3, 0x1D, 0x1D)),
+                _ => (Color::rgb(0xFF, 0xE6, 0x9C), Color::rgb(0x6B, 0x3F, 0x00)),
+            };
+            let scale = if bar.w >= 520 { 2 } else { 1 };
+            let tw = font::text_width(label, scale) as i32;
+            let ph = 7 * scale as i32 + 8;
+            let pw = tw + 16;
+            let px = bar.x + bar.w - pw - 8;
+            let py = bar.y + (bar.h - ph) / 2;
+            c.fill_round_rect(
+                px as usize,
+                py as usize,
+                pw as usize,
+                ph as usize,
+                ph as usize / 2,
+                bg,
+            );
+            font::draw_text(c, (px + 8) as usize, (py + 4) as usize, label, fg, scale);
+            badge_reserved = pw + 12;
+        }
+
         let tx = (bar.x + 36) as usize;
         let ty = (bar.y + (bar.h - 14) / 2) as usize;
         let url = self.browser.url();
-        let bar_cols = ((bar.w - 48) as usize / font::cell_w(2)).max(1);
+        let bar_cols = (((bar.w - 48 - badge_reserved).max(0)) as usize / font::cell_w(2)).max(1);
         if url.is_empty() {
             font::draw_text(
                 c,
@@ -203,13 +233,35 @@ impl Desktop {
                 c,
                 (content.x + 8) as usize,
                 (content.y + 8) as usize,
-                "Falha ao carregar a pagina.",
+                self.browser.fail_reason().message(),
                 theme::CLOSE,
                 2,
             );
             return;
         };
         self.paint_web_page(c, page, content);
+
+        // The response hit the size cap: say so on the page instead of showing
+        // a silently cut document.
+        if self.browser.truncated() && content.h > 24 {
+            let h = 24;
+            let y = (content.bottom() - h) as usize;
+            c.fill_rect(
+                content.x as usize,
+                y,
+                content.w as usize,
+                h as usize,
+                Color::rgb(0xFF, 0xE6, 0x9C),
+            );
+            font::draw_text(
+                c,
+                (content.x + 8) as usize,
+                y + 5,
+                "Pagina truncada (resposta muito grande)",
+                Color::rgb(0x6B, 0x3F, 0x00),
+                2,
+            );
+        }
 
         // Scrollbar track + thumb when the rendered page overflows.
         if page.height > content.h && content.h > 0 {

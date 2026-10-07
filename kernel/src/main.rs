@@ -682,8 +682,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         if let Some(result) = fetch::take_result() {
             match result {
-                Some(r) => desk.browser_load(&r),
-                None => desk.browser_fail(),
+                Ok(page) => desk.browser_load(&page.data, page.https, page.truncated),
+                Err(reason) => desk.browser_fail(reason),
             }
             browser_redraw = true;
         }

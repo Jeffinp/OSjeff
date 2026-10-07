@@ -621,19 +621,21 @@ impl Desktop {
     }
 
     /// Render a fetched raw HTTP response with the `web` engine and keep the
-    /// resulting display list for painting/scrolling.
-    pub fn browser_load(&mut self, resp: &[u8]) {
+    /// resulting display list for painting/scrolling. `https` is the scheme of
+    /// the final URL and `truncated` says the response hit the size cap; both
+    /// feed the address-bar badge and the truncation notice.
+    pub fn browser_load(&mut self, resp: &[u8], https: bool, truncated: bool) {
         let content_w = BrowserChrome::of(self.windows[BROWSER].rect).content.w;
         let body = osjeff_core::browser::page_body(resp);
         self.web_page = Some(osjeff_core::web::render(&body, content_w));
         self.page_scroll = 0;
-        self.browser.loaded();
+        self.browser.loaded_with(https, truncated);
     }
 
     /// Mark the in-flight browser fetch as failed.
-    pub fn browser_fail(&mut self) {
+    pub fn browser_fail(&mut self, reason: osjeff_core::browser::FailReason) {
         self.web_page = None;
-        self.browser.fail();
+        self.browser.fail_with(reason);
     }
 
     /// Scroll the rendered page by `dy` pixels, clamped to its content height.

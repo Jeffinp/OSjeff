@@ -28,6 +28,71 @@ pub fn append_capped(out: &mut alloc::vec::Vec<u8>, data: &[u8], cap: usize) -> 
     take < data.len()
 }
 
+/// What the browser can honestly say about the connection that produced the
+/// page on screen. There is deliberately no "secure" variant: the TLS client
+/// does not validate server certificates, so no connection is ever verified.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Security {
+    /// Nothing loaded (start page).
+    None,
+    /// Plain `http://`: not encrypted.
+    Http,
+    /// `https://`: encrypted, but the server certificate is NOT validated, so
+    /// the peer's identity is unverified (a man in the middle is possible).
+    HttpsUnverified,
+}
+
+impl Security {
+    /// Short label for the address bar, `None` when there is nothing to say.
+    /// ASCII only (the bitmap font has no accents).
+    pub fn label(self) -> Option<&'static str> {
+        match self {
+            Security::None => None,
+            Security::Http => Some("Nao seguro"),
+            Security::HttpsUnverified => Some("Conexao nao verificada"),
+        }
+    }
+}
+
+/// Why a navigation failed, so the UI can say more than "failed".
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FailReason {
+    /// DNS, connect, TLS or timeout: no usable response.
+    Network,
+    /// A redirect tried to move from `https://` to `http://`; blocked.
+    RedirectDowngrade,
+    /// A redirect `Location` was malformed or unsupported.
+    RedirectInvalid,
+    /// A redirect pointed back at a URL already visited in this navigation.
+    RedirectLoop,
+    /// More than [`crate::redirect::MAX_REDIRECTS`] redirects.
+    TooManyRedirects,
+}
+
+impl FailReason {
+    /// One-line message for the page area (ASCII only).
+    pub fn message(self) -> &'static str {
+        match self {
+            FailReason::Network => "Falha ao carregar a pagina.",
+            FailReason::RedirectDowngrade => "Bloqueado: redirecionamento de HTTPS para HTTP.",
+            FailReason::RedirectInvalid => "Redirecionamento invalido.",
+            FailReason::RedirectLoop => "Redirecionamento em ciclo.",
+            FailReason::TooManyRedirects => "Redirecionamentos demais.",
+        }
+    }
+
+    /// Map a refused redirect onto the reason shown to the user.
+    pub fn from_redirect(e: crate::redirect::RedirectError) -> Self {
+        use crate::redirect::RedirectError as E;
+        match e {
+            E::Invalid => FailReason::RedirectInvalid,
+            E::Downgrade => FailReason::RedirectDowngrade,
+            E::Loop => FailReason::RedirectLoop,
+            E::TooMany => FailReason::TooManyRedirects,
+        }
+    }
+}
+
 /// Where a fetch stands, surfaced in the UI.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Status {
@@ -462,6 +527,9 @@ pub struct Browser {
     nav: [u8; URL_CAP],
     nav_len: usize,
     home: bool, // showing the native start page (no page loaded)
+    security: Security,
+    truncated: bool,
+    fail_reason: FailReason,
 }
 
 /// Quick-link shortcuts shown on the start page (label, URL). All chosen to
@@ -490,6 +558,9 @@ impl Browser {
             nav: [0; URL_CAP],
             nav_len: 0,
             home: true,
+            security: Security::None,
+            truncated: false,
+            fail_reason: FailReason::Network,
         };
         b.set_url(b"");
         b
@@ -504,6 +575,8 @@ impl Browser {
     pub fn go_home(&mut self) {
         self.home = true;
         self.status = Status::Idle;
+        self.security = Security::None;
+        self.truncated = false;
         self.set_url(b"");
     }
 
@@ -534,6 +607,24 @@ impl Browser {
     }
     pub fn status(&self) -> Status {
         self.status
+    }
+
+    /// What can be said about the connection behind the current page. While a
+    /// load is in flight this reflects the *requested* scheme; once it
+    /// completes ([`Browser::loaded_with`]) it reflects the final one, after
+    /// any redirects. Never reports a verified connection (see [`Security`]).
+    pub fn security(&self) -> Security {
+        self.security
+    }
+
+    /// True when the loaded page was cut at [`MAX_RESPONSE_BYTES`].
+    pub fn truncated(&self) -> bool {
+        self.truncated
+    }
+
+    /// Why the last navigation failed (meaningful when `status()` is `Error`).
+    pub fn fail_reason(&self) -> FailReason {
+        self.fail_reason
     }
 
     /// Handle a key while the address bar has focus. Returns `true` if anything
@@ -626,6 +717,12 @@ impl Browser {
         };
         self.nav_len = n;
         self.nav[..n].copy_from_slice(&nav[..n]);
+        self.security = if starts_with_ci(&nav[..n], b"http://") {
+            Security::Http
+        } else {
+            Security::HttpsUnverified
+        };
+        self.truncated = false;
         self.status = Status::Loading;
         self.pending = true;
         self.home = false;
@@ -649,9 +746,29 @@ impl Browser {
         self.home = false;
     }
 
+    /// Like [`Browser::loaded`], recording how the page actually arrived: `https`
+    /// is the scheme of the *final* URL (after redirects) and `truncated` says
+    /// the response hit [`MAX_RESPONSE_BYTES`].
+    pub fn loaded_with(&mut self, https: bool, truncated: bool) {
+        self.security = if https {
+            Security::HttpsUnverified
+        } else {
+            Security::Http
+        };
+        self.truncated = truncated;
+        self.loaded();
+    }
+
     /// Mark the current fetch as failed (the kernel shows the error state).
     pub fn fail(&mut self) {
+        self.fail_with(FailReason::Network);
+    }
+
+    /// Mark the current fetch as failed for a specific reason.
+    pub fn fail_with(&mut self, reason: FailReason) {
         self.status = Status::Error;
+        self.fail_reason = reason;
+        self.truncated = false;
         self.home = false;
     }
 }
@@ -909,5 +1026,80 @@ mod tests {
         let mut v = alloc::vec::Vec::new();
         assert!(!append_capped(&mut v, &[1u8; 1024], MAX_RESPONSE_BYTES));
         assert_eq!(v.len(), 1024);
+    }
+
+    #[test]
+    fn https_is_labelled_unverified_and_never_secure() {
+        let mut b = Browser::new();
+        assert_eq!(b.security(), Security::None);
+        assert_eq!(b.security().label(), None);
+        b.open(b"https://example.com");
+        assert_eq!(b.security(), Security::HttpsUnverified);
+        let label = b.security().label().unwrap();
+        assert!(label.to_ascii_lowercase().contains("nao verificada"));
+        let _ = b.take_request();
+        b.loaded_with(true, false);
+        assert_eq!(b.security(), Security::HttpsUnverified);
+        assert!(!b.truncated());
+        // A bare host is normalised to https, so it is labelled too.
+        b.open(b"example.com");
+        assert_eq!(b.security(), Security::HttpsUnverified);
+        // Plain http says so.
+        b.open(b"http://example.com");
+        assert_eq!(b.security(), Security::Http);
+        assert_eq!(b.security().label(), Some("Nao seguro"));
+    }
+
+    #[test]
+    fn final_scheme_after_redirect_wins_over_requested_one() {
+        let mut b = Browser::new();
+        b.open(b"http://example.com"); // asked for http...
+        let _ = b.take_request();
+        b.loaded_with(true, false); // ...but ended on https
+        assert_eq!(b.security(), Security::HttpsUnverified);
+        b.open(b"https://example.com");
+        let _ = b.take_request();
+        b.loaded_with(false, false); // (the kernel blocks this; the model stays honest)
+        assert_eq!(b.security(), Security::Http);
+    }
+
+    #[test]
+    fn truncation_and_failure_state() {
+        let mut b = Browser::new();
+        b.open(b"example.com");
+        let _ = b.take_request();
+        b.loaded_with(true, true);
+        assert!(b.truncated());
+        assert_eq!(b.status(), Status::Done);
+        // A new navigation clears the flag.
+        b.open(b"example.org");
+        assert!(!b.truncated());
+        let _ = b.take_request();
+        b.fail_with(FailReason::RedirectDowngrade);
+        assert_eq!(b.status(), Status::Error);
+        assert_eq!(b.fail_reason(), FailReason::RedirectDowngrade);
+        assert!(b.fail_reason().message().contains("HTTPS"));
+        b.fail();
+        assert_eq!(b.fail_reason(), FailReason::Network);
+        b.go_home();
+        assert_eq!(b.security(), Security::None);
+    }
+
+    #[test]
+    fn redirect_errors_map_to_distinct_reasons() {
+        use crate::redirect::RedirectError as E;
+        let all = [E::Invalid, E::Downgrade, E::Loop, E::TooMany];
+        let reasons: alloc::vec::Vec<_> =
+            all.iter().map(|&e| FailReason::from_redirect(e)).collect();
+        for (i, a) in reasons.iter().enumerate() {
+            for b in &reasons[i + 1..] {
+                assert_ne!(a, b);
+            }
+            assert!(a.message().is_ascii());
+        }
+        assert_eq!(
+            FailReason::from_redirect(E::Downgrade),
+            FailReason::RedirectDowngrade
+        );
     }
 }

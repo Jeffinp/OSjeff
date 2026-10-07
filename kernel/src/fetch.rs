@@ -17,6 +17,7 @@ use crate::sync::RacyCell;
 use crate::{netstack, serial_println};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU8, Ordering};
+use osjeff_core::browser::FailReason;
 
 const IDLE: u8 = 0;
 const REQUESTED: u8 = 1;
@@ -29,7 +30,20 @@ static STATE: AtomicU8 = AtomicU8::new(IDLE);
 static NET: RacyCell<Option<netstack::Net>> = RacyCell::new(None);
 static REQ_URL: RacyCell<[u8; URL_CAP]> = RacyCell::new([0; URL_CAP]);
 static REQ_LEN: RacyCell<usize> = RacyCell::new(0);
-static RESULT: RacyCell<Option<Vec<u8>>> = RacyCell::new(None);
+static RESULT: RacyCell<Option<FetchResult>> = RacyCell::new(None);
+
+/// A fetched page plus what the browser needs to describe it honestly.
+pub struct Loaded {
+    /// Raw HTTP response (headers + body), at most `MAX_RESPONSE_BYTES`.
+    pub data: Vec<u8>,
+    /// Scheme of the *final* URL, after redirects.
+    pub https: bool,
+    /// The response was cut at the size cap.
+    pub truncated: bool,
+}
+
+/// Outcome of one navigation: the page, or why it failed.
+pub type FetchResult = Result<Loaded, FailReason>;
 
 /// Hand the network stack to the fetcher (call once, before spawning [`worker`]).
 pub fn init(net: netstack::Net) {
@@ -63,9 +77,9 @@ pub fn try_post(url: &[u8]) -> bool {
     true
 }
 
-/// If a fetch has finished, return its result (`Some(bytes)` on success, `None`
-/// on failure) and reset to idle. Yields `None` while nothing is ready.
-pub fn take_result() -> Option<Option<Vec<u8>>> {
+/// If a fetch has finished, return its result and reset to idle. Yields `None`
+/// while nothing is ready.
+pub fn take_result() -> Option<FetchResult> {
     if STATE.load(Ordering::Acquire) != DONE {
         return None;
     }
@@ -73,7 +87,7 @@ pub fn take_result() -> Option<Option<Vec<u8>>> {
     // until the compositor sets IDLE, which happens after this take (compositor is the only caller).
     let r = unsafe { (*RESULT.get()).take() };
     STATE.store(IDLE, Ordering::Release);
-    Some(r)
+    Some(r.unwrap_or(Err(FailReason::Network)))
 }
 
 /// Worker thread entry. Processes one queued request at a time and halts the CPU
@@ -95,12 +109,12 @@ pub extern "C" fn worker() -> ! {
             // `STATE`/`is_idle()`, not from the type.
             let result = match unsafe { (*NET.get()).as_mut() } {
                 Some(net) => fetch_url(net, &url),
-                None => None,
+                None => Err(FailReason::Network),
             };
             // SAFETY: STATE is RUNNING here; the compositor only touches RESULT after seeing DONE, which is
             // stored (Release) right after this write.
             unsafe {
-                *RESULT.get() = result;
+                *RESULT.get() = Some(result);
             }
             STATE.store(DONE, Ordering::Release);
         } else {
@@ -110,24 +124,23 @@ pub extern "C" fn worker() -> ! {
 }
 
 /// Resolve a URL and fetch it (HTTP or HTTPS), following up to
-/// [`osjeff_core::redirect::MAX_REDIRECTS`] redirects. Returns the final raw
-/// HTTP response, or `None` on failure. Redirect policy (scheme kept,
-/// https -> http refused, loops, bad `Location` values) lives in
-/// `osjeff_core::redirect`.
-fn fetch_url(net: &mut netstack::Net, url: &[u8]) -> Option<Vec<u8>> {
+/// [`osjeff_core::redirect::MAX_REDIRECTS`] redirects. Returns the final page,
+/// or why the navigation failed. Redirect policy (scheme kept, https -> http
+/// refused, loops, bad `Location` values) lives in `osjeff_core::redirect`.
+fn fetch_url(net: &mut netstack::Net, url: &[u8]) -> FetchResult {
     use osjeff_core::browser::{header_value, parse_url, status_code};
     use osjeff_core::redirect::Redirects;
     let mut cur: Vec<u8> = url.to_vec();
     let mut chain: Option<Redirects> = None;
 
     loop {
-        let u = parse_url(&cur)?;
+        let u = parse_url(&cur).ok_or(FailReason::Network)?;
         let chain = chain.get_or_insert_with(|| Redirects::new(&u));
         let (Ok(host), Ok(path)) = (
             core::str::from_utf8(u.host()),
             core::str::from_utf8(u.path()),
         ) else {
-            return None;
+            return Err(FailReason::Network);
         };
         serial_println!(
             "fetch: GET {}://{}{} :{}",
@@ -141,13 +154,11 @@ fn fetch_url(net: &mut netstack::Net, url: &[u8]) -> Option<Vec<u8>> {
         } else {
             net.http_get(host, path, u.port)
         };
-        let resp = resp?;
-        let truncated = resp.truncated;
-        let r = resp.data;
+        let r = resp.ok_or(FailReason::Network)?;
 
-        let code = status_code(&r).unwrap_or(0);
+        let code = status_code(&r.data).unwrap_or(0);
         if matches!(code, 301 | 302 | 303 | 307 | 308)
-            && let Some(loc) = header_value(&r, b"location")
+            && let Some(loc) = header_value(&r.data, b"location")
         {
             match chain.follow(&u, loc) {
                 Ok(next) => {
@@ -157,17 +168,21 @@ fn fetch_url(net: &mut netstack::Net, url: &[u8]) -> Option<Vec<u8>> {
                 }
                 Err(e) => {
                     serial_println!("fetch: {} redirect refused: {:?}", code, e);
-                    return None;
+                    return Err(FailReason::from_redirect(e));
                 }
             }
         }
 
         serial_println!(
             "fetch: {} bytes (status {}){}",
-            r.len(),
+            r.data.len(),
             code,
-            if truncated { " truncated" } else { "" }
+            if r.truncated { " truncated" } else { "" }
         );
-        return Some(r);
+        return Ok(Loaded {
+            data: r.data,
+            https: u.https,
+            truncated: r.truncated,
+        });
     }
 }
