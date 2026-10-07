@@ -28,8 +28,8 @@ for everything that comes from outside are fuzzed, and the project went through 
 [full security and performance audit](docs/audit/RELATORIO.md) whose findings are
 fixed or documented. (Audit documents are in Portuguese.)
 
-> **Honesty first.** Everything runs in ring 0 with no isolation; HTTPS **does not
-> verify certificates**; nothing has been tested on real hardware. See
+> **Honesty first.** Everything runs in ring 0 with no isolation; HTTPS **verifies the certificate chain**
+> (no revocation checking, no HSTS); nothing has been tested on real hardware. See
 > the "Known limits" section below and the [security model](docs/SECURITY-MODEL.md).
 
 ---
@@ -39,7 +39,7 @@ fixed or documented. (Audit documents are in Portuguese.)
 | Desktop | Task manager (real per-thread CPU) |
 |:---:|:---:|
 | <img src="docs/img/desktop.png" width="420"> | <img src="docs/img/taskmanager.png" width="420"> |
-| **File manager (folders, trash, persistent)** | **Browser (HTTPS flagged "not verified")** |
+| **File manager (folders, trash, persistent)** | **Browser (verified HTTPS: "Conexao segura")** |
 | <img src="docs/img/files.png" width="420"> | <img src="docs/img/browser.png" width="420"> |
 
 When the kernel fails it **says what happened**, on screen and on serial (here, a
@@ -135,7 +135,7 @@ Full report, with proof for each item and what was **not** worth doing:
 
 Defence is at the input: everything from the network, disk, HTML/CSS or `.wasm` goes
 through `unsafe`-free code with limits and fuzzing. What does **not** exist: isolation
-between apps and kernel (single ring 0) and TLS certificate verification. Details, attack scenarios and how to report:
+between apps and kernel (single ring 0) revocation checking (CRL/OCSP) and HSTS. Details, attack scenarios and how to report:
 [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md) · [`SECURITY.md`](SECURITY.md).
 
 ---
@@ -145,7 +145,7 @@ between apps and kernel (single ring 0) and TLS certificate verification. Detail
 - **Single ring 0**: a bug anywhere is a bug in the whole kernel. The evolution path
   (WebAssembly as the boundary, ring 3 only with a trigger) is in the
   [isolation ADR](docs/audit/adr-isolamento.md).
-- **HTTPS does not verify certificates.** The UI says so ("Conexao nao verificada").
+- **HTTPS is verified, but there is no revocation checking (CRL/OCSP), pinning or HSTS**; the time comes from the RTC corrected by (unauthenticated) SNTP. A certificate error blocks the page, with a per-site, per-session "continue anyway". See [`docs/design/tls-browser.md`](docs/design/tls-browser.md) (Portuguese).
 - **Network is NE2000 only** (a rare ISA card, QEMU only): IP, gateway and DNS come from DHCP (tested on another subnet), but there is no common-NIC driver and the lease is not renewed.
 - **No real-hardware testing.** BIOS gives 1280×720 at 24 bpp and UEFI needs at least
   192 MB of RAM (the kernel BSS is ~91 MiB).

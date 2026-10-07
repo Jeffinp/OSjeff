@@ -862,11 +862,14 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
   por segundo na serial.
 - **`smoltcp` 0.12:** um socket TCP (buffers de 8 KiB) e um UDP (para o DNS), **uma conexão por
   vez**; prazos de 8 s (conexão), 10 s (leitura HTTP), 12 s (cada operação TLS). O pedido é
-  `GET ... HTTP/1.0` com `Connection: close` (evita *chunked* e keep-alive).
+  `GET ... HTTP/1.1` com `Connection: close` e `Accept-Encoding: gzip, deflate` (sem keep-alive;
+  *chunked* e `Content-Encoding` são tratados em `browser::page_body`).
 - **TLS:** `embedded-tls` 0.19, TLS 1.3, `Aes128GcmSha256`, SNI, cripto por software
-  (o handshake é lento no TCG: o motivo da thread própria). **Sem verificação de
-  certificado** (`UnsecureProvider`): o tráfego é cifrado, o servidor **não é
-  autenticado**.
+  (o handshake é lento no TCG: o motivo da thread própria). **Com verificação de
+  certificado**: `kernel/src/tlsv.rs` liga um `Verifier` ao `embedded-tls` (cadeia, nome e
+  `CertificateVerify`, lógica em `osjeff_core::tlsverify` sobre `rustls-webpki`, trust store
+  de 46 raízes em `osjeff_core/data/`), na hora de `kernel/src/clock.rs` (RTC + SNTP). Ver
+  [`design/tls-browser.md`](design/tls-browser.md).
 - **RNG do handshake:** `RDRAND` se `CPUID.01H:ECX[30]` o anuncia e uma amostra de teste
   funciona (até 10 tentativas por palavra); senão `WeakMixer` (hash de TSC e ticks),
   **não criptográfico**, anunciado na serial (`RNG: weak fallback`). O `embedded-tls`
@@ -895,10 +898,11 @@ ganha `https://`. A tela inicial
 tem 4 atalhos (Bing, Wikipedia, Cloudflare, Exemplo), escolhidos por aceitarem o
 handshake P-256 do cliente.
 
-**Rótulo de segurança.** O enum `Security` tem `None`, `Http` ("Nao seguro") e
-`HttpsUnverified` ("Conexao nao verificada"). **Não existe variante "seguro"** de
-propósito: nenhuma conexão é verificada, então um cadeado não pode ser desenhado por
-engano.
+**Rótulo de segurança.** O enum `Security` tem `None`, `Http` ("Nao seguro"),
+`HttpsVerified` ("Conexao segura") e `HttpsInvalid` ("Certificado invalido", só depois do
+"continuar mesmo assim"). **"Seguro" só existe como `HttpsVerified`**, que só sai de
+`Browser::loaded_with(Conn::Verified, ..)`: o `fetcher` devolve `Conn::Verified` apenas
+depois da cadeia e da assinatura do handshake verificadas.
 
 `osjeff_core::web` é um motor de caixas no estilo "robinson": HTML para DOM, CSS (agente
 de usuário mais `<style>`), árvore estilizada, layout de blocos com fluxo inline, lista

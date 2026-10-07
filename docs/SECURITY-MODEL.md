@@ -25,7 +25,7 @@ Quem controla o dado, quem o interpreta e o que impede o pior.
 | # | Fronteira | Quem controla o dado | Quem interpreta | Proteções | Risco residual |
 |---|---|---|---|---|---|
 | 1 | **Frames de rede** (virtio-net, NE2000) | qualquer host na rede | `osjeff_core::{net, lease, dns, icmp}` (ARP, IPv4, ICMP, UDP, DHCP, DNS) e `smoltcp` | `forbid(unsafe_code)` nesses módulos; fuzz de `net_parse` cobre o parser e responder, a máquina de lease, a resposta DNS e o ICMP (38 M execuções sem crash antes da rodada de rede; 1,2 M, 90 s, depois dela); resposta DNS só vale com id, pergunta e origem certos e registros do dono certo; ICMP de erro só vale se citar o nosso pedido; orçamento de 32 frames por acordada | `smoltcp` e os drivers não são fuzzados; DHCP e DNS sem autenticação; id e porta de origem do DNS vêm do TSC (fracos); frame que cruza o fim do anel do DP8390 *(suposição, não provado)* |
-| 2 | **Respostas HTTP/HTTPS** | servidor remoto, ou quem estiver no caminho | `fetch` → `osjeff_core::browser` (cabeçalhos, `chunked`, redirect) | corpo limitado a 256 KiB (`MAX_RESPONSE_BYTES`) nos dois protocolos; `dechunk` sem panic; redirect sem rebaixar https→http, no máximo 5 saltos, rejeita caracteres de controle | **TLS sem verificação de certificado** (§3.1) |
+| 2 | **Respostas HTTP/HTTPS** | servidor remoto, ou quem estiver no caminho | `fetch` → `osjeff_core::browser` (cabeçalhos, `chunked`, redirect) | corpo limitado a 256 KiB (`MAX_RESPONSE_BYTES`) nos dois protocolos e 1 MiB descompactado (gzip/deflate); `dechunk` sem panic; redirect sem rebaixar https→http, no máximo 5 saltos, rejeita caracteres de controle; **TLS com cadeia de certificado, nome e `CertificateVerify` verificados** contra uma trust store embutida (§3.1) | sem revogação (CRL/OCSP), *pinning* nem HSTS (§3.1) |
 | 3 | **HTML e CSS** | página remota | `osjeff_core::web` | profundidade 40, 8 000 nós, 1 000 regras e 2 000 seletores; comprimentos CSS limitados; cores não-ASCII rejeitadas; fuzz de ~0,7 M execuções sem crash | cascata ainda é O(regras × elementos) dentro dos tetos; fuzz do `web` ainda ganhava cobertura quando parou |
 | 4 | **Disco (OJFS)** | quem fornecer a imagem | `osjeff_core::fs` | validação de `size`, `parent` (ciclos), imagem curta; fuzz de 1 M execuções sem crash; falha de leitura **não** reescreve o disco | disco com conteúdo desconhecido ainda é formatado (é o desenho do disco dedicado); sem permissões nem criptografia |
 | 5 | **Apps `.wasm`** | embutidos no build (hoje) | `wasmi` + 31 host functions | combustível por chamada (20 M; 256 M na inicialização), memória de 24 MiB, tetos nas host functions, o app é encerrado e liberado em qualquer falha | o TCB inclui `wasmi` e as host functions: um bug ali é fuga total; não há *fuel* retomável (um quadro pesado legítimo é encerrado) |
@@ -51,23 +51,55 @@ Quem controla o dado, quem o interpreta e o que impede o pior.
 
 ## 3. O que **não** é protegido
 
-### 3.1 HTTPS não é seguro
-A pilha usa `embedded-tls` com `UnsecureProvider`: **o certificado do servidor não
-é verificado**. Quem estiver no caminho pode se passar pelo servidor e ler ou
-alterar o tráfego. A interface não mostra cadeado: a barra de endereço exibe
-**"Conexao nao verificada"** em `https://` e **"Nao seguro"** em `http://`, e o
-tipo `Security` não tem variante "seguro", então um cadeado não pode ser desenhado
-por engano.
+### 3.1 HTTPS (verificado, com ressalvas)
+A pilha usa `embedded-tls` com um verificador próprio (`kernel/src/tlsv.rs`, lógica em
+`osjeff_core::tlsverify`, sobre `rustls-webpki`): a cadeia do servidor é montada até uma
+das 46 raízes embutidas (`osjeff_core/data/trust-store.bin`, SHA-256 de cada uma em
+`trust-store.sha256`, regenerável com `tools/gen-trust-store.sh`), com assinaturas
+(RSA PKCS#1/PSS, ECDSA P-256/P-384), validade, `basicConstraints`/`keyUsage`, EKU
+`serverAuth`, restrições de nome e `pathLen`; o nome do site precisa constar no
+`subjectAltName`; e o `CertificateVerify` do TLS 1.3 precisa conferir com a chave da folha.
+Limites: 8 certificados, 16 KiB cada, handshake em até 30 s. O desenho completo está em
+[`design/tls-browser.md`](design/tls-browser.md).
+
+A barra de endereço diz o que aconteceu: **"Conexao segura"** só com cadeia válida,
+"Certificado invalido" (vermelho) se o usuário abriu a página mesmo com erro, "Nao seguro"
+em `http://`. O tipo `Security` só chega a "seguro" por `Conn::Verified`, que o `fetcher`
+devolve apenas depois da cadeia e da assinatura. Um erro de certificado bloqueia a página
+com o motivo (expirado, nome não confere, cadeia não confiável, autoassinado, hora do
+sistema incorreta...) e oferece **"Continuar mesmo assim (inseguro)"**: vale para aquele
+host, nesta sessão, só na memória (8 hosts), nunca em disco.
+
+**Hora.** A validade depende do relógio. O RTC é lido uma vez no boot e corrigido por SNTP
+(`time.cloudflare.com`, `pool.ntp.org`, `time.google.com`, depois o gateway; resposta
+validada: modo, leap, stratum, eco do *originate* com 16 bits aleatórios, ordem dos
+timestamps, atraso, data entre 2024 e 2100). O deslocamento vale só para a checagem de
+certificado. Sem resposta usa-se o RTC e a página avisa "Hora do sistema nao confirmada"
+quando a checagem de data falha. **O SNTP não é autenticado**: quem controla a rede pode
+mentir a hora e, com um certificado expirado que ainda tenha a chave, fazê-lo parecer
+válido (o mesmo vale para quem controla o RTC e bloqueia o UDP/123).
 
 O gerador de números aleatórios do handshake usa `RDRAND` quando a CPU tem
 (checado por CPUID, com 10 tentativas). Sem `RDRAND`, cai para uma mistura de TSC e
 PIT e registra `RNG: weak fallback` na serial; como o `embedded-tls` exige o trait
 `CryptoRng`, esse fallback **também** o implementa, e por isso não deve ser
-considerado criptograficamente forte. No QEMU padrão (`qemu64`) o caminho fraco é o
-exercitado; com `-cpu max` o `RDRAND` é usado.
+considerado criptograficamente forte: o servidor continua autenticado, mas a
+confidencialidade da sessão não é garantida nessa CPU. No QEMU padrão (`qemu64`) o
+caminho fraco é o exercitado; com `-cpu max` o `RDRAND` é usado.
 
-Antes de tratar login ou dados pessoais no navegador, faltam: trust store,
-relógio confiável (o RTC não é verificado) e verificação de cadeia.
+**O que continua faltando:**
+- **Revogação**: não existe CRL, OCSP nem grampeamento; um certificado revogado e ainda
+  válido é aceito.
+- **Pinning** e **HSTS**: nada impede um downgrade `http://` digitado pelo usuário, nem
+  fixa a CA esperada de um site; Certificate Transparency não é consultada.
+- A trust store é estática: raiz removida pelo Mozilla continua confiável até a próxima
+  versão do OSjeff (atualização manual, `tools/gen-trust-store.sh`).
+- Ed25519 em certificados de servidor não é suportado (o handshake falha com mensagem).
+- A dependência `rsa` 0.9 tem o aviso RUSTSEC-2023-0071 (vazamento por tempo em operações
+  de **chave privada**); aqui só verificamos assinaturas, não há chave privada RSA, e o
+  aviso está ignorado de propósito em `deny.toml`.
+- Em redes que reassinam o HTTPS (gateways corporativos, esta sandbox) toda página dá
+  "cadeia nao confiavel": é o comportamento correto.
 
 ### 3.2 Sem isolamento
 - Qualquer código do kernel lê e escreve toda a RAM e todo o MMIO (a memória física
@@ -125,7 +157,7 @@ relógio confiável (o RTC não é verificado) e verificação de cadeia.
 | Guest WASM em laço infinito | CPU presa para sempre, janela fechada não o parava | encerrado por *fuel*, liberado |
 | Guest WASM com `memory.grow` sem fim | 51% do heap | limitado a 24 MiB |
 | `random_get(0x7fffffff)` / `fd_write` com 2³¹ iovecs | trabalho ilimitado | `EINVAL` |
-| MITM em HTTPS | possível | **ainda possível** (§3.1); a interface avisa |
+| MITM em HTTPS | possível | **bloqueado** pela verificação de cadeia/nome/assinatura (§3.1); ainda possível com uma raiz da trust store comprometida, sem revogação, ou mentindo a hora por SNTP |
 | Servidor malicioso faz resposta de vários MiB | OOM mudo no `http_get` | truncado em 256 KiB, avisado na página |
 
 ## 5. Como reproduzir as provas

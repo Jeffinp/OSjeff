@@ -28,10 +28,15 @@ exceção em `fetcher`/`wasmapp` mata só a thread, e as pilhas têm página de 
 *Aceite:* matar o `fetcher` e abrir o navegador de novo funciona sem reiniciar o sistema.
 
 ### 2. HTTPS de verdade
-Trust store, relógio confiável e verificação de cadeia com `embedded-tls`
-(`CertVerifier`); sem `RDRAND`, recusar em vez de usar RNG fraco.
-*Aceite:* conectar a um servidor com certificado inválido falha; a barra deixa de
-dizer "não verificada" apenas para cadeias válidas.
+~~Trust store, relógio confiável e verificação de cadeia~~ **feito** (W16): 46 raízes
+embutidas com hash documentado, cadeia/nome/`CertificateVerify` verificados com
+`rustls-webpki`, SNTP para a hora, erro claro na página e "continuar mesmo assim" por
+origem e por sessão, `x509_parse` fuzzado (5 M de execuções sem crash). Detalhes e provas
+em [`design/tls-browser.md`](design/tls-browser.md). Ainda em aberto: revogação (CRL/OCSP),
+*pinning*, HSTS e, sem `RDRAND`, recusar em vez de usar o RNG fraco. O navegador ainda não
+tem links clicáveis, histórico, imagens nem formulários.
+*Aceite (cumprido):* servidor com certificado inválido falha e a barra só diz "Conexao
+segura" para cadeias válidas.
 
 ### 3. Rede que funciona fora do QEMU
 - ~~O DHCP alimenta o `netstack`~~ **feito** (`NetConfig`): o navegador carregou uma página numa sub-rede `192.168.77.0/24` com gateway e DNS do lease.

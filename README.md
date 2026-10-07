@@ -28,8 +28,8 @@ que vem de fora é fuzzado, e o projeto passou por uma
 [auditoria completa de segurança e desempenho](docs/audit/RELATORIO.md) cujos achados
 estão corrigidos ou documentados.
 
-> **Honestidade primeiro.** Tudo roda em ring 0, sem isolamento; o HTTPS **não
-> verifica certificado**; nada foi testado em hardware real. Veja
+> **Honestidade primeiro.** Tudo roda em ring 0, sem isolamento; o HTTPS **verifica a cadeia de certificado**
+> (sem revogação nem HSTS); nada foi testado em hardware real. Veja
 > a seção "Limites conhecidos" abaixo e o [modelo de segurança](docs/SECURITY-MODEL.md).
 
 ---
@@ -39,7 +39,7 @@ estão corrigidos ou documentados.
 | Desktop | Gerenciador de tarefas (CPU real por thread) |
 |:---:|:---:|
 | <img src="docs/img/desktop.png" width="420"> | <img src="docs/img/taskmanager.png" width="420"> |
-| **Gerenciador de arquivos (pastas, lixeira, persistente)** | **Navegador (HTTPS marcado como "não verificado")** |
+| **Gerenciador de arquivos (pastas, lixeira, persistente)** | **Navegador (HTTPS verificado: "Conexao segura")** |
 | <img src="docs/img/files.png" width="420"> | <img src="docs/img/browser.png" width="420"> |
 
 Quando o kernel falha, ele **diz o que aconteceu**, na tela e na serial (aqui, um
@@ -75,8 +75,8 @@ variantes (DOOM) e solução de problemas: [`docs/BUILDING.md`](docs/BUILDING.md
 | **Gráficos** | Compositor com damage tracking, double buffer, fonte 8×8 própria, sombras alpha, animações; HUD de desempenho | `fb.rs`, `desktop/` |
 | **Apps** | Terminal, Editor, Gerenciador de tarefas, Calculadora, Gerenciador de arquivos, Navegador, app WebAssembly | `desktop/`, `osjeff_core` |
 | **Armazenamento** | Filesystem **OJFS** próprio (48 arquivos, pastas, lixeira) sobre ATA PIO, persistente entre boots | `osjeff_core/src/fs.rs`, `ata.rs` |
-| **Rede** | `virtio-net` e NE2000 (trait `Nic`), ARP/IPv4/ICMP/DHCP próprios (renova o lease, responde e envia `ping`), DNS com cache e vários servidores, `smoltcp` para TCP, **TLS 1.3** (`embedded-tls`) | `nic.rs`, `virtio_net.rs`, `ne2000.rs`, `netd.rs`, `netstack.rs`, `osjeff_core/src/{net,lease,dns,icmp}.rs` |
-| **Navegador** | Parser HTML, CSS (cascata), layout, redirects, limites de recurso, indicador de conexão | `osjeff_core/src/{web,browser,redirect}` |
+| **Rede** | `virtio-net` e NE2000 (trait `Nic`), ARP/IPv4/ICMP/DHCP próprios (renova o lease, responde e envia `ping`), DNS com cache e vários servidores, `smoltcp` para TCP, **TLS 1.3** (`embedded-tls`) **com cadeia de certificados verificada** (`rustls-webpki`, 46 raízes embutidas) e hora por SNTP | `nic.rs`, `virtio_net.rs`, `ne2000.rs`, `netd.rs`, `netstack.rs`, `osjeff_core/src/{net,lease,dns,icmp}.rs` |
+| **Navegador** | Parser HTML, CSS (cascata), layout, redirects, gzip/deflate, limites de recurso, indicador de conexão ("Conexao segura" só com certificado verificado) | `osjeff_core/src/{web,browser,redirect}` |
 | **WebAssembly** | Runtime `wasmi` como formato nativo de apps: ABI própria + subconjunto WASI, *fuel* por chamada, 24 MiB de memória, término real do app. Roda Snake; **DOOM** via `wasi-sdk` | `kernel/src/wasm/`, `wasm-apps/` |
 | **Dispositivos** | PS/2 (teclado, mouse), RTC, PCI, virtio-gpu (2D), ATA IDENTIFY | `ps2.rs`, `pci.rs`, `virtio*.rs` |
 
@@ -135,7 +135,7 @@ Relatório completo, com a prova de cada item e o que **não** valia a pena faze
 
 A defesa é na entrada: tudo que vem da rede, do disco, de HTML/CSS ou de `.wasm`
 passa por código sem `unsafe`, com limites e fuzz. O que **não** existe: isolamento
-entre apps e kernel (ring 0 único) e verificação de certificado TLS. Detalhes, cenários de ataque e como relatar:
+entre apps e kernel (ring 0 único), revogação de certificados (CRL/OCSP) e HSTS. Detalhes, cenários de ataque e como relatar:
 [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md) · [`SECURITY.md`](SECURITY.md).
 
 ---
@@ -145,7 +145,7 @@ entre apps e kernel (ring 0 único) e verificação de certificado TLS. Detalhes
 - **Ring 0 único**: um bug em qualquer parte é um bug do kernel todo. O caminho de
   evolução (WebAssembly como fronteira, ring 3 só com gatilho) está no
   [ADR de isolamento](docs/audit/adr-isolamento.md).
-- **HTTPS sem verificação de certificado.** A interface avisa ("Conexao nao verificada").
+- **HTTPS verificado, mas sem revogação (CRL/OCSP), *pinning* nem HSTS**; a hora vem do RTC corrigido por SNTP (não autenticado). Erro de certificado bloqueia a página, com "continuar mesmo assim" por site e por sessão. Veja [`docs/design/tls-browser.md`](docs/design/tls-browser.md).
 - **Rede só em QEMU/VMs** (`virtio-net` e NE2000 ISA): o IP, o gateway e os DNS vêm do DHCP, que é renovado (T1/T2/expiração, provado contra o servidor da SLIRP), mas não há driver para a NIC de um PC comum (`e1000`/`rtl8139`) e o DHCP e o DNS não são autenticados.
 - **Sem teste em hardware real.** BIOS entrega 1280×720 em 24 bpp e UEFI precisa de
   ≥ 192 MB de RAM (o BSS do kernel tem ~91 MiB).
