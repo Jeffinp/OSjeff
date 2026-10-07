@@ -130,9 +130,7 @@ pub fn natural_cmp(a: &[u8], b: &[u8]) -> Ordering {
             j += 1;
         }
     }
-    (a.len() - i)
-        .cmp(&(b.len() - j))
-        .then_with(|| a.cmp(b))
+    (a.len() - i).cmp(&(b.len() - j)).then_with(|| a.cmp(b))
 }
 
 fn trim_zeros(d: &[u8]) -> &[u8] {
@@ -311,7 +309,7 @@ impl Selection {
         self.mask
             .iter()
             .enumerate()
-            .filter(|(_, &m)| m)
+            .filter(|&(_, &m)| m)
             .map(|(i, _)| i)
             .collect()
     }
@@ -319,8 +317,9 @@ impl Selection {
     /// Select the rows in `names` (by index of `rows`), cursor on `cursor_name`.
     fn restore(&mut self, rows: &[Row], names: &[Vec<u8>], cursor_name: Option<&[u8]>) {
         self.reset(rows.len());
+        let wanted: alloc::collections::BTreeSet<&[u8]> = names.iter().map(|n| &n[..]).collect();
         for (i, r) in rows.iter().enumerate() {
-            if names.iter().any(|n| *n == r.name) {
+            if wanted.contains(&r.name[..]) {
                 self.set(i, true);
             }
             if cursor_name == Some(&r.name[..]) {
@@ -946,7 +945,12 @@ impl Layout {
                 (right - 10 - (r.x + 10 + 3 * (b + 6) + 4)).max(0),
                 b,
             ),
-            sidebar: Rect::new(r.x, top + TOOLBAR_H, SIDEBAR_W, (bottom - STATUS_H - top - TOOLBAR_H).max(0)),
+            sidebar: Rect::new(
+                r.x,
+                top + TOOLBAR_H,
+                SIDEBAR_W,
+                (bottom - STATUS_H - top - TOOLBAR_H).max(0),
+            ),
             header: Rect::new(main_x, top + TOOLBAR_H, (right - main_x).max(0), HEADER_H),
             list: Rect::new(main_x, list_top, (right - main_x - SCROLL_W).max(0), list_h),
             status: Rect::new(r.x, bottom - STATUS_H, r.w, STATUS_H),
@@ -974,9 +978,18 @@ impl Layout {
         let y0 = self.sidebar.y + 26;
         [
             (Place::Root, Rect::new(x, y0, w, SIDE_ROW_H)),
-            (Place::Documents, Rect::new(x, y0 + SIDE_ROW_H + 2, w, SIDE_ROW_H)),
-            (Place::Trash, Rect::new(x, y0 + 2 * (SIDE_ROW_H + 2), w, SIDE_ROW_H)),
-            (Place::Disk, Rect::new(x, y0 + 3 * (SIDE_ROW_H + 2) + 28, w, 46)),
+            (
+                Place::Documents,
+                Rect::new(x, y0 + SIDE_ROW_H + 2, w, SIDE_ROW_H),
+            ),
+            (
+                Place::Trash,
+                Rect::new(x, y0 + 2 * (SIDE_ROW_H + 2), w, SIDE_ROW_H),
+            ),
+            (
+                Place::Disk,
+                Rect::new(x, y0 + 3 * (SIDE_ROW_H + 2) + 28, w, 46),
+            ),
         ]
     }
 
