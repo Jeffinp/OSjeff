@@ -5,3 +5,4 @@
 //! the port I/O and MMIO glue and calls into these functions.
 
 pub mod ps2;
+pub mod rtc;
