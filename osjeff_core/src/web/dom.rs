@@ -59,6 +59,15 @@ fn is_void(tag: &str) -> bool {
 /// deeper than real-world page structure under `<body>`.
 pub const MAX_DEPTH: usize = 40;
 
+/// Maximum number of DOM nodes (elements + text runs) kept for one page.
+///
+/// Style resolution is O(rules x elements) and the display list grows with
+/// the node count, so an unbounded DOM lets a 256 KiB response (one `<i>` is
+/// 3 bytes) cost seconds of CPU and megabytes of heap. Parsing stops once the
+/// budget is spent: the page is rendered truncated, never refused. Real pages
+/// under `<body>` stay well below this.
+pub const MAX_NODES: usize = 8_000;
+
 /// Parse an HTML document into a DOM tree plus the concatenated text of every
 /// `<style>` element (the page's CSS). Tolerant of malformed markup: unknown
 /// tags pass through, mismatched close tags pop to the nearest match.
@@ -68,6 +77,7 @@ pub fn parse_html(input: &[u8]) -> (Vec<Node>, String) {
         b: s.as_bytes(),
         i: 0,
         css: String::new(),
+        nodes: 0,
     };
     let nodes = p.parse_nodes(&mut Vec::new());
     (nodes, p.css)
@@ -77,6 +87,8 @@ struct HtmlParser<'a> {
     b: &'a [u8],
     i: usize,
     css: String,
+    /// Nodes created so far (see [`MAX_NODES`]).
+    nodes: usize,
 }
 
 impl HtmlParser<'_> {
@@ -95,6 +107,12 @@ impl HtmlParser<'_> {
     fn parse_nodes(&mut self, open: &mut Vec<String>) -> Vec<Node> {
         let mut nodes = Vec::new();
         while !self.eof() {
+            if self.nodes >= MAX_NODES {
+                // Node budget spent: drop the rest of the document. Every
+                // enclosing `parse_nodes` then sees EOF and unwinds normally.
+                self.i = self.b.len();
+                break;
+            }
             if self.starts_with(b"<!--") {
                 self.skip_comment();
                 continue;
@@ -114,6 +132,7 @@ impl HtmlParser<'_> {
             } else {
                 let text = self.parse_text();
                 if !text.trim().is_empty() {
+                    self.nodes += 1;
                     nodes.push(Node::Text(text));
                 }
             }
@@ -151,6 +170,7 @@ impl HtmlParser<'_> {
         }
 
         if self_closing || is_void(&tag) {
+            self.nodes += 1;
             return Some(Node::Element(Element {
                 tag,
                 attrs,
@@ -166,6 +186,7 @@ impl HtmlParser<'_> {
             return None;
         }
 
+        self.nodes += 1;
         open.push(tag.clone());
         let children = self.parse_nodes(open);
         // Consume the matching close tag if present.
@@ -457,6 +478,40 @@ mod html_tests {
             })
             .unwrap();
         h.join().unwrap();
+    }
+
+    /// Regression: the DOM had no node budget, so a page of hundreds of
+    /// thousands of tiny elements (one `<i>` is 3 bytes) allocated without
+    /// bound and made every later pass slow. Parsing stops at `MAX_NODES`.
+    #[test]
+    fn node_count_is_capped() {
+        let html = "<i>x</i>".repeat(MAX_NODES * 3);
+        let (nodes, _) = parse_html(html.as_bytes());
+        let total = count_nodes(&nodes);
+        assert!(total <= MAX_NODES, "{total} nodes kept");
+        // ...but a normal document is untouched.
+        let (nodes, _) = parse_html("<p>a</p>".repeat(100).as_bytes());
+        assert_eq!(count_elements(&nodes), 100);
+    }
+
+    #[test]
+    fn node_cap_holds_for_siblings_and_nested_text() {
+        let html = "<div>t<b>u</b>v</div>".repeat(MAX_NODES);
+        let (nodes, _) = parse_html(html.as_bytes());
+        assert!(count_nodes(&nodes) <= MAX_NODES);
+        let html = "a<br>".repeat(MAX_NODES * 2); // void elements + text
+        let (nodes, _) = parse_html(html.as_bytes());
+        assert!(count_nodes(&nodes) <= MAX_NODES);
+    }
+
+    fn count_nodes(nodes: &[Node]) -> usize {
+        nodes
+            .iter()
+            .map(|n| match n {
+                Node::Element(e) => 1 + count_nodes(&e.children),
+                Node::Text(_) => 1,
+            })
+            .sum()
     }
 
     #[test]

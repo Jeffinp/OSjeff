@@ -6,6 +6,18 @@ use alloc::vec::Vec;
 
 // ---- CSS ----
 
+/// Maximum number of rules kept from one stylesheet.
+///
+/// The cascade tests every rule against every element, so rules x elements is
+/// the cost. With `MAX_NODES` elements this bounds the whole cascade to a few
+/// million selector tests. Later rules are dropped (document order is cascade
+/// order, so the page keeps its earliest, usually most structural, rules).
+pub const MAX_RULES: usize = 1_000;
+
+/// Maximum selectors summed over all rules of one stylesheet: a single rule
+/// with a huge comma list would otherwise dodge [`MAX_RULES`].
+pub const MAX_SELECTORS: usize = 2_000;
+
 /// A parsed stylesheet: an ordered list of rules.
 #[derive(Debug, Default)]
 pub struct Stylesheet {
@@ -74,7 +86,11 @@ pub fn parse_css(input: &str) -> Stylesheet {
     let b = input.as_bytes();
     let mut i = 0;
     let mut rules = Vec::new();
+    let mut selector_total = 0usize;
     while i < b.len() {
+        if rules.len() >= MAX_RULES || selector_total >= MAX_SELECTORS {
+            break;
+        }
         i = skip_css_ws(b, i);
         if i >= b.len() {
             break;
@@ -102,9 +118,12 @@ pub fn parse_css(input: &str) -> Stylesheet {
         if i < b.len() {
             i += 1; // '}'
         }
-        let selectors = parse_selectors(sel_text);
+        let mut selectors = parse_selectors(sel_text);
+        // Keep only as many selectors as the sheet-wide budget has left.
+        selectors.truncate(MAX_SELECTORS - selector_total);
         let decls = parse_decls(decl_text);
         if !selectors.is_empty() && !decls.is_empty() {
+            selector_total += selectors.len();
             rules.push(Rule { selectors, decls });
         }
     }
@@ -259,6 +278,29 @@ mod css_tests {
             parse_simple_selector("#lead").unwrap().specificity()
                 > parse_simple_selector("p").unwrap().specificity()
         );
+    }
+
+    /// Regression: unbounded rule and selector counts made the cascade
+    /// O(rules x elements) with no ceiling.
+    #[test]
+    fn rule_and_selector_counts_are_capped() {
+        let mut css = String::new();
+        for i in 0..(MAX_RULES * 3) {
+            css.push_str(&format!(".r{i}{{color:red}}"));
+        }
+        let ss = parse_css(&css);
+        assert_eq!(ss.rules.len(), MAX_RULES);
+        // The first rules are the ones kept (document order = cascade order).
+        assert_eq!(ss.rules[0].selectors[0].classes, ["r0"]);
+
+        // One rule with a huge selector list cannot dodge the selector budget.
+        let list = (0..MAX_SELECTORS * 4)
+            .map(|i| format!(".s{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let ss = parse_css(&format!("{list}{{color:red}} p{{margin:1px}}"));
+        let total: usize = ss.rules.iter().map(|r| r.selectors.len()).sum();
+        assert!(total <= MAX_SELECTORS, "{total} selectors kept");
     }
 
     #[test]

@@ -15,8 +15,8 @@ mod dom;
 mod layout;
 mod style;
 
-pub use css::{Decl, Rule, Selector, Specificity, Stylesheet, parse_css};
-pub use dom::{Element, Node, parse_html};
+pub use css::{Decl, MAX_RULES, MAX_SELECTORS, Rule, Selector, Specificity, Stylesheet, parse_css};
+pub use dom::{Element, MAX_DEPTH, MAX_NODES, Node, parse_html};
 pub use layout::{Cmd, Page, render};
 
 // ---- colors ----
@@ -99,5 +99,49 @@ mod tests {
         assert_eq!(parse_color("#\u{e9}\u{e9}\u{e9}"), None); // 6 bytes
         assert_eq!(parse_color("#1\u{e9}\u{e9}1"), None); // 6 bytes, mixed
         assert_eq!(parse_color("#\u{20ac}\u{20ac}"), None); // 2 x 3-byte chars
+    }
+
+    /// Regression: the cascade is O(rules x elements) and neither was bounded,
+    /// so a 256 KiB page with thousands of `<style>` rules and thousands of
+    /// elements burned seconds (1.6 s in release on a loaded host at
+    /// 5000 x 5000; far worse on the emulated CPU). Both are capped now: the DOM at `MAX_NODES` and
+    /// the stylesheet at `MAX_RULES` rules / `MAX_SELECTORS` selectors.
+    #[test]
+    fn huge_document_renders_fast_and_without_panic() {
+        let mut html = String::from("<style>");
+        for i in 0..5000 {
+            html.push_str(&format!(".c{i}, p.x{i} {{ color: red; margin: 1px }}\n"));
+        }
+        html.push_str("</style><body>");
+        for i in 0..5000 {
+            html.push_str(&format!("<p class='c{i}'>row {i}</p>"));
+        }
+        html.push_str("</body>");
+
+        let start = std::time::Instant::now();
+        let page = render(html.as_bytes(), 600);
+        let took = start.elapsed();
+        assert!(page.height > 0);
+        // Display commands are bounded by the node budget (one run per text
+        // node at most here), so the output cannot balloon either.
+        assert!(page.cmds.len() <= MAX_NODES, "{} cmds", page.cmds.len());
+        // Hang detector only (this is a debug build on a shared CI box): the
+        // capped render is ~0.2 s in release, the uncapped one was 1.6 s+ and
+        // grows with the product of the two counts.
+        assert!(
+            took < std::time::Duration::from_secs(20),
+            "render of an oversized page took {took:?}"
+        );
+    }
+
+    #[test]
+    fn page_limits_are_sane() {
+        // A real page (and the user-agent sheet) must fit comfortably.
+        const {
+            assert!(MAX_NODES >= 4096);
+            assert!(MAX_RULES >= 256);
+            assert!(MAX_SELECTORS >= MAX_RULES);
+            assert!(MAX_DEPTH >= 20);
+        }
     }
 }
