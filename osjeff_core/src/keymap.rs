@@ -27,6 +27,7 @@ pub struct Keymap {
     shift: bool,
     caps: bool,
     ctrl: bool,
+    alt: bool,
 }
 
 impl Keymap {
@@ -35,6 +36,7 @@ impl Keymap {
             shift: false,
             caps: false,
             ctrl: false,
+            alt: false,
         }
     }
 
@@ -53,12 +55,23 @@ impl Keymap {
         self.ctrl
     }
 
+    /// Current alt state (left, or right = extended, Alt held).
+    pub fn alt(&self) -> bool {
+        self.alt
+    }
+
     /// Process one PS/2 event. Returns the produced key on key-down, or `None`
     /// for modifier changes, key-up, and unmapped codes.
     pub fn process(&mut self, scan: u8, extended: bool, pressed: bool) -> Option<Key> {
         // Ctrl is scancode 0x1D for both left (normal) and right (extended).
         if scan == 0x1D {
             self.ctrl = pressed;
+            return None;
+        }
+
+        // Alt is scancode 0x38 for both left (normal) and right (extended, AltGr).
+        if scan == 0x38 {
+            self.alt = pressed;
             return None;
         }
 
@@ -204,6 +217,21 @@ mod tests {
         let mut km = Keymap::new();
         km.process(0x36, false, true);
         assert_eq!(down(&mut km, 0x1F), Some(Key::Char(b'S')));
+    }
+
+    #[test]
+    fn alt_tracks_press_and_release_and_tab_still_translates() {
+        let mut km = Keymap::new();
+        assert!(!km.alt());
+        assert_eq!(km.process(0x38, false, true), None); // left alt down
+        assert!(km.alt());
+        assert_eq!(down(&mut km, 0x0F), Some(Key::Tab)); // desktop reads alt()
+        assert_eq!(km.process(0x38, false, false), None);
+        assert!(!km.alt());
+        assert_eq!(km.process(0x38, true, true), None); // right alt (extended)
+        assert!(km.alt());
+        assert_eq!(km.process(0x38, true, false), None);
+        assert!(!km.alt());
     }
 
     #[test]

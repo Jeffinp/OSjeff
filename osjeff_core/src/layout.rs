@@ -228,6 +228,47 @@ pub fn start_item_at(sw: i32, sh: i32, apps: usize, px: i32, py: i32) -> Option<
     None
 }
 
+// ------------------------------------------------------------- work area & fit
+
+/// Bottom of the perf HUD (top-right corner, 12 px margin + 60 px panel) plus a
+/// little air. Maximized windows start below it so their title-bar buttons are
+/// never hidden under the HUD.
+pub const WORK_TOP: i32 = 76;
+/// Side margin of the work area.
+pub const WORK_SIDE: i32 = 12;
+/// Gap kept between the work area and the floating dock.
+pub const WORK_DOCK_GAP: i32 = 12;
+
+/// The rectangle windows maximize into: the screen minus the HUD band on top,
+/// a thin side margin and the floating dock at the bottom.
+pub fn work_area(sw: i32, sh: i32) -> Rect {
+    let (dock, _) = dock_layout(sw, sh);
+    let bottom = dock.y - WORK_DOCK_GAP;
+    Rect::new(
+        WORK_SIDE,
+        WORK_TOP,
+        (sw - 2 * WORK_SIDE).max(0),
+        (bottom - WORK_TOP).max(0),
+    )
+}
+
+/// Largest integer text scale in `base..=max` at which a text grid fits an
+/// `avail_w x avail_h` area. The grid measures `grid_w x grid_h` pixels at
+/// scale 1. When even `base` does not fit, `base` is returned (the caller
+/// clips). Apps with a fixed logical grid (terminal, editor) use this so a
+/// maximized window shows bigger, undistorted text instead of empty space.
+pub fn fit_scale(avail_w: i32, avail_h: i32, grid_w: i32, grid_h: i32, base: i32, max: i32) -> i32 {
+    let mut best = base;
+    let mut s = base + 1;
+    while s <= max {
+        if grid_w * s <= avail_w && grid_h * s <= avail_h {
+            best = s;
+        }
+        s += 1;
+    }
+    best
+}
+
 // ---------------------------------------------------------------- file manager
 
 /// Width of the file manager's sidebar.
@@ -273,6 +314,42 @@ mod tests {
 
     const SW: i32 = 1280;
     const SH: i32 = 800;
+
+    // ---- work area & fit ----
+
+    #[test]
+    fn work_area_clears_the_hud_and_the_dock() {
+        let w = work_area(SW, SH);
+        let (dock, _) = dock_layout(SW, SH);
+        assert_eq!(w.y, WORK_TOP);
+        assert!(w.bottom() + WORK_DOCK_GAP <= dock.y);
+        assert_eq!((w.x, w.right()), (WORK_SIDE, SW - WORK_SIDE));
+        // BIOS 1280x720 too.
+        let b = work_area(1280, 720);
+        assert!(b.h > 400);
+    }
+
+    #[test]
+    fn work_area_on_a_tiny_screen_is_not_negative() {
+        let w = work_area(100, 60);
+        assert!(w.w >= 0 && w.h >= 0);
+    }
+
+    #[test]
+    fn fit_scale_picks_the_largest_that_fits() {
+        // Terminal-like grid: 240 x 135 at scale 1.
+        assert_eq!(fit_scale(488, 282, 240, 135, 2, 4), 2);
+        assert_eq!(fit_scale(740, 420, 240, 135, 2, 4), 3);
+        assert_eq!(fit_scale(2000, 2000, 240, 135, 2, 4), 4); // capped
+        // Width limits even when height would allow more.
+        assert_eq!(fit_scale(500, 2000, 240, 135, 2, 4), 2);
+    }
+
+    #[test]
+    fn fit_scale_falls_back_to_base_when_nothing_fits() {
+        assert_eq!(fit_scale(10, 10, 240, 135, 2, 4), 2);
+        assert_eq!(fit_scale(0, 0, 240, 135, 2, 4), 2);
+    }
 
     // ---- context menu ----
 

@@ -1,4 +1,5 @@
-//! Process table. Fixed-capacity, allocation-free.
+//! Process table: a bounded list (at most [`MAX_PROC`] entries) that grows on
+//! demand, so every open window can own a process of its own.
 //!
 //! A "process" here is a bookkeeping entry (name, state, uptime), not an address
 //! space: the kernel, the compositor, and each app window. Preemption happens
@@ -6,8 +7,11 @@
 //! model. The Task Manager app views and controls this table; the table
 //! itself is pure logic and fully unit-tested.
 
-/// Maximum number of tracked processes.
-pub const MAX_PROC: usize = 8;
+use alloc::vec::Vec;
+
+/// Maximum number of tracked processes: the two system entries plus one per
+/// window of a full window table (`winman::DEFAULT_MAX_WINDOWS`), with slack.
+pub const MAX_PROC: usize = 48;
 const NAME_CAP: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -43,8 +47,7 @@ impl Process {
 }
 
 pub struct ProcessTable {
-    procs: [Process; MAX_PROC],
-    count: usize,
+    procs: Vec<Process>,
     next_pid: u16,
     selected: usize,
 }
@@ -57,41 +60,28 @@ impl Default for ProcessTable {
 
 impl ProcessTable {
     pub fn new() -> Self {
-        const EMPTY: Process = Process {
-            pid: 0,
-            name: [0; NAME_CAP],
-            name_len: 0,
-            kind: ProcKind::App,
-            state: ProcState::Terminated,
-            ticks: 0,
-        };
         Self {
-            procs: [EMPTY; MAX_PROC],
-            count: 0,
+            procs: Vec::new(),
             next_pid: 1,
             selected: 0,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.count
+        self.procs.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.count == 0
+        self.procs.is_empty()
     }
 
     pub fn at(&self, i: usize) -> Option<&Process> {
-        if i < self.count {
-            Some(&self.procs[i])
-        } else {
-            None
-        }
+        self.procs.get(i)
     }
 
     /// Spawn a process. Returns its pid, or `None` if the table is full.
     pub fn spawn(&mut self, name: &[u8], kind: ProcKind, state: ProcState) -> Option<u16> {
-        if self.count >= MAX_PROC {
+        if self.procs.len() >= MAX_PROC {
             return None;
         }
         let pid = self.next_pid;
@@ -106,13 +96,12 @@ impl ProcessTable {
             ticks: 0,
         };
         p.name[..n].copy_from_slice(&name[..n]);
-        self.procs[self.count] = p;
-        self.count += 1;
+        self.procs.push(p);
         Some(pid)
     }
 
     fn index_of(&self, pid: u16) -> Option<usize> {
-        (0..self.count).find(|&i| self.procs[i].pid == pid)
+        self.procs.iter().position(|p| p.pid == pid)
     }
 
     pub fn get(&self, pid: u16) -> Option<&Process> {
@@ -138,28 +127,27 @@ impl ProcessTable {
         if self.procs[i].kind == ProcKind::System {
             return false;
         }
-        for j in i..self.count - 1 {
-            self.procs[j] = self.procs[j + 1];
-        }
-        self.count -= 1;
-        if self.selected >= self.count && self.count > 0 {
-            self.selected = self.count - 1;
+        self.procs.remove(i);
+        let count = self.procs.len();
+        if self.selected >= count && count > 0 {
+            self.selected = count - 1;
         }
         true
     }
 
     /// Increment `ticks` for every `Running` process (one scheduler quantum).
     pub fn tick(&mut self) {
-        for i in 0..self.count {
-            if self.procs[i].state == ProcState::Running {
-                self.procs[i].ticks += 1;
+        for p in self.procs.iter_mut() {
+            if p.state == ProcState::Running {
+                p.ticks += 1;
             }
         }
     }
 
     pub fn running(&self) -> usize {
-        (0..self.count)
-            .filter(|&i| self.procs[i].state == ProcState::Running)
+        self.procs
+            .iter()
+            .filter(|p| p.state == ProcState::Running)
             .count()
     }
 
@@ -174,14 +162,15 @@ impl ProcessTable {
     }
 
     pub fn select_next(&mut self) {
-        if self.count > 0 {
-            self.selected = (self.selected + 1) % self.count;
+        if !self.procs.is_empty() {
+            self.selected = (self.selected + 1) % self.procs.len();
         }
     }
 
     pub fn select_prev(&mut self) {
-        if self.count > 0 {
-            self.selected = (self.selected + self.count - 1) % self.count;
+        let n = self.procs.len();
+        if n > 0 {
+            self.selected = (self.selected + n - 1) % n;
         }
     }
 }
@@ -231,6 +220,30 @@ mod tests {
                 .is_none()
         );
         assert_eq!(t.len(), MAX_PROC);
+    }
+
+    #[test]
+    fn table_holds_one_process_per_window_of_a_full_window_table() {
+        // Two system entries + a full table of windows must fit.
+        const { assert!(MAX_PROC >= 2 + crate::winman::DEFAULT_MAX_WINDOWS) };
+    }
+
+    #[test]
+    fn killing_in_the_middle_keeps_order_and_pids_unique() {
+        let mut t = ProcessTable::new();
+        let pids: Vec<u16> = (0..20)
+            .map(|_| t.spawn(b"p", ProcKind::App, ProcState::Running).unwrap())
+            .collect();
+        for &p in pids.iter().step_by(3) {
+            assert!(t.kill(p));
+        }
+        let left: Vec<u16> = (0..t.len()).map(|i| t.at(i).unwrap().pid).collect();
+        let mut sorted = left.clone();
+        sorted.sort_unstable();
+        assert_eq!(left, sorted); // spawn order preserved
+        // A new spawn never reuses a dead pid.
+        let fresh = t.spawn(b"p", ProcKind::App, ProcState::Running).unwrap();
+        assert!(!pids.contains(&fresh));
     }
 
     #[test]

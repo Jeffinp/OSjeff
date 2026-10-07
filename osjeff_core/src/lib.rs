@@ -47,6 +47,7 @@ pub mod terminal;
 pub(crate) mod testutil;
 pub mod web;
 pub mod window;
+pub mod winman;
 pub mod wm;
 
 pub use anim::Anim;
