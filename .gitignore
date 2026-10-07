@@ -35,3 +35,7 @@ qlog.txt
 # Performance harness output and the (separate) bench crate build dir
 /tools/perf/runs/
 /bench/target/
+
+# Runtime artifacts from tools/run.sh
+*.pcap
+osjeff-ovmf-vars.fd

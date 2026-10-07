@@ -9,8 +9,10 @@
 # <outdir>/net.pcap. Exits 0 if the screenshot was taken.
 #
 # Extra monitor commands (sendkey, mouse_move, ...) can be sent while it runs
-# through <outdir>/mon.sock, e.g.:
-#   echo "sendkey a" | socat - UNIX-CONNECT:<outdir>/mon.sock
+# through the monitor socket, whose path is printed at start and is also
+# available as <outdir>/mon.path (the socket itself lives under /tmp because a
+# Unix socket path is limited to 107 bytes and <outdir> may be longer), e.g.:
+#   echo "sendkey a" | socat - UNIX-CONNECT:$(cat <outdir>/mon.path)
 set -euo pipefail
 
 mode=${1:?usage: qemu-headless.sh <bios|uefi> <outdir> [wait_seconds]}
@@ -25,7 +27,9 @@ img=$(find "$root/target/release/build" -path "*/out/osjeff-$mode.img" -printf '
 [ -f "$img" ] || { echo "image not found; run: cargo build --release -p os" >&2; exit 2; }
 
 mkdir -p "$out"
-rm -f "$out"/serial.log "$out"/mon.sock "$out"/screen.ppm "$out"/screen.png
+rm -f "$out"/serial.log "$out"/mon.sock "$out"/mon.path "$out"/screen.ppm "$out"/screen.png
+sock=$(mktemp -u "${TMPDIR:-/tmp}/osjeff-mon.XXXXXX")
+echo "$sock" > "$out/mon.path"
 # Fresh persistent-FS disk each run so results are reproducible (KEEP_FS=1 keeps
 # an existing <outdir>/fs.img, e.g. to test persistence or corrupted disks).
 fsimg="$out/fs.img"
@@ -35,7 +39,7 @@ fi
 
 args=(-m "${QEMU_MEM:-128M}" -display none -no-reboot -no-shutdown
       -serial "file:$out/serial.log"
-      -monitor "unix:$out/mon.sock,server,nowait"
+      -monitor "unix:$sock,server,nowait"
       -drive "format=raw,file=$img"
       -drive "format=raw,file=$fsimg,if=ide,index=2"
       -netdev user,id=n0 -device ne2k_isa,netdev=n0,mac=52:54:00:12:34:56
@@ -52,13 +56,13 @@ fi
 
 qemu-system-x86_64 "${args[@]}" "$@" &
 qpid=$!
-trap 'kill $qpid 2>/dev/null || true' EXIT
+trap 'kill $qpid 2>/dev/null || true; rm -f "$sock"' EXIT
 
 sleep "$wait_s"
-echo "screendump $out/screen.ppm" | socat - "UNIX-CONNECT:$out/mon.sock" >/dev/null
+echo "screendump $out/screen.ppm" | socat - "UNIX-CONNECT:$sock" >/dev/null
 sleep 1
 if command -v convert >/dev/null; then convert "$out/screen.ppm" "$out/screen.png"; fi
 echo "image : $img ($(stat -c %s "$img") bytes)"
 echo "serial: $out/serial.log ($(wc -l < "$out/serial.log") lines)"
 echo "screen: $out/screen.png"
-echo "quit" | socat - "UNIX-CONNECT:$out/mon.sock" >/dev/null 2>&1 || true
+echo "quit" | socat - "UNIX-CONNECT:$sock" >/dev/null 2>&1 || true
