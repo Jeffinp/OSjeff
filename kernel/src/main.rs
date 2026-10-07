@@ -711,7 +711,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // keyboard/mouse IRQs wake us immediately on input. This paces frames to
         // the tick rate and stops the compositor from burning a full core — a
         // real system halts when it has nothing to draw.
-        x86_64::instructions::hlt();
+        //
+        // `sched::idle` does this without the old lost-wakeup window (input that
+        // lands between the last poll and the `hlt` is noticed with interrupts
+        // masked) and, when a worker thread is runnable, gives it the CPU now
+        // rather than halting through the rest of our slice.
+        sched::idle(interrupts::input_pending);
         trace::hlt_wake();
     }
 }

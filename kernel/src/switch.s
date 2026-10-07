@@ -12,13 +12,16 @@
  * cooperation required. This is the one place that cannot be written in Rust:
  * swapping the stack out from under the running code and returning elsewhere.
  *
- * The Rust half ({schedule} = sched::timer_schedule) saves the outgoing RSP,
- * does round-robin + FPU/SSE save/restore, EOIs the PIC, and returns the next
- * thread's RSP in RAX.
+ * The Rust half (sched::timer_schedule) saves the outgoing RSP, does round-robin
+ * + FPU/SSE save/restore, EOIs the PIC, and returns the next thread's RSP in RAX.
+ *
+ * The same body is also installed on a software-interrupt vector (`yield_isr`,
+ * `int 0x81`) so a thread that blocks can hand the CPU over immediately instead
+ * of idling out the rest of its slice. Its Rust half (sched::yield_schedule)
+ * neither advances the clock nor EOIs the PIC: it is not a hardware interrupt.
  */
-.text
-.global timer_isr
-timer_isr:
+
+.macro CONTEXT_SWITCH_ISR target
     push rax
     push rbx
     push rcx
@@ -35,7 +38,7 @@ timer_isr:
     push r14
     push r15
     mov rdi, rsp        /* arg0 = current (outgoing) stack pointer */
-    call {schedule}
+    call \target
     mov rsp, rax        /* switch to the next thread's stack        */
     pop r15
     pop r14
@@ -53,3 +56,13 @@ timer_isr:
     pop rbx
     pop rax
     iretq
+.endm
+
+.text
+.global timer_isr
+timer_isr:
+    CONTEXT_SWITCH_ISR {schedule}
+
+.global yield_isr
+yield_isr:
+    CONTEXT_SWITCH_ISR {yield_schedule}

@@ -32,6 +32,8 @@ const PS2_DATA: u16 = 0x60;
 const TIMER_VECTOR: u8 = 32; // IRQ0
 const KEYBOARD_VECTOR: u8 = 33; // IRQ1
 const MOUSE_VECTOR: u8 = 44; // IRQ12 (slave PIC)
+/// Software interrupt a blocking thread raises (`int 0x81`) to hand over the CPU.
+pub const YIELD_VECTOR: u8 = 0x81;
 
 static IDT: RacyCell<InterruptDescriptorTable> = RacyCell::new(InterruptDescriptorTable::new());
 
@@ -57,6 +59,7 @@ pub fn init() {
         // The timer uses a naked ISR that performs a full preemptive context
         // switch, so it's installed by raw address instead of `set_handler_fn`.
         idt[TIMER_VECTOR].set_handler_addr(VirtAddr::from_ptr(timer_isr as *const ()));
+        idt[YIELD_VECTOR].set_handler_addr(VirtAddr::from_ptr(yield_isr as *const ()));
         idt[KEYBOARD_VECTOR].set_handler_fn(keyboard);
         idt[MOUSE_VECTOR].set_handler_fn(mouse);
         // `load` needs `&'static self`; the table lives in a `static`, so a
@@ -110,6 +113,12 @@ pub fn ticks() -> u64 {
     TICKS.load(Ordering::Relaxed)
 }
 
+/// True if the input ring holds an unread byte (the compositor's "work to do"
+/// test before it idles).
+pub fn input_pending() -> bool {
+    RING.head.load(Ordering::Relaxed) != RING.tail.load(Ordering::Acquire)
+}
+
 /// Pop one tagged input byte (`SRC_* << 8 | byte`), or `None` if empty.
 pub fn read_input() -> Option<u16> {
     let head = RING.head.load(Ordering::Relaxed);
@@ -131,12 +140,15 @@ pub fn read_input() -> Option<u16> {
 core::arch::global_asm!(
     include_str!("switch.s"),
     schedule = sym timer_schedule,
+    yield_schedule = sym yield_schedule,
 );
 
 unsafe extern "C" {
     /// Naked timer ISR entry (see `switch.s`): saves the interrupted context,
     /// switches stacks to the next thread, and `iretq`s into it.
     fn timer_isr();
+    /// Same context-switch body on the yield vector (see `switch.s`).
+    fn yield_isr();
 }
 
 /// Rust half of the timer ISR: advance the clock, round-robin to the next
@@ -154,6 +166,12 @@ extern "C" fn timer_schedule(rsp: u64) -> u64 {
         crate::trace::max_to(&crate::trace::ISR_MAX, d);
     }
     next
+}
+
+/// Rust half of the yield interrupt: pick the next runnable thread without
+/// touching the clock or the PIC (this is a software interrupt, not IRQ0).
+extern "C" fn yield_schedule(rsp: u64) -> u64 {
+    crate::sched::yield_switch(rsp)
 }
 
 extern "x86-interrupt" fn keyboard(_f: InterruptStackFrame) {

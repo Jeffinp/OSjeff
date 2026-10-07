@@ -337,8 +337,19 @@ const SURF_BYTES: usize = WASM_SW * WASM_SH * 4;
 static SURFACE: RacyCell<[[u8; SURF_BYTES]; 2]> = RacyCell::new([[0; SURF_BYTES]; 2]);
 static FRONT: AtomicUsize = AtomicUsize::new(0);
 static READY: AtomicBool = AtomicBool::new(false);
-/// Set while the WASM window is open; the worker idles (`hlt`) otherwise.
+/// Set while the WASM window is open; the worker is blocked in the scheduler otherwise.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Scheduler slot of the worker thread (`usize::MAX` until it has started), so the
+/// compositor can wake it on window open and on input.
+static TID: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+/// Wake the worker if it is blocked (no-op before it has started).
+fn wake_worker() {
+    let tid = TID.load(Ordering::Acquire);
+    if tid != usize::MAX {
+        crate::sched::wake(tid);
+    }
+}
 /// The real framebuffer layout, captured at boot to derive the offscreen one.
 static FB_INFO: RacyCell<Option<FrameBufferInfo>> = RacyCell::new(None);
 
@@ -373,7 +384,9 @@ pub fn init(info: FrameBufferInfo) {
 
 /// Mark the WASM app window open/closed. The worker only runs while open.
 pub fn set_active(on: bool) {
-    ACTIVE.store(on, Ordering::Release);
+    if ACTIVE.swap(on, Ordering::AcqRel) != on {
+        wake_worker();
+    }
 }
 
 fn push_ev(ev: Ev) {
@@ -389,6 +402,7 @@ fn push_ev(ev: Ev) {
         (*EVENTS.get())[h] = ev;
     }
     EV_HEAD.store(next, Ordering::Release);
+    wake_worker();
 }
 
 /// Queue a pointer event (content-local coords; `buttons` bit 0 = left).
@@ -453,16 +467,20 @@ fn surface_info() -> Option<FrameBufferInfo> {
 }
 
 /// Worker-thread entry: build the app, then loop — drain input, render one frame
-/// into the back surface, publish it. Idles (`hlt`) while the window is closed or
-/// the app has not loaded yet.
+/// into the back surface, publish it. While the window is closed (or the app
+/// failed to load) the thread is blocked in the scheduler and costs no CPU.
 pub extern "C" fn worker() -> ! {
+    TID.store(crate::sched::current(), Ordering::Release);
     loop {
         if !ACTIVE.load(Ordering::Acquire) {
-            x86_64::instructions::hlt();
+            // Closed: sleep until `set_active(true)` wakes us.
+            crate::sched::block(crate::sched::FOREVER, || !ACTIVE.load(Ordering::Acquire));
             continue;
         }
         let (Some(app), Some(oi)) = (app_mut(), surface_info()) else {
-            x86_64::instructions::hlt();
+            // The app failed to load (already logged): wait for the window to be
+            // closed and reopened rather than retrying the build in a loop.
+            crate::sched::block(crate::sched::FOREVER, || ACTIVE.load(Ordering::Acquire));
             continue;
         };
         let back = 1 - FRONT.load(Ordering::Relaxed);

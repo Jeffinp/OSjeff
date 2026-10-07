@@ -16,7 +16,7 @@
 use crate::sync::RacyCell;
 use crate::{netstack, serial_println};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU8, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use osjeff_core::browser::FailReason;
 
 const IDLE: u8 = 0;
@@ -27,6 +27,9 @@ const DONE: u8 = 3;
 const URL_CAP: usize = 512;
 
 static STATE: AtomicU8 = AtomicU8::new(IDLE);
+/// Scheduler slot of the worker thread (`usize::MAX` until it has started), so
+/// [`try_post`] can wake it from its idle block.
+static TID: AtomicUsize = AtomicUsize::new(usize::MAX);
 static NET: RacyCell<Option<netstack::Net>> = RacyCell::new(None);
 static REQ_URL: RacyCell<[u8; URL_CAP]> = RacyCell::new([0; URL_CAP]);
 static REQ_LEN: RacyCell<usize> = RacyCell::new(0);
@@ -74,6 +77,10 @@ pub fn try_post(url: &[u8]) -> bool {
         *REQ_LEN.get() = n;
     }
     STATE.store(REQUESTED, Ordering::Release);
+    let tid = TID.load(Ordering::Acquire);
+    if tid != usize::MAX {
+        crate::sched::wake(tid);
+    }
     true
 }
 
@@ -90,9 +97,11 @@ pub fn take_result() -> Option<FetchResult> {
     Some(r.unwrap_or(Err(FailReason::Network)))
 }
 
-/// Worker thread entry. Processes one queued request at a time and halts the CPU
-/// while idle, so it yields the core to the compositor instead of busy-spinning.
+/// Worker thread entry. Processes one queued request at a time and, while idle,
+/// is *blocked* in the scheduler (it costs no time slice at all) until
+/// [`try_post`] wakes it.
 pub extern "C" fn worker() -> ! {
+    TID.store(crate::sched::current(), Ordering::Release);
     loop {
         if STATE.load(Ordering::Acquire) == REQUESTED {
             STATE.store(RUNNING, Ordering::Relaxed);
@@ -118,7 +127,12 @@ pub extern "C" fn worker() -> ! {
             }
             STATE.store(DONE, Ordering::Release);
         } else {
-            x86_64::instructions::hlt();
+            // Nothing queued: leave the run queue until `try_post` wakes us. The
+            // scheduler re-checks the condition after announcing the block, so a
+            // request posted in between is not missed.
+            crate::sched::block(crate::sched::FOREVER, || {
+                STATE.load(Ordering::Acquire) != REQUESTED
+            });
         }
     }
 }

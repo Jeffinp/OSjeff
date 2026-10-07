@@ -1,4 +1,4 @@
-//! Preemptive round-robin kernel scheduler.
+//! Preemptive round-robin kernel scheduler with blocked threads.
 //!
 //! Each thread owns a heap-allocated stack and a saved stack pointer. The PIT
 //! timer fires a naked ISR (see `interrupts`) that saves the full interrupted
@@ -6,12 +6,27 @@
 //! `iretq`s into it — so any thread is preempted on a timer tick without
 //! cooperating. New threads are launched by fabricating an initial stack frame
 //! that the ISR epilogue + `iretq` "resume" into the entry function.
+//!
+//! # Blocked threads
+//!
+//! Each thread has a wake-up tick in `WAKE`; it is *runnable* iff
+//! `WAKE[i] <= now` (0 = ready, [`FOREVER`] = parked until [`wake`]). The ISR
+//! round-robin skips threads that are not runnable, so an idle worker costs no
+//! slice. A thread blocks itself with [`block`] (which also hands the CPU over
+//! at once through the yield vector, [`yield_now`]) and is released by the tick
+//! reaching its deadline or by [`wake`]. If nothing at all is runnable the ISR
+//! leaves the current thread in place; every wait loop re-checks its condition
+//! after `hlt`, so that is safe. All of this state is plain atomics, so the ISR
+//! (IF=0, never allocates) and thread code can share it without locks.
+//!
+//! The Task Manager's per-thread "CPU" counts only the timer ticks that found
+//! the thread *running* (`IDLE` marks the ones spent in `hlt`).
 
 use crate::sync::RacyCell;
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use x86_64::registers::segmentation::{CS, SS, Segment};
 
 // Per-thread stack. Sized generously (128 KiB) because the background fetcher
@@ -54,8 +69,15 @@ impl FxArea {
 
 /// Index of the running thread (read by the Task Manager).
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
-/// CPU ticks credited per thread slot.
+/// Timer ticks that found each thread slot *running* (not parked in `hlt`).
 static TICKS: [AtomicU64; MAX_THREADS] = [const { AtomicU64::new(0) }; MAX_THREADS];
+/// Wake-up tick per slot: runnable iff `WAKE[i] <= now`. 0 = ready.
+static WAKE: [AtomicU64; MAX_THREADS] = [const { AtomicU64::new(0) }; MAX_THREADS];
+/// `WAKE` value meaning "blocked until [`wake`] is called".
+pub const FOREVER: u64 = u64::MAX;
+/// Set by a thread while it sits in `hlt` waiting for an interrupt, so the tick
+/// sampler does not charge that time as CPU use.
+static IDLE: [AtomicBool; MAX_THREADS] = [const { AtomicBool::new(false) }; MAX_THREADS];
 
 struct Thread {
     name: &'static str,
@@ -152,11 +174,20 @@ pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
     });
 }
 
-/// Called from the timer ISR: save the outgoing `rsp`, credit a CPU tick to the
-/// thread that just ran, advance round-robin, and return the next thread's
-/// `rsp`. Touches only scheduler state (no allocation, no other locks).
+/// Called from the timer ISR (clock already advanced): credit the tick to the
+/// thread that was running (unless it was idle in `hlt`), then pick the next
+/// runnable thread. Touches only scheduler state (no allocation, no locks).
 pub extern "C" fn switch_current(rsp: u64) -> u64 {
-    // SAFETY: runs inside the timer ISR with IF=0, so it is neither re-entered nor preempted.
+    reschedule(rsp, true)
+}
+
+/// Called from the yield vector (`int 0x81`): same, but no tick is credited.
+pub extern "C" fn yield_switch(rsp: u64) -> u64 {
+    reschedule(rsp, false)
+}
+
+fn reschedule(rsp: u64, timer_tick: bool) -> u64 {
+    // SAFETY: runs inside an ISR with IF=0, so it is neither re-entered nor preempted.
     // Other users run with IF=0 (`spawn`, via `without_interrupts`) or only read fields the ISR
     // leaves alone (`thread_count`/`thread_name`).
     // NOTE: those readers' shared refs can overlap this `&mut` (not guaranteed by the type).
@@ -179,6 +210,26 @@ pub extern "C" fn switch_current(rsp: u64) -> u64 {
         panic!("stack overflow in thread '{}'", s.threads[cur].name);
     }
 
+    if timer_tick && cur < MAX_THREADS && !IDLE[cur].load(Ordering::Relaxed) {
+        TICKS[cur].fetch_add(1, Ordering::Relaxed);
+    }
+
+    // Next runnable thread after `cur`, round-robin; `cur` itself is the last
+    // candidate, so it keeps the CPU when nobody else can run.
+    let n = s.threads.len();
+    let now = crate::interrupts::ticks();
+    let mut next = cur;
+    for step in 1..=n {
+        let cand = (cur + step) % n;
+        if cand >= MAX_THREADS || WAKE[cand].load(Ordering::Acquire) <= now {
+            next = cand;
+            break;
+        }
+    }
+    if next == cur {
+        return rsp; // nothing else to run: state unchanged, `cur` resumes
+    }
+
     // Save the outgoing thread's x87/SSE state. This must run before any xmm
     // use: the path from ISR entry to here (GP-reg pushes, integer scheduler
     // glue) touches no SSE register, so the interrupted thread's xmm/MXCSR are
@@ -193,15 +244,6 @@ pub extern "C" fn switch_current(rsp: u64) -> u64 {
     }
 
     s.threads[cur].rsp = rsp;
-    if cur < MAX_THREADS {
-        TICKS[cur].fetch_add(1, Ordering::Relaxed);
-    }
-
-    let n = s.threads.len();
-    if n < 2 {
-        return rsp; // single thread: nothing to restore, state unchanged
-    }
-    let next = (cur + 1) % n;
     s.current = next;
     CURRENT.store(next, Ordering::Relaxed);
 
@@ -217,6 +259,90 @@ pub extern "C" fn switch_current(rsp: u64) -> u64 {
     }
 
     s.threads[next].rsp
+}
+
+// ---- blocking API (thread context, IF=1) ----
+
+/// Hand the CPU to the next runnable thread right now (`int 0x81`). Returns when
+/// this thread is scheduled again, immediately if nothing else can run. A no-op
+/// with interrupts disabled (the yield ISR would resume us with IF=1).
+pub fn yield_now() {
+    if !x86_64::instructions::interrupts::are_enabled() {
+        return;
+    }
+    // SAFETY: vector 0x81 (`YIELD_VECTOR`) holds `yield_isr`, which saves and restores every GPR
+    // and returns with `iretq`; IF is set, so the saved RFLAGS resumes with IF=1 as it was.
+    unsafe {
+        core::arch::asm!("int 0x81", options(nostack));
+    }
+}
+
+/// Make thread `id` runnable (no-op if it already is). Callable from any context.
+pub fn wake(id: usize) {
+    if id < MAX_THREADS {
+        WAKE[id].store(0, Ordering::SeqCst);
+    }
+}
+
+/// `true` if some thread other than `me` is runnable right now.
+fn others_ready(me: usize) -> bool {
+    let n = thread_count().min(MAX_THREADS);
+    let now = crate::interrupts::ticks();
+    (0..n).any(|i| i != me && WAKE[i].load(Ordering::Acquire) <= now)
+}
+
+/// Sleep in `hlt` until the next interrupt, unless `skip()` says there is
+/// already something to do. Interrupts are masked while `skip()` is evaluated
+/// and `sti; hlt` re-enables them atomically, so an event that arrives between
+/// the check and the halt is not lost (it just ends the `hlt` at once).
+fn halt_unless(me: usize, skip: impl Fn() -> bool) {
+    x86_64::instructions::interrupts::disable();
+    if skip() {
+        x86_64::instructions::interrupts::enable();
+        return;
+    }
+    let slot = me.min(MAX_THREADS - 1);
+    IDLE[slot].store(true, Ordering::Relaxed);
+    x86_64::instructions::interrupts::enable_and_hlt();
+    IDLE[slot].store(false, Ordering::Relaxed);
+}
+
+/// Block the calling thread until tick `until` ([`FOREVER`] = no deadline) or
+/// until another thread calls [`wake`] on it, whichever comes first. `still_idle`
+/// is the caller's "there is still nothing to do" test: it is re-evaluated *after*
+/// the block is announced, so a `wake` that raced with the announcement is not
+/// lost (announce, then re-check, then sleep).
+pub fn block(until: u64, still_idle: impl Fn() -> bool) {
+    let me = current();
+    let runnable = || WAKE[me].load(Ordering::SeqCst) <= crate::interrupts::ticks();
+    WAKE[me].store(until, Ordering::SeqCst);
+    while still_idle() && !runnable() {
+        yield_now(); // the ISR skips us now; we return once runnable (or alone)
+        if runnable() {
+            break;
+        }
+        halt_unless(me, || runnable() || !still_idle());
+    }
+    WAKE[me].store(0, Ordering::SeqCst);
+}
+
+/// The compositor's idle step (replaces a bare `hlt`): if `has_work()` return
+/// at once; if another thread is runnable give it the CPU now instead of
+/// halting through our slice; otherwise `sti; hlt` until the next interrupt.
+pub fn idle(has_work: impl Fn() -> bool) {
+    let me = current();
+    x86_64::instructions::interrupts::disable();
+    if has_work() {
+        x86_64::instructions::interrupts::enable();
+    } else if others_ready(me) {
+        x86_64::instructions::interrupts::enable();
+        yield_now();
+    } else {
+        let slot = me.min(MAX_THREADS - 1);
+        IDLE[slot].store(true, Ordering::Relaxed);
+        x86_64::instructions::interrupts::enable_and_hlt();
+        IDLE[slot].store(false, Ordering::Relaxed);
+    }
 }
 
 // ---- introspection for the Task Manager ----
