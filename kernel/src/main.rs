@@ -115,6 +115,31 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     crash::register_framebuffer(framebuffer.buffer_mut(), info);
     let n = framebuffer.buffer().len().min(MAX_BYTES);
 
+    // The render buffers are fixed-size statics and `Canvas` indexes them with the real
+    // layout, so a larger screen would panic with no message once drawing starts. Refuse
+    // cleanly instead, saying what was detected.
+    let fb_need = info.stride * info.height * info.bytes_per_pixel;
+    if fb_need > n {
+        crash::die(
+            crash::Kind::Unsupported,
+            "this screen resolution is not supported",
+            format_args!(
+                "Detected {}x{} (stride {}, {} bytes/pixel): the screen needs {} bytes, the \
+                 bootloader provided a framebuffer of {} bytes and the kernel's render \
+                 buffers hold at most {} bytes (1920x1080x4).\nSelect a smaller resolution \
+                 in the firmware or bootloader settings (1920x1080 or lower) and reboot.",
+                info.width,
+                info.height,
+                info.stride,
+                info.bytes_per_pixel,
+                fb_need,
+                framebuffer.buffer().len(),
+                MAX_BYTES,
+            ),
+            None,
+        );
+    }
+
     // Wipe the bootloader's on-screen debug log immediately, so the early init
     // (PCI scan, TSC calibration, DHCP) shows a clean screen instead of a frozen
     // wall of text until the splash takes over.
