@@ -40,11 +40,8 @@ use bootloader_api::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use desktop::{CURSOR_H, CURSOR_W, Desktop};
 use fb::Canvas;
-use osjeff_core::net::{self, Ipv4};
+use osjeff_core::net::{self, NetConfig};
 use osjeff_core::{Rect, Time};
-
-/// Our IPv4 address. Matches QEMU's user-mode (SLIRP) default guest address.
-const NET_IP: Ipv4 = Ipv4([10, 0, 2, 15]);
 use ps2::Event;
 
 // Ask the bootloader to map all physical memory at a fixed offset. This gives
@@ -288,7 +285,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // skip and keep the static IP.
     let net_up = ne2000::init();
     trace::mark("ne2000 init done");
-    let net_ip = if net_up { dhcp_acquire(NET_IP) } else { NET_IP };
+    let net_cfg = if net_up {
+        dhcp_acquire()
+    } else {
+        NetConfig::STATIC_FALLBACK
+    };
+    let net_ip = net_cfg.ip;
     trace::mark("dhcp done");
     if net_up {
         let mut frame = [0u8; 64];
@@ -899,26 +901,47 @@ fn blit_rect(
     }
 }
 
-/// Acquire an IP via DHCP (DISCOVER -> OFFER -> REQUEST -> ACK). Every wait is
-/// time-bounded against the timer tick, so a missing or slow server never hangs
-/// the boot — it just falls back to `default` (the static address).
-fn dhcp_acquire(default: Ipv4) -> Ipv4 {
+/// Acquire the network configuration via DHCP (DISCOVER -> OFFER -> REQUEST ->
+/// ACK). Every wait is time-bounded against the timer tick, so a missing or slow
+/// server never hangs the boot — it falls back to [`NetConfig::STATIC_FALLBACK`]
+/// (QEMU's user-mode defaults). An offer without a server id, or an ACK that does
+/// not make a valid config (bad mask, unusable address, zero lease), also falls
+/// back. The outcome is logged on the serial port either way.
+fn dhcp_acquire() -> NetConfig {
     let xid = (io::rdtsc() as u32) | 1; // any non-zero transaction id
     let mut tx = [0u8; 600];
     let mut rx = [0u8; 1600];
 
     let len = net::dhcp_discover(&mut tx, ne2000::MAC, xid);
     ne2000::send(&tx[..len]);
-    let offer = match poll_dhcp(&mut rx, xid, net::DHCP_OFFER) {
-        Some(o) => o,
-        None => return default,
+    let Some(offer) = poll_dhcp(&mut rx, xid, net::DHCP_OFFER) else {
+        serial_println!("net: static fallback (no DHCP offer)");
+        return NetConfig::STATIC_FALLBACK;
+    };
+    let Some(server_id) = offer.server_id else {
+        serial_println!("net: static fallback (DHCP offer without server id)");
+        return NetConfig::STATIC_FALLBACK;
     };
 
-    let len = net::dhcp_request(&mut tx, ne2000::MAC, xid, offer.your_ip, offer.server_id);
+    let len = net::dhcp_request(&mut tx, ne2000::MAC, xid, offer.your_ip, server_id);
     ne2000::send(&tx[..len]);
-    match poll_dhcp(&mut rx, xid, net::DHCP_ACK) {
-        Some(ack) => ack.your_ip,
-        None => default,
+    let Some(ack) = poll_dhcp(&mut rx, xid, net::DHCP_ACK) else {
+        serial_println!("net: static fallback (no DHCP ack)");
+        return NetConfig::STATIC_FALLBACK;
+    };
+    match NetConfig::from_ack(&ack) {
+        Ok(cfg) => {
+            serial_println!("net: DHCP lease {}", cfg);
+            match cfg.lease_secs {
+                Some(s) => serial_println!("net: lease time {} s", s),
+                None => serial_println!("net: lease time infinite"),
+            }
+            cfg
+        }
+        Err(e) => {
+            serial_println!("net: static fallback (DHCP ack rejected: {:?})", e);
+            NetConfig::STATIC_FALLBACK
+        }
     }
 }
 

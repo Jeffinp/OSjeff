@@ -27,6 +27,13 @@ pub struct Mac(pub [u8; 6]);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Ipv4(pub [u8; 4]);
 
+impl core::fmt::Display for Ipv4 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let [a, b, c, d] = self.0;
+        write!(f, "{a}.{b}.{c}.{d}")
+    }
+}
+
 /// Internet checksum (RFC 1071): one's-complement sum of 16-bit big-endian
 /// words, folded and inverted.
 pub fn checksum(data: &[u8]) -> u16 {
@@ -273,15 +280,48 @@ pub const DHCP_ACK: u8 = 5;
 pub const DHCP_NAK: u8 = 6;
 
 /// What a parsed DHCP reply tells us.
+///
+/// Every field is the *raw* content of the reply, already checked for being
+/// well-formed (right option length, usable unicast address) but not yet
+/// interpreted: turning an ACK into something the stack can use is
+/// [`NetConfig::from_ack`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DhcpReply {
     pub msg_type: u8, // DHCP_OFFER / DHCP_ACK / DHCP_NAK
     pub xid: u32,
-    pub your_ip: Ipv4,        // yiaddr — the address offered/assigned
-    pub server_id: Ipv4,      // option 54
-    pub subnet: Option<Ipv4>, // option 1
-    pub router: Option<Ipv4>, // option 3
-    pub dns: Option<Ipv4>,    // option 6
+    pub your_ip: Ipv4,           // yiaddr — the address offered/assigned
+    pub server_id: Option<Ipv4>, // option 54 (a REQUEST cannot be built without it)
+    pub subnet: Option<Ipv4>,    // option 1 (exactly 4 bytes)
+    pub router: Option<Ipv4>,    // option 3 (first usable entry of the list)
+    pub dns: Option<Ipv4>,       // option 6 (first usable entry of the list)
+    pub lease_secs: Option<u32>, // option 51 (0xFFFF_FFFF = infinite, kept raw)
+}
+
+/// True for an address a host can sit behind or talk to: not `0.0.0.0/8`, not
+/// loopback, not multicast/reserved/broadcast (`224.0.0.0` and up).
+fn is_usable_unicast(ip: Ipv4) -> bool {
+    let a = ip.0[0];
+    a != 0 && a != 127 && a < 224
+}
+
+/// First usable unicast entry of an option holding a list of IPv4 addresses
+/// (routers, DNS servers). RFC 2132 makes the length a non-zero multiple of 4;
+/// anything else is malformed and yields `None`.
+fn first_usable_addr(v: &[u8]) -> Option<Ipv4> {
+    if v.is_empty() || !v.len().is_multiple_of(4) {
+        return None;
+    }
+    let (addrs, _) = v.as_chunks::<4>();
+    addrs
+        .iter()
+        .map(|&a| Ipv4(a))
+        .find(|&a| is_usable_unicast(a))
+}
+
+/// A single-address option: exactly 4 bytes and usable.
+fn single_addr(v: &[u8]) -> Option<Ipv4> {
+    let a = first_usable_addr(v)?;
+    (v.len() == 4).then_some(a)
 }
 
 /// Lay down the Ethernet/IPv4/UDP/BOOTP envelope for a broadcast DHCP message
@@ -412,8 +452,9 @@ pub fn parse_dhcp(frame: &[u8], our_mac: Mac) -> Option<DhcpReply> {
     let xid = u32::from_be_bytes([dhcp[4], dhcp[5], dhcp[6], dhcp[7]]);
     let your_ip = Ipv4([dhcp[16], dhcp[17], dhcp[18], dhcp[19]]);
 
-    let (mut msg_type, mut server_id) = (0u8, Ipv4([0; 4]));
-    let (mut subnet, mut router, mut dns) = (None, None, None);
+    let mut msg_type = 0u8;
+    let (mut server_id, mut subnet, mut router, mut dns) = (None, None, None, None);
+    let mut lease_secs = None;
     let mut i = BOOTP_FIXED + 4;
     while i < dhcp.len() {
         let code = dhcp[i];
@@ -433,13 +474,13 @@ pub fn parse_dhcp(frame: &[u8], our_mac: Mac) -> Option<DhcpReply> {
             break;
         }
         let v = &dhcp[val..val + len];
-        let ip4 = || Ipv4([v[0], v[1], v[2], v[3]]);
         match code {
             53 if len >= 1 => msg_type = v[0],
-            54 if len >= 4 => server_id = ip4(),
-            1 if len >= 4 => subnet = Some(ip4()),
-            3 if len >= 4 => router = Some(ip4()),
-            6 if len >= 4 => dns = Some(ip4()),
+            54 => server_id = single_addr(v),
+            1 if len == 4 => subnet = Some(Ipv4([v[0], v[1], v[2], v[3]])),
+            3 => router = first_usable_addr(v),
+            6 => dns = first_usable_addr(v),
+            51 if len == 4 => lease_secs = Some(u32::from_be_bytes([v[0], v[1], v[2], v[3]])),
             _ => {}
         }
         i = val + len;
@@ -455,7 +496,146 @@ pub fn parse_dhcp(frame: &[u8], our_mac: Mac) -> Option<DhcpReply> {
         subnet,
         router,
         dns,
+        lease_secs,
     })
+}
+
+// ---- The result of DHCP, as a plain value ----
+
+/// Prefix length assumed when an ACK carries no subnet-mask option (the common
+/// home/SLIRP /24).
+pub const DEFAULT_PREFIX: u8 = 24;
+
+/// Everything the TCP/IP stack and the ARP/ping responder need to know about
+/// this host's network identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NetConfig {
+    /// Our address.
+    pub ip: Ipv4,
+    /// Subnet prefix length, `1..=30`.
+    pub prefix: u8,
+    /// Default gateway; `None` means "no default route" (on-link only).
+    pub gateway: Option<Ipv4>,
+    /// DNS resolver; `None` means "no resolver" (only IPv4 literals resolve).
+    pub dns: Option<Ipv4>,
+    /// Lease duration in seconds; `None` means the address never expires.
+    pub lease_secs: Option<u32>,
+}
+
+/// `192.168.77.15/24 gw 192.168.77.2 dns 192.168.77.3` (`none` when absent):
+/// the form the boot log uses.
+impl core::fmt::Display for NetConfig {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}/{} gw ", self.ip, self.prefix)?;
+        match self.gateway {
+            Some(g) => write!(f, "{g}")?,
+            None => f.write_str("none")?,
+        }
+        f.write_str(" dns ")?;
+        match self.dns {
+            Some(d) => write!(f, "{d}"),
+            None => f.write_str("none"),
+        }
+    }
+}
+
+/// Why an ACK could not become a [`NetConfig`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigError {
+    /// The reply is not a DHCPACK.
+    NotAck,
+    /// `yiaddr` is not a usable host address (0.0.0.0, loopback, multicast,
+    /// broadcast) or is the network/broadcast address of its own subnet.
+    BadAddress,
+    /// The subnet mask is not a contiguous run of ones, or its prefix is
+    /// outside `1..=30`.
+    BadMask,
+    /// The lease time is zero seconds.
+    ZeroLease,
+}
+
+/// Prefix length of a netmask, or `None` if the mask is not contiguous ones
+/// followed by zeros (e.g. `255.0.255.0`). `0.0.0.0` is prefix 0.
+pub fn mask_to_prefix(mask: Ipv4) -> Option<u8> {
+    let m = u32::from_be_bytes(mask.0);
+    let ones = m.leading_ones();
+    // A valid mask is `ones` ones then only zeros.
+    let expect = if ones == 0 {
+        0
+    } else {
+        u32::MAX << (32 - ones)
+    };
+    (m == expect).then_some(ones as u8)
+}
+
+impl NetConfig {
+    /// What the boot uses when no DHCP server answers (or there is no NIC):
+    /// QEMU's user-mode (SLIRP) defaults, 10.0.2.15/24, gateway 10.0.2.2, DNS
+    /// 10.0.2.3, no expiry.
+    pub const STATIC_FALLBACK: NetConfig = NetConfig {
+        ip: Ipv4([10, 0, 2, 15]),
+        prefix: DEFAULT_PREFIX,
+        gateway: Some(Ipv4([10, 0, 2, 2])),
+        dns: Some(Ipv4([10, 0, 2, 3])),
+        lease_secs: None,
+    };
+
+    /// Interpret a DHCPACK. Total: any combination of options (missing,
+    /// truncated, wrong-sized, hostile values) yields a config or a
+    /// [`ConfigError`], never a panic.
+    ///
+    /// Defaults for what the server leaves out:
+    /// * no subnet mask -> `/24` ([`DEFAULT_PREFIX`]); an invalid one is an error
+    ///   (a wrong mask silently misroutes everything);
+    /// * no router -> the DHCP server itself (option 54), which is the on-link
+    ///   router in SLIRP and in consumer gateways; with no server id either, no
+    ///   default route;
+    /// * no DNS server -> the gateway (routers usually forward DNS); with no
+    ///   gateway either, no resolver;
+    /// * no lease time, or `0xFFFF_FFFF` -> never expires; `0` is an error;
+    /// * a gateway/DNS equal to our own address is dropped (it cannot be reached).
+    pub fn from_ack(r: &DhcpReply) -> Result<NetConfig, ConfigError> {
+        if r.msg_type != DHCP_ACK {
+            return Err(ConfigError::NotAck);
+        }
+        let prefix = match r.subnet {
+            None => DEFAULT_PREFIX,
+            Some(m) => match mask_to_prefix(m) {
+                Some(p @ 1..=30) => p,
+                _ => return Err(ConfigError::BadMask),
+            },
+        };
+        let ip = r.your_ip;
+        if !is_usable_unicast(ip) {
+            return Err(ConfigError::BadAddress);
+        }
+        let host_mask = u32::MAX >> prefix; // the host bits
+        let host = u32::from_be_bytes(ip.0) & host_mask;
+        if host == 0 || host == host_mask {
+            return Err(ConfigError::BadAddress); // network or broadcast address
+        }
+        let lease_secs = match r.lease_secs {
+            Some(0) => return Err(ConfigError::ZeroLease),
+            Some(0xFFFF_FFFF) | None => None,
+            Some(n) => Some(n),
+        };
+        let not_us = |a: &Ipv4| *a != ip;
+        let gateway = r.router.or(r.server_id).filter(not_us);
+        let dns = r.dns.filter(not_us).or(gateway);
+        Ok(NetConfig {
+            ip,
+            prefix,
+            gateway,
+            dns,
+            lease_secs,
+        })
+    }
+
+    /// True once a lease of `lease_secs` has run for `elapsed_secs`.
+    pub fn lease_expired(&self, elapsed_secs: u64) -> bool {
+        self.lease_secs
+            .is_some_and(|l| elapsed_secs >= u64::from(l))
+    }
 }
 
 #[cfg(test)]
@@ -467,6 +647,13 @@ mod tests {
     const PEER_MAC: Mac = Mac([0x52, 0x55, 0x0a, 0x00, 0x02, 0x02]);
     const PEER_IP: Ipv4 = Ipv4([10, 0, 2, 2]);
 
+    /// Append one TLV option to `v`.
+    fn opt(v: &mut Vec<u8>, code: u8, val: &[u8]) {
+        v.push(code);
+        v.push(val.len() as u8);
+        v.extend_from_slice(val);
+    }
+
     /// Craft a BOOTREPLY (server -> client) DHCP packet for round-trip tests.
     fn craft_reply(
         out: &mut [u8],
@@ -475,6 +662,24 @@ mod tests {
         your_ip: Ipv4,
         server_id: Ipv4,
         msg_type: u8,
+    ) -> usize {
+        let mut opts = Vec::new();
+        opt(&mut opts, 53, &[msg_type]);
+        opt(&mut opts, 54, &server_id.0);
+        opt(&mut opts, 1, &[255, 255, 255, 0]); // subnet
+        opt(&mut opts, 3, &PEER_IP.0); // router
+        opts.push(255);
+        craft_raw(out, our_mac, xid, your_ip, server_id, &opts)
+    }
+
+    /// Craft a BOOTREPLY carrying exactly the (already encoded) `opts`.
+    fn craft_raw(
+        out: &mut [u8],
+        our_mac: Mac,
+        xid: u32,
+        your_ip: Ipv4,
+        server_id: Ipv4,
+        opts: &[u8],
     ) -> usize {
         write_eth(out, our_mac, PEER_MAC, ETHERTYPE_IPV4);
         let b = ETH_HDR + IPV4_HDR + UDP_HDR;
@@ -487,25 +692,8 @@ mod tests {
         out[b + 16..b + 20].copy_from_slice(&your_ip.0); // yiaddr
         out[b + 28..b + 34].copy_from_slice(&our_mac.0); // chaddr
         out[b + BOOTP_FIXED..opt].copy_from_slice(&DHCP_MAGIC.to_be_bytes());
-        let mut o = opt;
-        out[o] = 53;
-        out[o + 1] = 1;
-        out[o + 2] = msg_type;
-        o += 3;
-        out[o] = 54;
-        out[o + 1] = 4;
-        out[o + 2..o + 6].copy_from_slice(&server_id.0);
-        o += 6;
-        out[o] = 1;
-        out[o + 1] = 4;
-        out[o + 2..o + 6].copy_from_slice(&[255, 255, 255, 0]); // subnet
-        o += 6;
-        out[o] = 3;
-        out[o + 1] = 4;
-        out[o + 2..o + 6].copy_from_slice(&PEER_IP.0); // router
-        o += 6;
-        out[o] = 255;
-        o += 1;
+        out[opt..opt + opts.len()].copy_from_slice(opts);
+        let o = opt + opts.len();
         let udp_off = ETH_HDR + IPV4_HDR;
         let udp_len = o - udp_off;
         out[udp_off..udp_off + 2].copy_from_slice(&DHCP_SERVER_PORT.to_be_bytes());
@@ -560,9 +748,11 @@ mod tests {
         assert_eq!(r.msg_type, DHCP_OFFER);
         assert_eq!(r.xid, 0x1234_5678);
         assert_eq!(r.your_ip, your);
-        assert_eq!(r.server_id, server);
+        assert_eq!(r.server_id, Some(server));
         assert_eq!(r.subnet, Some(Ipv4([255, 255, 255, 0])));
         assert_eq!(r.router, Some(PEER_IP));
+        assert_eq!(r.dns, None);
+        assert_eq!(r.lease_secs, None);
     }
 
     #[test]
@@ -812,5 +1002,293 @@ mod tests {
         assert_eq!(tx_len(1515), 1514);
         assert_eq!(tx_len(usize::MAX), 1514);
         const { assert!(MAX_TX_FRAME <= 6 * 256) };
+    }
+
+    // ---- NetConfig ----
+
+    const LEASE_IP: Ipv4 = Ipv4([192, 168, 77, 15]);
+    const LEASE_GW: Ipv4 = Ipv4([192, 168, 77, 2]);
+    const LEASE_DNS: Ipv4 = Ipv4([192, 168, 77, 3]);
+
+    /// Parse an ACK for `LEASE_IP` made of `opts` (+ end marker) from `LEASE_GW`.
+    fn ack_with(opts: &[(u8, &[u8])]) -> DhcpReply {
+        let mut v = Vec::new();
+        for (c, val) in opts {
+            opt(&mut v, *c, val);
+        }
+        v.push(255);
+        let mut buf = [0u8; 600];
+        let n = craft_raw(&mut buf, OUR_MAC, 9, LEASE_IP, LEASE_GW, &v);
+        parse_dhcp(&buf[..n], OUR_MAC).expect("ack should parse")
+    }
+
+    const T_ACK: (u8, &[u8]) = (53, &[DHCP_ACK]);
+    const SERVER: (u8, &[u8]) = (54, &LEASE_GW.0);
+    const MASK24: (u8, &[u8]) = (1, &[255, 255, 255, 0]);
+    const ROUTER: (u8, &[u8]) = (3, &LEASE_GW.0);
+    const DNS: (u8, &[u8]) = (6, &LEASE_DNS.0);
+
+    #[test]
+    fn full_ack_becomes_config() {
+        let r = ack_with(&[
+            T_ACK,
+            SERVER,
+            MASK24,
+            ROUTER,
+            DNS,
+            (51, &86_400u32.to_be_bytes()),
+        ]);
+        assert_eq!(
+            NetConfig::from_ack(&r),
+            Ok(NetConfig {
+                ip: LEASE_IP,
+                prefix: 24,
+                gateway: Some(LEASE_GW),
+                dns: Some(LEASE_DNS),
+                lease_secs: Some(86_400),
+            })
+        );
+    }
+
+    #[test]
+    fn non_24_prefixes_are_derived_from_the_mask() {
+        for (mask, want) in [
+            ([255u8, 0, 0, 0], 8u8),
+            ([255, 255, 0, 0], 16),
+            ([255, 255, 255, 128], 25),
+            ([255, 255, 255, 224], 27),
+        ] {
+            let r = ack_with(&[T_ACK, SERVER, (1, &mask)]);
+            assert_eq!(NetConfig::from_ack(&r).unwrap().prefix, want, "{mask:?}");
+        }
+    }
+
+    #[test]
+    fn missing_router_falls_back_to_server_then_nothing() {
+        // No router option: the DHCP server is the gateway; DNS follows it.
+        let r = ack_with(&[T_ACK, SERVER, MASK24]);
+        let c = NetConfig::from_ack(&r).unwrap();
+        assert_eq!(c.gateway, Some(LEASE_GW));
+        assert_eq!(c.dns, Some(LEASE_GW));
+        // Neither router nor server id: no default route, no resolver.
+        let r = ack_with(&[T_ACK, MASK24]);
+        let c = NetConfig::from_ack(&r).unwrap();
+        assert_eq!((c.gateway, c.dns), (None, None));
+        // Router but no DNS: DNS = router.
+        let r = ack_with(&[T_ACK, (3, &[192, 168, 77, 1])]);
+        let c = NetConfig::from_ack(&r).unwrap();
+        assert_eq!(c.dns, Some(Ipv4([192, 168, 77, 1])));
+        // An explicit DNS wins over the router.
+        let r = ack_with(&[T_ACK, ROUTER, (6, &[8, 8, 8, 8])]);
+        assert_eq!(
+            NetConfig::from_ack(&r).unwrap().dns,
+            Some(Ipv4([8, 8, 8, 8]))
+        );
+    }
+
+    #[test]
+    fn missing_mask_defaults_to_24() {
+        let r = ack_with(&[T_ACK, SERVER]);
+        assert_eq!(NetConfig::from_ack(&r).unwrap().prefix, DEFAULT_PREFIX);
+    }
+
+    #[test]
+    fn invalid_masks_are_rejected() {
+        for mask in [
+            [255u8, 0, 255, 0], // not contiguous
+            [255, 255, 0, 255],
+            [0, 255, 255, 255],
+            [0, 0, 0, 0],         // prefix 0
+            [255, 255, 255, 254], // /31 and /32 leave no room for a gateway
+            [255, 255, 255, 255],
+            [1, 0, 0, 0],
+        ] {
+            let r = ack_with(&[T_ACK, SERVER, (1, &mask)]);
+            assert_eq!(
+                NetConfig::from_ack(&r),
+                Err(ConfigError::BadMask),
+                "{mask:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mask_to_prefix_covers_every_contiguous_mask() {
+        for p in 0..=32u32 {
+            let m = if p == 0 { 0 } else { u32::MAX << (32 - p) };
+            assert_eq!(mask_to_prefix(Ipv4(m.to_be_bytes())), Some(p as u8));
+            if (1..=31).contains(&p) {
+                // Flip the lowest set bit one position down -> a hole.
+                let holey = (m | (1 << (32 - p - 1))) & !(1 << (32 - p));
+                if holey != m && p > 1 {
+                    assert_eq!(mask_to_prefix(Ipv4(holey.to_be_bytes())), None, "p={p}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lease_zero_infinite_and_absent() {
+        let zero = ack_with(&[T_ACK, SERVER, (51, &0u32.to_be_bytes())]);
+        assert_eq!(NetConfig::from_ack(&zero), Err(ConfigError::ZeroLease));
+        let inf = ack_with(&[T_ACK, SERVER, (51, &u32::MAX.to_be_bytes())]);
+        assert_eq!(NetConfig::from_ack(&inf).unwrap().lease_secs, None);
+        let absent = ack_with(&[T_ACK, SERVER]);
+        assert_eq!(NetConfig::from_ack(&absent).unwrap().lease_secs, None);
+        let one = ack_with(&[T_ACK, SERVER, (51, &1u32.to_be_bytes())]);
+        assert_eq!(NetConfig::from_ack(&one).unwrap().lease_secs, Some(1));
+        // A malformed (3-byte) lease option is ignored, not misread.
+        let short = ack_with(&[T_ACK, SERVER, (51, &[0, 0, 5])]);
+        assert_eq!(NetConfig::from_ack(&short).unwrap().lease_secs, None);
+    }
+
+    #[test]
+    fn lease_expiry_boundary() {
+        let c = NetConfig {
+            lease_secs: Some(60),
+            ..NetConfig::STATIC_FALLBACK
+        };
+        assert!(!c.lease_expired(0));
+        assert!(!c.lease_expired(59));
+        assert!(c.lease_expired(60));
+        assert!(c.lease_expired(u64::MAX));
+        assert!(!NetConfig::STATIC_FALLBACK.lease_expired(u64::MAX));
+    }
+
+    #[test]
+    fn offer_without_server_id_is_visible_to_the_caller() {
+        let r = ack_with(&[(53, &[DHCP_OFFER]), MASK24, ROUTER]);
+        assert_eq!(r.msg_type, DHCP_OFFER);
+        assert_eq!(r.server_id, None); // dhcp_acquire cannot REQUEST this
+        // And an OFFER is never a config.
+        assert_eq!(NetConfig::from_ack(&r), Err(ConfigError::NotAck));
+        let nak = ack_with(&[(53, &[DHCP_NAK]), SERVER]);
+        assert_eq!(NetConfig::from_ack(&nak), Err(ConfigError::NotAck));
+    }
+
+    #[test]
+    fn malformed_address_options_are_ignored() {
+        // Wrong lengths: 3, 5, 6, 0 bytes -> treated as absent.
+        for bad in [&[1u8, 2, 3][..], &[1, 2, 3, 4, 5], &[1, 2, 3, 4, 5, 6], &[]] {
+            let r = ack_with(&[T_ACK, (54, bad), (3, bad), (6, bad)]);
+            assert_eq!(
+                (r.server_id, r.router, r.dns),
+                (None, None, None),
+                "{bad:?}"
+            );
+        }
+        // Unusable addresses: 0.0.0.0, loopback, multicast, broadcast.
+        for bad in [[0u8, 0, 0, 0], [127, 0, 0, 1], [224, 0, 0, 1], [255; 4]] {
+            let r = ack_with(&[T_ACK, (54, &bad), (3, &bad), (6, &bad)]);
+            assert_eq!(
+                (r.server_id, r.router, r.dns),
+                (None, None, None),
+                "{bad:?}"
+            );
+        }
+        // A list: the first *usable* entry wins (0.0.0.0 is skipped).
+        let r = ack_with(&[T_ACK, (3, &[0, 0, 0, 0, 192, 168, 77, 9, 192, 168, 77, 8])]);
+        assert_eq!(r.router, Some(Ipv4([192, 168, 77, 9])));
+    }
+
+    #[test]
+    fn unusable_addresses_are_rejected() {
+        for bad in [[0u8, 0, 0, 0], [127, 0, 0, 1], [224, 0, 0, 1], [255; 4]] {
+            let mut r = ack_with(&[T_ACK, SERVER, MASK24]);
+            r.your_ip = Ipv4(bad);
+            assert_eq!(
+                NetConfig::from_ack(&r),
+                Err(ConfigError::BadAddress),
+                "{bad:?}"
+            );
+        }
+        // Network and broadcast address of the subnet.
+        for bad in [[192u8, 168, 77, 0], [192, 168, 77, 255]] {
+            let mut r = ack_with(&[T_ACK, SERVER, MASK24]);
+            r.your_ip = Ipv4(bad);
+            assert_eq!(
+                NetConfig::from_ack(&r),
+                Err(ConfigError::BadAddress),
+                "{bad:?}"
+            );
+        }
+        // .255 is fine in a /16.
+        let mut r = ack_with(&[T_ACK, SERVER, (1, &[255, 255, 0, 0])]);
+        r.your_ip = Ipv4([192, 168, 77, 255]);
+        assert!(NetConfig::from_ack(&r).is_ok());
+    }
+
+    #[test]
+    fn gateway_or_dns_equal_to_our_ip_is_dropped() {
+        let r = ack_with(&[T_ACK, (3, &LEASE_IP.0), (6, &LEASE_IP.0)]);
+        let c = NetConfig::from_ack(&r).unwrap();
+        assert_eq!((c.gateway, c.dns), (None, None));
+    }
+
+    #[test]
+    fn static_fallback_is_the_slirp_default() {
+        let f = NetConfig::STATIC_FALLBACK;
+        assert_eq!(f.ip, Ipv4([10, 0, 2, 15]));
+        assert_eq!(f.prefix, 24);
+        assert_eq!(f.gateway, Some(Ipv4([10, 0, 2, 2])));
+        assert_eq!(f.dns, Some(Ipv4([10, 0, 2, 3])));
+        assert_eq!(f.lease_secs, None);
+    }
+
+    #[test]
+    fn config_display_is_the_boot_log_form() {
+        assert_eq!(
+            format!("{}", NetConfig::STATIC_FALLBACK),
+            "10.0.2.15/24 gw 10.0.2.2 dns 10.0.2.3"
+        );
+        let c = NetConfig {
+            gateway: None,
+            dns: None,
+            ..NetConfig::STATIC_FALLBACK
+        };
+        assert_eq!(format!("{c}"), "10.0.2.15/24 gw none dns none");
+    }
+
+    #[test]
+    fn ipv4_display_is_dotted_quad() {
+        assert_eq!(format!("{}", Ipv4([192, 168, 77, 15])), "192.168.77.15");
+        assert_eq!(format!("{}", Ipv4([0, 0, 0, 0])), "0.0.0.0");
+    }
+
+    /// Totality: every truncation of a full ACK frame, and every single-byte
+    /// corruption of its options area, goes through `parse_dhcp` and
+    /// `from_ack` without panicking.
+    #[test]
+    fn parse_and_config_are_total_over_truncation_and_corruption() {
+        let mut buf = [0u8; 600];
+        let mut v = Vec::new();
+        for (c, val) in [
+            T_ACK,
+            SERVER,
+            MASK24,
+            ROUTER,
+            DNS,
+            (51, &3600u32.to_be_bytes()[..]),
+        ] {
+            opt(&mut v, c, val);
+        }
+        v.push(255);
+        let n = craft_raw(&mut buf, OUR_MAC, 1, LEASE_IP, LEASE_GW, &v);
+        let run = |f: &[u8]| {
+            if let Some(r) = parse_dhcp(f, OUR_MAC) {
+                let _ = NetConfig::from_ack(&r);
+            }
+        };
+        for len in 0..=n {
+            run(&buf[..len]);
+        }
+        let opts_at = ETH_HDR + IPV4_HDR + UDP_HDR + BOOTP_FIXED + 4;
+        for i in opts_at..n {
+            for val in [0u8, 1, 3, 4, 5, 255] {
+                let mut f = buf;
+                f[i] = val;
+                run(&f[..n]);
+            }
+        }
     }
 }
