@@ -91,3 +91,11 @@ pub extern "C" fn on_pointer(x: i32, _y: i32, buttons: i32) {
         unsafe { SHIFT = SHIFT.wrapping_add((x.max(0) as u32).wrapping_mul(2)) };
     }
 }
+
+// Package manifest (a custom wasm section, see docs/design/apps.md): one file = one app.
+#[used]
+#[link_section = "osjeff.manifest"]
+static MANIFEST: [u8; 104] = *b"id=plasma\nname=Plasma\nversion=1.0.0\nabi=1\nmem_mib=4\nfuel_frame=20000000\nwin_w=692\nwin_h=414\nresizable=0\n";
+#[used]
+#[link_section = "osjeff.icon"]
+static ICON: [u8; include_bytes!("../icon.png").len()] = *include_bytes!("../icon.png");

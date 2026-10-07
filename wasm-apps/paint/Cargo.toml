@@ -1,0 +1,21 @@
+# Mouse drawing app (ABI v2, `fs=own`): strokes are drawn straight onto the window
+# surface (which keeps its content between frames) and mirrored in the app's own
+# bitmap, which Ctrl+S writes as a 24-bit BMP into the app's folder.
+[package]
+name = "paint"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+osjeff-sdk = { path = "../sdk" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+
+[workspace]

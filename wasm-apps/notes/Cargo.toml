@@ -1,0 +1,21 @@
+# Notepad with files (ABI v2, `fs=own`): its files live in `/data/notes/`, which
+# the host maps to the app's own `/`. Also the demonstration that the sandbox
+# refuses `..` (Ctrl+T).
+[package]
+name = "notes"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+osjeff-sdk = { path = "../sdk" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+
+[workspace]

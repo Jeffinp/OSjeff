@@ -1,0 +1,15 @@
+# OSjeff app SDK: safe Rust wrappers over the ABI v2 (`osj.*` host module) for
+# `wasm32-unknown-unknown`, plus the `manifest!` / `icon!` / `export_app!` macros.
+# `no_std`, no dependencies. Apps depend on it by path (`../sdk`); see
+# docs/BUILDING.md ("Como criar um app") and docs/design/apps.md.
+[package]
+name = "osjeff-sdk"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+# Detached from the repository workspace (own lock, never built natively).
+[workspace]

@@ -39,3 +39,4 @@ qlog.txt
 # Runtime artifacts from tools/run.sh
 *.pcap
 osjeff-ovmf-vars.fd
+!wasm-apps/*/icon.png
