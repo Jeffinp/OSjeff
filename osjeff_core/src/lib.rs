@@ -14,6 +14,7 @@
 extern crate alloc;
 
 pub mod anim;
+pub mod appmanifest;
 pub mod blockcache;
 pub mod blockdev;
 pub mod bmp;
@@ -53,6 +54,7 @@ pub mod terminal;
 pub(crate) mod testutil;
 pub mod tlsverify;
 pub mod unixtime;
+pub mod wasmsec;
 pub mod web;
 pub mod window;
 pub mod winman;

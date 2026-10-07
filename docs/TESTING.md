@@ -55,6 +55,8 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 | `image_decode` | bytes como PNG/BMP/PPM/zlib (cru, com CRCs reparados, PNG sintetizado ou BMP com offset ajustado) | `image::decode`, `inflate` (com `max_output` pequeno, também em fluxo), e as operações sobre a imagem decodificada (resize, fit, rotação, composição) mais a ida e volta exata dos codificadores PNG/BMP |
 | `x509_parse` | `[modo, bytes]`: o leitor DER/X.509 estrito, o casamento de nomes (SAN/curinga), o parser de datas, a validação de cadeia (`rustls-webpki` com âncora real) com os bytes como cadeia de 1 a 4 certificados, como folha ou intermediária substituindo as de uma cadeia de teste válida (chega à checagem de assinatura), e o `CertificateVerify` do TLS 1.3 com os bytes como assinatura | `osjeff_core::x509`, `osjeff_core::tlsverify` (nunca pânico nem travamento; semente: os certificados de `tools/gen-test-certs.py`) |
 
+| `app_manifest` | bytes como `.wasm` inteiro, como payload de `osjeff.manifest` ou de `osjeff.icon` (embrulhado numa seção válida), ou como manifesto/ícone soltos | `wasmsec` (cabeçalho, seções, LEB128), `appmanifest` (chaves, quotas, ícone PNG até 64x64) e as invariantes do manifesto aceito |
+
 ```bash
 cargo install cargo-fuzz
 cd fuzz
@@ -67,6 +69,8 @@ cargo fuzz run shell_parse -- -max_total_time=600 -print_final_stats=1 -dict=dic
 cargo fuzz run editor_ops  -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run image_decode -- -max_total_time=600 -print_final_stats=1 -dict=dict/image.dict
 cargo fuzz run x509_parse -- -max_total_time=600 -print_final_stats=1
+
+cargo fuzz run app_manifest -- -max_total_time=600 -print_final_stats=1
 ```
 
 O perfil de release do `fuzz/` liga `overflow-checks` e `debug-assertions`: um

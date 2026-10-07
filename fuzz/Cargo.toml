@@ -87,3 +87,10 @@ path = "fuzz_targets/x509_parse.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "app_manifest"
+path = "fuzz_targets/app_manifest.rs"
+test = false
+doc = false
+bench = false
