@@ -23,6 +23,7 @@ pub mod heap;
 pub mod keymap;
 pub mod net;
 pub mod process;
+pub mod redirect;
 pub mod terminal;
 pub mod web;
 pub mod window;
