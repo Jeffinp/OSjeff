@@ -86,8 +86,10 @@ mod wasi;
 /// the translation/clip that places that surface inside a window.
 ///
 /// A raw pointer (not a borrow) because the guest calls back into these host
-/// functions from inside `wasmi`, outliving any normal borrow; the boot/desktop
-/// context is single-threaded, matching the kernel's `RacyCell` discipline.
+/// functions from inside `wasmi`, outliving any normal borrow. The `HostState` of
+/// the resident app lives in its `Store`, which only the `wasmapp` worker thread
+/// touches; the console demo runs once on the boot thread before the scheduler
+/// starts. Either way one thread at a time owns it.
 struct HostState {
     fb: *mut u8,
     fb_len: usize,
@@ -127,8 +129,9 @@ impl HostState {
     /// Build a `Canvas` over the surface, or `None` for console-only guests.
     fn canvas(&self) -> Option<Canvas<'static>> {
         let info = self.info?;
-        // SAFETY: single-threaded context; the pointer/length come from a live
-        // framebuffer slice that outlives this guest call (set right before it).
+        // SAFETY: only the thread that owns this `Store` (the `wasmapp` worker, or the boot thread for
+        // the console demo) calls this; the pointer/length come from a live surface slice that outlives
+        // this guest call (set right before it, cleared right after).
         let buf = unsafe { core::slice::from_raw_parts_mut(self.fb, self.fb_len) };
         Some(Canvas::new(buf, info))
     }
@@ -386,7 +389,9 @@ fn guest_call<P: wasmi::WasmParams>(
 }
 
 /// The desktop's WASM app, built lazily on first paint and kept resident so the
-/// interpreter is not re-instantiated every frame. Single-threaded access.
+/// interpreter is not re-instantiated every frame. Only the `wasmapp` worker
+/// thread touches it (build, run, drop on close); the compositor talks to that
+/// thread through `ACTIVE`, the event queue and the surface buffers instead.
 static APP: RacyCell<Option<App>> = RacyCell::new(None);
 
 /// Build the resident windowed app from `APP_WASM`. `None` if it fails to load.
@@ -438,12 +443,11 @@ fn drop_app() {
 }
 
 /// The resident app, built lazily on first access. `None` if it fails to load.
-/// SAFETY: single-threaded desktop context (compositor thread only).
+/// Callable only from the `wasmapp` worker thread (see [`APP`]).
 fn app_mut() -> Option<&'static mut App> {
     // SAFETY: APP is only reached through `app_mut`, called only by the `wasmapp` worker thread (the
     // compositor never uses it), and no reference outlives a loop iteration, so the `&mut` is unique.
-    // NOTE: the doc above ("compositor thread only") is stale; not guaranteed by the type (safe fn
-    // returning `&'static mut`).
+    // NOTE: not guaranteed by the type (safe fn returning `&'static mut`).
     let slot = unsafe { &mut *APP.get() };
     if slot.is_none() {
         *slot = build_app();

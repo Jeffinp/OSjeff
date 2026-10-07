@@ -60,7 +60,10 @@ const SPIN: u32 = 1_000_000;
 pub const MAC: Mac = Mac([0x52, 0x54, 0x00, 0x12, 0x34, 0x56]);
 
 /// Next ring page to read (the software read pointer). Touched only by `poll`
-/// and `init`, both on the polled main loop — never from an ISR.
+/// and `init`, never from an ISR. `poll` runs on the compositor thread (boot, then
+/// the main loop while `fetch::is_idle()`) or on the `fetcher` thread (through
+/// `netstack`, while a fetch is running); the fetch state machine keeps the two
+/// mutually exclusive.
 static NEXT: RacyCell<u8> = RacyCell::new(RX_START + 1);
 
 #[inline]
@@ -144,8 +147,7 @@ pub fn poll(buf: &mut [u8]) -> Option<usize> {
     // SAFETY: NEXT is only used by `init`/`poll`, never by an ISR. `poll` runs on the compositor
     // (at boot, then in the main loop only while `fetch::is_idle()`) or on the fetcher via
     // netstack (while a fetch is RUNNING); the fetch state machine keeps them mutually exclusive.
-    // NOTE: not guaranteed by the type, and the doc on NEXT ("main loop only") is stale: the
-    // fetcher thread also calls `poll`.
+    // NOTE: the exclusion comes from that state machine, not from the type.
     let next = unsafe { *NEXT.get() };
     if next == curr {
         return None; // ring empty
