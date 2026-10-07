@@ -63,6 +63,9 @@ pub struct Picker {
     caret: usize,
     error: Option<String>,
     ask: Option<String>,
+    /// The field still holds the name it started with: the first typed character replaces it
+    /// (as a selected text would), any other key keeps it.
+    fresh: bool,
 }
 
 impl Picker {
@@ -78,6 +81,7 @@ impl Picker {
             scroll: 0,
             visible: 8,
             caret: field.len(),
+            fresh: !field.is_empty(),
             field,
             error: None,
             ask: None,
@@ -231,6 +235,7 @@ impl Picker {
     /// A click on list row `i` (index into [`Picker::rows`]); a double click
     /// opens the row.
     pub fn click(&mut self, i: usize, double: bool) -> PickEvent {
+        self.fresh = false;
         if i >= self.rows.len() || self.ask.is_some() {
             return PickEvent::None;
         }
@@ -323,6 +328,20 @@ impl Picker {
         }
         self.error = None;
         let (ctrl, alt) = (ev.mods.ctrl, ev.mods.alt);
+        if core::mem::take(&mut self.fresh) {
+            match ev.code {
+                KeyCode::Char(_) if !ctrl && !alt => {
+                    self.field.clear();
+                    self.caret = 0;
+                }
+                KeyCode::Backspace | KeyCode::Delete => {
+                    self.field.clear();
+                    self.caret = 0;
+                    return PickEvent::Redraw;
+                }
+                _ => {}
+            }
+        }
         match ev.code {
             KeyCode::Esc => PickEvent::Cancel,
             KeyCode::Enter => self.enter(),
@@ -699,6 +718,32 @@ mod tests {
             p.key(KeyEvent::ch('z'));
         }
         assert_eq!(p.field().0.len(), MAX_FIELD);
+    }
+
+    #[test]
+    fn the_first_typed_character_replaces_the_starting_name() {
+        let mut p = picker(PickMode::SaveAs, "/", "sem-nome.txt");
+        p.key(KeyEvent::ch('n'));
+        p.key(KeyEvent::ch('o'));
+        assert_eq!(p.field().0, "no");
+        // Backspace clears the whole starting name, once.
+        let mut p = picker(PickMode::SaveAs, "/", "sem-nome.txt");
+        p.key(k(KeyCode::Backspace));
+        assert_eq!(p.field().0, "");
+        p.key(KeyEvent::ch('a'));
+        p.key(k(KeyCode::Backspace));
+        assert_eq!(p.field().0, "");
+        // Moving the caret first keeps the name for editing.
+        let mut p = picker(PickMode::SaveAs, "/", "sem-nome.txt");
+        p.key(k(KeyCode::End));
+        p.key(KeyEvent::ch('2'));
+        assert_eq!(p.field().0, "sem-nome.txt2");
+        // Choosing with Enter keeps it as typed.
+        let mut p = picker(PickMode::SaveAs, "/", "sem-nome.txt");
+        assert_eq!(
+            p.key(k(KeyCode::Enter)),
+            PickEvent::Choose("/sem-nome.txt".into())
+        );
     }
 
     #[test]
