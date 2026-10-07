@@ -15,7 +15,7 @@
 //! `2>` and `>&` (descriptor redirections), unbalanced quotes and
 //! substitutions, and nesting deeper than [`MAX_DEPTH`].
 
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -113,7 +113,7 @@ pub enum Part {
     /// `$@` (`at`) or `$*`.
     Args { at: bool, quoted: bool },
     /// `$( ... )`.
-    Cmd { body: Rc<Vec<Stmt>>, quoted: bool },
+    Cmd { body: Arc<Vec<Stmt>>, quoted: bool },
     /// `$(( ... ))`; the expression is itself a word so `$x` works inside.
     Arith { expr: Vec<Part>, quoted: bool },
 }
@@ -166,7 +166,7 @@ pub enum Command {
     },
     Func {
         name: String,
-        body: Rc<Vec<Stmt>>,
+        body: Arc<Vec<Stmt>>,
     },
     Group(Vec<Stmt>),
 }
@@ -647,7 +647,7 @@ impl<'a> Lexer<'a> {
         let body = parse_with(inner, base, self.depth + 1)?;
         self.i = close + 1;
         Ok(Part::Cmd {
-            body: Rc::new(body),
+            body: Arc::new(body),
             quoted,
         })
     }
@@ -915,7 +915,7 @@ impl Parser {
         self.expect_keyword("}")?;
         Ok(Command::Func {
             name,
-            body: Rc::new(body),
+            body: Arc::new(body),
         })
     }
 

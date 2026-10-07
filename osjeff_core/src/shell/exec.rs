@@ -10,7 +10,7 @@ use super::parse::{
 };
 use super::sys::SysInfo;
 use alloc::collections::BTreeMap;
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -117,7 +117,7 @@ pub struct CmdCtx<'a> {
     pub sys: &'a mut dyn SysInfo,
     pub meta: &'a mut Meta,
     pub registry: &'a Registry,
-    pub funcs: &'a BTreeMap<String, Rc<Vec<Stmt>>>,
+    pub funcs: &'a BTreeMap<String, Arc<Vec<Stmt>>>,
     pub limits: &'a Limits,
     /// Set by `clear`: the terminal view should be wiped.
     pub clear: bool,
@@ -291,7 +291,7 @@ pub struct Shell {
     pub limits: Limits,
     registry: Registry,
     meta: Meta,
-    funcs: BTreeMap<String, Rc<Vec<Stmt>>>,
+    funcs: BTreeMap<String, Arc<Vec<Stmt>>>,
     frames: Vec<Frame>,
     status: i32,
     display: OutBuf,
@@ -1013,7 +1013,7 @@ impl Shell {
 
     fn call_function(
         &mut self,
-        body: &Rc<Vec<Stmt>>,
+        body: &Arc<Vec<Stmt>>,
         args: &[String],
         stdin: &[u8],
         out: &mut Out<'_>,
