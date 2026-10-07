@@ -59,39 +59,12 @@ pub fn init() {
     mouse_command(0xF4); // enable data reporting
 }
 
-pub struct Packet {
-    pub dx: i32,
-    pub dy: i32,
-    pub left: bool,
-    pub right: bool,
-}
-
-pub struct KeyEvent {
-    pub scan_code: u8,
-    pub pressed: bool,
-    /// Set when the scancode followed an `0xE0` prefix (arrows, Del, etc.).
-    pub extended: bool,
-}
-
-pub enum Event {
-    Mouse(Packet),
-    Key(KeyEvent),
-}
+pub use osjeff_core::hw::ps2::{Decoder, Event};
 
 /// Incremental decoder state for the scancode/mouse-packet state machines.
 /// Touched only by [`poll`] on the main loop (the sole consumer of the IRQ
 /// ring), so a single non-reentrant owner — see [`RacyCell`].
-struct DecoderState {
-    mouse_cycle: u8,
-    mouse_buf: [u8; 3],
-    key_extended: bool,
-}
-
-static DECODER: RacyCell<DecoderState> = RacyCell::new(DecoderState {
-    mouse_cycle: 0,
-    mouse_buf: [0; 3],
-    key_extended: false,
-});
+static DECODER: RacyCell<Decoder> = RacyCell::new(Decoder::new());
 
 /// Drains the IRQ ring until a complete event is decoded, or it empties.
 pub fn poll() -> Option<Event> {
@@ -100,71 +73,17 @@ pub fn poll() -> Option<Event> {
         let source = raw >> 8;
         let data = (raw & 0xFF) as u8;
 
+        // SAFETY: DECODER is only used here, in `poll()` on the compositor thread (ISRs only fill
+        // the ring); calls are sequential, so this `&mut` is unique.
+        let d = unsafe { &mut *DECODER.get() };
         let event = if source == SRC_KEYBOARD {
-            decode_keyboard(data)
+            d.keyboard(data)
         } else {
-            decode_mouse(data)
+            d.mouse(data)
         };
         if event.is_some() {
             return event;
         }
         // Otherwise the byte was a prefix / mid-packet: keep draining.
-    }
-}
-
-fn decode_keyboard(data: u8) -> Option<Event> {
-    // SAFETY: DECODER is only used by `decode_keyboard`/`decode_mouse`, reached solely through
-    // `poll()` on the compositor thread (ISRs only fill the ring); calls are sequential, so this
-    // `&mut` is unique.
-    let d = unsafe { &mut *DECODER.get() };
-    if data == 0xE0 {
-        d.key_extended = true;
-        return None; // prefix; real scancode is the next byte
-    }
-    let extended = d.key_extended;
-    d.key_extended = false;
-    Some(Event::Key(KeyEvent {
-        scan_code: data & 0x7F,
-        pressed: data & 0x80 == 0,
-        extended,
-    }))
-}
-
-fn decode_mouse(data: u8) -> Option<Event> {
-    // SAFETY: same as in `decode_keyboard`: compositor thread only, sequential calls.
-    let d = unsafe { &mut *DECODER.get() };
-    match d.mouse_cycle {
-        0 => {
-            if data & 0x08 == 0 {
-                return None; // out of sync; bit3 of byte0 is always 1
-            }
-            d.mouse_buf[0] = data;
-            d.mouse_cycle = 1;
-            None
-        }
-        1 => {
-            d.mouse_buf[1] = data;
-            d.mouse_cycle = 2;
-            None
-        }
-        _ => {
-            d.mouse_buf[2] = data;
-            d.mouse_cycle = 0;
-            let flags = d.mouse_buf[0];
-            let mut dx = d.mouse_buf[1] as i32;
-            let mut dy = d.mouse_buf[2] as i32;
-            if flags & 0x10 != 0 {
-                dx -= 256;
-            }
-            if flags & 0x20 != 0 {
-                dy -= 256;
-            }
-            Some(Event::Mouse(Packet {
-                dx,
-                dy,
-                left: flags & 0x01 != 0,
-                right: flags & 0x02 != 0,
-            }))
-        }
     }
 }

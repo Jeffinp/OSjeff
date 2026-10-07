@@ -20,6 +20,7 @@ pub mod clipboard;
 pub mod editor;
 pub mod fs;
 pub mod heap;
+pub mod hw;
 pub mod keymap;
 pub mod net;
 pub mod process;
