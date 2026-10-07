@@ -40,6 +40,7 @@ pub mod image;
 pub mod inflate;
 pub mod input;
 pub mod keymap;
+pub mod klog;
 pub mod layout;
 pub mod lease;
 pub mod net;
@@ -53,6 +54,7 @@ pub mod rng;
 pub mod schedule;
 pub mod shell;
 pub mod sntp;
+pub mod sysif;
 pub mod terminal;
 #[cfg(test)]
 pub(crate) mod testutil;

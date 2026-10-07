@@ -1,0 +1,180 @@
+//! Interfaces the system-management apps (resource monitor, settings, log
+//! viewer) use to reach subsystems that other parts of the kernel own: disk
+//! usage, network counters and control, log persistence, settings persistence.
+//!
+//! Each has a trivial default implementation here (`n/d`, RAM), and the kernel
+//! provides one backed by whatever exists today. A new storage or network
+//! front only has to implement the trait and hand the new object to the
+//! desktop (see `docs/design/sysmgmt.md`).
+
+use alloc::vec::Vec;
+
+/// Space accounting of one volume. Any field the backend cannot know is `None`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DiskUsageInfo {
+    pub total_bytes: Option<u64>,
+    pub used_bytes: Option<u64>,
+    /// Directory entries (files + folders) in use / available.
+    pub items_used: Option<u32>,
+    pub items_total: Option<u32>,
+}
+
+impl DiskUsageInfo {
+    /// Used share of the volume in tenths of a percent (`None` if unknown).
+    pub fn used_permille(&self) -> Option<u32> {
+        let (u, t) = (self.used_bytes?, self.total_bytes?);
+        if t == 0 {
+            return None;
+        }
+        Some((u.saturating_mul(1000) / t).min(1000) as u32)
+    }
+}
+
+/// Disk space of the volume that holds user data.
+pub trait DiskUsage {
+    /// Short label of the volume ("FS v2 (IDE 1)").
+    fn label(&self) -> &str;
+    fn usage(&self) -> DiskUsageInfo;
+}
+
+/// Cumulative network counters (monotonic since boot).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NetCounters {
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_frames: u64,
+    pub tx_frames: u64,
+}
+
+/// Source of network counters; `None` when there is no NIC.
+pub trait NetStats {
+    fn counters(&self) -> Option<NetCounters>;
+}
+
+/// Why a network control request was not carried out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NetControlError {
+    /// No NIC, or the network front does not offer this yet.
+    Unsupported,
+    /// The stack is busy (a fetch owns the NIC).
+    Busy,
+}
+
+/// Network actions the settings app can ask for.
+pub trait NetControl {
+    /// Ask for a new DHCP lease.
+    fn renew_dhcp(&mut self) -> Result<(), NetControlError>;
+}
+
+/// A `NetControl` for kernels whose network front does not expose the action
+/// yet: every request answers `Unsupported`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoNetControl;
+
+impl NetControl for NoNetControl {
+    fn renew_dhcp(&mut self) -> Result<(), NetControlError> {
+        Err(NetControlError::Unsupported)
+    }
+}
+
+/// Why a file could not be stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SinkError {
+    /// The volume or table is full.
+    NoSpace,
+    /// The name is not acceptable for this filesystem.
+    BadName,
+    /// No writable storage at all.
+    Unavailable,
+    /// Written, but cut to the filesystem's file size limit (`kept` bytes).
+    Truncated { kept: usize },
+}
+
+/// Where "save log to file" puts the text. The FS v3 front will implement it
+/// over `/var/log/`; today's implementation writes a root file of FS v2.
+pub trait LogSink {
+    /// Store `data` under `name` (replacing a previous file of that name).
+    fn write_file(&mut self, name: &[u8], data: &[u8]) -> Result<(), SinkError>;
+}
+
+/// A `LogSink` that keeps the last file in memory (tests, no-disk boots).
+#[derive(Default)]
+pub struct MemSink {
+    pub name: Vec<u8>,
+    pub data: Vec<u8>,
+}
+
+impl LogSink for MemSink {
+    fn write_file(&mut self, name: &[u8], data: &[u8]) -> Result<(), SinkError> {
+        self.name = name.to_vec();
+        self.data = data.to_vec();
+        Ok(())
+    }
+}
+
+/// Persistence of the settings text (`key=value` lines, see
+/// [`crate::settings`]). The FS v3 front will back it with `/etc/osjeff.conf`.
+pub trait SettingsStore {
+    /// The stored text, if any.
+    fn load(&mut self) -> Option<Vec<u8>>;
+    fn save(&mut self, text: &[u8]) -> Result<(), SinkError>;
+}
+
+/// A `SettingsStore` in RAM (used when no disk is writable, and in tests).
+#[derive(Default)]
+pub struct MemStore {
+    pub text: Option<Vec<u8>>,
+}
+
+impl SettingsStore for MemStore {
+    fn load(&mut self) -> Option<Vec<u8>> {
+        self.text.clone()
+    }
+    fn save(&mut self, text: &[u8]) -> Result<(), SinkError> {
+        self.text = Some(text.to_vec());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permille() {
+        let u = DiskUsageInfo {
+            total_bytes: Some(2000),
+            used_bytes: Some(500),
+            ..Default::default()
+        };
+        assert_eq!(u.used_permille(), Some(250));
+        assert_eq!(DiskUsageInfo::default().used_permille(), None);
+        let z = DiskUsageInfo {
+            total_bytes: Some(0),
+            used_bytes: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(z.used_permille(), None);
+        let over = DiskUsageInfo {
+            total_bytes: Some(10),
+            used_bytes: Some(99),
+            ..Default::default()
+        };
+        assert_eq!(over.used_permille(), Some(1000));
+    }
+
+    #[test]
+    fn defaults_behave() {
+        assert_eq!(NoNetControl.renew_dhcp(), Err(NetControlError::Unsupported));
+        let mut s = MemSink::default();
+        s.write_file(b"a.log", b"x").unwrap();
+        assert_eq!(
+            (s.name.as_slice(), s.data.as_slice()),
+            (&b"a.log"[..], &b"x"[..])
+        );
+        let mut st = MemStore::default();
+        assert!(st.load().is_none());
+        st.save(b"k=v").unwrap();
+        assert_eq!(st.load().unwrap(), b"k=v");
+    }
+}
