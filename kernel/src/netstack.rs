@@ -244,6 +244,15 @@ impl Net {
                     }
                     let to = IpEndpoint::new(IpAddress::Ipv4(server.0.into()), dns::DNS_PORT);
                     let s = self.sockets.get_mut::<udp::Socket>(self.udp);
+                    // smoltcp sends a socket's datagrams in order and a datagram whose next hop
+                    // has not answered ARP stays at the head of the queue, blocking everything
+                    // behind it: a dead first server would then starve the failover query. Closing
+                    // the socket drops the stale datagram (a late answer to it is still accepted,
+                    // it is matched by id and source, not by socket state).
+                    s.close();
+                    if s.bind(local_port).is_err() {
+                        break Outcome::Failed;
+                    }
                     let _ = s.send_slice(&query[..qlen], to);
                 }
                 Step::Wait(_) => {}
