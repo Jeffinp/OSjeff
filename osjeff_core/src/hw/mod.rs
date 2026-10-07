@@ -4,5 +4,6 @@
 //! typed values out) so it can be unit-tested on the host. The kernel keeps only
 //! the port I/O and MMIO glue and calls into these functions.
 
+pub mod ata;
 pub mod ps2;
 pub mod rtc;

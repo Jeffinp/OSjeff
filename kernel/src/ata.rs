@@ -37,30 +37,9 @@ pub const CHANNELS: [(u16, u16, &str); 2] = [
     (0x170, 0x376, "secundario (FS)"),
 ];
 
-/// What `IDENTIFY DEVICE` tells us about a drive — enough to report where the OS
-/// lives and whether each disk is a spinning HD or an SSD, so the storage layer
-/// can adapt (and the user can see it).
-#[derive(Clone, Copy)]
-pub struct DiskInfo {
-    /// ATA model string (ASCII, space-padded; `model_len` trims trailing spaces).
-    pub model: [u8; 40],
-    pub model_len: usize,
-    /// Total addressable 512-byte sectors.
-    pub sectors: u64,
-    /// True when the drive reports a non-rotating medium (rotation rate == 1).
-    pub ssd: bool,
-    /// Nominal rotation rate in RPM, or 0 when not reported / SSD.
-    pub rpm: u16,
-}
+pub use osjeff_core::hw::ata::DiskInfo;
+use osjeff_core::hw::ata::{SECTOR, lba28_regs, parse_identify, sector_count};
 
-impl DiskInfo {
-    /// Capacity in whole mebibytes.
-    pub fn mib(&self) -> u64 {
-        self.sectors * (SECTOR as u64) / (1024 * 1024)
-    }
-}
-
-const SECTOR: usize = 512;
 const SPIN: u32 = 1_000_000; // bounded poll budget
 
 /// ~400ns settle: the spec says read the alternate status four times after
@@ -103,12 +82,13 @@ fn setup(lba: u32, sectors: u8) -> bool {
     if !wait_not_busy() {
         return false;
     }
-    outb(REG_DRIVE, 0xE0 | (((lba >> 24) & 0x0F) as u8));
+    let [drive, lba0, lba1, lba2] = lba28_regs(lba);
+    outb(REG_DRIVE, drive);
     settle();
     outb(REG_SECCOUNT, sectors);
-    outb(REG_LBA0, (lba & 0xFF) as u8);
-    outb(REG_LBA1, ((lba >> 8) & 0xFF) as u8);
-    outb(REG_LBA2, ((lba >> 16) & 0xFF) as u8);
+    outb(REG_LBA0, lba0);
+    outb(REG_LBA1, lba1);
+    outb(REG_LBA2, lba2);
     true
 }
 
@@ -176,41 +156,7 @@ pub fn identify(base: u16, ctrl: u16, slave: bool) -> Option<DiskInfo> {
         *w = inw(base);
     }
 
-    // Model: words 27..=46, big-endian within each word (byte-swapped).
-    let mut model = [b' '; 40];
-    for (i, &w) in id[27..47].iter().enumerate() {
-        model[i * 2] = (w >> 8) as u8;
-        model[i * 2 + 1] = (w & 0xFF) as u8;
-    }
-    let model_len = model
-        .iter()
-        .rposition(|&b| b != b' ' && b != 0)
-        .map_or(0, |p| p + 1);
-
-    // Sector count: 48-bit (words 100..=103) if present, else 28-bit (words 60/61).
-    let lba48 = (id[100] as u64)
-        | ((id[101] as u64) << 16)
-        | ((id[102] as u64) << 32)
-        | ((id[103] as u64) << 48);
-    let lba28 = (id[60] as u64) | ((id[61] as u64) << 16);
-    let sectors = if lba48 != 0 { lba48 } else { lba28 };
-
-    // Word 217: nominal media rotation rate. 1 = non-rotating (SSD).
-    let rot = id[217];
-    let ssd = rot == 1;
-    let rpm = if (0x0401..=0xFFFE).contains(&rot) {
-        rot
-    } else {
-        0
-    };
-
-    Some(DiskInfo {
-        model,
-        model_len,
-        sectors,
-        ssd,
-        rpm,
-    })
+    Some(parse_identify(&id))
 }
 
 /// Probe every standard channel and log a one-line summary per present drive.
@@ -220,9 +166,7 @@ pub fn detect_and_log() {
     for (base, ctrl, label) in CHANNELS {
         match identify(base, ctrl, false) {
             Some(d) => {
-                let model = core::str::from_utf8(&d.model[..d.model_len])
-                    .unwrap_or("?")
-                    .trim();
+                let model = d.model_name();
                 let kind = if d.ssd {
                     "SSD"
                 } else if d.rpm > 0 {
@@ -258,11 +202,11 @@ pub fn read_image(buf: &mut [u8]) -> bool {
 }
 
 fn read_image_inner(buf: &mut [u8]) -> bool {
-    let sectors = buf.len() / SECTOR;
-    if sectors == 0 || sectors > 255 {
+    let Some(count) = sector_count(buf.len()) else {
         return false;
-    }
-    if !setup(0, sectors as u8) {
+    };
+    let sectors = count as usize;
+    if !setup(0, count) {
         return false;
     }
     outb(REG_CMD, CMD_READ);
@@ -293,11 +237,11 @@ pub fn write_image(buf: &[u8]) -> bool {
 }
 
 fn write_image_inner(buf: &[u8]) -> bool {
-    let sectors = buf.len() / SECTOR;
-    if sectors == 0 || sectors > 255 {
+    let Some(count) = sector_count(buf.len()) else {
         return false;
-    }
-    if !setup(0, sectors as u8) {
+    };
+    let sectors = count as usize;
+    if !setup(0, count) {
         return false;
     }
     outb(REG_CMD, CMD_WRITE);
