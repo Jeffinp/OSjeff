@@ -59,7 +59,7 @@ extensões e ignoradas). Obrigatórias: `id`, `name`, `version`.
 | `fuel_frame` | combustível por chamada ao guest, 10 000..=20 000 000 (teto do sistema) | 4 000 000 |
 | `disk_kib` | cota de disco, 0..=4096 (0 se `fs=none`) | 256 |
 | `max_fds` | descritores abertos, 1..=32 | 16 |
-| `tick_ms` | período de `on_tick`; 0 = sem ticks, senão 16..=60000 | 0 |
+| `tick_ms` | período de `on_tick` (só com a janela visível); 0 = sem ticks, senão 16..=60000 | 0 |
 | `win_w`, `win_h` | tamanho padrão da **área de conteúdo**, 64..=1280 x 64..=800 | 640 x 400 |
 | `win_min_w`, `win_min_h` | tamanho mínimo, 64..=win_w/h | min(win_w,200) x min(win_h,120) |
 | `resizable` | `0` \| `1` | `1` |
@@ -126,18 +126,18 @@ combustível não vê é cobrado (ver §6) e tem teto.
 | entrada (exports do guest) | `on_key(code, mods)` | `mods`: bit0 Shift, bit1 Ctrl, bit2 Alt; `code`: ASCII, 10 Enter, 27 Esc, 8 Backspace, 127 Del, 0x100.. setas/Home/End/PgUp/PgDn |
 | | `on_text(cp)` | caractere já traduzido pelo mapa de teclado |
 | | `on_pointer(x,y,buttons)` | coordenadas do conteúdo; `buttons` bit0 esq., bit1 dir.; chamado em mudança de posição/botão |
-| | `on_scroll(dx,dy)` | passos de roda |
+| | `on_scroll(dx,dy)` | passos de roda (**reservado**: o driver PS/2 do kernel não decodifica a roda; o export existe na ABI e o SDK, mas nenhum evento é entregue neste build) |
 | | `on_resize(w,h)` | nova área de conteúdo; seguido de `render` |
-| | `on_tick(ms)` | a cada `tick_ms` (monotônico) |
+| | `on_tick(dt_ms)` | a cada `tick_ms`; `dt_ms` = ms desde o tick anterior |
 | | `on_close()` | pedido de fechar; o app tem uma chamada para salvar |
-| | `render()` | quando há `request_redraw`, após entrada, resize ou tick |
+| | `render()` | quando há `request_redraw`, após entrada, resize ou tick. A superfície **guarda o quadro anterior** (o host copia frente->trás antes), então o app pode desenhar só o que mudou; após um `on_resize` a superfície nova começa vazia |
 | tempo | `now_ms() -> i64` | relógio de parede em ms (RTC) |
 | | `monotonic_ms() -> i64` | ms desde o boot |
 | | `random() -> i32` | xorshift por app, semente do relógio; **não criptográfico** |
 | sistema | `log(ptr,len)` | <= 512 B por chamada; prefixo `[app <id>]`; 16 KiB por execução, depois descartado |
 | | `exit(code)` | encerramento limpo (estado `Encerrado`, sem erro) |
 | clipboard | `clip_get(ptr,cap) -> len`, `clip_set(ptr,len)` | `clipboard=rw`; <= 256 B (o clipboard do SO) |
-| arquivos | `fs_open(path,plen,flags) -> fd` | flags: 1 READ, 2 WRITE, 4 CREATE, 8 TRUNC, 16 APPEND |
+| arquivos | `fs_open(path,plen,flags) -> fd` | fd >= 1; flags: 1 READ, 2 WRITE, 4 CREATE, 8 TRUNC, 16 APPEND |
 | | `fs_read(fd,ptr,len)`, `fs_write(fd,ptr,len)` | <= 64 KiB por chamada; devolve a contagem |
 | | `fs_seek(fd, off: i64, whence) -> i64` | 0 SET, 1 CUR, 2 END |
 | | `fs_close(fd)`, `fs_stat(path,plen,out)` | `out`: 16 B (`kind u32`, `size u64`, reservado) |
@@ -170,7 +170,8 @@ A decisão é toda de `osjeff_core::appfs`:
   (`/data/<id>` ou `/home`), a tabela de descritores (`max_fds`; fechar tudo ao encerrar o
   app), a cota (`disk_kib`: soma de tamanhos + 256 B por entrada; `write`/`truncate` além
   dela dá `ERR_NOSPC`, com escrita parcial até o limite) e o teto por chamada.
-  Renomear um arquivo aberto invalida o descritor (`ERR_NOENT` na próxima operação).
+  Renomear um arquivo (ou a pasta que o contém) aberto **acompanha** o descritor: ele passa a
+  apontar para o novo caminho.
 * **Isolamento entre apps:** cada app só enxerga a própria raiz; `/data/<outro>` é
   inalcançável porque o prefixo é fixo por instância. A raiz `home` é compartilhada por
   definição (é o diretório do usuário).
@@ -200,13 +201,16 @@ combustível).
 
 **Contabilidade por app:** combustível consumido (`fuel_total`), ticks de CPU (medidos em
 torno de cada chamada com `interrupts::ticks()`), pico de memória linear, nº de chamadas.
-O Gerenciador de tarefas mostra, por app: estado, CPU (% na última janela de 1 s), memória.
+O Gerenciador de tarefas mostra, por app (seção "APPS"): nome e instância, estado (`INI`, `RUN`,
+`SUS`, `END`, `ERR`), CPU (% do tempo de relógio das fatias do app na última janela de 1 s,
+medido com o TSC; inclui preempção) e memória linear em KiB.
 
 **Isolamento de falhas:** qualquer erro de uma chamada ao guest (`OutOfFuel`, trap,
 ponteiro inválido, `memory.grow` negado que o guest transforma em trap) vira `Crashou`
 **só daquela instância**; as demais, o compositor e o desktop seguem. `memory.grow` acima de
 `mem_mib` é negado pelo `StoreLimits` (devolve -1 ao guest, como manda a especificação).
-Gerenciador de tarefas: `DEL` fecha a janela (e mata o app); a ação "reiniciar" é fechar e abrir.
+Gerenciador de tarefas: `DEL` fecha a janela (e mata o app) e `R` **reinicia** a instância
+selecionada (descarta a `Store` e instancia de novo o mesmo pacote, na mesma janela).
 Limite honesto: se a **thread** `appd` morrer (pânico dentro do `wasmi`), todos os apps
 morrem juntos e a janela mostra "App encerrado"; não há reinício automático (mesma TCB de hoje).
 
@@ -249,8 +253,9 @@ limitação, não escondido.
   temporário e renomeia).
 * O catálogo (`AppCatalog`, em memória, reconstruído ao instalar/remover) guarda id, nome,
   versão, ícone decodificado em 24x24 e o manifesto. O **Painel Iniciar** lista os apps
-  instalados abaixo dos apps do sistema, com ícone e nome, e **rola** quando são muitos (o
-  painel não passa da altura útil). O **menu de contexto** da área de trabalho usa a mesma lista.
+  instalados abaixo dos apps do sistema, com ícone e nome, e **rola** quando são muitos (até 11
+  linhas; setas Cima/Baixo/Home/End com o painel aberto, ou clique na barra à direita). O menu
+  de contexto da área de trabalho continua listando só os apps do sistema.
 * **Dock e boot idênticos:** a dock continua com os 7 ícones atuais e o ícone "WASM" abre o app
   padrão (`snake`), como hoje. Como o Painel Iniciar só aparece aberto, o desktop do boot
   fica pixel a pixel igual à linha de base (`tools/verify-boot.sh`, 0 pixels).

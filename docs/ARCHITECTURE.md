@@ -24,12 +24,12 @@ o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
   passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
 - **Multitarefa preemptiva** a 250 Hz, com bloqueio. Três threads: `compositor`,
-  `fetcher` (rede), `wasmapp`.
+  `fetcher` (rede), `appd`.
 - **Memória:** heap fixo de 64 MiB num BSS de ~91 MiB; sem alocador de frames. As page
   tables são do bootloader; o kernel só edita uma entrada de nível 1 por pilha de thread,
   para criar uma **guard page**.
 - **Falhas:** todas as exceções têm handler. Um panic ou exceção no `fetcher` ou no
-  `wasmapp` **mata só aquela thread** (log na serial, o resto segue). Falha no compositor,
+  `appd` **mata só aquela thread** (log na serial, o resto segue). Falha no compositor,
   #DF/NMI/#MC, qualquer falha com interrupções desligadas ou durante a morte de uma thread
   pinta uma tela de erro e para a **máquina inteira**. A thread morta não é reiniciada
   nem liberada.
@@ -115,6 +115,9 @@ da pilha de boot) -> ps2::init
 -> interrupts::init (IDT, PIC, PIT 250 Hz, sti) -> calibra TSC (25 ticks)
 -> nic::probe (virtio-net, senão NE2000) + Netd::boot (DHCP, NetConfig, ARP gratuito)
 -> spawn fetcher (só com NIC, stack com guard page; sem NIC, `fetch::init_offline`) e wasmapp
+
+-> ne2000::init + DHCP (NetConfig) + ARP gratuito -> spawn fetcher (só com NIC, stack
+com guard page) e appd
 -> splash -> wallpaper em BG -> Desktop::new (lê o FS do ATA) -> laço do compositor
 ```
 
@@ -180,7 +183,7 @@ regiões `CONVENTIONAL` e o OVMF consome parte da RAM; a causa exata do limite d
 - **compositor** (thread 0): a pilha de **512 KiB** do bootloader, que tem uma página de
   guarda não mapeada logo abaixo; `sched::init` a acha descendo página a página a partir
   do `rsp` (`vm::find_guard_below`). O estouro é reportado como tal, mas continua fatal.
-- **`fetcher` e `wasmapp`:** `sched::spawn` aloca com `alloc_zeroed` um bloco **alinhado a
+- **`fetcher` e `appd`:** `sched::spawn` aloca com `alloc_zeroed` um bloco **alinhado a
   4096** de 1 página de guarda mais **128 KiB**, e `vm::unmap_page` tira a guarda das page
   tables (limpa `PRESENT` na PTE de nível 1 e faz `invlpg`). O bloco **nunca é liberado**
   (devolver ao allocator uma página não mapeada o faria faltar ao escrever o nó da
@@ -192,7 +195,7 @@ regiões `CONVENTIONAL` e o OVMF consome parte da RAM; a causa exata do limite d
 - **IST:** #DF e #PF têm 32 KiB estáticos cada (§3.2).
 
 Folga medida pela auditoria, antes das guard pages [A, sem handshake TLS real]: compositor
-~11 KiB, `fetcher` ~9 KiB, `wasmapp` ~13 KiB; o pico do `fetcher` num handshake real é
+~11 KiB, `fetcher` ~9 KiB, `appd` ~13 KiB; o pico do `fetcher` num handshake real é
 **[NV]**. A pilha de boot subiu de 80 para 512 KiB porque o layout HTML/CSS recursivo e o
 TLS são os usuários mais fundos.
 
@@ -292,11 +295,11 @@ disparei nesta revisão **[NV]**.
 **O que ainda NÃO existe:**
 
 - **Liberar os recursos de uma thread morta:** pilha (e sua guard page), memória do heap
-  que ela alocou e, no `wasmapp`, a `Store` do `wasmi` continuam alocadas.
+  que ela alocou e, no `appd`, a `Store` do `wasmi` continuam alocadas.
 - **Locks que a thread segurava com IF=1 ficam presos** para sempre (só o lock do heap é
   imune, porque roda com IF=0).
 - **Reiniciar a thread:** nunca. Um slot morto continua contando em `thr N` do HUD.
-  Sem `fetcher`, o navegador falha toda navegação; sem `wasmapp`, o app não volta.
+  Sem `fetcher`, o navegador falha toda navegação; sem `appd`, o app não volta.
 - O compositor é um ponto único de falha; NMI e #MC sem pilha própria; sem watchdog,
   reinício automático, dump ou backtrace.
 
@@ -318,6 +321,9 @@ dava `#GP` fatal sob WHPX não tem sustentação no código atual.
 | 0 | `compositor` (`kernel_main`) | sempre, é o contexto de boot | 512 KiB do bootloader, guard page achada por `sched::init` | **fatal** (tela de erro) |
 | 1 | `fetcher` (`fetch::worker`), que também é o `netd` | só se `nic::probe()` achou uma NIC | 128 KiB do heap + guard page | morre sozinha |
 | 1 ou 2 | `wasmapp` (`wasm::worker`) | sempre, mesmo sem janela WASM | 128 KiB do heap + guard page | morre sozinha |
+
+| 1 | `fetcher` (`fetch::worker`) | só se `ne2000::init()` achou a placa | 128 KiB do heap + guard page | morre sozinha |
+| 1 ou 2 | `appd` (`wasm::worker`) | sempre, mesmo sem janela WASM | 128 KiB do heap + guard page | morre sozinha |
 
 `MAX_THREADS = 8` (`assert!` em `spawn`). Threads **nunca terminam por conta própria**: a
 entrada é `extern "C" fn() -> !` e a tabela só cresce; a única saída é morrer (§3.4), e o
@@ -403,7 +409,7 @@ sequenceDiagram
   o tick em que a thread **estava executando**, não parada em `hlt`. O Task Manager
   mostra esses ticks acumulados (coluna `CPU`), não um percentual, ou `DEAD` se a thread
   morreu. É amostragem a 250 Hz.
-- **Guard page (mecanismo principal).** Estourar a pilha de `fetcher` ou `wasmapp` acerta
+- **Guard page (mecanismo principal).** Estourar a pilha de `fetcher` ou `appd` acerta
   uma página não mapeada: #PF na IST[1], `sched::guard_owner(cr2)` reconhece a guarda de
   qual thread foi e a mensagem vira `stack overflow in thread '<nome>': guard page hit at
   ...`; a thread morre (§3.4). A guarda falta no primeiro acesso, não no próximo tick; um
@@ -581,10 +587,10 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
   arquivos e Calculadoras podem coexistir, cada um com **processo próprio** na
   `ProcessTable` (`shell`, `shell 2`, `shell 3`... o menor número livre). Fechar a janela
   encerra instância e processo; no Task Manager, `DEL` fecha de fato a janela da
-  instância. Navegador, app WASM e Task Manager seguem **únicos** (uma NIC e uma thread
-  de busca, uma thread WASM e uma superfície): lançá-los de novo foca a janela existente,
-  mas passam pelo mesmo mecanismo. O app WASM tem tamanho fixo (superfície de 692x414) e
-  não maximiza; minimizá-lo o mantém vivo.
+  instância. Navegador e Task Manager seguem **únicos** (uma NIC e uma thread de busca):
+  lançá-los de novo foca a janela existente, mas passam pelo mesmo mecanismo. **Apps WASM são
+  multi-instância** (cada janela é uma instância do `AppManager`, §10.4), com tamanho, mínimo e
+  `resizable` vindos do manifesto; minimizar suspende o app (sem `render`), fechar o encerra.
 - **Geometria** (`osjeff_core::window`, `layout`): botões da barra de título (fechar,
   maximizar/restaurar, minimizar, nessa ordem da direita), faixa de redimensionar de 5 px
   em volta da janela (cantos de 14 px), `Rect::resized`, `layout::work_area` (a tela menos
@@ -618,8 +624,9 @@ instância de janela** (mais `kernel` e `compositor`, do tipo `System`). A tabel
 ("KERNEL THREADS CPU") mostra as threads reais com os ticks **executados** (§4.5), ou `DEAD`
 para uma thread morta (§3.4). `DEL` numa linha de app fecha a janela daquela instância e
 o processo some quando a animação termina; `Enter` foca (restaura) a janela do processo.
-Para o app WASM, fechá-la (`wasm::set_active(false)`) faz o worker descartar o app de
-verdade (§10.4).
+Para um app WASM, fechar a janela (`wasm::close`) faz a `appd` descartar a `Store` de verdade
+(§10.4); a seção "APPS" do Task Manager mostra estado, CPU e memória de cada instância e `R`
+reinicia a selecionada.
 
 ### 7.3 Apps
 
@@ -655,7 +662,9 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
 - **Navegador:** a barra de endereço e a área de conteúdo seguem a janela, e a página é
   **diagramada de novo** para a nova largura ao terminar de redimensionar (o corpo HTML
   fica guardado na instância). Fechar a janela descarta página e estado.
-- **App WASM:** §10.
+- **Apps WASM:** §10. O Painel Iniciar lista os instalados (ícone e nome, com rolagem) depois dos
+  apps do sistema; o Gerenciador de arquivos ganhou a vista **Apps** (`Enter` abre, `I` instala,
+  `Del` remove).
 
 ### 7.4 Como registrar um app novo
 
@@ -919,71 +928,106 @@ a UI durante a renderização (~0,2 s em release num host, segundo o teste do co
 
 ## 10. WebAssembly
 
-`wasmi` 1.1.0 (interpretador `no_std`, sem JIT) em `kernel/src/wasm/`. O módulo é
-**embutido no build**; não há loader nem lista de apps.
+`wasmi` 1.1.0 (interpretador `no_std`, sem JIT) em `kernel/src/wasm/` é a **plataforma de
+apps** do SO: pacotes `.wasm` com manifesto e permissões, vários rodando ao mesmo tempo,
+instalados em `/apps`. O desenho completo (formato, manifesto, ABI v2, sandbox, escalonamento,
+instalação, o que vira teste) está em [`docs/design/apps.md`](design/apps.md); aqui o resumo
+do que existe no código.
 
-### 10.1 O que entra na imagem
+### 10.1 Pacote, manifesto e instalação
 
-`kernel/build.rs` embute **um** app com janela, escolhido na compilação, mais a demo de
-console e um arquivo de dados:
+Um app é **um arquivo `.wasm`** com a seção customizada `osjeff.manifest` (texto `chave=valor`)
+e, opcionalmente, `osjeff.icon` (PNG até 64x64). O leitor de seções
+(`osjeff_core::wasmsec`, sem alocar, nunca entra em pânico) e o manifesto
+(`osjeff_core::appmanifest`: `id`, `name`, `version`, `abi`, `fs`, `net`, `clipboard`,
+`mem_mib`, `fuel_frame`, `disk_kib`, `max_fds`, `tick_ms`, janela) são puros e **fuzzados**
+(`app_manifest`, `app_sandbox`). Chave repetida/desconhecida, permissão inexistente e pedido
+acima do teto do sistema (24 MiB, 20 M de combustível, 4 MiB de disco, 32 descritores) são
+**recusados**. `osjeff_core::appinstall` instala em `/apps/<id>.wasm` (valida antes, recusa id
+duplicado, grava em nome temporário e renomeia), remove, lista (catálogo com ícone 24x24) e
+semeia os apps embutidos no primeiro boot sem sobrescrever os do usuário.
 
-| Compilação | `app.wasm` | `doom1.wad` |
-|---|---|---|
-| padrão | `snake` (Rust, `wasm32-unknown-unknown`) | vazio |
-| `WASI_SDK_PATH=...` | `cdemo` (C freestanding) | vazio |
-| `DOOM=1 WASI_SDK_PATH=...` | DOOM (`tools/build-doom.sh`, `doomgeneric`) | `wasm-apps/doom/doom1.wad` (obrigatório, fora do repo) |
+`kernel/build.rs` compila `wasm-apps/{hello,clock,notes,paint,snake,plasma}` (Rust,
+`wasm32-unknown-unknown`, workspaces isolados, SDK em `wasm-apps/sdk`) e os embute. Um módulo
+**sem** manifesto (DOOM com `DOOM=1 WASI_SDK_PATH=...`, `cdemo` com `WASI_SDK_PATH=...`) roda como
+app legado (ABI v1, 692x414 fixa), aberto pelo ícone "W" do dock; sem essas variáveis o ícone
+abre o `snake` empacotado. DOOM continua sem ser reproduzível do checkout puro (precisa de
+`wasi-sdk`, rede para clonar o upstream GPLv2 e um WAD).
 
-`wasm-apps/plasma` é **órfão**: nenhum caminho do `build.rs` o seleciona (o literal é
-`"snake"`). DOOM não é reproduzível do checkout puro (precisa de `wasi-sdk`, de rede para
-clonar o upstream GPLv2 e de um WAD); a auditoria o fez rodar com o Freedoom no lugar do
-WAD shareware [A]; **não reproduzido aqui [NV]**. A demo de console (`demo.wasm`, WAT
-montado no host) roda uma vez no boot como teste de fumaça.
-
-### 10.2 ABI do host (31 importações)
+### 10.2 ABI do host
 
 | Módulo | Funções | Efeito |
 |---|---|---|
-| `host` | `log(ptr,len)` | serial, ≤ 4096 B por chamada |
-| `host` | `fill_rect`, `draw_text`, `blit(off,w,h,dx,dy)` | desenham na **superfície fora de tela**, com translação e recorte à caixa de conteúdo; `draw_text` recorta glifo a glifo; `blit` limita a 2^20 px, cobra combustível (1 por 8 px) e amplia por fator inteiro |
-| `host` | `time_ms()` | `ticks * 4` |
-| `wasi_snapshot_preview1` (25) | `fd_write` (fd 1 e 2 vão à serial, 512 B por chunk), `fd_read`/`fd_seek`/`fd_tell`/`fd_close` (só o WAD), `path_open`/`path_filestat_get` (só `doom1.wad`), `fd_prestat_*`, `fd_fdstat_*`, `fd_sync`/`fd_datasync`, `clock_time_get`, `random_get` (xorshift de ticks, **não criptográfico**), `args_*`, `environ_*`, `poll_oneoff`, `proc_exit`; `path_create_directory`, `path_remove_directory`, `path_unlink_file`, `path_rename` **fingem sucesso** | subconjunto para um guest C como o DOOM; **não é um WASI conforme** |
+| `host` (v1) | `log`, `fill_rect`, `draw_text`, `blit`, `time_ms` | como antes (snake, plasma, DOOM): desenham na superfície do app com translação e recorte; `blit` limita a 2^20 px e cobra combustível |
+| `wasi_snapshot_preview1` (25) | subconjunto para um guest C como o DOOM | `fd_*`/`path_*` servem só o WAD; `path_create_directory` etc. **fingem sucesso**; não é um WASI conforme |
+| `osj` (v2) | janela (`set_title`, `get_size`, `request_redraw`), desenho (`fill_rect`, `draw_text`, `blit_rgba`, `draw_image_png`), tempo (`now_ms`, `monotonic_ms`), `random`, `log`, `exit`, clipboard (`clip_get/set`), **arquivos** (`fs_open/read/write/seek/close/stat/readdir/mkdir/unlink/rename`), **rede** (`net_http_get`) | `kernel/src/wasm/abi2.rs`; erros são códigos negativos (`osjeff_core::appabi`); ponteiro fora da memória do guest = trap que mata **só** o app |
 | `env` | `system` | devolve -1 |
 
-Os acessos do host à memória do guest passam por `Memory::read/write/data`, com checagem
-de limites, e nenhum ponteiro do kernel é exposto. O guest só alcança a própria memória
-linear, a superfície `SURFACE[back]`, a serial, o WAD (somente leitura) e os ticks; não
-alcança rede, disco, o FS do SO nem a entrada além da fila `EVENTS`.
+Entrada por exports do guest: `on_key(code, mods)`, `on_text`, `on_pointer(x, y, buttons)`,
+`on_resize(w, h)`, `on_tick(dt)`, `on_close()` e `render()` (`on_scroll` existe na ABI, mas o
+driver PS/2 não decodifica a roda). Os acessos do host à memória do guest passam por
+`appabi::check_range` (aritmética sem estouro contra o tamanho atual da memória linear); tudo
+que o combustível não vê (preenchimentos, decodificação de PNG, E/S de arquivo) é **cobrado**
+do combustível do app. Um app v1 não precisa mudar nada.
 
-### 10.3 Limites de recurso
+**Arquivos.** `osjeff_core::appfs`: o caminho do guest nunca é concatenado como texto
+(`normalize` resolve `.`/`..`/`//` lexicalmente e **recusa** subir acima da raiz; nomes de 1 a 48
+bytes ASCII imprimíveis, sem `\ : * ? " < > |`; <= 256 B, <= 8 níveis). `Sandbox`: raiz por app
+(`/data/<id>/` com `fs=own`, `/home` com `fs=home`, tudo negado com `fs=none`), tabela de
+descritores (`max_fds`), cota de disco (soma de tamanhos + 256 B por entrada; escrita parcial até
+o limite) e teto de 64 KiB por chamada. O backend é o trait `AppFs`; **hoje é um `MemFs` em RAM**
+(`kernel/src/wasm/appfs_backend.rs`, o único ponto de troca: quando `kernel::storage` existir é
+ali que entra `storage::with_fs`), então `/apps` e `/data` **não sobrevivem ao reboot**.
+
+**Rede.** `osjeff_core::appnet` decide (esquemas `http(s)`, URL <= 512 B, destinos locais,
+privados, IPv6 e IPs disfarçados recusados, 1 requisição por segundo, 256 KiB, 8 s). O
+transporte **não está ligado**: a pilha (`fetch`) tem uma só vaga de requisição, compartilhada
+com o navegador e dirigida pelo laço principal; `net_http_get` valida permissão, URL e filtro e
+devolve `ERR_NOSYS`. Sockets TCP (`net=tcp`) são só aceitos no manifesto.
+
+### 10.3 Limites de recurso (por app)
 
 | Limite | Valor | Observação |
 |---|---|---|
-| combustível por chamada (`render`, `on_key`, `on_pointer`) | 20 M instruções (`FRAME_FUEL`) | DOOM em regime: 4,5 a 9 M por quadro [A] |
-| combustível de inicialização (`_initialize`, 1º `render`) | 256 M (`INIT_FUEL`) | `doomgeneric_Create` ~39 M [A] |
-| memória linear | **24 MiB** (`MEM_LIMIT`) | DOOM usa 16-20 MiB; sem teto chegou a 32 MiB [A] |
+| combustível por chamada | `fuel_frame` do manifesto (padrão 4 M, teto 20 M) | legado v1: 20 M; DOOM em regime 4,5 a 9 M por quadro [A] |
+| combustível de inicialização | 8x `fuel_frame` (teto 64 M); legado v1: 256 M | `doomgeneric_Create` ~39 M [A] |
+| memória linear | `mem_mib` (padrão 8, teto **24 MiB**) | `memory.grow` acima disso falha (devolve -1 ao guest) |
 | tabela; instâncias, memórias, tabelas | 100.000; 1 de cada | `StoreLimits` |
-| iovecs por `fd_write`/`fd_read`; `random_get` | 16; 64 KiB | laços do host que o combustível não vê |
-| ritmo | 1 `render` a cada 4 ticks (16 ms) | o worker bloqueia entre quadros |
+| descritores / disco | `max_fds` (teto 32) / `disk_kib` (teto 4096) | por app, no `Sandbox` |
+| log | 512 B por chamada, 16 KiB por execução | prefixo `[app <id>]` |
+| instâncias simultâneas | 8 (`MAX_APPS`) | |
 
-### 10.4 Execução e término real
+### 10.4 Execução: `AppManager` e a thread `appd`
 
-O app roda na thread `wasmapp`, que **só trabalha com a janela aberta** (`set_active`);
-fechada, o worker descarta o app e bloqueia (`FOREVER`) sem custo. O worker renderiza no
-buffer de trás de `SURFACE`, publica com `FRONT`/`READY`, e o compositor copia o da
-frente (`blit_surface`). A entrada vai por uma fila SPSC de 128 eventos (`on_key`,
-`on_pointer`) que **acorda** o worker.
+`kernel/src/wasm/manager.rs`. Cada janela WASM é **uma instância** (`App::Wasm(WasmWin)` guarda
+só o handle); o `Kind::WasmApp` é multi-instância e a janela segue o manifesto (tamanho
+padrão e mínimo, redimensionável ou não). A superfície offscreen é **por instância**, no formato
+do framebuffer, com dois buffers (frente/trás) e é realocada no tamanho da janela depois que ele
+se estabiliza por 3 ticks (o app recebe `on_resize` e redesenha). O compositor copia a frente sob
+um aperto de mão (`reading`), sem quadro torto.
 
-**Término real:** `OutOfFuel`, trap, falha de carga ou de `_initialize` e `proc_exit` (um
-erro de saída que desenrola o guest) chamam `terminate`: registra o motivo na serial,
-**destrói a `Store`** (a memória linear volta ao heap) e mantém a janela com a mensagem
-até ser fechada; reabrir cria instância nova. Isso vale para falhas **do guest**. Se a
-própria **thread** `wasmapp` morre (panic ou exceção dentro do motor, §3.4), nada disso
-roda: `blit_surface` passa a mostrar "App WASM encerrado" (`worker_dead`), a `Store` e a
-pilha ficam alocadas e a thread não volta.
+Uma única thread **`appd`** (substitui a antiga `wasmapp`; o kernel só tem 8 vagas de thread) é a
+dona de todas as `Store`: percorre as instâncias em **round-robin**, uma fatia por app pronto
+(até 8 eventos e um `render`, cada chamada com o seu combustível); sem nada pronto, bloqueia em
+`sched::block` até o prazo mais próximo (tick de app, quadro de app v1) ou um `wake` (entrada,
+abrir, fechar, redimensionar): parada, custa zero CPU. Um app `abi=2` é orientado a eventos (só
+renderiza com motivo); um app v1 mantém o laço contínuo de 16 ms. A tabela de instâncias é
+compartilhada com o compositor sob interrupções mascaradas (núcleo único, seções curtas).
 
-**Fronteira de confiança:** o isolamento é o do interpretador mais as host functions, no
-mesmo ring 0. A TCB inclui o `wasmi` (~135 `unsafe` nas crates `wasmi*` [A]) e as 31
-funções, que **não são fuzzadas**: um bug ali é fuga total.
+Estados: `Starting`, `Running`, `Suspended` (janela minimizada: sem `render`, sem ticks, entrada
+descartada), `Exited` (`exit`/`proc_exit`), `Crashed`. **Término real e isolamento de falhas:**
+falta de combustível, trap, ponteiro inválido e falha de carga encerram **só aquela instância**:
+a `Store` (memória linear, descritores) é destruída na hora e a janela mostra "O app encerrou:
+<motivo>" até fechar. Fechar a janela manda `on_close` (uma chamada para salvar) e depois mata a
+instância; o Gerenciador de tarefas (`DEL` fecha, `R` reinicia) lista cada app com estado, CPU
+(tempo de relógio das fatias, medido com o TSC) e memória. Se a **thread** `appd` morrer (pânico
+ou falha de CPU dentro do `wasmi`, §3.4), todos os apps morrem juntos e não há reinício
+automático: é a mesma TCB de antes.
+
+**Fronteira de confiança:** o isolamento é o do interpretador mais as host functions, no mesmo
+ring 0. A TCB inclui o `wasmi` (~135 `unsafe` nas crates `wasmi*` [A]) e as funções do host
+(`osj.*`, `host.*`, WASI): a parte de decisão (caminhos, cotas, URL, manifesto, ponteiros) é
+código seguro em `osjeff_core`, testado e fuzzado, mas a cola em `abi2.rs` e `manager.rs` não é.
 
 ## 11. Decisões de engenharia
 
@@ -995,7 +1039,7 @@ funções, que **não são fuzzadas**: um bug ali é fuga total.
 | `SpinLock` com IF=0; `RacyCell` no lugar de `static mut` | evitar deadlock sob preempção; a edição 2024 proíbe `&mut` a `static mut` | lock não reentrante, só vale porque nenhuma ISR aloca; soundness por convenção, 5 `fn` seguras devolvem `&'static mut` |
 | Round-robin preemptivo com bloqueio por atômicos | a ISR não pode travar nem alocar; worker ocioso não deve custar fatia | quantum fixo de 4 ms, sem prioridades, máximo 8 threads, nenhuma sai (só morre) |
 | GDT/TSS próprios com IST para #DF e para #PF | estouro de pilha vira relatório, não reset; o #PF da guard page precisa de pilha que não seja a esgotada | duas pilhas de 32 KiB; NMI e #MC na pilha corrente |
-| Thread morta em vez de máquina morta, só se for seguro | um bug no `fetcher` ou no `wasmapp` não deve derrubar o desktop | contenção só com IF=1, fora do compositor e fora de abortos; nada da thread é liberado, locks presos ficam presos, sem reinício |
+| Thread morta em vez de máquina morta, só se for seguro | um bug no `fetcher` ou no `appd` não deve derrubar o desktop | contenção só com IF=1, fora do compositor e fora de abortos; nada da thread é liberado, locks presos ficam presos, sem reinício |
 | Guard page por PTE editada pelo kernel (`vm`), canário só de *fallback* | detecta o estouro no primeiro acesso, sem alocador de frames nem page tables próprias | depende de o `.bss` estar em páginas de 4 KiB (senão recusa e cai no canário fraco); o bloco da pilha nunca volta ao heap |
 | Fatal total para o compositor, #DF, NMI, #MC e falhas com IF=0 | sem o desktop ou com estado de IRQ/lock incerto não há o que preservar | tela de erro e parada, como antes |
 | Buffers de render fixos de 1080p | sem alocação, custo zero | recusa telas maiores; em 24 bpp usa um terço do reservado |
@@ -1014,7 +1058,7 @@ funções, que **não são fuzzadas**: um bug ali é fuga total.
   sem adaptação. UEFI exige ≥ 192 MiB e o excedente não é usado. Single-core, PIC 8259,
   sem ACPI, APIC ou SMP. Splash obrigatório de 4-5 s.
 - **Robustez.** O compositor é ponto único de falha, e #DF, NMI, #MC e qualquer falha com
-  IF=0 param a máquina. Uma thread morta (`fetcher`, `wasmapp`) **não é liberada** (pilha,
+  IF=0 param a máquina. Uma thread morta (`fetcher`, `appd`) **não é liberada** (pilha,
   heap, `Store` do `wasmi`), **não reinicia**, deixa presos os locks que segurava com IF=1
   e continua contando no HUD. A guard page cai para o canário (fraco) se o `.bss` deixar
   de ser mapeado em 4 KiB. NMI e #MC sem pilha própria; sem watchdog. Corretude por

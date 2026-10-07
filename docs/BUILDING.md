@@ -11,7 +11,7 @@ Este guia leva do `git clone` a um desktop OSjeff na tela, em Linux, WSL, macOS
 | QEMU (`qemu-system-x86_64`) | rodar a imagem | Não precisa de KVM nem de tela para os testes (`-display none`). |
 | OVMF | boot UEFI | Ubuntu/Debian: `apt install ovmf`. Só é necessário para `uefi`. |
 | `socat` e ImageMagick | harness headless | Só para `tools/qemu-headless.sh` e `tools/verify-boot.sh` (screenshots). |
-| `wasi-sdk` | apps C em WASM | Opcional (DOOM e `cdemo`). O app padrão (`snake`) é Rust e não precisa. |
+| `wasi-sdk` | apps C em WASM | Opcional (DOOM e `cdemo`). Os apps de exemplo são Rust e não precisam. |
 
 Ubuntu/Debian de uma vez:
 
@@ -79,20 +79,98 @@ Para mandar teclas e mouse enquanto roda:
 `echo "sendkey a" | socat - UNIX-CONNECT:$(cat /tmp/osj/mon.path)`
 (o socket fica em `/tmp` porque caminhos de socket Unix têm limite de 107 bytes).
 
-## 4. Variantes de app WebAssembly
+## 4. Apps WebAssembly
 
-O kernel embute **um** app WASM com janela, escolhido na compilação (`kernel/build.rs`):
+A imagem embute os apps de exemplo (`hello`, `clock`, `notes`, `paint`, `snake`,
+`plasma`, em `wasm-apps/`; `kernel/build.rs` compila todos para
+`wasm32-unknown-unknown`) e os instala em `/apps` no primeiro boot, sem sobrescrever
+os que já existem. Eles aparecem no Painel Iniciar (com ícone e nome) e no Gerenciador
+de arquivos (vista **Apps**: `Enter` abre, `I` instala, `Del` remove). O ícone "W" do dock
+abre o `snake`. Detalhes: [`docs/design/apps.md`](design/apps.md).
 
-| Compilação | App |
+Variantes opcionais para o app "legado" do dock (sem manifesto, ABI v1):
+
+| Compilação | O ícone "W" do dock abre |
 |---|---|
-| padrão | `snake` (Rust → `wasm32-unknown-unknown`, em `wasm-apps/snake`) |
+| padrão | `snake` (empacotado, como os outros) |
 | `WASI_SDK_PATH=...` | `cdemo` (C freestanding) |
 | `DOOM=1 WASI_SDK_PATH=...` | DOOM ([doomgeneric](https://github.com/ozkl/doomgeneric), GPLv2) |
 
 DOOM **não** vem pronto no checkout: precisa do `wasi-sdk`, de rede para clonar o
 doomgeneric (`tools/build-doom.sh`) e de um WAD (`doom1.wad`, não redistribuído; o
-Freedoom serve). Use 512 MB de RAM no QEMU. O app `plasma` existe em
-`wasm-apps/plasma` mas nenhum caminho do `build.rs` o seleciona.
+Freedoom serve). Use 512 MB de RAM no QEMU.
+
+### Como criar um app
+
+Um app é **um arquivo `.wasm`**: o código mais uma seção `osjeff.manifest` (e, se quiser,
+`osjeff.icon`). Passo a passo com o SDK (`wasm-apps/sdk`, `no_std`, sem dependências):
+
+1. **Crie a crate** em `wasm-apps/meuapp/` (workspace isolado, como as outras):
+
+   ```toml
+   # wasm-apps/meuapp/Cargo.toml
+   [package]
+   name = "meuapp"
+   version = "0.1.0"
+   edition = "2021"
+
+   [lib]
+   crate-type = ["cdylib"]
+
+   [dependencies]
+   osjeff-sdk = { path = "../sdk" }
+
+   [profile.release]
+   opt-level = "s"
+   lto = true
+   panic = "abort"
+
+   [workspace]
+   ```
+
+2. **Escreva o app** (`src/lib.rs`): implemente `App` (só `new` e `render` são
+   obrigatórios) e declare o manifesto:
+
+   ```rust
+   #![no_std]
+   use osjeff_sdk::*;
+
+   manifest!("id=meuapp\nname=Meu App\nversion=1.0.0\nfs=own\nwin_w=420\nwin_h=300\n");
+   icon!(include_bytes!("../icon.png")); // opcional: PNG de até 64x64
+
+   struct Meu { toques: u32 }
+   impl App for Meu {
+       fn new() -> Self { Meu { toques: 0 } }
+       fn on_key(&mut self, _code: i32, _mods: i32) { self.toques += 1; }
+       fn render(&mut self, c: &mut Canvas) {
+           c.clear(0x10141F);
+           c.text(16, 16, "Ola!", 0xFFFFFF, 2);
+       }
+   }
+   export_app!(Meu);
+   ```
+
+3. **Manifesto** (`chave=valor` por linha; `id`, `name` e `version` são obrigatórios):
+   permissões `fs=none|own|home`, `net=none|http|tcp`, `clipboard=none|rw`; quotas
+   `mem_mib` (até 24), `fuel_frame` (até 20 000 000 instruções por chamada), `disk_kib` (até
+   4096), `max_fds` (até 32); `tick_ms` (período de `on_tick`); janela `win_w`/`win_h`
+   (área de conteúdo), `win_min_w`/`win_min_h`, `resizable`. Valor acima do teto, chave
+   repetida ou desconhecida, permissão inexistente: o instalador **recusa** o app.
+   Tabela completa em [`docs/design/apps.md`](design/apps.md) §2.
+
+4. **Compile e teste isolado**: `cd wasm-apps/meuapp && cargo build --release --target
+   wasm32-unknown-unknown` gera `target/wasm32-unknown-unknown/release/meuapp.wasm`.
+
+5. **Embuta na imagem**: acrescente `"meuapp"` em `BUNDLED_APPS` de `kernel/build.rs` e rode
+   `cargo build --release -p os`. No primeiro boot ele é instalado em `/apps/meuapp.wasm`
+   e aparece no Painel Iniciar. Dados do app (`fs=own`) ficam em `/data/meuapp/`.
+
+Regras do jogo: entrada por `on_key(code, mods)`, `on_text`, `on_pointer`, `on_resize`,
+`on_tick`, `on_close`; desenho por `Canvas` (`fill_rect`, `text`, `blit_rgba`, `png`);
+arquivos por `File` (a raiz `/` é a pasta do app; `..` acima dela falha com `Errno::PERM`);
+`render` só roda quando há motivo (entrada, tick, `request_redraw`), então um app parado não
+gasta CPU. Um ponteiro inválido ou um laço infinito encerra **só** o seu app, com "O app
+encerrou: <motivo>" na janela. `log!` escreve na serial (`[app <id>] ...`).
 
 ## 5. Problemas comuns
 
