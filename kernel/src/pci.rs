@@ -7,10 +7,10 @@ use crate::io::{inl, outl};
 const CONFIG_ADDRESS: u16 = 0xCF8;
 const CONFIG_DATA: u16 = 0xCFC;
 
-/// virtio PCI vendor id, and the modern/transitional virtio-gpu device ids.
-pub const VIRTIO_VENDOR: u16 = 0x1AF4;
-pub const VIRTIO_GPU_MODERN: u16 = 0x1050; // 0x1040 + virtio device type 16 (GPU)
-pub const VIRTIO_GPU_LEGACY: u16 = 0x1010;
+use osjeff_core::hw::pci::{
+    VIRTIO_GPU_LEGACY, VIRTIO_GPU_MODERN, VIRTIO_VENDOR, cap_list_start, config_address,
+    extract_u16,
+};
 
 /// A located PCI function.
 #[derive(Clone, Copy, Debug)]
@@ -22,29 +22,20 @@ pub struct PciDevice {
     pub device: u16,
 }
 
-fn address(bus: u8, slot: u8, func: u8, offset: u8) -> u32 {
-    0x8000_0000
-        | (bus as u32) << 16
-        | (slot as u32) << 11
-        | (func as u32) << 8
-        | (offset as u32 & 0xFC)
-}
-
 /// Read a 32-bit dword from config space (`offset` is dword-aligned).
 pub fn read32(bus: u8, slot: u8, func: u8, offset: u8) -> u32 {
-    outl(CONFIG_ADDRESS, address(bus, slot, func, offset));
+    outl(CONFIG_ADDRESS, config_address(bus, slot, func, offset));
     inl(CONFIG_DATA)
 }
 
 /// Read a 16-bit word from config space.
 pub fn read16(bus: u8, slot: u8, func: u8, offset: u8) -> u16 {
-    let dword = read32(bus, slot, func, offset & 0xFC);
-    ((dword >> ((offset as u32 & 2) * 8)) & 0xFFFF) as u16
+    extract_u16(read32(bus, slot, func, offset & 0xFC), offset)
 }
 
 /// Write a 32-bit dword to config space.
 pub fn write32(bus: u8, slot: u8, func: u8, offset: u8, value: u32) {
-    outl(CONFIG_ADDRESS, address(bus, slot, func, offset));
+    outl(CONFIG_ADDRESS, config_address(bus, slot, func, offset));
     outl(CONFIG_DATA, value);
 }
 
@@ -66,10 +57,8 @@ impl PciDevice {
     /// device has none (status register bit 4 clears it).
     pub fn cap_list(&self) -> Option<u8> {
         let status = read16(self.bus, self.slot, self.func, 0x06);
-        if status & 0x10 == 0 {
-            return None;
-        }
-        Some((read16(self.bus, self.slot, self.func, 0x34) & 0xFC) as u8)
+        let ptr = read16(self.bus, self.slot, self.func, 0x34);
+        cap_list_start(status, ptr)
     }
 
     /// Read a config-space dword at `offset` (for walking capabilities).
@@ -81,25 +70,18 @@ impl PciDevice {
 /// Visit every present function on bus 0, calling `f` for each. QEMU places its
 /// virtio devices on bus 0, so a single-bus scan suffices here.
 pub fn for_each<F: FnMut(PciDevice)>(mut f: F) {
-    for slot in 0..32u8 {
-        for func in 0..8u8 {
-            let vendor = read16(0, slot, func, 0x00);
-            if vendor == 0xFFFF {
-                if func == 0 {
-                    break; // no function 0 -> the whole slot is empty
-                }
-                continue;
-            }
-            let device = read16(0, slot, func, 0x02);
+    osjeff_core::hw::pci::enumerate(
+        |slot, func, off| read16(0, slot, func, off),
+        |slot, func, vendor, device| {
             f(PciDevice {
                 bus: 0,
                 slot,
                 func,
                 vendor,
                 device,
-            });
-        }
-    }
+            })
+        },
+    );
 }
 
 /// Find the first function matching `vendor`/`device` on bus 0.
