@@ -33,6 +33,7 @@
 //!   of a line (never between `\r` and `\n`), and `0 <= cursor <= len`.
 
 mod buffer;
+mod dialog;
 mod keys;
 mod search;
 #[cfg(test)]
@@ -41,6 +42,9 @@ mod undo;
 mod view;
 
 pub use buffer::{GapBuffer, REPLACEMENT, TextBuf};
+pub use dialog::{
+    CloseAsk, CloseChoice, MAX_FIELD, PickEvent, PickMode, PickRow, Picker, status_line,
+};
 pub use search::{Notice, PromptKind, PromptView};
 pub use undo::{Edit, History, Kind};
 pub use view::{Cell, Cells, RowView, VisibleRows};
