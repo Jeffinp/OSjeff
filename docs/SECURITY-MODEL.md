@@ -87,9 +87,10 @@ relógio confiável (o RTC não é verificado) e verificação de cadeia.
 - Um panic em uma thread secundária para a máquina inteira (não há "thread morta").
 
 ### 3.4 Rede
-- O IP, o gateway e o DNS usados pelo navegador são os fixos do SLIRP do QEMU
-  (`10.0.2.15`); o DHCP só alimenta o responder ARP/ping. Na prática o navegador só
-  funciona sob `-netdev user`.
+- O IP, o gateway e o DNS do navegador vêm do lease DHCP (com fallback estático
+  `10.0.2.15/24` do SLIRP quando não há servidor); o lease **não é renovado**, só
+  registra quando expira. Só há um servidor DNS e o DHCP não é autenticado: quem
+  responder primeiro define o gateway e o DNS.
 - O driver NE2000 é de placa ISA rara; não há driver para NICs comuns.
 
 ### 3.5 Dados

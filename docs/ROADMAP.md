@@ -34,9 +34,9 @@ Trust store, relógio confiável e verificação de cadeia com `embedded-tls`
 dizer "não verificada" apenas para cadeias válidas.
 
 ### 3. Rede que funciona fora do QEMU
-- O DHCP precisa alimentar o `netstack` (IP, gateway e DNS não podem ser os do SLIRP).
+- ~~O DHCP alimenta o `netstack`~~ **feito** (`NetConfig`): o navegador carregou uma página numa sub-rede `192.168.77.0/24` com gateway e DNS do lease. Falta renovar o lease e usar mais de um DNS.
 - Um driver para uma NIC comum (`virtio-net`, depois `e1000` ou `rtl8139`); o NE2000 é ISA e raro.
-*Aceite:* o navegador carrega uma página numa rede com outra faixa de IP.
+*Aceite:* o navegador carrega uma página usando uma NIC que existe em hardware real.
 
 ### 4. WebAssembly como fronteira de isolamento
 *Fuel* retomável (um quadro pesado legítimo, como o carregamento de nível do DOOM,

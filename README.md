@@ -147,7 +147,7 @@ nas pilhas das threads secundárias. Detalhes, cenários de ataque e como relata
   evolução (WebAssembly como fronteira, ring 3 só com gatilho) está no
   [ADR de isolamento](docs/audit/adr-isolamento.md).
 - **HTTPS sem verificação de certificado.** A interface avisa ("Conexao nao verificada").
-- **Navegador preso ao IP do SLIRP do QEMU** (10.0.2.15); o DHCP não alimenta a pilha TCP.
+- **Rede só com NE2000** (placa ISA rara, só no QEMU): o IP, o gateway e o DNS vêm do DHCP (testado em outra sub-rede), mas não há driver de NIC comum e o lease não é renovado.
 - **Sem teste em hardware real.** BIOS entrega 1280×720 em 24 bpp e UEFI precisa de
   ≥ 192 MB de RAM (o BSS do kernel tem ~91 MiB).
 - Um panic em qualquer thread ainda para a máquina inteira.

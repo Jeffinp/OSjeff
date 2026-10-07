@@ -32,7 +32,7 @@ o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
   thread".
 - **Rede, web e WASM:** NE2000 ISA, `smoltcp`, TLS 1.3 **sem verificação de
   certificado**, motor HTML/CSS próprio, `wasmi` (um app por build); a rede só funciona
-  atrás do SLIRP do QEMU (IP fixo).
+  com o IP, gateway e DNS do lease DHCP (fallback estático do SLIRP).
 - **Boot [M]:** primeiro frame ~5,1 s (BIOS) e ~4,5 s (UEFI) após a entrada do kernel,
   quase tudo é o splash.
 
@@ -583,11 +583,16 @@ compositor atende ARP e ping por `osjeff_core::net`, **só com `fetch::is_idle()
   Ethernet, ARP, IPv4, ICMP, UDP, BOOTP/DHCP. `respond(frame, mac, ip, out)` devolve a
   resposta (ARP reply e ICMP echo reply: o SO é "pingável"). No boot sai um ARP gratuito.
   O compositor atende no máximo 32 frames por acordada.
-- **O DHCP só alimenta o responder.** `main.rs` faz DISCOVER/REQUEST com cada espera
-  limitada a 75 ticks (~300 ms) e usa o IP obtido (ou `10.0.2.15`) **apenas no ARP
-  gratuito e no responder**. A pilha do navegador (`netstack.rs`) fixa **IP
-  `10.0.2.15/24`, gateway `10.0.2.2` e DNS `10.0.2.3`**, os do SLIRP, independentemente
-  do DHCP. Fora do SLIRP o navegador não funciona.
+- **O DHCP configura a pilha inteira.** `main.rs` faz DISCOVER/REQUEST com cada espera
+  limitada a 75 ticks (~300 ms) e devolve um `osjeff_core::net::NetConfig` (IP, prefixo,
+  gateway, DNS, lease). O ACK é interpretado de forma total (máscara não contígua,
+  endereço inválido e lease 0 são recusados). `netstack::Net::new(&NetConfig)` usa esse
+  resultado para o endereço da interface `smoltcp`, a rota padrão e o DNS, e o responder
+  ARP/ping usa o mesmo IP. Sem servidor DHCP, cai para o fallback estático
+  `10.0.2.15/24`, gateway `10.0.2.2`, DNS `10.0.2.3` (os do SLIRP) e registra
+  `net: static fallback (...)` na serial. O lease **não é renovado**: ao expirar só há um
+  registro na serial. Literais IPv4 em URLs não consultam o DNS. Provado em QEMU com
+  `192.168.77.0/24` (ARP ao gateway do lease, DNS ao servidor do lease).
 - **`smoltcp` 0.12:** um socket TCP (buffers de 8 KiB) e um DNS, **uma conexão por vez**;
   prazos de 5 s (DNS), 8 s (conexão), 10 s (leitura HTTP), 12 s (cada operação TLS).
   O pedido é `GET ... HTTP/1.0` com `Connection: close` (evita *chunked* e keep-alive).
@@ -717,7 +722,7 @@ funções, que **não são fuzzadas**: um bug ali é fuga total.
 | Canário de pilha em vez de guard page | as pilhas vêm do heap e o kernel não edita page tables | detecção tardia e parcial; o compositor não tem |
 | Buffers de render fixos de 1080p | sem alocação, custo zero | recusa telas maiores; em 24 bpp usa um terço do reservado |
 | Damage tracking e camada `STATIC` | animação proporcional à área do dano | vários caminhos de desenho e uma assinatura de cena que precisa invalidar certo (já colidiu com ≥ 9 janelas; corrigido) |
-| NE2000 ISA polled, IP fixo do SLIRP, `smoltcp` | NIC mais simples de programar; funciona no QEMU | só QEMU; DHCP não alimenta a pilha |
+| NE2000 ISA polled, `smoltcp`, DHCP próprio | NIC mais simples de programar; funciona no QEMU | só QEMU (NE2000 é ISA rara); lease sem renovação |
 | Fetcher em thread própria, NIC com dono por protocolo | o handshake TLS por software não pode congelar a UI | exclusão da NIC é convenção (`STATE`, `is_idle`), não lock |
 | TLS 1.3 sem verificação de certificado | sem trust store nem relógio confiável | cifra sem autenticar; rótulo honesto na UI; RNG fraco sem `RDRAND` |
 | `wasmi` com combustível, teto de memória e término real | WebAssembly como formato nativo de apps (Rust e C) | interpretador 25-37x mais lento que nativo [A]; combustível não retomável; um app por build; `unsafe` do `wasmi` na TCB |

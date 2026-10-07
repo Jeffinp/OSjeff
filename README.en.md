@@ -147,7 +147,7 @@ on secondary thread stacks. Details, attack scenarios and how to report:
   (WebAssembly as the boundary, ring 3 only with a trigger) is in the
   [isolation ADR](docs/audit/adr-isolamento.md).
 - **HTTPS does not verify certificates.** The UI says so ("Conexao nao verificada").
-- **The browser is tied to QEMU's SLIRP IP** (10.0.2.15); DHCP does not feed the TCP stack.
+- **Network is NE2000 only** (a rare ISA card, QEMU only): IP, gateway and DNS come from DHCP (tested on another subnet), but there is no common-NIC driver and the lease is not renewed.
 - **No real-hardware testing.** BIOS gives 1280×720 at 24 bpp and UEFI needs at least
   192 MB of RAM (the kernel BSS is ~91 MiB).
 - A panic in any thread still halts the whole machine.

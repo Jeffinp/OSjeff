@@ -47,6 +47,11 @@ Cada mudança é um commit separado, com teste ou prova em QEMU.
   14 → 3 ciclos/px; sombras com tabela de blend (24 → 10 ciclos/px).
 
 ### Adicionado
+- Rede: o resultado do DHCP (`NetConfig`) configura a pilha TCP/DNS do navegador (antes só
+  o responder ARP/ping; o IP do SLIRP era fixo). Literais IPv4 não consultam o DNS.
+  Provado em QEMU numa sub-rede `192.168.77.0/24`.
+- Editor: arquivo que não cabe na grade 44×18 agora é marcado `TRUNC` e **não pode ser
+  salvo** (antes era truncado em silêncio e o save destruía o resto).
 - `osjeff_core::{hw, layout, wm, gfx, redirect, rng}` (lógica movida do kernel, com
   testes); `fs::read_in`, `fs::live_dir`.
 - `tools/`: `qemu-headless.sh`, `verify-boot.sh`, `run.sh`, harness `perf/` e
@@ -66,5 +71,6 @@ Cada mudança é um commit separado, com teste ou prova em QEMU.
 
 ### Conhecido e ainda aberto
 HTTPS sem verificação de certificado; sem ring 3; pilhas de thread sem página de
-guarda e panic em thread secundária ainda para a máquina; navegador preso ao IP do
-SLIRP; nenhum teste em hardware real. Ver [`docs/ROADMAP.md`](docs/ROADMAP.md).
+guarda e panic em thread secundária ainda para a máquina; lease DHCP sem renovação e
+um único driver de NIC (NE2000); nenhum teste em hardware real. Ver
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
