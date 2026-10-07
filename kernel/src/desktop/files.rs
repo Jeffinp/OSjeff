@@ -7,7 +7,9 @@
 //! clipboard of paths, and runs long copies in steps from `animate`.
 
 use super::*;
-use osjeff_core::fileman::{self, Activation, Cmd, FileClass, MenuCtx, TRASH_PATH};
+use osjeff_core::fileman::apps::{self as fapps, AppAction, AppItem, AppKey};
+use osjeff_core::fileman::{self, APPS_PATH, Activation, Cmd, FileClass, MenuCtx, TRASH_PATH};
+use osjeff_core::vfs::VfsError;
 
 /// Bytes copied per frame by a running copy job.
 const JOB_CHUNK: usize = 128 * 1024;
@@ -21,12 +23,16 @@ impl Desktop {
 
     /// Reload window `id`'s folder from the filesystem.
     pub(crate) fn files_refresh(&mut self, id: WindowId) {
+        let items = self.apps_items_if_shown(id);
         let Some(f) = self.files_mut(id) else {
             return;
         };
         match vfs::with_backend(|b| f.view.refresh(b)) {
             Ok(Ok(())) => {}
             Ok(Err(e)) | Err(e) => f.say(e.message(), true),
+        }
+        if let Some(items) = items {
+            f.view.set_apps(&items);
         }
         f.usage = vfs::statfs();
         if f.msg.is_none()
@@ -67,6 +73,49 @@ impl Desktop {
         self.fs_changed();
     }
 
+    /// The Apps place's rows (installed apps, then the bundled packages not installed).
+    fn app_items(&self) -> Vec<AppItem> {
+        self.app_rows()
+            .into_iter()
+            .map(|r| AppItem {
+                id: r.id,
+                name: r.name,
+                installed: r.installed,
+                size: r.size,
+            })
+            .collect()
+    }
+
+    /// The app list when window `id` is showing the Apps place (it is then loaded
+    /// into the view by the caller), else `None`.
+    fn apps_items_if_shown(&self, id: WindowId) -> Option<Vec<AppItem>> {
+        match self.wm.get(id).map(|w| &w.app.app) {
+            Some(App::Files(f)) if f.view.in_apps() => Some(self.app_items()),
+            _ => None,
+        }
+    }
+
+    /// The catalog changed (install, remove): every file manager on the Apps place
+    /// reloads its rows.
+    pub(crate) fn refresh_apps_views(&mut self) {
+        let ids: Vec<WindowId> = self
+            .wm
+            .windows()
+            .iter()
+            .filter(|w| matches!(&w.app.app, App::Files(f) if f.view.in_apps()))
+            .map(|w| w.id)
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        let items = self.app_items();
+        for id in ids {
+            if let Some(f) = self.files_mut(id) {
+                f.view.set_apps(&items);
+            }
+        }
+    }
+
     fn files_rect(&self, id: WindowId) -> Option<Rect> {
         self.wm.get(id).map(|w| w.rect)
     }
@@ -94,6 +143,16 @@ impl Desktop {
             Ok(Ok(())) => {}
             Ok(Err(e)) | Err(e) => f.say(e.message(), true),
         }
+        self.files_load_apps(id);
+    }
+
+    /// When window `id` is on the Apps place, fill its rows from the catalog.
+    fn files_load_apps(&mut self, id: WindowId) {
+        if let Some(items) = self.apps_items_if_shown(id)
+            && let Some(f) = self.files_mut(id)
+        {
+            f.view.set_apps(&items);
+        }
     }
 
     /// Back, forward or up.
@@ -111,6 +170,7 @@ impl Desktop {
             Ok(Ok(())) => f.msg = None,
             Ok(Err(e)) | Err(e) => f.say(e.message(), true),
         }
+        self.files_load_apps(id);
     }
 
     /// Enter / double click on row `i`.
@@ -130,8 +190,43 @@ impl Desktop {
             }
         };
         f.msg = None;
-        if let Activation::Open(path, class) = act {
-            self.open_path(id, &path, class);
+        match act {
+            Activation::Open(path, class) => self.open_path(id, &path, class),
+            Activation::App { .. } => self.files_app_key(id, i, AppKey::Enter),
+            Activation::Entered | Activation::None => {}
+        }
+    }
+
+    /// A key of the Apps place on row `i`: run, install or remove the app, and say
+    /// the outcome (or why it does not apply) in the status line.
+    fn files_app_key(&mut self, id: WindowId, i: usize, key: AppKey) {
+        let Some(row) = self.files_mut(id).and_then(|f| f.view.rows.get(i).cloned()) else {
+            return;
+        };
+        let action = match fapps::app_action(&row, key) {
+            Ok(a) => a,
+            Err(m) => return self.files_note(id, m, true),
+        };
+        let name = String::from_utf8_lossy(&fileman::display_ascii(&row.name)).into_owned();
+        let result: Result<String, String> = match action {
+            AppAction::Launch(app) => {
+                self.launch_wasm_app(&app);
+                Ok(alloc::format!("{name} aberto"))
+            }
+            AppAction::InstallAndLaunch(app) => self.install_bundled(&app).map(|()| {
+                self.launch_wasm_app(&app);
+                alloc::format!("{name} instalado e aberto")
+            }),
+            AppAction::Install(app) => self
+                .install_bundled(&app)
+                .map(|()| alloc::format!("{name} instalado")),
+            AppAction::Remove(app) => self
+                .remove_app(&app)
+                .map(|()| alloc::format!("{name} removido")),
+        };
+        match result {
+            Ok(m) => self.files_note(id, &m, false),
+            Err(e) => self.files_note(id, &e, true),
         }
     }
 
@@ -171,6 +266,8 @@ impl Desktop {
         let rows = f.view.selected_rows();
         Some(MenuCtx {
             in_trash: f.view.in_trash(),
+            in_apps: f.view.in_apps(),
+            app_installed: rows.len() == 1 && rows[0].installed,
             selected: rows.len(),
             image: rows.len() == 1 && fileman::is_image(&rows[0].name) && !rows[0].is_dir(),
             clip_has_items: !self.pathclip.is_empty(),
@@ -237,6 +334,7 @@ impl Desktop {
                 let path: &[u8] = match p {
                     fileman::Place::Root | fileman::Place::Disk => b"/",
                     fileman::Place::Documents => b"/Documentos",
+                    fileman::Place::Apps => APPS_PATH,
                     fileman::Place::Trash => TRASH_PATH,
                 };
                 self.files_go(id, path);
@@ -390,6 +488,7 @@ impl Desktop {
         }
         // 6. normal keys.
         let in_trash = f.view.in_trash();
+        let in_apps = f.view.in_apps();
         match key {
             Key::Esc => {
                 if f.view.sel.count() > 0 {
@@ -425,8 +524,20 @@ impl Desktop {
                 }
             }
             Key::Tab => {
-                let target: &[u8] = if in_trash { b"/" } else { TRASH_PATH };
+                let target: &[u8] = if in_trash || in_apps {
+                    b"/"
+                } else {
+                    TRASH_PATH
+                };
                 self.files_go(id, target);
+            }
+            // The Apps place: `I` installs the bundled package, `Del` removes the app.
+            Key::Char(b'i') | Key::Char(b'I') if in_apps => {
+                let c = f.view.sel.cursor();
+                self.files_app_key(id, c, AppKey::Install);
+            }
+            Key::Char(b'a') | Key::Char(b'A') if !in_trash && !in_apps => {
+                self.files_go(id, APPS_PATH);
             }
             Key::Delete => {
                 let cmd = if shift || in_trash {
@@ -436,8 +547,12 @@ impl Desktop {
                 };
                 self.files_cmd(id, cmd);
             }
-            Key::Char(b'n') | Key::Char(b'N') if !in_trash => self.files_cmd(id, Cmd::NewFolder),
-            Key::Char(b'f') | Key::Char(b'F') if !in_trash => self.files_cmd(id, Cmd::NewFile),
+            Key::Char(b'n') | Key::Char(b'N') if !in_trash && !in_apps => {
+                self.files_cmd(id, Cmd::NewFolder)
+            }
+            Key::Char(b'f') | Key::Char(b'F') if !in_trash && !in_apps => {
+                self.files_cmd(id, Cmd::NewFile)
+            }
             _ => {}
         }
     }
@@ -476,6 +591,24 @@ impl Desktop {
             return;
         };
         f.menu = None;
+        if f.view.in_apps() {
+            let c = f.view.sel.cursor();
+            return match cmd {
+                Cmd::Open => self.files_app_key(id, c, AppKey::Enter),
+                Cmd::InstallApp => self.files_app_key(id, c, AppKey::Install),
+                // Delete and Shift+Delete both mean "remove the app".
+                Cmd::RemoveApp | Cmd::Delete | Cmd::DeletePermanent => {
+                    self.files_app_key(id, c, AppKey::Remove)
+                }
+                Cmd::Properties => self.files_app_properties(id),
+                Cmd::SelectAll => f.view.sel.select_all(),
+                Cmd::Refresh => {
+                    self.files_refresh(id);
+                    self.files_note(id, "Atualizado", false);
+                }
+                _ => {}
+            };
+        }
         let in_trash = f.view.in_trash();
         let cwd = f.view.cwd.clone();
         let paths = f.view.selected_paths();
@@ -587,6 +720,8 @@ impl Desktop {
                 }
             }
             Cmd::Properties => self.files_properties(id, in_trash, &cwd, &paths),
+            // The Apps place handles these above; they do not exist on a volume path.
+            Cmd::InstallApp | Cmd::RemoveApp => {}
             Cmd::SetWallpaper => {
                 if let Some(p) = paths.first() {
                     match self.set_wallpaper_path(p) {
@@ -827,6 +962,11 @@ impl Desktop {
                     }
                     lines.push(alloc::format!("Criado: {}", local_time(info.ctime)));
                     lines.push(alloc::format!("Modificado: {}", local_time(info.mtime)));
+                    if info.kind == vfs::EntryKind::File
+                        && fileman::classify(vfs::base_name(p)) == FileClass::Wasm
+                    {
+                        lines.extend(self.wasm_property_lines(p));
+                    }
                 }
                 Err(e) => lines.push(String::from(e.message())),
             }
@@ -855,6 +995,59 @@ impl Desktop {
         ));
         if vfs::volume() == vfs::Volume::Memory {
             lines.push(String::from("Volume: memoria (nao persiste)"));
+        }
+        if let Some(f) = self.files_mut(id) {
+            f.props = Some(lines);
+        }
+    }
+}
+
+impl Desktop {
+    /// Properties lines of a `.wasm` file: whether it is a valid app package and, if
+    /// so, its manifest (permissions and limits) and whether it is installed.
+    fn wasm_property_lines(&self, path: &[u8]) -> Vec<String> {
+        let bytes = match vfs::read_range(path, 0, osjeff_core::appinstall::MAX_PACKAGE_BYTES + 1) {
+            Ok(b) => b,
+            Err(e) => return alloc::vec![String::from(e.message())],
+        };
+        match osjeff_core::appinstall::check(&bytes) {
+            Ok(m) => {
+                let mut v = alloc::vec![String::from("Pacote de app valido")];
+                v.extend(fapps::manifest_lines(&m));
+                let state = if self.apps.iter().any(|a| a.id == m.id) {
+                    "Estado: instalado"
+                } else {
+                    "Estado: nao instalado (Enter instala e abre)"
+                };
+                v.push(String::from(state));
+                v
+            }
+            Err(e) => alloc::vec![alloc::format!("Pacote invalido: {e}")],
+        }
+    }
+
+    /// Properties of the selected app in the Apps place: manifest, state and package.
+    fn files_app_properties(&mut self, id: WindowId) {
+        let Some(row) = self
+            .files_mut(id)
+            .and_then(|f| f.view.selected_rows().first().map(|r| (*r).clone()))
+        else {
+            return;
+        };
+        let app_id = String::from_utf8_lossy(&row.id).into_owned();
+        let mut lines = match self.app_manifest(&app_id) {
+            Some(m) => fapps::manifest_lines(&m),
+            None => alloc::vec![String::from("Manifesto indisponivel")],
+        };
+        lines.push(alloc::format!(
+            "Estado: {}   Pacote: {}",
+            fapps::status_label(row.installed),
+            fileman::format_size(row.size)
+        ));
+        if row.installed {
+            lines.push(alloc::format!("Arquivo: /apps/{app_id}.wasm"));
+        } else {
+            lines.push(String::from("Pacote embutido no sistema (I instala)"));
         }
         if let Some(f) = self.files_mut(id) {
             f.props = Some(lines);

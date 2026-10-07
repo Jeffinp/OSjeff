@@ -50,7 +50,7 @@ fn round(c: &mut Canvas, x: i32, y: i32, w: i32, h: i32, rad: i32, col: Color) {
     }
 }
 
-/// Small glyph by id: 0 folder, 1 trash, 2 disk, 3 document.
+/// Small glyph by id: 0 folder, 1 trash, 2 disk, 3 document, 4 apps (a 2x2 grid).
 fn glyph(c: &mut Canvas, id: u8, x: i32, y: i32, s: i32, col: Color, bg: Color) {
     match id {
         0 => {
@@ -72,6 +72,12 @@ fn glyph(c: &mut Canvas, id: u8, x: i32, y: i32, s: i32, col: Color, bg: Color) 
                 s / 8,
                 bg,
             );
+        }
+        4 => {
+            let q = s / 2 - 1;
+            for (dx, dy) in [(0, 0), (s - q, 0), (0, s - q), (s - q, s - q)] {
+                round(c, x + dx, y + dy, q, q, 2, col);
+            }
         }
         _ => {
             round(c, x + s / 6, y, s - s / 3, s, 2, col);
@@ -155,6 +161,7 @@ impl Desktop {
             let (label, gid, active): (&[u8], u8, bool) = match p {
                 Place::Root => (b"Raiz", 2, v.cwd == b"/"),
                 Place::Documents => (b"Documentos", 0, docs),
+                Place::Apps => (b"Apps", 4, v.in_apps()),
                 Place::Trash => (b"Lixeira", 1, v.in_trash()),
                 Place::Disk => (b"", 2, false),
             };
@@ -188,6 +195,8 @@ impl Desktop {
         rect(c, h.x, h.bottom() - 1, h.w, 1, SEP);
         let date_title: &[u8] = if v.in_trash() {
             b"Apagado em"
+        } else if v.in_apps() {
+            b"Estado"
         } else {
             b"Modificado"
         };
@@ -216,6 +225,8 @@ impl Desktop {
         if v.rows.is_empty() {
             let msg: &[u8] = if v.in_trash() {
                 b"(lixeira vazia)"
+            } else if v.in_apps() {
+                b"(nenhum app)"
             } else {
                 b"(pasta vazia)"
             };
@@ -229,7 +240,9 @@ impl Desktop {
             }
             let row = &v.rows[i];
             let sel = v.sel.is_selected(i);
-            let cut = !v.in_trash() && self.pathclip.is_cut_path(&vfs::join(&v.cwd, &row.name));
+            let cut = !v.in_trash()
+                && !v.in_apps()
+                && self.pathclip.is_cut_path(&vfs::join(&v.cwd, &row.name));
             if sel {
                 round(c, l.x + 4, y, l.w - 8, ROW_H - 2, 6, BLUE);
             } else if i % 2 == 1 {
@@ -254,15 +267,39 @@ impl Desktop {
                 theme::TEXT_MUTED
             };
             let bg = if sel { BLUE } else { theme::WINDOW_BODY };
-            glyph(
-                c,
-                if row.is_dir() { 0 } else { 3 },
-                lay.name_x - 26,
-                y + (ROW_H - 18) / 2,
-                16,
-                gcol,
-                bg,
-            );
+            // Installed apps show their launcher icon, the rest the document glyph.
+            let icon = if v.in_apps() && row.installed {
+                self.apps
+                    .iter()
+                    .find(|a| a.id.as_bytes() == &row.id[..])
+                    .and_then(|a| a.icon.as_deref())
+            } else {
+                None
+            };
+            match icon {
+                Some(rgba) => c.draw_rgba(
+                    rgba,
+                    24,
+                    24,
+                    (lay.name_x - 30).max(0) as usize,
+                    y.max(0) as usize,
+                ),
+                None => glyph(
+                    c,
+                    if v.in_apps() {
+                        4
+                    } else if row.is_dir() {
+                        0
+                    } else {
+                        3
+                    },
+                    lay.name_x - 26,
+                    y + (ROW_H - 18) / 2,
+                    16,
+                    gcol,
+                    bg,
+                ),
+            }
             let ty = y + (ROW_H - 2 - 14) / 2;
             text(c, lay.name_x, ty, &shown(&row.name, name_cols), tc);
             let size: String = if row.is_dir() {
@@ -272,7 +309,19 @@ impl Desktop {
             };
             let sx = lay.date_x - 8 - size.len() as i32 * CELL;
             text(c, sx, ty, size.as_bytes(), mc);
-            text(c, lay.date_x + 8, ty, files_local(row.mtime).as_bytes(), mc);
+            if v.in_apps() {
+                let status = fileman::apps::status_label(row.installed);
+                let sc = if sel {
+                    theme::WHITE
+                } else if row.installed {
+                    OKC
+                } else {
+                    theme::TEXT_MUTED
+                };
+                text(c, lay.date_x + 8, ty, status.as_bytes(), sc);
+            } else {
+                text(c, lay.date_x + 8, ty, files_local(row.mtime).as_bytes(), mc);
+            }
         }
 
         // ---- scrollbar ----
@@ -370,6 +419,11 @@ impl Desktop {
             let col = if *err { ERR } else { OKC };
             let mb = m.as_bytes();
             text(c, x, ty, &fileman::ellipsize(mb, room.min(cols)), col);
+        } else if st.view.in_apps() {
+            let x = s.x + 12 + (summary.len() as i32 + 3) * CELL;
+            let room = ((s.right() - 12 - x) / CELL).max(0) as usize;
+            let hint: &[u8] = b"Enter abre   I instala   Del remove";
+            text(c, x, ty, &fileman::ellipsize(hint, room), theme::TEXT_MUTED);
         }
     }
 
@@ -500,7 +554,7 @@ impl Desktop {
                 theme::WHITE
             } else if matches!(
                 cmd,
-                fileman::Cmd::DeletePermanent | fileman::Cmd::EmptyTrash
+                fileman::Cmd::DeletePermanent | fileman::Cmd::EmptyTrash | fileman::Cmd::RemoveApp
             ) {
                 ERR
             } else {

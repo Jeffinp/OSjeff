@@ -15,6 +15,8 @@
 //!   editor), [`PathClip`] (the shared copy/cut clipboard), [`classify`] (what
 //!   "open" means for a file), [`context_menu`].
 
+pub mod apps;
+
 use crate::vfs::{self, Backend, Entry, EntryKind, VfsError};
 use crate::window::Rect;
 use alloc::string::String;
@@ -23,6 +25,9 @@ use core::cmp::Ordering;
 
 /// The trash as a location.
 pub const TRASH_PATH: &[u8] = b"/.trash";
+/// The Apps place (installed and bundled packages) as a location, like the trash a
+/// pseudo path: history, the address bar and the sidebar treat it as any other place.
+pub const APPS_PATH: &[u8] = b"/.apps";
 /// Most rows a view loads (a folder with more shows the first ones).
 pub const MAX_ROWS: usize = 20_000;
 
@@ -38,8 +43,10 @@ pub struct Row {
     pub size: u64,
     /// Modified time; in the trash, the time it was deleted.
     pub mtime: u64,
-    /// Trash key (empty outside the trash).
+    /// Trash key (empty outside the trash); in the Apps place, the app id.
     pub id: Vec<u8>,
+    /// Apps place only: the package is installed (always `false` elsewhere).
+    pub installed: bool,
 }
 
 impl Row {
@@ -57,6 +64,7 @@ impl From<Entry> for Row {
             size: e.size,
             mtime: e.mtime,
             id: Vec::new(),
+            installed: false,
         }
     }
 }
@@ -363,6 +371,13 @@ pub fn breadcrumbs(path: &[u8]) -> Vec<Crumb> {
         out.push(Crumb {
             label: b"Lixeira".to_vec(),
             path: TRASH_PATH.to_vec(),
+        });
+        return out;
+    }
+    if path == APPS_PATH {
+        out.push(Crumb {
+            label: b"Apps".to_vec(),
+            path: APPS_PATH.to_vec(),
         });
         return out;
     }
@@ -814,12 +829,20 @@ pub enum Cmd {
     SelectAll,
     Refresh,
     SetWallpaper,
+    /// Apps place: install the selected bundled package.
+    InstallApp,
+    /// Apps place: remove the selected installed app.
+    RemoveApp,
 }
 
 /// What the context menu is about to be shown for.
 #[derive(Clone, Copy, Debug)]
 pub struct MenuCtx {
     pub in_trash: bool,
+    /// The Apps place (the menu then offers run / install / remove).
+    pub in_apps: bool,
+    /// Apps place: the single selected app is installed.
+    pub app_installed: bool,
     /// Number of selected rows under the cursor click (0 = empty space).
     pub selected: usize,
     /// The single selected row is an image.
@@ -830,6 +853,20 @@ pub struct MenuCtx {
 /// The entries of the context menu, in order, with their Portuguese labels.
 pub fn context_menu(ctx: MenuCtx) -> Vec<(Cmd, &'static str)> {
     let mut m = Vec::new();
+    if ctx.in_apps {
+        if ctx.selected == 1 {
+            if ctx.app_installed {
+                m.push((Cmd::Open, "Abrir"));
+                m.push((Cmd::RemoveApp, "Remover"));
+            } else {
+                m.push((Cmd::Open, "Instalar e abrir"));
+                m.push((Cmd::InstallApp, "Instalar"));
+            }
+            m.push((Cmd::Properties, "Propriedades"));
+        }
+        m.push((Cmd::Refresh, "Atualizar"));
+        return m;
+    }
     if ctx.in_trash {
         if ctx.selected > 0 {
             m.push((Cmd::Restore, "Restaurar"));
@@ -877,6 +914,8 @@ pub fn context_menu(ctx: MenuCtx) -> Vec<(Cmd, &'static str)> {
 pub enum Place {
     Root,
     Documents,
+    /// Installed and bundled apps (`APPS_PATH`).
+    Apps,
     Trash,
     /// The disk entry (shows usage); opens the root.
     Disk,
@@ -984,7 +1023,7 @@ impl Layout {
     }
 
     /// Sidebar row rectangles `(place, rect)`; the disk entry is taller (usage bar).
-    pub fn places(&self) -> [(Place, Rect); 4] {
+    pub fn places(&self) -> [(Place, Rect); 5] {
         let x = self.sidebar.x + 8;
         let w = SIDEBAR_W - 16;
         let y0 = self.sidebar.y + 26;
@@ -995,12 +1034,16 @@ impl Layout {
                 Rect::new(x, y0 + SIDE_ROW_H + 2, w, SIDE_ROW_H),
             ),
             (
-                Place::Trash,
+                Place::Apps,
                 Rect::new(x, y0 + 2 * (SIDE_ROW_H + 2), w, SIDE_ROW_H),
             ),
             (
+                Place::Trash,
+                Rect::new(x, y0 + 3 * (SIDE_ROW_H + 2), w, SIDE_ROW_H),
+            ),
+            (
                 Place::Disk,
-                Rect::new(x, y0 + 3 * (SIDE_ROW_H + 2) + 28, w, 46),
+                Rect::new(x, y0 + 4 * (SIDE_ROW_H + 2) + 28, w, 46),
             ),
         ]
     }
@@ -1110,11 +1153,14 @@ pub enum Activation {
     Entered,
     /// Open this file.
     Open(Vec<u8>, FileClass),
+    /// Apps place: run this app (installing the bundled package first when it is not
+    /// installed yet).
+    App { id: Vec<u8>, installed: bool },
 }
 
 /// One file-manager window's state.
 pub struct FileView {
-    /// `/`, a folder path, or [`TRASH_PATH`].
+    /// `/`, a folder path, [`TRASH_PATH`] or [`APPS_PATH`].
     pub cwd: Vec<u8>,
     pub rows: Vec<Row>,
     pub sort: Sort,
@@ -1150,9 +1196,25 @@ impl FileView {
         self.cwd == TRASH_PATH
     }
 
+    /// In the Apps place (rows come from [`set_apps`](Self::set_apps), not a folder).
+    pub fn in_apps(&self) -> bool {
+        self.cwd == APPS_PATH
+    }
+
     /// Reload the rows of the current place from `b`, keeping the selection by name.
     /// A folder that no longer exists moves the view to the closest existing parent.
     pub fn refresh<B: Backend + ?Sized>(&mut self, b: &mut B) -> Result<(), VfsError> {
+        if self.in_apps() {
+            // The app list is not on the volume: whoever owns the catalog refills it
+            // with `set_apps`; the app rows already shown stay until then. Rows left
+            // over from the folder we came from (app rows always have an id) go.
+            if self.rows.iter().any(|r| r.id.is_empty()) {
+                self.rows.clear();
+                self.sel.reset(0);
+            }
+            self.clamp_scroll();
+            return Ok(());
+        }
         let keep: Vec<Vec<u8>> = self
             .sel
             .selected()
@@ -1169,6 +1231,7 @@ impl FileView {
                     size: t.size,
                     mtime: t.deleted_at,
                     id: t.id,
+                    installed: false,
                 })
                 .collect()
         } else {
@@ -1200,7 +1263,7 @@ impl FileView {
         b: &mut B,
         path: &[u8],
     ) -> Result<(), VfsError> {
-        if path != TRASH_PATH {
+        if path != TRASH_PATH && path != APPS_PATH {
             match b.stat(path)? {
                 i if i.kind == EntryKind::Dir => {}
                 _ => return Err(VfsError::NotDir),
@@ -1219,6 +1282,28 @@ impl FileView {
         Ok(())
     }
 
+    /// Fill the Apps place from the catalog (sorted by the current sort, the rows are
+    /// [`apps::rows`]). The cursor stays on the same app (by id); if it is gone, or
+    /// nothing was selected, it goes to the first row.
+    pub fn set_apps(&mut self, items: &[apps::AppItem]) {
+        let cursor_id = self.rows.get(self.sel.cursor()).map(|r| r.id.clone());
+        let had_selection = self.sel.count() > 0;
+        let mut rows = apps::rows(items);
+        self.truncated = false;
+        sort_rows(&mut rows, self.sort);
+        self.sel.reset(rows.len());
+        if had_selection || self.rows.is_empty() {
+            let at = cursor_id
+                .and_then(|id| rows.iter().position(|r| r.id == id))
+                .unwrap_or(0);
+            if !rows.is_empty() {
+                self.sel.only(at);
+            }
+        }
+        self.rows = rows;
+        self.clamp_scroll();
+    }
+
     /// Put the cursor (and the selection) on the first row, if there is one.
     pub fn select_first(&mut self) {
         if !self.rows.is_empty() {
@@ -1228,7 +1313,7 @@ impl FileView {
 
     /// The parent folder (from the trash: the root).
     pub fn go_up<B: Backend + ?Sized>(&mut self, b: &mut B) -> Result<(), VfsError> {
-        let up = if self.in_trash() {
+        let up = if self.in_trash() || self.in_apps() {
             b"/".to_vec()
         } else {
             vfs::parent(&self.cwd)
@@ -1286,7 +1371,7 @@ impl FileView {
 
     /// Absolute path of row `i` (folder views only; the trash has none).
     pub fn path_of(&self, i: usize) -> Option<Vec<u8>> {
-        if self.in_trash() {
+        if self.in_trash() || self.in_apps() {
             return None;
         }
         self.rows.get(i).map(|r| vfs::join(&self.cwd, &r.name))
@@ -1317,6 +1402,12 @@ impl FileView {
         };
         if self.in_trash() {
             return Activation::None;
+        }
+        if self.in_apps() {
+            return Activation::App {
+                id: row.id.clone(),
+                installed: row.installed,
+            };
         }
         let name = row.name.clone();
         let is_dir = row.is_dir();

@@ -36,13 +36,14 @@ pub(crate) struct AppEntry {
     pub manifest: Manifest,
 }
 
-#[allow(dead_code)] // returns with the file manager's Apps view
 /// What the Files "Apps" view lists: installed packages and bundled ones that are
 /// not installed.
 pub(crate) struct AppRow {
     pub id: String,
     pub name: String,
     pub installed: bool,
+    /// Size of the package file in bytes.
+    pub size: u64,
 }
 
 fn argb_to_rgba(px: &[u32]) -> Vec<u8> {
@@ -79,19 +80,33 @@ impl Desktop {
             .collect();
         self.start_scroll = self.start_scroll.min(self.start_max_scroll());
         serial_println!("apps: catalog has {} apps", self.apps.len());
+        // File managers showing the Apps place follow the catalog.
+        self.refresh_apps_views();
     }
 
-    #[allow(dead_code)] // returns with the file manager's Apps view
     /// Rows of the Files "Apps" view: installed apps first (name order), then the
     /// bundled packages that are not installed.
     pub(crate) fn app_rows(&self) -> Vec<AppRow> {
+        // One lock round for all the package sizes.
+        let sizes: Vec<u64> = appfs_backend::with(|fs| {
+            self.apps
+                .iter()
+                .map(|a| {
+                    fs.stat(&alloc::format!("{}/{}.wasm", appinstall::APPS_DIR, a.id))
+                        .map_or(0, |s| s.size)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
         let mut rows: Vec<AppRow> = self
             .apps
             .iter()
-            .map(|a| AppRow {
+            .enumerate()
+            .map(|(i, a)| AppRow {
                 id: a.id.clone(),
                 name: a.name.clone(),
                 installed: true,
+                size: sizes.get(i).copied().unwrap_or(0),
             })
             .collect();
         for pkg in wasm::BUNDLED {
@@ -102,10 +117,23 @@ impl Desktop {
                     id: m.id,
                     name: m.name,
                     installed: false,
+                    size: pkg.len() as u64,
                 });
             }
         }
         rows
+    }
+
+    /// The manifest of app `id` for Properties: the installed one, else the bundled
+    /// package's.
+    pub(crate) fn app_manifest(&self, id: &str) -> Option<Manifest> {
+        if let Some(a) = self.apps.iter().find(|a| a.id == id) {
+            return Some(a.manifest.clone());
+        }
+        wasm::BUNDLED
+            .iter()
+            .filter_map(|p| appinstall::check(p).ok())
+            .find(|m| m.id == id)
     }
 
     /// Open a `.wasm` file of the file system (Files, Enter): validate it as a package,
@@ -137,7 +165,6 @@ impl Desktop {
         self.launch_wasm_app(&manifest.id);
     }
 
-    #[allow(dead_code)] // returns with the file manager's Apps view
     /// Install the bundled package `id` (Files, `I`). `Err` carries the reason.
     pub(crate) fn install_bundled(&mut self, id: &str) -> Result<(), String> {
         let pkg = wasm::BUNDLED
@@ -156,7 +183,6 @@ impl Desktop {
         Ok(())
     }
 
-    #[allow(dead_code)] // returns with the file manager's Apps view
     /// Remove an installed app (Files, `Del`). Its open windows keep running until closed.
     pub(crate) fn remove_app(&mut self, id: &str) -> Result<(), String> {
         let r = appfs_backend::try_with(|fs| appinstall::remove(fs, id));

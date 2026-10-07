@@ -22,6 +22,7 @@ fn row(name: &str, dir: bool, size: u64, mtime: u64) -> Row {
         size,
         mtime,
         id: Vec::new(),
+        installed: false,
     }
 }
 
@@ -501,6 +502,8 @@ fn text_sniffing() {
 fn context_menu_adapts_to_the_selection() {
     let ctx = |in_trash, selected, image, clip| MenuCtx {
         in_trash,
+        in_apps: false,
+        app_installed: false,
         selected,
         image,
         clip_has_items: clip,
@@ -874,4 +877,233 @@ fn select_set_sets_cursor_and_anchor() {
     assert_eq!(s.cursor(), 2);
     s.click(5, false, true);
     assert_eq!(s.selected(), vec![2, 3, 4, 5]);
+}
+
+// ---- the Apps place ----
+
+fn items() -> Vec<apps::AppItem> {
+    let it = |id: &str, name: &str, installed: bool, size: u64| apps::AppItem {
+        id: id.into(),
+        name: name.into(),
+        installed,
+        size,
+    };
+    alloc::vec![
+        it("snake", "Snake", true, 3000),
+        it("notes", "Notas", true, 5200),
+        it("paint", "Pintura", false, 9000),
+        it("clock", "Relogio", true, 2100),
+    ]
+}
+
+#[test]
+fn apps_rows_carry_id_state_and_size() {
+    let rows = apps::rows(&items());
+    assert_eq!(rows.len(), 4);
+    let r = &rows[2];
+    assert_eq!(r.name, b"Pintura");
+    assert_eq!(r.id, b"paint");
+    assert!(!r.installed && r.mtime == 0 && r.size == 9000 && !r.is_dir());
+    assert!(rows[0].installed && rows[0].mtime == 1);
+    assert_eq!(apps::status_label(true), "instalado");
+    assert_eq!(apps::status_label(false), "nao instalado");
+}
+
+#[test]
+fn apps_place_is_a_pseudo_path_that_never_touches_the_volume() {
+    let mut fs = fresh();
+    fs.write_file("/a.txt", b"x", NOW).unwrap();
+    let mut v = FileView::new();
+    v.refresh(&mut fs).unwrap();
+    assert!(!v.in_apps());
+    assert!(!v.rows.is_empty(), "the root has rows");
+    v.navigate(&mut fs, APPS_PATH).unwrap();
+    assert!(v.in_apps() && !v.in_trash());
+    assert_eq!(v.cwd, APPS_PATH);
+    // The volume has no such folder: no row of the volume leaks in.
+    assert!(v.rows.is_empty());
+    let crumbs = breadcrumbs(APPS_PATH);
+    assert_eq!(crumbs.len(), 2);
+    assert_eq!(
+        (&crumbs[1].label[..], &crumbs[1].path[..]),
+        (&b"Apps"[..], APPS_PATH)
+    );
+    v.set_apps(&items());
+    // Name order (the default sort): Notas, Pintura, Relogio, Snake.
+    assert_eq!(names(&v.rows), ["Notas", "Pintura", "Relogio", "Snake"]);
+    assert_eq!(v.sel.cursor(), 0);
+    assert!(v.sel.is_selected(0), "the first app is selected");
+    v.set_apps(&items());
+    assert!(v.sel.is_selected(0), "and stays selected on a reload");
+    // A reload (the volume changed) keeps the app rows.
+    v.refresh(&mut fs).unwrap();
+    assert_eq!(v.rows.len(), 4);
+    // No file paths in this place.
+    assert_eq!(v.path_of(0), None);
+    assert!(v.selected_paths().is_empty());
+    // Up goes to the root; history remembers the Apps place.
+    v.go_up(&mut fs).unwrap();
+    assert_eq!(v.cwd, b"/");
+    v.go_back(&mut fs).unwrap();
+    assert!(v.in_apps());
+}
+
+#[test]
+fn apps_selection_follows_the_app_across_catalog_changes() {
+    let mut fs = fresh();
+    let mut v = FileView::new();
+    v.navigate(&mut fs, APPS_PATH).unwrap();
+    v.set_apps(&items());
+    v.sel.only(2); // Relogio
+    assert_eq!(v.rows[2].id, b"clock");
+    // Pintura gets installed and Notas removed: the cursor stays on the clock.
+    let mut now = items();
+    now[2].installed = true;
+    now.retain(|a| a.id != "notes");
+    v.set_apps(&now);
+    assert_eq!(v.rows[v.sel.cursor()].id, b"clock");
+    // The selected app disappears: the cursor falls back to the first row.
+    now.retain(|a| a.id != "clock");
+    v.set_apps(&now);
+    assert_eq!(v.sel.cursor(), 0);
+    v.set_apps(&[]);
+    assert!(v.rows.is_empty());
+    assert_eq!(v.summary(), "0 itens");
+}
+
+#[test]
+fn activating_an_app_row_asks_for_the_app_not_a_file() {
+    let mut fs = fresh();
+    let mut v = FileView::new();
+    v.navigate(&mut fs, APPS_PATH).unwrap();
+    v.set_apps(&items());
+    match v.activate(&mut fs, 1) {
+        Activation::App { id, installed } => {
+            assert_eq!(id, b"paint");
+            assert!(!installed);
+        }
+        a => panic!("{a:?}"),
+    }
+    assert_eq!(v.activate(&mut fs, 99), Activation::None);
+}
+
+#[test]
+fn app_keys_install_remove_and_run() {
+    let rows = apps::rows(&items());
+    let installed = rows.iter().find(|r| r.id == b"notes").unwrap();
+    let missing = rows.iter().find(|r| r.id == b"paint").unwrap();
+    use apps::{AppAction, AppKey, app_action};
+    assert_eq!(
+        app_action(installed, AppKey::Enter),
+        Ok(AppAction::Launch("notes".into()))
+    );
+    assert_eq!(
+        app_action(missing, AppKey::Enter),
+        Ok(AppAction::InstallAndLaunch("paint".into()))
+    );
+    assert_eq!(
+        app_action(missing, AppKey::Install),
+        Ok(AppAction::Install("paint".into()))
+    );
+    assert_eq!(app_action(installed, AppKey::Install), Err("ja instalado"));
+    assert_eq!(
+        app_action(installed, AppKey::Remove),
+        Ok(AppAction::Remove("notes".into()))
+    );
+    assert_eq!(app_action(missing, AppKey::Remove), Err("nao instalado"));
+}
+
+#[test]
+fn apps_context_menu_offers_what_applies() {
+    let ctx = |selected, installed| MenuCtx {
+        in_trash: false,
+        in_apps: true,
+        app_installed: installed,
+        selected,
+        image: false,
+        clip_has_items: true,
+    };
+    let cmds = |c| {
+        context_menu(c)
+            .into_iter()
+            .map(|(c, _)| c)
+            .collect::<Vec<_>>()
+    };
+    let on_installed = cmds(ctx(1, true));
+    assert_eq!(on_installed[0], Cmd::Open);
+    assert!(on_installed.contains(&Cmd::RemoveApp) && !on_installed.contains(&Cmd::InstallApp));
+    let on_missing = cmds(ctx(1, false));
+    assert!(on_missing.contains(&Cmd::InstallApp) && !on_missing.contains(&Cmd::RemoveApp));
+    // None of the file commands (they would act on paths that do not exist here).
+    for c in [
+        &on_installed,
+        &on_missing,
+        &cmds(ctx(0, false)),
+        &cmds(ctx(3, false)),
+    ] {
+        for bad in [
+            Cmd::NewFile,
+            Cmd::NewFolder,
+            Cmd::Cut,
+            Cmd::Copy,
+            Cmd::Paste,
+            Cmd::Delete,
+            Cmd::DeletePermanent,
+            Cmd::Rename,
+            Cmd::SetWallpaper,
+        ] {
+            assert!(!c.contains(&bad), "{bad:?}");
+        }
+    }
+    assert!(
+        context_menu(ctx(1, false))
+            .iter()
+            .all(|(_, l)| l.is_ascii())
+    );
+}
+
+#[test]
+fn sidebar_has_an_apps_entry_that_hits_and_fits() {
+    let l = layout();
+    let places = l.places();
+    let apps_rect = places.iter().find(|(p, _)| *p == Place::Apps).unwrap().1;
+    let c = (apps_rect.x + 5, apps_rect.y + 5);
+    assert_eq!(l.hit(c.0, c.1, 0, &[4]), Some(Hit::Place(Place::Apps)));
+    // No two sidebar entries overlap, and all of them fit in the sidebar.
+    for (i, (_, a)) in places.iter().enumerate() {
+        assert!(a.bottom() <= l.sidebar.bottom(), "{a:?}");
+        for (_, b) in &places[i + 1..] {
+            assert!(a.bottom() <= b.y || b.bottom() <= a.y, "{a:?} {b:?}");
+        }
+    }
+}
+
+#[test]
+fn manifest_lines_show_every_permission() {
+    use crate::appmanifest::{ClipPerm, FsPerm, NetPerm};
+    let mut m = crate::appmanifest::Manifest::legacy("demo", "Demo");
+    m.fs = FsPerm::Own;
+    m.net = NetPerm::Http;
+    m.clipboard = ClipPerm::Rw;
+    let lines = apps::manifest_lines(&m);
+    let all = lines.join("\n");
+    assert!(all.contains("Demo (demo)"), "{all}");
+    assert!(all.contains("/data/demo"), "{all}");
+    assert!(all.contains("HTTP"), "{all}");
+    assert!(all.contains("ler e escrever"), "{all}");
+    assert!(all.contains("Memoria:") && all.contains("Janela "), "{all}");
+    m.fs = FsPerm::None;
+    m.net = NetPerm::None;
+    m.clipboard = ClipPerm::None;
+    let none = apps::manifest_lines(&m).join("\n");
+    assert!(
+        none.contains("Arquivos: nenhum") && none.contains("Rede: nenhuma"),
+        "{none}"
+    );
+    assert!(
+        lines.iter().all(|l| l.is_ascii() && l.len() <= 46),
+        "{lines:?}"
+    );
+    m.fs = FsPerm::Home;
+    assert!(apps::manifest_lines(&m).join("\n").contains("/home"));
 }
