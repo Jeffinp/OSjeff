@@ -5,8 +5,8 @@ diferente, e a lista abaixo diz **o que cada uma não cobre**.
 
 | Camada | Pergunta que responde | Comando | Cobre | Não cobre |
 |---|---|---|---|---|
-| Testes unitários | A lógica pura está certa? | `cargo test-core` | `osjeff_core` (terminal, editor, calc, janelas, heap, FS, rede, HTML/CSS, browser) | `kernel/` (hardware) |
-| Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net`, `fs`, `web`, `shell`, `editor2` | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
+| Testes unitários | A lógica pura está certa? | `cargo test-core` | `osjeff_core` (terminal, shell, editor, editor2, calc, janelas, heap, FS v2/v3, blockdev/blockcache, rede, HTML/CSS, browser) | `kernel/` (hardware) |
+| Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net`, `fs` (v2 e v3), `web`, `shell`, `editor2` | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
 | Boot em QEMU | O kernel sobe e o desktop é o mesmo? | `tools/verify-boot.sh` | BIOS e UEFI, panic/exceção na serial, imagem do desktop | Hardware real, rede real |
 | Lint | Há `unsafe` sem justificativa, avisos? | `cargo lint-kernel`, `cargo lint-host` | Todo o código | Corretude |
 | Supply chain | Dependência vulnerável ou de licença ruim? | `cargo deny check`, `cargo audit` | `Cargo.lock` | Código das dependências |
@@ -46,7 +46,9 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 | Alvo | Entrada | Exercita |
 |---|---|---|
 | `net_parse` | bytes como frame Ethernet | `osjeff_core::net` (ARP, IPv4, ICMP, UDP, DHCP, `respond`) com buffers de saída de vários tamanhos |
-| `ojfs_parse` | bytes como imagem de disco | todas as operações do OJFS (`list/read/write/remove/mkdir/trash/purge`) |
+| `ojfs_parse` | bytes como imagem de disco | todas as operações do OJFS v2 (`list/read/write/remove/mkdir/trash/purge`) |
+| `ojfs3_parse` | remendos sobre um OJFS v3 válido (com todos os CRC refeitos, para passar do checksum), bytes crus, ou dispositivo de tamanho qualquer | `detect`, `mount`, caminhada (`readdir/stat/read_at/path_of/trash_list`), `fsck`, 16 operações, `fsck` de novo (um FS são continua são) |
+| `ojfs3_ops` | sequência de operações, com queda de energia opcional (em ordem ou cache volátil) | escrita lida de volta, `fsck` limpo, remount idêntico, estado exatamente antes/depois da operação cortada |
 | `web_parse` | bytes como HTML/CSS/URL/resposta HTTP | parser, CSS, layout, `dechunk`, URL |
 | `shell_parse` | bytes como linha/script de shell | lexer/parser, executor (FS em memória com limites, `SysInfo` mock), editor de linha com Tab |
 | `editor_ops` | documento + sequência de operações (`arbitrary`) | `editor2`: teclas, mouse, busca/substituição, undo/redo, wrap; invariantes depois de cada operação |
@@ -56,6 +58,8 @@ cargo install cargo-fuzz
 cd fuzz
 cargo fuzz run net_parse -- -max_total_time=600 -print_final_stats=1 -dict=dict/net.dict
 cargo fuzz run ojfs_parse -- -max_total_time=600
+cargo fuzz run ojfs3_parse -- -max_total_time=600
+cargo fuzz run ojfs3_ops   -- -max_total_time=600
 cargo fuzz run web_parse  -- -max_total_time=600 -dict=dict/web.dict
 cargo fuzz run shell_parse -- -max_total_time=600 -print_final_stats=1 -dict=dict/shell.dict
 cargo fuzz run editor_ops  -- -max_total_time=600 -print_final_stats=1
@@ -97,6 +101,30 @@ texto final mesmo com refazeres pendentes de operações `Undo` anteriores), cor
 harness: não houve bug na biblioteca. Os trechos que o fuzz não alcança (limite de
 memória do desfazer, comandos que dependem de `SysInfo` real) são cobertos pelos testes
 unitários.
+
+**OJFS v3** (10 minutos por alvo, rodados em paralelo numa máquina de 4 núcleos, sem
+crash em nenhum dos dois; nenhuma regressão a registrar em `fuzz/regressions/ojfs3_*`):
+
+| Alvo | Execuções | execs/s | Cobertura (libFuzzer) | Linhas de `fs3` cobertas pelo corpus (`cargo fuzz coverage`) |
+|---|---|---|---|---|
+| `ojfs3_parse` | 114.724 | 190 | 3259 arestas, 763 entradas no corpus | `dir.rs` 93,7%, `inode.rs` 98,3%, `layout.rs` 93,2%, `bits.rs` 94,0%, `extent.rs` 83,2%, `mod.rs` 79,9%, `ops.rs` 77,5%, `fsck.rs` 76,4% (`migrate.rs` fora do alvo: coberto pelos testes) |
+| `ojfs3_ops` | 196.201 | 326 | 3764 arestas, 1359 entradas | (alvo de sequência e de queda de energia; não medido por linha) |
+
+O `ojfs3_parse` refaz os CRC depois dos remendos (`fix_crc`): sem isso o fuzzer não
+passa do checksum e só exercita a rejeição. Como o `fsck` é a prova de consistência,
+ambos terminam com `fsck`.
+
+### OJFS v3: queda de energia, desempenho
+
+```bash
+cargo test -p osjeff_core fs3::tests::crash         # corta a energia em cada setor/flush
+cargo test -p osjeff_core -- --ignored many_seeds   # 60 sementes x 6000 operações vs. modelo
+cargo run --release -p osjeff_core --example ojfs3_bench   # MiB/s e setores por operação
+```
+
+`cargo test -p osjeff_core` compila o core com `opt-level = 2` (perfil `test` no
+`Cargo.toml` raiz): as varreduras de queda de energia rodam em segundos em vez de minutos.
+O kernel e os perfis `dev`/`release` não mudam.
 
 ## 3. Boot em QEMU
 

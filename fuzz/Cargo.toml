@@ -40,6 +40,20 @@ doc = false
 bench = false
 
 [[bin]]
+name = "ojfs3_ops"
+path = "fuzz_targets/ojfs3_ops.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ojfs3_parse"
+path = "fuzz_targets/ojfs3_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "web_parse"
 path = "fuzz_targets/web_parse.rs"
 test = false

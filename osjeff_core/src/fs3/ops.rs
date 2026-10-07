@@ -13,7 +13,7 @@ const BS: u64 = BLOCK_SIZE as u64;
 /// Longest path accepted (bytes).
 pub const MAX_PATH: usize = 4096;
 /// Largest file `read_file` will load into memory.
-pub const MAX_READ_FILE: u64 = 256 * 1024 * 1024;
+pub const MAX_READ_FILE: u64 = 64 * 1024 * 1024;
 /// Blocks assembled in memory at a time while writing.
 const WRITE_CHUNK: u32 = 256;
 
