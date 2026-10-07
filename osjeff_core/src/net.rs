@@ -34,6 +34,30 @@ impl core::fmt::Display for Ipv4 {
     }
 }
 
+/// Parse a dotted-quad IPv4 literal (`"192.168.77.2"`). Strict: exactly four
+/// decimal parts of 1-3 digits, each at most 255, no leading zeros (`"010"` is
+/// ambiguous between decimal and octal, so it is not an address), no signs, no
+/// spaces. Used so that `http://192.168.77.2:8000/` needs no DNS lookup.
+pub fn parse_ipv4(s: &[u8]) -> Option<Ipv4> {
+    let mut out = [0u8; 4];
+    let mut parts = s.split(|&b| b == b'.');
+    for slot in &mut out {
+        let p = parts.next()?;
+        if p.is_empty() || p.len() > 3 || (p.len() > 1 && p[0] == b'0') {
+            return None;
+        }
+        let mut v = 0u16;
+        for &d in p {
+            if !d.is_ascii_digit() {
+                return None;
+            }
+            v = v * 10 + u16::from(d - b'0');
+        }
+        *slot = u8::try_from(v).ok()?;
+    }
+    parts.next().is_none().then_some(Ipv4(out))
+}
+
 /// Internet checksum (RFC 1071): one's-complement sum of 16-bit big-endian
 /// words, folded and inverted.
 pub fn checksum(data: &[u8]) -> u16 {
@@ -1247,6 +1271,41 @@ mod tests {
             ..NetConfig::STATIC_FALLBACK
         };
         assert_eq!(format!("{c}"), "10.0.2.15/24 gw none dns none");
+    }
+
+    #[test]
+    fn parse_ipv4_accepts_dotted_quads() {
+        assert_eq!(parse_ipv4(b"192.168.77.2"), Some(Ipv4([192, 168, 77, 2])));
+        assert_eq!(parse_ipv4(b"0.0.0.0"), Some(Ipv4([0; 4])));
+        assert_eq!(parse_ipv4(b"255.255.255.255"), Some(Ipv4([255; 4])));
+        assert_eq!(parse_ipv4(b"10.0.2.2"), Some(Ipv4([10, 0, 2, 2])));
+    }
+
+    #[test]
+    fn parse_ipv4_rejects_everything_else() {
+        for bad in [
+            &b""[..],
+            b"1.2.3",
+            b"1.2.3.4.5",
+            b"1.2.3.",
+            b".1.2.3",
+            b"1..2.3",
+            b"256.1.1.1",
+            b"1.1.1.999",
+            b"1.1.1.1000",
+            b"01.2.3.4",
+            b"1.2.3.04",
+            b"+1.2.3.4",
+            b"-1.2.3.4",
+            b"1.2.3.4 ",
+            b" 1.2.3.4",
+            b"0x7f.0.0.1",
+            b"example.com",
+            b"1.2.3.a",
+            b"1.2.3.4:80",
+        ] {
+            assert_eq!(parse_ipv4(bad), None, "{:?}", core::str::from_utf8(bad));
+        }
     }
 
     #[test]

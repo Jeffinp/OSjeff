@@ -21,7 +21,7 @@ use smoltcp::socket::{dns, tcp};
 use smoltcp::time::Instant;
 use smoltcp::wire::{DnsQueryType, EthernetAddress, IpAddress, IpCidr};
 
-use osjeff_core::net::NetConfig;
+use osjeff_core::net::{NetConfig, parse_ipv4};
 
 /// smoltcp `Instant` from the monotonic timer tick (TIMER_HZ).
 fn now() -> Instant {
@@ -144,8 +144,12 @@ impl Net {
         interrupts::ticks() + ms * interrupts::TIMER_HZ as u64 / 1000
     }
 
-    /// Resolve `host` to an IPv4 address (bounded).
+    /// Resolve `host` to an IPv4 address (bounded). A dotted-quad literal is
+    /// its own answer and never goes to the DNS server.
     fn resolve(&mut self, host: &str) -> Option<IpAddress> {
+        if let Some(ip) = parse_ipv4(host.as_bytes()) {
+            return Some(IpAddress::Ipv4(ip.0.into()));
+        }
         let query = {
             let s = self.sockets.get_mut::<dns::Socket>(self.dns);
             s.start_query(self.iface.context(), host, DnsQueryType::A)
