@@ -666,12 +666,31 @@ impl Desktop {
             })
     }
 
+    /// The host the user allowed past a certificate error for the navigation just
+    /// taken by [`browser_take_request`] (empty when none): copied into `out`.
+    pub fn browser_insecure_host(&mut self, out: &mut [u8]) -> usize {
+        let Some(id) = self.browser_id() else {
+            return 0;
+        };
+        let Some(b) = self.browser_state_mut(id) else {
+            return 0;
+        };
+        match b.browser.insecure_host() {
+            Some(h) => {
+                let n = h.len().min(out.len());
+                out[..n].copy_from_slice(&h[..n]);
+                n
+            }
+            None => 0,
+        }
+    }
+
     /// Render a fetched raw HTTP response with the `web` engine and keep the
-    /// resulting display list for painting/scrolling. `https` is the scheme of
-    /// the final URL and `truncated` says the response hit the size cap; both
-    /// feed the address-bar badge and the truncation notice. Dropped when the
-    /// browser window was closed meanwhile.
-    pub fn browser_load(&mut self, resp: &[u8], https: bool, truncated: bool) {
+    /// resulting display list for painting/scrolling. `conn` says how the final
+    /// connection was authenticated and `truncated` that the response hit the
+    /// size cap; both feed the address-bar badge and the truncation notice.
+    /// Dropped when the browser window was closed meanwhile.
+    pub fn browser_load(&mut self, resp: &[u8], conn: osjeff_core::browser::Conn, truncated: bool) {
         let Some(id) = self.browser_id() else {
             return;
         };
@@ -685,7 +704,7 @@ impl Desktop {
             b.body = body;
             b.layout_w = content_w;
             b.scroll = 0;
-            b.browser.loaded_with(https, truncated);
+            b.browser.loaded_with(conn, truncated);
         }
     }
 

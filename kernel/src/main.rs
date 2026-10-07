@@ -8,6 +8,7 @@ extern crate alloc;
 mod allocator;
 mod ata;
 mod boot;
+mod clock;
 mod crash;
 mod desktop;
 mod fb;
@@ -32,6 +33,7 @@ mod serial;
 mod storage;
 mod sync;
 mod theme;
+mod tlsv;
 mod trace;
 mod virtio;
 mod virtio_gpu;
@@ -299,6 +301,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // party that can touch the hardware (DHCP renewal, ARP/ping and fetches all run there).
     let netd = port.map(netd::Netd::boot);
     trace::mark("dhcp done");
+    // Capture the RTC (UTC) once, before any other thread can touch the CMOS
+    // ports: it is the local clock that SNTP then corrects for TLS date checks.
+    clock::init();
 
     // Hand the browser's TCP/IP + TLS stack to the background fetcher and spawn
     // its worker thread, so page loads (and the slow software TLS handshake) run
@@ -734,7 +739,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if fetch::is_idle() {
             let mut url = [0u8; 256];
             if let Some(len) = desk.browser_take_request(&mut url) {
-                fetch::try_post(&url[..len]);
+                let mut host = [0u8; 96];
+                let hlen = desk.browser_insecure_host(&mut host);
+                fetch::try_post(&url[..len], &host[..hlen]);
             }
         } else if fetch::worker_dead() {
             // The fetcher thread died: fail the navigation now instead of leaving the
@@ -747,7 +754,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         if let Some(result) = fetch::take_result() {
             match result {
-                Ok(page) => desk.browser_load(&page.data, page.https, page.truncated),
+                Ok(page) => desk.browser_load(&page.data, page.conn, page.truncated),
                 Err(reason) => desk.browser_fail(reason),
             }
             browser_redraw = true;

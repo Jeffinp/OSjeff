@@ -27,8 +27,8 @@ use crate::netd::Netd;
 use crate::sync::RacyCell;
 use crate::{netstack, serial_println};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
-use osjeff_core::browser::FailReason;
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use osjeff_core::browser::{Conn, FailReason};
 
 const IDLE: u8 = 0;
 const REQUESTED: u8 = 1;
@@ -49,14 +49,19 @@ static OFFLINE: AtomicBool = AtomicBool::new(false);
 static NET: RacyCell<Option<Netd>> = RacyCell::new(None);
 static REQ_URL: RacyCell<[u8; URL_CAP]> = RacyCell::new([0; URL_CAP]);
 static REQ_LEN: RacyCell<usize> = RacyCell::new(0);
+/// Host the user explicitly allowed past a certificate error (empty = none). It
+/// applies to that host only, on every hop of the navigation.
+static REQ_INSECURE: RacyCell<[u8; INSECURE_CAP]> = RacyCell::new([0; INSECURE_CAP]);
+static REQ_INSECURE_LEN: RacyCell<usize> = RacyCell::new(0);
+const INSECURE_CAP: usize = 96;
 static RESULT: RacyCell<Option<FetchResult>> = RacyCell::new(None);
 
 /// A fetched page plus what the browser needs to describe it honestly.
 pub struct Loaded {
     /// Raw HTTP response (headers + body), at most `MAX_RESPONSE_BYTES`.
     pub data: Vec<u8>,
-    /// Scheme of the *final* URL, after redirects.
-    pub https: bool,
+    /// How the *final* connection (after redirects) was authenticated.
+    pub conn: Conn,
     /// The response was cut at the size cap.
     pub truncated: bool,
 }
@@ -102,7 +107,9 @@ pub fn wake_worker() {
 }
 
 /// Queue a fetch for `url` if the worker is idle. Returns `true` if accepted.
-pub fn try_post(url: &[u8]) -> bool {
+/// `insecure_host` (usually empty) is the one host the user allowed to proceed
+/// despite a certificate error, for this session.
+pub fn try_post(url: &[u8], insecure_host: &[u8]) -> bool {
     if STATE.load(Ordering::Acquire) != IDLE || worker_dead() {
         return false;
     }
@@ -116,12 +123,16 @@ pub fn try_post(url: &[u8]) -> bool {
         return true;
     }
     let n = url.len().min(URL_CAP);
+    let m = insecure_host.len().min(INSECURE_CAP);
     // SAFETY: only the compositor posts, and only in IDLE (checked above), when the worker does not
-    // touch REQ_URL/REQ_LEN; the Release store of REQUESTED below publishes them.
+    // touch REQ_URL/REQ_LEN/REQ_INSECURE*; the Release store of REQUESTED below publishes them.
     unsafe {
         let buf = &mut *REQ_URL.get();
         buf[..n].copy_from_slice(&url[..n]);
         *REQ_LEN.get() = n;
+        let ib = &mut *REQ_INSECURE.get();
+        ib[..m].copy_from_slice(&insecure_host[..m]);
+        *REQ_INSECURE_LEN.get() = m;
     }
     STATE.store(REQUESTED, Ordering::Release);
     let tid = TID.load(Ordering::Acquire);
@@ -155,6 +166,15 @@ pub fn take_result() -> Option<FetchResult> {
 /// [`try_post`] wakes it.
 pub extern "C" fn worker() -> ! {
     TID.store(crate::sched::current(), Ordering::Release);
+    // Confirm the time over SNTP before anything else: certificate validity dates
+    // are only as good as the clock. A request posted meanwhile waits (at most a
+    // few seconds); if no server answers the RTC is used and the browser says
+    // "hora nao confirmada" when a date check fails.
+    // SAFETY: NET is set once before this thread exists and used only by this worker.
+    if let Some(netd) = unsafe { (*NET.get()).as_mut() } {
+        netd.net_mut().sync_time();
+        LAST_RESYNC_MS.store(crate::netd::now_ms().max(1), Ordering::Relaxed);
+    }
     loop {
         if STATE.load(Ordering::Acquire) == REQUESTED {
             STATE.store(RUNNING, Ordering::Relaxed);
@@ -165,10 +185,15 @@ pub extern "C" fn worker() -> ! {
                 let buf = &*REQ_URL.get();
                 buf[..n].to_vec()
             };
+            // SAFETY: as for REQ_URL above (REQ_INSECURE* are written together with it).
+            let insecure = unsafe {
+                let n = *REQ_INSECURE_LEN.get();
+                (&*REQ_INSECURE.get())[..n].to_vec()
+            };
             // SAFETY: NET is set once, before this thread exists (`fetch::init`), and used only by this
             // worker, one request at a time, so the `&mut` is unique.
             let result = match unsafe { (*NET.get()).as_mut() } {
-                Some(netd) => fetch_url(netd.net_mut(), &url),
+                Some(netd) => fetch_url(netd.net_mut(), &url, &insecure),
                 None => Err(FailReason::Network),
             };
             // SAFETY: STATE is RUNNING here; the compositor only touches RESULT after seeing DONE, which is
@@ -195,11 +220,29 @@ pub extern "C" fn worker() -> ! {
     }
 }
 
+/// Monotonic ms of the last SNTP attempt made on behalf of a page load.
+static LAST_RESYNC_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Retry the SNTP sync before an HTTPS load when the clock is still
+/// unconfirmed, rate-limited to one attempt per minute.
+fn resync_clock_if_needed(net: &mut netstack::Net) {
+    if crate::clock::confirmed() {
+        return;
+    }
+    let now = crate::netd::now_ms();
+    let last = LAST_RESYNC_MS.load(Ordering::Relaxed);
+    if last != 0 && now.saturating_sub(last) < 60_000 {
+        return;
+    }
+    LAST_RESYNC_MS.store(now.max(1), Ordering::Relaxed);
+    net.sync_time();
+}
+
 /// Resolve a URL and fetch it (HTTP or HTTPS), following up to
 /// [`osjeff_core::redirect::MAX_REDIRECTS`] redirects. Returns the final page,
 /// or why the navigation failed. Redirect policy (scheme kept, https -> http
 /// refused, loops, bad `Location` values) lives in `osjeff_core::redirect`.
-fn fetch_url(net: &mut netstack::Net, url: &[u8]) -> FetchResult {
+fn fetch_url(net: &mut netstack::Net, url: &[u8], insecure_host: &[u8]) -> FetchResult {
     use osjeff_core::browser::{header_value, parse_url, status_code};
     use osjeff_core::redirect::Redirects;
     let mut cur: Vec<u8> = url.to_vec();
@@ -221,12 +264,16 @@ fn fetch_url(net: &mut netstack::Net, url: &[u8]) -> FetchResult {
             path,
             u.port
         );
-        let resp = if u.https {
-            net.https_get(host, path, u.port)
+        let (r, conn) = if u.https {
+            // Certificate dates need a confirmed clock: if the boot-time SNTP did not
+            // succeed, try again (at most once a minute) before the handshake.
+            resync_clock_if_needed(net);
+            // Validation is skipped only for the one host the user allowed.
+            let allow = !insecure_host.is_empty() && u.host().eq_ignore_ascii_case(insecure_host);
+            net.https_get(host, path, u.port, allow)?
         } else {
-            net.http_get(host, path, u.port)
+            (net.http_get(host, path, u.port)?, Conn::Plain)
         };
-        let r = resp.ok_or(FailReason::Network)?;
 
         let code = status_code(&r.data).unwrap_or(0);
         if matches!(code, 301 | 302 | 303 | 307 | 308)
@@ -253,7 +300,7 @@ fn fetch_url(net: &mut netstack::Net, url: &[u8]) -> FetchResult {
         );
         return Ok(Loaded {
             data: r.data,
-            https: u.https,
+            conn,
             truncated: r.truncated,
         });
     }

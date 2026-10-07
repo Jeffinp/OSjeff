@@ -164,6 +164,11 @@ impl Desktop {
             b.browser.reload();
         } else if ch.go.contains(px, py) {
             b.browser.submit();
+        } else if b.browser.can_continue_insecure()
+            && osjeff_core::layout::browser_continue_button(ch.content).contains(px, py)
+        {
+            // The explicit, per-origin, per-session "continue anyway".
+            b.browser.continue_insecure();
         } else if b.browser.is_home() {
             let (_logo, tiles) = browser_home_layout(ch.content);
             for (i, t) in tiles.iter().enumerate() {

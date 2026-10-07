@@ -22,8 +22,9 @@ use crate::sync::RacyCell;
 use crate::{interrupts, io};
 use alloc::vec;
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU64, Ordering};
 use embedded_tls::blocking::*;
-use osjeff_core::browser::{MAX_RESPONSE_BYTES, append_capped};
+use osjeff_core::browser::{Conn, FailReason, MAX_RESPONSE_BYTES, append_capped};
 use osjeff_core::rng::WeakMixer;
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
@@ -105,6 +106,11 @@ pub struct Net {
     udp: SocketHandle,
     resolver: Resolver,
 }
+
+/// Absolute tick by which the TLS handshake in progress must be done (0 = none).
+/// The stream refuses to wait past it, so a server that dribbles bytes cannot
+/// hold the fetcher for longer than `MAX_HANDSHAKE_MS`.
+static HS_DEADLINE: AtomicU64 = AtomicU64::new(0);
 
 impl Net {
     /// Build the stack for `cfg`: interface address with its prefix, a default
@@ -293,42 +299,43 @@ impl Net {
         }
     }
 
-    /// Blocking HTTP/1.0 GET over plain TCP. Returns the raw response bytes,
-    /// at most [`MAX_RESPONSE_BYTES`] of them (the same cap as the TLS path).
-    pub fn http_get(&mut self, host: &str, path: &str, port: u16) -> Option<Fetched> {
-        let ip = self.resolve(host)?;
+    /// Tear the TCP connection down and let smoltcp put the RST on the wire (it
+    /// is only queued by `abort`; without a poll the peer keeps a half-open
+    /// connection and a single-threaded server never accepts the next one).
+    fn abort_conn(&mut self) {
+        self.sockets.get_mut::<tcp::Socket>(self.tcp).abort();
+        for _ in 0..4 {
+            self.poll();
+        }
+    }
 
-        // Connect.
-        let local_port = 49152 + (interrupts::ticks() as u16 & 0x3FFF);
-        {
-            let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
-            s.connect(self.iface.context(), (ip, port), local_port)
-                .ok()?;
-        }
-        let end = Self::deadline(8000);
-        while interrupts::ticks() < end {
-            self.pump();
-            if self.sockets.get_mut::<tcp::Socket>(self.tcp).may_send() {
-                break;
-            }
-        }
+    /// Resolve for a fetch: [`FailReason::Dns`] when the name does not resolve.
+    fn resolve_or_fail(&mut self, host: &str) -> Result<IpAddress, FailReason> {
+        self.resolve(host).ok_or(FailReason::Dns)
+    }
+
+    /// Blocking HTTP/1.1 GET over plain TCP. Returns the raw response bytes,
+    /// at most [`MAX_RESPONSE_BYTES`] of them (the same cap as the TLS path).
+    pub fn http_get(&mut self, host: &str, path: &str, port: u16) -> Result<Fetched, FailReason> {
+        let ip = self.resolve_or_fail(host)?;
+        self.connect(ip, port)?;
 
         // Request.
         let mut req = Vec::new();
-        req.extend_from_slice(b"GET ");
-        req.extend_from_slice(path.as_bytes());
-        req.extend_from_slice(b" HTTP/1.0\r\nHost: ");
-        req.extend_from_slice(host.as_bytes());
-        req.extend_from_slice(b"\r\nConnection: close\r\n\r\n");
+        build_request(&mut req, host, path, port, false);
         {
             let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
-            s.send_slice(&req).ok()?;
+            if s.send_slice(&req).is_err() {
+                s.abort();
+                return Err(FailReason::Network);
+            }
         }
 
         // Drain the response until the peer closes or the cap is reached.
         let mut out = Vec::new();
         let mut truncated = false;
         let end = Self::deadline(10000);
+        let mut timed_out = true;
         while interrupts::ticks() < end {
             self.pump();
             let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
@@ -341,57 +348,75 @@ impl Net {
                 });
             }
             if truncated || !s.is_active() {
+                timed_out = false;
                 break;
             }
         }
-        {
-            let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
-            s.abort();
-        }
+        self.abort_conn();
         if truncated {
             crate::serial_println!("http: response truncated at {} bytes", MAX_RESPONSE_BYTES);
         }
-        Some(Fetched {
+        if out.is_empty() {
+            return Err(if timed_out {
+                FailReason::Timeout
+            } else {
+                FailReason::Network
+            });
+        }
+        Ok(Fetched {
             data: out,
             truncated,
         })
     }
 
-    /// Open the TCP connection to `ip:port` (bounded). Returns `true` once the
-    /// socket can send. Shared by the plain-HTTP and TLS paths.
-    fn connect(&mut self, ip: IpAddress, port: u16) -> bool {
+    /// Open the TCP connection to `ip:port` (bounded). Shared by the plain-HTTP
+    /// and TLS paths. An RST during the handshake is [`FailReason::Refused`], no
+    /// answer within 8 s is [`FailReason::Timeout`].
+    fn connect(&mut self, ip: IpAddress, port: u16) -> Result<(), FailReason> {
         let local_port = 49152 + (interrupts::ticks() as u16 & 0x3FFF);
         {
             let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
+            s.abort();
             if s.connect(self.iface.context(), (ip, port), local_port)
                 .is_err()
             {
-                return false;
+                return Err(FailReason::Network);
             }
         }
         let end = Self::deadline(8000);
         while interrupts::ticks() < end {
             self.pump();
-            if self.sockets.get_mut::<tcp::Socket>(self.tcp).may_send() {
-                return true;
+            let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
+            if s.may_send() {
+                return Ok(());
+            }
+            if s.state() == tcp::State::Closed {
+                return Err(FailReason::Refused);
             }
         }
-        false
+        self.abort_conn();
+        Err(FailReason::Timeout)
     }
 
-    /// Blocking HTTPS GET over TLS 1.3. Returns the raw HTTP response (headers +
-    /// body) as received inside the TLS tunnel, capped at
-    /// [`MAX_RESPONSE_BYTES`] like [`Net::http_get`].
+    /// Blocking HTTPS GET over TLS 1.3 **with certificate verification**.
+    /// Returns the raw HTTP response (headers + body) as received inside the TLS
+    /// tunnel, capped at [`MAX_RESPONSE_BYTES`] like [`Net::http_get`], and how
+    /// the connection was authenticated.
     ///
-    /// NOTE: certificate verification is skipped (`UnsecureProvider`). The
-    /// traffic is encrypted, but the server is NOT authenticated: a man in the
-    /// middle is not detected. The browser UI therefore labels every `https://`
-    /// page "Conexao nao verificada" and never shows a padlock.
-    pub fn https_get(&mut self, host: &str, path: &str, port: u16) -> Option<Fetched> {
-        let ip = self.resolve(host)?;
-        if !self.connect(ip, port) {
-            return None;
-        }
+    /// The server's chain is validated against the embedded trust store, for
+    /// `host`, at the trusted time (`crate::tlsv`). A failure aborts the
+    /// handshake with [`FailReason::Cert`] unless `allow_insecure` (the user's
+    /// per-origin, per-session override) is set, in which case the page is
+    /// returned as [`Conn::Insecure`]. A verified chain is [`Conn::Verified`].
+    pub fn https_get(
+        &mut self,
+        host: &str,
+        path: &str,
+        port: u16,
+        allow_insecure: bool,
+    ) -> Result<(Fetched, Conn), FailReason> {
+        let ip = self.resolve_or_fail(host)?;
+        self.connect(ip, port)?;
 
         // 16 KiB record buffers (one TLS frame). Kept in static memory so they
         // never land on the kernel stack.
@@ -404,34 +429,76 @@ impl Net {
         let tx_rec: &mut [u8] =
             unsafe { core::slice::from_raw_parts_mut(TLS_TX.get() as *mut u8, TLS_REC) };
 
-        let config = TlsConfig::new().with_server_name(host);
+        let config = TlsConfig::new()
+            .enable_rsa_signatures()
+            .with_server_name(host);
+        let mut verifier = crate::tlsv::Verifier::new(allow_insecure);
+        HS_DEADLINE.store(
+            interrupts::ticks()
+                + osjeff_core::tlsverify::MAX_HANDSHAKE_MS * u64::from(interrupts::TIMER_HZ) / 1000,
+            Ordering::Relaxed,
+        );
+        let hs_start = now_ms();
         let stream = Stream { net: self };
         let mut tls: TlsConnection<Stream, Aes128GcmSha256> =
             TlsConnection::new(stream, rx_rec, tx_rec);
 
-        let rng = TlsRng::new();
-        if let Err(e) = tls.open(TlsContext::new(
-            &config,
-            UnsecureProvider::new::<Aes128GcmSha256>(rng),
-        )) {
+        let provider = crate::tlsv::Provider {
+            rng: TlsRng::new(),
+            verifier: &mut verifier,
+        };
+        let opened = tls.open(TlsContext::new(&config, provider));
+        if let Err(e) = opened {
+            HS_DEADLINE.store(0, Ordering::Relaxed);
+            self.abort_conn();
+            if let Some(ce) = verifier.failure() {
+                return Err(FailReason::Cert(ce));
+            }
             crate::serial_println!("https: TLS handshake failed for {}: {:?}", host, e);
-            self.sockets.get_mut::<tcp::Socket>(self.tcp).abort();
-            return None;
+            return Err(if now_ms().saturating_sub(hs_start) >= 11_000 {
+                FailReason::Timeout
+            } else {
+                FailReason::Tls
+            });
         }
+        HS_DEADLINE.store(0, Ordering::Relaxed);
+        let hs_ms = now_ms().saturating_sub(hs_start);
+        let conn = match verifier.outcome() {
+            Some(crate::tlsv::Outcome::Verified(v)) => {
+                crate::serial_println!(
+                    "tls: chain verified for {} ({} certs, root {}); handshake {} ms",
+                    host,
+                    v.chain_len,
+                    verifier.root_name(&v),
+                    hs_ms
+                );
+                Conn::Verified
+            }
+            Some(crate::tlsv::Outcome::Overridden(e)) => {
+                crate::serial_println!(
+                    "tls: UNVERIFIED connection to {} ({}), user override; handshake {} ms",
+                    host,
+                    e.reason(),
+                    hs_ms
+                );
+                Conn::Insecure
+            }
+            None => {
+                // The handshake completed without the verifier concluding: never
+                // report that as secure.
+                self.abort_conn();
+                return Err(FailReason::Tls);
+            }
+        };
 
-        // Request (HTTP/1.0, Connection: close — avoids chunked responses).
+        // Request (HTTP/1.1 with Connection: close; chunked and gzip responses are
+        // decoded by `browser::page_body`).
         let mut req = Vec::new();
-        req.extend_from_slice(b"GET ");
-        req.extend_from_slice(path.as_bytes());
-        req.extend_from_slice(b" HTTP/1.0\r\nHost: ");
-        req.extend_from_slice(host.as_bytes());
-        req.extend_from_slice(
-            b"\r\nUser-Agent: OSjeff/1.0\r\nAccept: text/html\r\nConnection: close\r\n\r\n",
-        );
+        build_request(&mut req, host, path, port, true);
         use embedded_io::Write as _;
         if tls.write_all(&req).is_err() || tls.flush().is_err() {
-            self.sockets.get_mut::<tcp::Socket>(self.tcp).abort();
-            return None;
+            self.abort_conn();
+            return Err(FailReason::Network);
         }
 
         // Drain the decrypted response until the peer closes (read returns 0)
@@ -454,19 +521,131 @@ impl Net {
 
         // `tls` is unused past here, so its `&mut self` borrow (via Stream) ends
         // and we can touch the socket again to tear the connection down.
-        self.sockets.get_mut::<tcp::Socket>(self.tcp).abort();
+        self.abort_conn();
         if truncated {
             crate::serial_println!("https: response truncated at {} bytes", MAX_RESPONSE_BYTES);
         }
         if out.is_empty() {
-            None
+            Err(FailReason::Network)
         } else {
-            Some(Fetched {
-                data: out,
-                truncated,
-            })
+            Ok((
+                Fetched {
+                    data: out,
+                    truncated,
+                },
+                conn,
+            ))
         }
     }
+
+    /// One SNTP exchange with `server` (bounded to `timeout_ms`). Returns the
+    /// validated measurement, or `None` (the reason is on the serial log).
+    pub fn sntp_query(
+        &mut self,
+        server: IpAddress,
+        timeout_ms: u64,
+    ) -> Option<osjeff_core::sntp::Measurement> {
+        use osjeff_core::sntp;
+        let mix = io::rdtsc() ^ interrupts::ticks().rotate_left(17);
+        let local_port = 32768 + ((mix >> 3) % 28000) as u16;
+        let nonce = (mix ^ (mix >> 16) ^ (mix >> 32)) as u16;
+        {
+            let s = self.sockets.get_mut::<udp::Socket>(self.udp);
+            s.close();
+            s.bind(local_port).ok()?;
+        }
+        let t1 = crate::clock::local_ntp(nonce);
+        let req = sntp::build_request(t1);
+        {
+            let to = IpEndpoint::new(server, sntp::PORT);
+            let s = self.sockets.get_mut::<udp::Socket>(self.udp);
+            s.send_slice(&req, to).ok()?;
+        }
+        let end = Self::deadline(timeout_ms);
+        let mut result = None;
+        'wait: while interrupts::ticks() < end {
+            self.pump();
+            let s = self.sockets.get_mut::<udp::Socket>(self.udp);
+            while let Ok((data, meta)) = s.recv() {
+                if meta.endpoint.addr != server {
+                    continue; // not from the server we asked
+                }
+                let t4 = crate::clock::local_ntp(0);
+                match sntp::process_reply(t1, t4, data) {
+                    Ok(m) => {
+                        result = Some(m);
+                        break 'wait;
+                    }
+                    Err(e) => {
+                        crate::serial_println!(
+                            "sntp: reply from {} rejected: {}",
+                            server,
+                            e.reason()
+                        );
+                    }
+                }
+            }
+        }
+        self.sockets.get_mut::<udp::Socket>(self.udp).close();
+        result
+    }
+
+    /// Sync the trusted clock: try the time servers by name (DNS), then the
+    /// gateway as a last resort. Logs every step; returns whether the clock is
+    /// now confirmed.
+    pub fn sync_time(&mut self) -> bool {
+        const SERVERS: [&str; 3] = ["time.cloudflare.com", "pool.ntp.org", "time.google.com"];
+        for name in SERVERS {
+            let Some(ip) = self.resolve(name) else {
+                continue;
+            };
+            for _ in 0..2 {
+                if let Some(m) = self.sntp_query(ip, 1000) {
+                    crate::serial_println!("sntp: {} answered", name);
+                    crate::clock::apply_sntp(&m);
+                    return true;
+                }
+            }
+            crate::serial_println!("sntp: no valid answer from {}", name);
+        }
+        if let Some(gw) = self.cfg.and_then(|c| c.gateway) {
+            let ip = IpAddress::Ipv4(gw.0.into());
+            if let Some(m) = self.sntp_query(ip, 1500) {
+                crate::serial_println!("sntp: gateway {} answered", gw);
+                crate::clock::apply_sntp(&m);
+                return true;
+            }
+        }
+        crate::serial_println!("sntp: time NOT confirmed (using the RTC)");
+        false
+    }
+}
+
+/// Build an HTTP/1.1 GET request (`Connection: close`: one request per connection) (shared by the plain and TLS paths).
+fn build_request(req: &mut Vec<u8>, host: &str, path: &str, port: u16, tls: bool) {
+    req.extend_from_slice(b"GET ");
+    req.extend_from_slice(path.as_bytes());
+    req.extend_from_slice(b" HTTP/1.1\r\nHost: ");
+    req.extend_from_slice(host.as_bytes());
+    let default_port = if tls { 443 } else { 80 };
+    if port != default_port {
+        req.push(b':');
+        let mut digits = [0u8; 5];
+        let mut n = port;
+        let mut i = digits.len();
+        loop {
+            i -= 1;
+            digits[i] = b'0' + (n % 10) as u8;
+            n /= 10;
+            if n == 0 {
+                break;
+            }
+        }
+        req.extend_from_slice(&digits[i..]);
+    }
+    req.extend_from_slice(
+        b"\r\nUser-Agent: OSjeff/1.0\r\nAccept: text/html, image/png, image/bmp, */*;q=0.1\r\nAccept-Encoding: gzip, deflate\r\nConnection: close\r\n\r\n",
+    );
 }
 
 // ---- TLS plumbing: an embedded-io stream over the smoltcp socket + an RNG ----
@@ -505,7 +684,11 @@ impl embedded_io::ErrorType for Stream<'_> {
 
 impl embedded_io::Read for Stream<'_> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, StreamError> {
-        let end = Net::deadline(12000);
+        let mut end = Net::deadline(12000);
+        let hs = HS_DEADLINE.load(Ordering::Relaxed);
+        if hs != 0 {
+            end = end.min(hs);
+        }
         loop {
             self.net.poll();
             let s = self.net.sockets.get_mut::<tcp::Socket>(self.net.tcp);
@@ -529,7 +712,11 @@ impl embedded_io::Read for Stream<'_> {
 
 impl embedded_io::Write for Stream<'_> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, StreamError> {
-        let end = Net::deadline(12000);
+        let mut end = Net::deadline(12000);
+        let hs = HS_DEADLINE.load(Ordering::Relaxed);
+        if hs != 0 {
+            end = end.min(hs);
+        }
         loop {
             self.net.poll();
             let s = self.net.sockets.get_mut::<tcp::Socket>(self.net.tcp);
@@ -568,9 +755,12 @@ impl embedded_io::Write for Stream<'_> {
 /// LIMITATION: `embedded-tls` bounds its provider's RNG by `CryptoRng`, so the
 /// fallback path has to implement that marker trait too even though it does
 /// not deserve it. The type system cannot separate the two here; the serial
-/// message and the browser's "Conexao nao verificada" label (the server is
-/// never authenticated anyway) are the honest signals. Replace the fallback by
-/// refusing TLS if this ever carries real secrets.
+/// message is the honest signal: the ephemeral key share and client random
+/// are only as unpredictable as that fallback, so a passive observer who can
+/// guess the mixer state could read the session. The server is authenticated
+/// regardless (certificate chain + CertificateVerify), but confidentiality is
+/// not guaranteed on CPUs without RDRAND. Replace the fallback by refusing TLS
+/// if this ever carries real secrets.
 struct TlsRng {
     hw: bool,
     weak: WeakMixer,

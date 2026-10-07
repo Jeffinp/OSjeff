@@ -146,16 +146,20 @@ impl Desktop {
         );
         glyph_globe(c, Rect::new(bar.x + 10, bar.y + (bar.h - 18) / 2, 18, 18));
 
-        // Connection badge, right-aligned inside the bar. The TLS client never
-        // validates server certificates, so `https://` is NEVER shown as
-        // secure: no padlock, an explicit "not verified" warning instead (and
-        // plain http says it is not encrypted). Text is ASCII (bitmap font).
+        // Connection badge, right-aligned inside the bar. The padlock ("Conexao
+        // segura", green) is shown only for a connection whose certificate chain
+        // was verified by the TLS client; an https page the user chose to open
+        // despite a certificate error says "Certificado invalido" in red, and
+        // plain http says it is not encrypted. Text is ASCII (bitmap font).
         let mut badge_reserved = 0;
         if let Some(label) = bs.browser.security().label() {
             use osjeff_core::browser::Security;
             let (bg, fg) = match bs.browser.security() {
-                Security::Http => (Color::rgb(0xFF, 0xD9, 0xD9), Color::rgb(0xA3, 0x1D, 0x1D)),
-                _ => (Color::rgb(0xFF, 0xE6, 0x9C), Color::rgb(0x6B, 0x3F, 0x00)),
+                Security::HttpsVerified => {
+                    (Color::rgb(0xDC, 0xF2, 0xDD), Color::rgb(0x1B, 0x5E, 0x20))
+                }
+                Security::HttpsInvalid => (Color::rgb(0xC6, 0x28, 0x28), theme::WHITE),
+                _ => (Color::rgb(0xFF, 0xD9, 0xD9), Color::rgb(0xA3, 0x1D, 0x1D)),
             };
             let scale = if bar.w >= 520 { 2 } else { 1 };
             let tw = font::text_width(label, scale) as i32;
@@ -224,14 +228,7 @@ impl Desktop {
 
         let content = ch.content;
         let Some(page) = &bs.page else {
-            font::draw_text(
-                c,
-                (content.x + 8) as usize,
-                (content.y + 8) as usize,
-                bs.browser.fail_reason().message(),
-                theme::CLOSE,
-                2,
-            );
+            self.draw_browser_error(c, content, bs);
             return;
         };
         self.paint_web_page(c, page, content, bs.scroll);
@@ -336,6 +333,71 @@ impl Desktop {
     }
 
     /// The native start page: brand mark, tagline, and clickable shortcut tiles.
+    /// The error page: the reason in red, and for a refused certificate the
+    /// explanation, the clock hint (when the time was not confirmed over SNTP) and
+    /// the explicit "continue anyway (insecure)" button.
+    fn draw_browser_error(&self, c: &mut Canvas, content: Rect, bs: &BrowserState) {
+        use osjeff_core::browser::FailReason;
+        let reason = bs.browser.fail_reason();
+        font::draw_text(
+            c,
+            (content.x + 8) as usize,
+            (content.y + 10) as usize,
+            reason.message(),
+            theme::CLOSE,
+            2,
+        );
+        if let FailReason::Cert(e) = reason {
+            font::draw_text(
+                c,
+                (content.x + 8) as usize,
+                (content.y + 38) as usize,
+                "A identidade do servidor nao foi comprovada: a conexao pode ser interceptada.",
+                theme::TEXT,
+                1,
+            );
+            if e.clock_may_be_to_blame() && !crate::clock::confirmed() {
+                font::draw_text(
+                    c,
+                    (content.x + 8) as usize,
+                    (content.y + 56) as usize,
+                    "Hora do sistema nao confirmada: confira o relogio (sem resposta de servidor de hora).",
+                    Color::rgb(0x6B, 0x3F, 0x00),
+                    1,
+                );
+            }
+            if bs.browser.can_continue_insecure() {
+                let b = osjeff_core::layout::browser_continue_button(content);
+                c.fill_round_rect(
+                    b.x as usize,
+                    b.y as usize,
+                    b.w as usize,
+                    b.h as usize,
+                    8,
+                    Color::rgb(0xC6, 0x28, 0x28),
+                );
+                let label = "Continuar mesmo assim (inseguro)";
+                let tw = font::text_width(label, 2) as i32;
+                font::draw_text(
+                    c,
+                    (b.x + (b.w - tw).max(0) / 2) as usize,
+                    (b.y + (b.h - 14) / 2) as usize,
+                    label,
+                    theme::WHITE,
+                    2,
+                );
+                font::draw_text(
+                    c,
+                    (content.x + 8) as usize,
+                    (b.bottom() + 8) as usize,
+                    "Vale so para este site, nesta sessao.",
+                    theme::TEXT_MUTED,
+                    1,
+                );
+            }
+        }
+    }
+
     pub(crate) fn draw_browser_home(&self, c: &mut Canvas, content: Rect) {
         let (logo, tiles) = browser_home_layout(content);
 
