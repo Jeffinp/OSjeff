@@ -693,7 +693,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // owns it during a fetch).
         if net_up && fetch::is_idle() {
             let mut rx = [0u8; 1600];
-            while let Some(len) = ne2000::poll(&mut rx) {
+            // Bounded per wake: a flood of frames must not keep the compositor
+            // from drawing; whatever is left is handled on the next wake.
+            for _ in 0..NET_RX_BUDGET {
+                let Some(len) = ne2000::poll(&mut rx) else {
+                    break;
+                };
                 let mut tx = [0u8; 1600];
                 if let Some(reply) = net::respond(&rx[..len], ne2000::MAC, net_ip, &mut tx) {
                     ne2000::send(&tx[..reply]);
@@ -710,6 +715,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         trace::hlt_wake();
     }
 }
+
+/// Max frames handled per compositor wake by the ARP/ping responder.
+const NET_RX_BUDGET: usize = 32;
 
 fn secs_of_day(t: rtc::Time) -> u32 {
     t.h as u32 * 3600 + t.m as u32 * 60 + t.s as u32

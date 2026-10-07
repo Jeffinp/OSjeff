@@ -10,7 +10,7 @@
 
 use crate::io::{inb, outb};
 use crate::sync::RacyCell;
-use osjeff_core::net::Mac;
+use osjeff_core::net::{Mac, ring_prev_page, tx_len};
 
 const IO: u16 = 0x300; // ISA I/O base (QEMU ne2k_isa default)
 const DATA: u16 = IO + 0x10; // NE2000 data port (remote DMA window)
@@ -160,12 +160,7 @@ pub fn poll(buf: &mut [u8]) -> Option<usize> {
     if !(4..=1518 + 4).contains(&total) || !(RX_START..=RX_STOP).contains(&next_page) {
         // SAFETY: same single-NIC-owner exclusivity as the read of NEXT above.
         unsafe { *NEXT.get() = curr };
-        let bnry = if curr == RX_START {
-            RX_STOP - 1
-        } else {
-            curr - 1
-        };
-        w(BNRY, bnry);
+        w(BNRY, ring_prev_page(curr, RX_START, RX_STOP));
         return None;
     }
 
@@ -176,18 +171,14 @@ pub fn poll(buf: &mut [u8]) -> Option<usize> {
     // Advance the read pointer and the hardware boundary.
     // SAFETY: same single-NIC-owner exclusivity as the read of NEXT above.
     unsafe { *NEXT.get() = next_page };
-    let bnry = if next_page == RX_START {
-        RX_STOP - 1
-    } else {
-        next_page - 1
-    };
-    w(BNRY, bnry);
+    w(BNRY, ring_prev_page(next_page, RX_START, RX_STOP));
     Some(n)
 }
 
-/// Transmit `frame` (padded to the 60-byte Ethernet minimum).
+/// Transmit `frame` (padded to the 60-byte Ethernet minimum, cut at the
+/// 1514-byte maximum: the transmit buffer is only 6 pages wide).
 pub fn send(frame: &[u8]) {
-    let len = frame.len().max(60);
+    let len = tx_len(frame.len());
 
     // Remote-DMA write the frame into the transmit page.
     w(CR, CR_START | CR_RD_ABORT);

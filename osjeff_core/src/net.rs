@@ -230,6 +230,31 @@ pub fn respond(frame: &[u8], mac: Mac, ip: Ipv4, out: &mut [u8]) -> Option<usize
 
 // ---- UDP + DHCP client (acquire an IP automatically) ----
 
+/// Largest Ethernet frame the NIC driver will put on the wire (MTU 1500 +
+/// 14-byte header). The NE2000 transmit buffer is 6 pages (1536 bytes) wide;
+/// anything longer would spill into the receive ring.
+pub const MAX_TX_FRAME: usize = 1514;
+/// Ethernet minimum frame length without FCS (shorter frames are padded).
+pub const MIN_TX_FRAME: usize = 60;
+
+/// Length actually transmitted for a frame of `len` bytes: padded up to the
+/// Ethernet minimum, clamped to [`MAX_TX_FRAME`].
+pub fn tx_len(len: usize) -> usize {
+    len.clamp(MIN_TX_FRAME, MAX_TX_FRAME)
+}
+
+/// The ring page just before `page` in a receive ring `[start, stop)`, wrapping
+/// from `start` back to the last page. Total over every `u8`: a garbled hardware
+/// pointer outside the ring (below `start`, e.g. 0, or above `stop`) must not
+/// underflow or point outside the ring, so it also maps to the last page.
+pub fn ring_prev_page(page: u8, start: u8, stop: u8) -> u8 {
+    if page <= start || page > stop {
+        stop - 1
+    } else {
+        page - 1
+    }
+}
+
 pub const IPPROTO_UDP: u8 = 17;
 const UDP_HDR: usize = 8;
 const DHCP_CLIENT_PORT: u16 = 68;
@@ -754,5 +779,38 @@ mod tests {
     fn short_frame_ignored() {
         let mut out = [0u8; 64];
         assert_eq!(respond(&[0u8; 8], OUR_MAC, OUR_IP, &mut out), None);
+    }
+
+    /// Regression: the NE2000 driver computed `curr - 1` for the boundary
+    /// register; a hardware pointer of 0 underflowed (panic in debug, 255 in
+    /// release). The helper wraps for every input.
+    #[test]
+    fn ring_prev_page_wraps_and_never_underflows() {
+        const START: u8 = 0x46;
+        const STOP: u8 = 0x80;
+        assert_eq!(ring_prev_page(0x47, START, STOP), 0x46);
+        assert_eq!(ring_prev_page(0x7F, START, STOP), 0x7E);
+        assert_eq!(ring_prev_page(START, START, STOP), STOP - 1);
+        for p in 0..=u8::MAX {
+            let prev = ring_prev_page(p, START, STOP);
+            assert!((START..STOP).contains(&prev), "page {p} -> {prev}");
+        }
+        assert_eq!(ring_prev_page(0, START, STOP), STOP - 1);
+        assert_eq!(ring_prev_page(0xFF, START, STOP), STOP - 1);
+        assert_eq!(ring_prev_page(STOP, START, STOP), STOP - 1);
+    }
+
+    /// Regression: `ne2000::send` had no ceiling on the frame length, so an
+    /// oversized frame overran the 6-page transmit buffer into the RX ring.
+    #[test]
+    fn tx_len_pads_and_clamps() {
+        assert_eq!(tx_len(0), MIN_TX_FRAME);
+        assert_eq!(tx_len(42), 60);
+        assert_eq!(tx_len(60), 60);
+        assert_eq!(tx_len(1000), 1000);
+        assert_eq!(tx_len(1514), 1514);
+        assert_eq!(tx_len(1515), 1514);
+        assert_eq!(tx_len(usize::MAX), 1514);
+        const { assert!(MAX_TX_FRAME <= 6 * 256) };
     }
 }
