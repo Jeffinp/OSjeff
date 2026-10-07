@@ -223,11 +223,22 @@ impl Term {
     /// What to draw for the current geometry. While a command runs the prompt is
     /// hidden (the output so far is all there is).
     pub fn view(&self) -> View {
+        self.view_in(self.cols, self.rows)
+    }
+
+    /// [`Term::view`] for an explicit window size (the window may have been resized since
+    /// the last key).
+    pub fn view_in(&self, cols: usize, rows: usize) -> View {
         if self.running {
-            return self.screen.view_history(self.cols, self.rows);
+            return self.screen.view_history(cols, rows);
         }
         let (text, cur) = self.line.display();
-        self.screen.view(self.cols, self.rows, &text, cur)
+        self.screen.view(cols, rows, &text, cur)
+    }
+
+    /// Characters of the prompt on the live line (to colour them).
+    pub fn prompt_chars(&self) -> usize {
+        self.line.prompt().chars().count()
     }
 }
 

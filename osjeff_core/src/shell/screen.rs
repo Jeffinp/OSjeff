@@ -37,6 +37,8 @@ pub struct View {
     pub above: usize,
     /// Wrapped rows hidden below the window (zero when at the bottom).
     pub below: usize,
+    /// Index in `rows` of the first row of the live line (prompt and typed text), if shown.
+    pub live_first: Option<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -337,6 +339,7 @@ impl Screen {
         let end = first + rows.min(total);
         let mut out: Vec<String> = Vec::with_capacity(rows);
         let mut cursor = None;
+        let mut live_first = None;
         let mut row0 = 0usize; // wrapped-row index of the line being visited
         let partial = (!self.cur.is_empty()).then_some(self.cur.as_slice());
         let hist = self.lines.iter().map(Vec::as_slice).chain(partial);
@@ -364,6 +367,7 @@ impl Screen {
                 if r >= first && r < end {
                     let a = k * cols;
                     let b = (a + cols).min(live.len());
+                    live_first.get_or_insert(out.len());
                     out.push(live.get(a..b).unwrap_or(&[]).iter().collect());
                     if caret / cols == k {
                         cursor = Some((out.len() - 1, caret % cols));
@@ -376,6 +380,7 @@ impl Screen {
             cursor,
             above: first,
             below: total - end,
+            live_first,
         }
     }
 }
@@ -519,6 +524,22 @@ mod tests {
         // In the middle of the text.
         let v = s.view(4, 5, "abcdefg", 5);
         assert_eq!(v.cursor, Some((1, 1)));
+    }
+
+    #[test]
+    fn live_first_marks_where_the_live_line_starts() {
+        let mut s = Screen::new();
+        s.print(b"a\nb\n");
+        assert_eq!(s.view(10, 8, "$ x", 3).live_first, Some(2));
+        // A wrapped live line starts on its first row.
+        assert_eq!(s.view(2, 8, "abcde", 5).live_first, Some(2));
+        // Scrolled away, or hidden while a command runs: none.
+        assert_eq!(s.view_history(10, 8).live_first, None);
+        for i in 0..20 {
+            s.print(format!("{i}\n").as_bytes());
+        }
+        s.scroll(3, 10, 4, 3);
+        assert_eq!(s.view(10, 4, "$ x", 3).live_first, None);
     }
 
     #[test]
