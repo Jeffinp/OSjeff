@@ -1,0 +1,129 @@
+# Modelo de segurança do OSjeff
+
+Este documento diz **o que o OSjeff protege, contra quem, e o que não protege**.
+Foi escrito depois de uma auditoria completa (ver [`audit/`](audit/RELATORIO.md))
+e cada afirmação aponta para uma prova: teste, fuzzing, medição em QEMU ou o
+trecho de código. O que não foi provado está marcado como *suposição*.
+
+## Resumo em cinco linhas
+
+1. **Tudo roda em ring 0, num único espaço de endereçamento.** Não existe processo
+   de usuário: um bug em qualquer componente é um bug no kernel inteiro.
+2. Por isso a defesa é **na entrada**: todo dado que vem de fora (rede, disco,
+   HTML/CSS, `.wasm`) passa por código que não usa `unsafe`, tem limites
+   explícitos e foi fuzzado.
+3. O que ainda é fraco e conhecido: **HTTPS não verifica certificado**, as pilhas
+   das threads secundárias não têm página de guarda, e não há isolamento entre apps
+   e kernel.
+4. Falhas fatais agora são **visíveis** (tela de erro + serial) em vez de
+   congelamento ou reinício mudo.
+5. Nenhuma garantia vale em hardware real: tudo foi verificado em QEMU.
+
+## 1. Fronteiras de confiança
+
+Quem controla o dado, quem o interpreta e o que impede o pior.
+
+| # | Fronteira | Quem controla o dado | Quem interpreta | Proteções | Risco residual |
+|---|---|---|---|---|---|
+| 1 | **Frames de rede** (NE2000) | qualquer host na rede | `osjeff_core::net` (ARP, IPv4, ICMP, UDP, DHCP) e `smoltcp` | `forbid(unsafe_code)` no `net`; fuzz de 38 M execuções sem crash; `respond` é total para qualquer buffer de saída; orçamento de 32 frames por acordada | `smoltcp` e o driver não são fuzzados; laço de recepção do NIC só limitado no responder; frame que cruza o fim do anel do DP8390 *(suposição, não provado)* |
+| 2 | **Respostas HTTP/HTTPS** | servidor remoto, ou quem estiver no caminho | `fetch` → `osjeff_core::browser` (cabeçalhos, `chunked`, redirect) | corpo limitado a 256 KiB (`MAX_RESPONSE_BYTES`) nos dois protocolos; `dechunk` sem panic; redirect sem rebaixar https→http, no máximo 5 saltos, rejeita caracteres de controle | **TLS sem verificação de certificado** (§3.1) |
+| 3 | **HTML e CSS** | página remota | `osjeff_core::web` | profundidade 40, 8 000 nós, 1 000 regras e 2 000 seletores; comprimentos CSS limitados; cores não-ASCII rejeitadas; fuzz de ~0,7 M execuções sem crash | cascata ainda é O(regras × elementos) dentro dos tetos; fuzz do `web` ainda ganhava cobertura quando parou |
+| 4 | **Disco (OJFS)** | quem fornecer a imagem | `osjeff_core::fs` | validação de `size`, `parent` (ciclos), imagem curta; fuzz de 1 M execuções sem crash; falha de leitura **não** reescreve o disco | disco com conteúdo desconhecido ainda é formatado (é o desenho do disco dedicado); sem permissões nem criptografia |
+| 5 | **Apps `.wasm`** | embutidos no build (hoje) | `wasmi` + 31 host functions | combustível por chamada (20 M; 256 M na inicialização), memória de 24 MiB, tetos nas host functions, o app é encerrado e liberado em qualquer falha | o TCB inclui `wasmi` e as host functions: um bug ali é fuga total; não há *fuel* retomável (um quadro pesado legítimo é encerrado) |
+| 6 | **Dispositivos** (PS/2, virtio, ATA) | hardware | drivers do kernel | `virtio` valida `qsize`, BAR e limites de capability antes de tocar MMIO (testado no host) | dispositivos são confiáveis por premissa; DMA do virtio-gpu não tem IOMMU |
+| 7 | **Firmware/bootloader** | fabricante | `bootloader 0.11` | — | imagem **não assinada**: Secure Boot precisa estar desligado |
+
+## 2. O que o kernel faz para se defender
+
+| Mecanismo | Estado | Prova |
+|---|---|---|
+| GDT/TSS próprias com pilha IST para #DF | feito (`gdt.rs`) | estouro de pilha vira `#DF` reportado, sem triple fault (BIOS e UEFI, `-d cpu_reset`) |
+| Todas as exceções da CPU têm handler | feito (`interrupts.rs`) | `ud2`, `#PF`, `#NM`, `#XM` e outras exercitados com ganchos de build |
+| Tela de erro + serial em panic/exceção/OOM | feito (`crash.rs`) | capturas em `docs/img/panic-*.png` |
+| IRQ espúria 7/15 ignorada | feito | logado em QEMU (corrigiu um boot quebrado com `virtio-gpu-pci`) |
+| W^X na imagem do kernel, NX no resto | herdado do bootloader | escrever em `.text` e executar no heap dão `#PF` (medido na auditoria) |
+| `unsafe` documentado | 100% dos blocos com `// SAFETY:`, imposto pelo clippy | `cargo lint-kernel` (`-D warnings`) |
+| Core sem `unsafe` | `#![forbid(unsafe_code)]` | compilação |
+| Canário de pilha | só em `fetcher` e `wasmapp` | parcial: um frame maior que o canário o pula |
+| Recusa de framebuffer maior que os buffers | feito | "UNSUPPORTED SCREEN" (`docs/img/panic-oversize-*.png`) |
+| Disco intocado se a leitura falhar | feito (`PERSIST`) | hash do disco idêntico com falha injetada |
+
+## 3. O que **não** é protegido
+
+### 3.1 HTTPS não é seguro
+A pilha usa `embedded-tls` com `UnsecureProvider`: **o certificado do servidor não
+é verificado**. Quem estiver no caminho pode se passar pelo servidor e ler ou
+alterar o tráfego. A interface não mostra cadeado: a barra de endereço exibe
+**"Conexao nao verificada"** em `https://` e **"Nao seguro"** em `http://`, e o
+tipo `Security` não tem variante "seguro", então um cadeado não pode ser desenhado
+por engano.
+
+O gerador de números aleatórios do handshake usa `RDRAND` quando a CPU tem
+(checado por CPUID, com 10 tentativas). Sem `RDRAND`, cai para uma mistura de TSC e
+PIT e registra `RNG: weak fallback` na serial; como o `embedded-tls` exige o trait
+`CryptoRng`, esse fallback **também** o implementa, e por isso não deve ser
+considerado criptograficamente forte. No QEMU padrão (`qemu64`) o caminho fraco é o
+exercitado; com `-cpu max` o `RDRAND` é usado.
+
+Antes de tratar login ou dados pessoais no navegador, faltam: trust store,
+relógio confiável (o RTC não é verificado) e verificação de cadeia.
+
+### 3.2 Sem isolamento
+- Qualquer código do kernel lê e escreve toda a RAM e todo o MMIO (a memória física
+  está mapeada em 1 TiB virtual, RW+NX).
+- Não há SMEP/SMAP, ring 3, paginação por processo, nem syscalls.
+- "Processos" são linhas de uma tabela, não espaços de endereçamento. O gerenciador
+  de tarefas mostra CPU real por thread, mas matar um "processo" só fecha a janela.
+- O caminho de evolução está no [ADR de isolamento](audit/adr-isolamento.md): primeiro
+  endurecer o kernel, depois tornar o WebAssembly a fronteira (já existe, com
+  limites), e adiar o ring 3 até haver um gatilho concreto.
+
+### 3.3 Pilhas e memória
+- As pilhas de `fetcher` e `wasmapp` (128 KiB cada) vêm do heap, **sem página de
+  guarda**. O canário (8 bytes) é checado só na troca de contexto. Uso medido:
+  9–13 KiB; nenhum estouro real observado.
+- O heap é um bloco único de 64 MiB sem cota por consumidor. Esgotá-lo vira panic
+  (agora visível), não corrupção.
+- Um panic em uma thread secundária para a máquina inteira (não há "thread morta").
+
+### 3.4 Rede
+- O IP, o gateway e o DNS usados pelo navegador são os fixos do SLIRP do QEMU
+  (`10.0.2.15`); o DHCP só alimenta o responder ARP/ping. Na prática o navegador só
+  funciona sob `-netdev user`.
+- O driver NE2000 é de placa ISA rara; não há driver para NICs comuns.
+
+### 3.5 Dados
+- Não há criptografia, permissões nem usuários no OJFS. O disco dedicado é tratado
+  como confiável depois de validado.
+
+## 4. Cenários de ataque e resultado hoje
+
+| Cenário | O que acontecia antes da auditoria | Hoje |
+|---|---|---|
+| Servidor responde `Transfer-Encoding: chunked` com tamanho gigante | `panic` no kernel (máquina parada) | tratado, teste de regressão |
+| Página com ~150 `<div>` aninhados | estouro da pilha de 80 KiB → triple fault | profundidade limitada a 40, teste e fuzz |
+| CSS `color:#é1` | `panic` por fatiar no meio de um caractere | rejeitado, teste e fuzz |
+| CSS `margin:2147483647` | overflow em release → coordenadas negativas | limitado a 4096 px |
+| URL com porta `4294967376` | conecta na porta 80 | saturada e rejeitada |
+| Redirect `Location` com CRLF ou `https`→`http` | aceito | rejeitado / bloqueado |
+| Disco com `parent` em ciclo | recursão infinita, estouro de pilha | corrigido |
+| Disco com `size = 0xFFFF` | leitura além do registro e `panic` | limitado ao máximo |
+| Disco ilegível por erro transitório | **formatado e sobrescrito** | intocado |
+| Guest WASM em laço infinito | CPU presa para sempre, janela fechada não o parava | encerrado por *fuel*, liberado |
+| Guest WASM com `memory.grow` sem fim | 51% do heap | limitado a 24 MiB |
+| `random_get(0x7fffffff)` / `fd_write` com 2³¹ iovecs | trabalho ilimitado | `EINVAL` |
+| MITM em HTTPS | possível | **ainda possível** (§3.1); a interface avisa |
+| Servidor malicioso faz resposta de vários MiB | OOM mudo no `http_get` | truncado em 256 KiB, avisado na página |
+
+## 5. Como reproduzir as provas
+
+- Testes: `cargo test-core` (379 testes; regressões dos achados em `osjeff_core`).
+- Fuzz: [`TESTING.md`](TESTING.md#2-fuzzing) — as entradas mínimas dos crashes estão em
+  `fuzz/regressions/`.
+- Falhas visíveis e IST: [`TESTING.md`](TESTING.md#provando-falhas-padrão-usado-na-auditoria).
+- Limites do WASM: guests hostis foram gerados com `wat` num gancho temporário de
+  build (laço infinito, `memory.grow` em laço, `proc_exit`, `random_get` gigante) e
+  o log da serial mostra o app encerrado com o desktop respondendo.
+- Relatório completo e rastreabilidade de cada achado: [`audit/RELATORIO.md`](audit/RELATORIO.md).
+
+Para relatar uma vulnerabilidade, veja [`../SECURITY.md`](../SECURITY.md).
