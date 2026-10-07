@@ -47,6 +47,41 @@ pub fn window_of_pid(pids: &[u16], pid: u16) -> Option<usize> {
     pids.iter().position(|&p| p == pid)
 }
 
+/// Compact signature of the *static* scene: which windows are visible /
+/// animating, their z-order and the drag target. Two scenes that differ in any
+/// of those produce different signatures (up to 64-bit hash collisions), for
+/// any number of windows. The kernel rebuilds its cached static layer when the
+/// value changes.
+///
+/// The window count is `order.len()`; `visible` / `animating` are queried for
+/// every window index in `0..order.len()`.
+pub fn scene_signature(
+    order: &[usize],
+    visible: impl Fn(usize) -> bool,
+    animating: impl Fn(usize) -> bool,
+    drag: Option<usize>,
+) -> u64 {
+    // FNV-1a over a fixed-layout byte stream: flags per window, z-order, drag.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut feed = |b: u8| {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    };
+    for w in 0..order.len() {
+        feed((visible(w) as u8) | ((animating(w) as u8) << 1));
+    }
+    for &w in order {
+        for b in (w as u32).to_le_bytes() {
+            feed(b);
+        }
+    }
+    // +1 so "no drag" and "dragging window 0" differ.
+    for b in drag.map_or(0u32, |d| d as u32 + 1).to_le_bytes() {
+        feed(b);
+    }
+    h
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +176,102 @@ mod tests {
         assert_eq!(window_of_pid(&pids, 0), None); // closed windows have pid 0
         assert_eq!(window_of_pid(&pids, 7), None);
         assert_eq!(window_of_pid(&[], 1), None);
+    }
+
+    fn sig(order: &[usize], vis: u64, anim: u64, drag: Option<usize>) -> u64 {
+        scene_signature(
+            order,
+            |w| (vis >> w) & 1 == 1,
+            |w| (anim >> w) & 1 == 1,
+            drag,
+        )
+    }
+
+    #[test]
+    fn signature_is_deterministic() {
+        let o = [6, 5, 4, 3, 2, 1, 0];
+        assert_eq!(sig(&o, 0b1, 0, None), sig(&o, 0b1, 0, None));
+    }
+
+    #[test]
+    fn signature_changes_with_each_ingredient() {
+        let o = [6, 5, 4, 3, 2, 1, 0];
+        let base = sig(&o, 0b0000011, 0, None);
+        assert_ne!(base, sig(&o, 0b0000111, 0, None)); // visibility
+        assert_ne!(base, sig(&o, 0b0000011, 0b1, None)); // animation
+        let mut o2 = o;
+        o2.swap(0, 1);
+        assert_ne!(base, sig(&o2, 0b0000011, 0, None)); // z-order
+        assert_ne!(base, sig(&o, 0b0000011, 0, Some(0))); // drag begins
+        assert_ne!(sig(&o, 0b11, 0, Some(0)), sig(&o, 0b11, 0, Some(1)));
+        assert_ne!(sig(&o, 0b11, 0, None), sig(&o, 0b11, 0, Some(0)));
+    }
+
+    #[test]
+    fn visible_and_animating_flags_are_distinct() {
+        let o = [0, 1];
+        // visible-only on window 0 vs animating-only on window 0.
+        assert_ne!(sig(&o, 0b1, 0, None), sig(&o, 0, 0b1, None));
+    }
+
+    /// The pre-fix encoding: 3 bits per z-order slot and per drag target.
+    fn legacy_signature(order: &[usize], drag: Option<usize>) -> u64 {
+        let n = order.len();
+        let (zbase, dbase) = (2 * n, 5 * n);
+        let mut s = 0u64;
+        for (i, &w) in order.iter().enumerate() {
+            s |= (w as u64 & 0x7) << (zbase + i * 3);
+        }
+        if let Some(d) = drag {
+            s |= ((d as u64 & 0x7) + 1) << dbase;
+        }
+        s
+    }
+
+    #[test]
+    fn regression_nine_or_more_windows_no_longer_collide() {
+        // With 9 windows, ids 0 and 8 share their low 3 bits, so swapping their
+        // z-order positions left the old signature unchanged and the cached
+        // static layer went stale.
+        let a: Vec<usize> = (0..9).collect();
+        let mut b = a.clone();
+        b.swap(0, 8);
+        assert_eq!(legacy_signature(&a, None), legacy_signature(&b, None));
+        assert_ne!(
+            scene_signature(&a, |_| true, |_| false, None),
+            scene_signature(&b, |_| true, |_| false, None)
+        );
+        // Dragging window 8 vs window 0 was also indistinguishable.
+        assert_eq!(legacy_signature(&a, Some(0)), legacy_signature(&a, Some(8)));
+        assert_ne!(
+            scene_signature(&a, |_| true, |_| false, Some(0)),
+            scene_signature(&a, |_| true, |_| false, Some(8))
+        );
+    }
+
+    #[test]
+    fn signature_distinguishes_every_swap_with_many_windows() {
+        let n = 20;
+        let base: Vec<usize> = (0..n).collect();
+        let s0 = scene_signature(&base, |_| true, |_| false, None);
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let mut o = base.clone();
+                o.swap(i, j);
+                assert_ne!(
+                    s0,
+                    scene_signature(&o, |_| true, |_| false, None),
+                    "{i}<->{j}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn signature_with_zero_windows_is_stable() {
+        assert_eq!(
+            scene_signature(&[], |_| true, |_| true, None),
+            scene_signature(&[], |_| false, |_| false, None)
+        );
     }
 }

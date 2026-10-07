@@ -59,36 +59,15 @@ impl Desktop {
     }
 
     /// Compact signature of the *static* scene (which windows are visible /
-    /// animating, and their z-order). When it changes, the cached static layer
-    /// must be rebuilt.
+    /// animating, their z-order and the drag target). When it changes, the
+    /// cached static layer must be rebuilt. See [`osjeff_core::wm::scene_signature`].
     pub fn anim_signature(&self) -> u64 {
-        // Bit layout, all offsets relative to WIN_COUNT (=7 windows, 3 bits each):
-        //   bits [0, WIN_COUNT)              visible flags
-        //   bits [WIN_COUNT, 2*WIN_COUNT)    animating flags
-        //   bits [2*WIN_COUNT, 5*WIN_COUNT)  z-order (WIN_COUNT entries x 3 bits)
-        //   bits [5*WIN_COUNT, +3)           drag target (+1, 0 = no drag)
-        // For WIN_COUNT = 7 the drag field ends at bit 38, well within the u64.
-        const ZBASE: usize = 2 * WIN_COUNT;
-        const DBASE: usize = 5 * WIN_COUNT;
-        let mut s = 0u64;
-        for (w, win) in self.windows.iter().enumerate() {
-            if win.visible {
-                s |= 1 << w;
-            }
-            if win.anim.is_some() {
-                s |= 1 << (w + WIN_COUNT);
-            }
-        }
-        for (i, &w) in self.order.iter().enumerate() {
-            s |= (w as u64 & 0x7) << (ZBASE + i * 3);
-        }
-        // Fold in the drag target so the static layer is rebuilt when a drag
-        // starts (the window leaves the static layer) and ends (it rejoins it),
-        // but stays stable mid-drag so it is composed only once.
-        if let Some(d) = &self.drag {
-            s |= ((d.win as u64 & 0x7) + 1) << DBASE;
-        }
-        s
+        osjeff_core::wm::scene_signature(
+            &self.order,
+            |w| self.windows[w].visible,
+            |w| self.windows[w].anim.is_some(),
+            self.drag.as_ref().map(|d| d.win),
+        )
     }
 
     /// Composes the static layer (non-animating windows + clock) into `buf`,
