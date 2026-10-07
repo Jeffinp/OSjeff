@@ -14,7 +14,10 @@
 extern crate alloc;
 
 pub mod anim;
+pub mod appabi;
+pub mod appfs;
 pub mod appmanifest;
+pub mod appnet;
 pub mod blockcache;
 pub mod blockdev;
 pub mod bmp;

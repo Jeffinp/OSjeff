@@ -94,3 +94,10 @@ path = "fuzz_targets/app_manifest.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "app_sandbox"
+path = "fuzz_targets/app_sandbox.rs"
+test = false
+doc = false
+bench = false

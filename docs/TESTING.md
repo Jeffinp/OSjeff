@@ -56,6 +56,7 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 | `x509_parse` | `[modo, bytes]`: o leitor DER/X.509 estrito, o casamento de nomes (SAN/curinga), o parser de datas, a validação de cadeia (`rustls-webpki` com âncora real) com os bytes como cadeia de 1 a 4 certificados, como folha ou intermediária substituindo as de uma cadeia de teste válida (chega à checagem de assinatura), e o `CertificateVerify` do TLS 1.3 com os bytes como assinatura | `osjeff_core::x509`, `osjeff_core::tlsverify` (nunca pânico nem travamento; semente: os certificados de `tools/gen-test-certs.py`) |
 
 | `app_manifest` | bytes como `.wasm` inteiro, como payload de `osjeff.manifest` ou de `osjeff.icon` (embrulhado numa seção válida), ou como manifesto/ícone soltos | `wasmsec` (cabeçalho, seções, LEB128), `appmanifest` (chaves, quotas, ícone PNG até 64x64) e as invariantes do manifesto aceito |
+| `app_sandbox` | sequência de operações com caminhos em bytes crus sobre dois apps que dividem um `MemFs` (mais URLs) | `appfs` (normalização, `Sandbox`, cota, descritores) e `appnet`: nada existe fora de `/data/<id>`, o arquivo do sistema fica intacto, a cota vale, URL aceita nunca é local |
 
 ```bash
 cargo install cargo-fuzz
@@ -71,6 +72,7 @@ cargo fuzz run image_decode -- -max_total_time=600 -print_final_stats=1 -dict=di
 cargo fuzz run x509_parse -- -max_total_time=600 -print_final_stats=1
 
 cargo fuzz run app_manifest -- -max_total_time=600 -print_final_stats=1
+cargo fuzz run app_sandbox -- -max_total_time=600 -print_final_stats=1
 ```
 
 O perfil de release do `fuzz/` liga `overflow-checks` e `debug-assertions`: um
