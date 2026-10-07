@@ -206,7 +206,7 @@ fn paint_image(c: &mut Canvas, path: &[u8]) -> bool {
         crate::klog!(Warn, "wallpaper: file not found, using the default");
         return false;
     };
-    let mut img = match osjeff_core::wallpaper::load(bytes, w, h) {
+    let mut img = match osjeff_core::wallpaper::load(&bytes, w, h) {
         Ok(img) => img,
         Err(e) => {
             crate::klog!(Warn, "wallpaper: {e}, using the default");

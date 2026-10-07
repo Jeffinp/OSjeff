@@ -184,7 +184,7 @@ fn viewer(c: &mut Canvas, x: usize, y: usize, size: usize) {
         Color::rgb(0xFF, 0xC1, 0x4D),
     );
     // Hills.
-    c.fill_round_rect(ix, iy + ih / 2, iw * 3 / 5, ih / 2, iw / 6, theme::ACCENT);
+    c.fill_round_rect(ix, iy + ih / 2, iw * 3 / 5, ih / 2, iw / 6, theme::accent());
     c.fill_round_rect(
         ix + iw / 3,
         iy + ih * 3 / 5,

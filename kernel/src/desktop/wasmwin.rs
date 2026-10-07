@@ -36,6 +36,7 @@ pub(crate) struct AppEntry {
     pub manifest: Manifest,
 }
 
+#[allow(dead_code)] // returns with the file manager's Apps view
 /// What the Files "Apps" view lists: installed packages and bundled ones that are
 /// not installed.
 pub(crate) struct AppRow {
@@ -79,6 +80,7 @@ impl Desktop {
         serial_println!("apps: catalog has {} apps", self.apps.len());
     }
 
+    #[allow(dead_code)] // returns with the file manager's Apps view
     /// Rows of the Files "Apps" view: installed apps first (name order), then the
     /// bundled packages that are not installed.
     pub(crate) fn app_rows(&self) -> Vec<AppRow> {
@@ -105,12 +107,11 @@ impl Desktop {
         rows
     }
 
-    /// Enter on a `.wasm` file of the file system: validate it as a package, install it
-    /// when it is new (the installer refuses a bad manifest or quota, see the serial log)
-    /// and run it. A file over 1 KiB cannot exist on the current OJFS, so this serves tiny
-    /// packages until the disk filesystem (OJFS v3) is wired.
-    pub(crate) fn open_wasm_file(&mut self, slot: usize) {
-        let Some(bytes) = fs::read_slot(disk(), slot).map(|d| d.to_vec()) else {
+    /// Open a `.wasm` file of the file system (Files, Enter): validate it as a package,
+    /// install it when it is new (the installer refuses a bad manifest or quota, see the
+    /// serial log) and run it.
+    pub(crate) fn open_wasm_path(&mut self, path: &[u8]) {
+        let Ok(bytes) = vfs::read_file(path) else {
             return;
         };
         let manifest = match appinstall::check(&bytes) {
@@ -134,6 +135,7 @@ impl Desktop {
         self.launch_wasm_app(&manifest.id);
     }
 
+    #[allow(dead_code)] // returns with the file manager's Apps view
     /// Install the bundled package `id` (Files, `I`). `Err` carries the reason.
     pub(crate) fn install_bundled(&mut self, id: &str) -> Result<(), String> {
         let pkg = wasm::BUNDLED
@@ -152,6 +154,7 @@ impl Desktop {
         Ok(())
     }
 
+    #[allow(dead_code)] // returns with the file manager's Apps view
     /// Remove an installed app (Files, `Del`). Its open windows keep running until closed.
     pub(crate) fn remove_app(&mut self, id: &str) -> Result<(), String> {
         let r = appfs_backend::with(|fs| appinstall::remove(fs, id));

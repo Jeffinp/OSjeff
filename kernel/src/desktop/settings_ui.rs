@@ -253,7 +253,7 @@ impl Desktop {
     /// Make `new` the settings in effect: accent, keyboard layout, time zone,
     /// clock format and toasts apply at once, a changed wallpaper or accent
     /// asks the compositor to repaint the background, and the text form is
-    /// stored through the `SettingsStore` (FS v2 file `osjeff.conf`).
+    /// stored through the `SettingsStore` (`/etc/osjeff.conf`).
     pub(crate) fn settings_apply(
         &mut self,
         new: Settings,
@@ -269,12 +269,12 @@ impl Desktop {
         }
         // Everything on screen may change (clock text, accent colours).
         self.force_full = true;
-        FsV2Store.save(&new.to_text())
+        VfsStore.save(&new.to_text())
     }
 
     /// Load the stored settings at boot (before the first wallpaper paint).
     pub fn load_settings(&mut self) {
-        match FsV2Store.load() {
+        match VfsStore.load() {
             Some(text) => {
                 let s = Settings::parse(&text);
                 crate::settings::set(s);
@@ -286,6 +286,31 @@ impl Desktop {
                 );
             }
             None => crate::settings::set(Settings::default()),
+        }
+    }
+
+    /// Use the image at `path` as the wallpaper (file manager, viewer). `Some(message)`
+    /// is the reason it was refused.
+    pub(crate) fn set_wallpaper_path(&mut self, path: &[u8]) -> Option<String> {
+        let (w, h) = (self.sw as usize, self.sh as usize);
+        let mut s = crate::settings::get();
+        if !s.set_image_path(path) {
+            return Some(String::from(
+                "Caminho invalido para papel de parede (use letras, numeros . _ - /)",
+            ));
+        }
+        match read_path(path) {
+            None => return Some(String::from("Arquivo nao encontrado")),
+            Some(bytes) => {
+                if let Err(e) = wallpaper::load(&bytes, w, h) {
+                    return Some(alloc::format!("Imagem recusada: {e}"));
+                }
+            }
+        }
+        s.wallpaper = WallpaperChoice::Image;
+        match self.settings_apply(s) {
+            Ok(()) => None,
+            Err(_) => Some(String::from("Papel de parede aplicado, mas nao salvo")),
         }
     }
 
@@ -314,7 +339,7 @@ impl Desktop {
                     return;
                 }
                 Some(bytes) => {
-                    if let Err(e) = wallpaper::load(bytes, w, h) {
+                    if let Err(e) = wallpaper::load(&bytes, w, h) {
                         let mut m = FixedBuf::<60>::new();
                         let _ = write!(m, "imagem recusada: {e}");
                         st.set_msg(m.as_bytes());
@@ -922,7 +947,7 @@ impl Desktop {
 
     fn draw_storage(&self, c: &mut Canvas, p: Rect) {
         self.heading(c, p, p.y, b"Armazenamento");
-        let usage = FsV2Usage;
+        let usage = VfsUsage;
         let u = usage.usage();
         let mut lbl = FixedBuf::<40>::new();
         let _ = write!(lbl, "{}", usage.label());

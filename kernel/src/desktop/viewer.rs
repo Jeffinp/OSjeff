@@ -289,8 +289,13 @@ impl Desktop {
             Key::Char(b'i') | Key::Char(b'I') => v.show_info = !v.show_info,
             Key::Char(b's') | Key::Char(b'S') => self.viewer_save_prompt(id),
             Key::Char(b'w') | Key::Char(b'W') => {
-                if let Some(m) = apps_hook::set_wallpaper(&v.path) {
-                    v.msg = Some((String::from(m), false));
+                let path = v.path.clone();
+                let r = self.set_wallpaper_path(&path);
+                if let Some(v) = self.viewer_mut(id) {
+                    v.msg = Some(match r {
+                        Some(m) => (m, true),
+                        None => (String::from("Papel de parede aplicado"), false),
+                    });
                 }
             }
             Key::Left if shift => {
@@ -514,7 +519,7 @@ impl Desktop {
         font::draw_bytes(c, (bx + 10) as usize, ty, &lt, theme::HEADER_TEXT, 2);
         let (right, col): (String, Color) = match &v.msg {
             Some((m, true)) => (m.clone(), theme::CLOSE),
-            Some((m, false)) => (m.clone(), theme::ACCENT),
+            Some((m, false)) => (m.clone(), theme::accent()),
             None => (
                 String::from("+/- zoom  0 ajusta  1 real  R girar  I info  S salvar"),
                 theme::TEXT_MUTED,
@@ -534,7 +539,7 @@ impl Desktop {
                 (w + 6) as usize,
                 102,
                 12,
-                theme::ACCENT,
+                theme::accent(),
             );
             c.fill_round_rect(
                 x as usize,

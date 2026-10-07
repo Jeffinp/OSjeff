@@ -226,7 +226,7 @@ impl Desktop {
                 |o| crate::sched::thread_name(o as usize),
                 &mut text,
             );
-            let msg: &[u8] = match FsV2Sink.write_file(SAVE_NAME, &text) {
+            let msg: &[u8] = match VfsSink.write_file(SAVE_NAME, &text) {
                 Ok(()) => b"salvo em syslog.txt",
                 Err(SinkError::Truncated { .. }) => b"salvo em syslog.txt (so o fim)",
                 Err(SinkError::NoSpace) => b"erro: disco cheio",

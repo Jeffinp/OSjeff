@@ -255,7 +255,7 @@ impl App {
             App::Log(l) => size_of::<LogState>() + l.heap_bytes(),
             App::Monitor(m) => size_of::<MonitorState>() + m.heap_bytes(),
             App::Settings(s) => size_of::<SettingsState>() + s.heap_bytes(),
-            App::Files(_) | App::TaskMgr | App::Wasm(_) => return None,
+            App::Files(_) | App::Viewer(_) | App::TaskMgr | App::Wasm(_) => return None,
         };
         Some(n)
     }
@@ -771,7 +771,7 @@ impl Desktop {
     }
 
     fn draw_disk_usage(&self, c: &mut Canvas, r: Rect) {
-        let usage = FsV2Usage;
+        let usage = VfsUsage;
         let u = usage.usage();
         fill_round(c, r, 10, PANEL_DARK);
         text(c, r.x + 10, r.y + 8, r.w - 20, b"Disco", theme::HEADER_TEXT);

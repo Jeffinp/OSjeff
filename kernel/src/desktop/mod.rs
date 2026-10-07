@@ -146,6 +146,8 @@ pub(crate) struct Drag {
 
 pub struct Desktop {
     sw: i32,
+    // One-time snapshot of the two IDE disks (boot + filesystem) for the Settings disk panel.
+    disks: [Option<crate::ata::DiskInfo>; 2],
     sh: i32,
     clipboard: Clipboard,
     /// Paths set aside by the file managers' Copy / Cut (shared by all windows).
@@ -190,8 +192,6 @@ pub struct Desktop {
     wasm_grab: Option<WindowId>,
     /// Last seen generation of app-side clipboard writes.
     clip_gen: u64,
-    /// Last message of the Files "Apps" view (an install/remove error).
-    files_msg: Option<(String, u8)>,
 }
 
 impl Desktop {
@@ -203,6 +203,10 @@ impl Desktop {
         procs.spawn(b"compositor", ProcKind::System, ProcState::Running);
 
         let mut desk = Self {
+            disks: [
+                crate::ata::identify(0x1F0, 0x3F6, false),
+                crate::ata::identify(0x170, 0x376, false),
+            ],
             sw,
             sh,
             clipboard: Clipboard::new(),
@@ -231,7 +235,6 @@ impl Desktop {
             start_scroll: 0,
             wasm_grab: None,
             clip_gen: crate::wasm::clip_generation(),
-            files_msg: None,
         };
         // Install the bundled apps into /apps (first boot) and build the launcher catalog.
         desk.init_apps();
@@ -768,7 +771,6 @@ impl Desktop {
 }
 
 mod apps;
-mod apps_hook;
 mod files;
 mod files_ui;
 mod input;

@@ -337,7 +337,10 @@ impl Desktop {
     pub(crate) fn open_path(&mut self, from: WindowId, path: &[u8], class: FileClass) {
         let note = match class {
             FileClass::Image => self.open_viewer(path).map(|e| (e, true)),
-            FileClass::Wasm => apps_hook::open_wasm(path).map(|m| (String::from(m), true)),
+            FileClass::Wasm => {
+                self.open_wasm_path(path);
+                None
+            }
             FileClass::Text | FileClass::Other => {
                 let sniff = vfs::read_range(path, 0, 4096);
                 match sniff {
@@ -783,10 +786,11 @@ impl Desktop {
             }
             Cmd::Properties => self.files_properties(id, in_trash, &cwd, &paths),
             Cmd::SetWallpaper => {
-                if let Some(p) = paths.first()
-                    && let Some(m) = apps_hook::set_wallpaper(p)
-                {
-                    self.files_note(id, m, false);
+                if let Some(p) = paths.first() {
+                    match self.set_wallpaper_path(p) {
+                        Some(m) => self.files_note(id, &m, true),
+                        None => self.files_note(id, "Papel de parede aplicado", false),
+                    }
                 }
             }
         }

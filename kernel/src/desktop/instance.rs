@@ -154,7 +154,12 @@ impl Kind {
     pub(crate) const fn multi(self) -> bool {
         matches!(
             self,
-            Kind::Terminal | Kind::Editor | Kind::Calculator | Kind::Files | Kind::WasmApp | Kind::Viewer
+            Kind::Terminal
+                | Kind::Editor
+                | Kind::Calculator
+                | Kind::Files
+                | Kind::WasmApp
+                | Kind::Viewer
         )
     }
 

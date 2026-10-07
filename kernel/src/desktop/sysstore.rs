@@ -1,36 +1,49 @@
 //! Kernel implementations of the `osjeff_core::sysif` traits that the
-//! system-management apps use, backed by what exists today: the RAM image of
-//! the FS v2 root directory. The FS v3 front replaces these with `/var/log/`,
-//! `/etc/osjeff.conf` and real volume accounting by implementing the same
-//! traits (see `docs/design/sysmgmt.md`).
+//! system-management apps use, backed by the desktop VFS (OJFS v3 on the disk,
+//! or the RAM volume when no v3 disk is mounted): the log goes to
+//! `/var/log/`, the settings to `/etc/osjeff.conf`, and the space accounting
+//! is the volume's `statfs`.
 
-use super::*;
 use alloc::vec::Vec;
 use osjeff_core::sysif::{
     DiskUsage, DiskUsageInfo, LogSink, NetCounters, NetStats, SettingsStore, SinkError,
 };
 
-fn map_fs_error(e: fs::FsError) -> SinkError {
+use super::vfs::{self, VfsError};
+
+/// Largest file a `LogSink` writes: a longer dump keeps its newest whole lines.
+const MAX_LOG_FILE: usize = 256 * 1024;
+
+fn map_err(e: VfsError) -> SinkError {
     match e {
-        fs::FsError::NoSpace => {
+        VfsError::NoSpace => {
             crate::klog!(Warn, "disk full: the file could not be written");
             SinkError::NoSpace
         }
-        fs::FsError::NameTooLong | fs::FsError::EmptyName => SinkError::BadName,
+        VfsError::InvalidName | VfsError::InvalidPath | VfsError::NameTooLong => SinkError::BadName,
         _ => SinkError::Unavailable,
     }
 }
 
-/// Writes top-level files of FS v2. A v2 file holds at most
-/// [`fs::MAX_FILE_SIZE`] bytes, so a longer dump keeps its newest whole lines
-/// and the call reports [`SinkError::Truncated`] (the file *is* written).
-pub(crate) struct FsV2Sink;
+/// Ensure `dir` (a top-level folder) exists.
+fn ensure_dir(dir: &[u8]) {
+    if !vfs::exists(dir) {
+        let _ = vfs::mkdir(dir);
+    }
+}
 
-impl LogSink for FsV2Sink {
+/// Writes files into `/var/log/`. A dump over [`MAX_LOG_FILE`] bytes keeps its
+/// newest whole lines and the call reports [`SinkError::Truncated`] (the file
+/// *is* written).
+pub(crate) struct VfsSink;
+
+impl LogSink for VfsSink {
     fn write_file(&mut self, name: &[u8], data: &[u8]) -> Result<(), SinkError> {
-        let (body, cut) = osjeff_core::klog::tail_lines(data, fs::MAX_FILE_SIZE);
-        fs::write(disk(), name, body).map_err(map_fs_error)?;
-        flush_disk();
+        let (body, cut) = osjeff_core::klog::tail_lines(data, MAX_LOG_FILE);
+        ensure_dir(b"/var");
+        ensure_dir(b"/var/log");
+        let path = vfs::join(b"/var/log", name);
+        vfs::write_file(&path, body).map_err(map_err)?;
         if cut {
             Err(SinkError::Truncated { kept: body.len() })
         } else {
@@ -39,33 +52,29 @@ impl LogSink for FsV2Sink {
     }
 }
 
-/// Space accounting of the FS v2 image: 48 slots of up to 1 KiB each (a
-/// trashed file still holds its slot until it is purged).
-pub(crate) struct FsV2Usage;
+/// Space accounting of the volume the desktop is on.
+pub(crate) struct VfsUsage;
 
-impl DiskUsage for FsV2Usage {
+impl DiskUsage for VfsUsage {
     fn label(&self) -> &str {
-        "FS v2 (IDE 1)"
+        match vfs::volume() {
+            vfs::Volume::Disk => "OJFS v3 (IDE)",
+            vfs::Volume::Memory => "Memoria (sem disco v3)",
+        }
     }
 
     fn usage(&self) -> DiskUsageInfo {
-        let img = disk();
-        let used_slots = (0..fs::MAX_FILES).filter(|&i| fs::is_used(img, i));
-        let (mut slots, mut bytes) = (0u32, 0u64);
-        for i in used_slots {
-            slots += 1;
-            bytes += fs::size_at(img, i) as u64;
-        }
+        let u = vfs::statfs();
         DiskUsageInfo {
-            total_bytes: Some((fs::MAX_FILES * fs::MAX_FILE_SIZE) as u64),
-            used_bytes: Some(bytes),
-            items_used: Some(slots),
-            items_total: Some(fs::MAX_FILES as u32),
+            total_bytes: Some(u.total),
+            used_bytes: Some(u.used()),
+            items_used: None,
+            items_total: None,
         }
     }
 }
 
-/// The NE2000 byte counters (`crate::netstats`); `None` when there is no NIC.
+/// The NIC byte counters (`crate::netstats`); `None` when there is no NIC.
 pub(crate) struct KernelNetStats;
 
 impl NetStats for KernelNetStats {
@@ -74,43 +83,24 @@ impl NetStats for KernelNetStats {
     }
 }
 
-/// Stores the settings text as the top-level FS v2 file `osjeff.conf` (the FS v3
-/// front maps it to `/etc/osjeff.conf`). A first boot has no file: `load` is `None`.
-pub(crate) struct FsV2Store;
+/// Stores the settings text as `/etc/osjeff.conf`. A first boot has no file:
+/// `load` is `None`.
+pub(crate) struct VfsStore;
 
-impl SettingsStore for FsV2Store {
+const CONF_PATH: &[u8] = b"/etc/osjeff.conf";
+
+impl SettingsStore for VfsStore {
     fn load(&mut self) -> Option<Vec<u8>> {
-        fs::read(disk(), osjeff_core::settings::FILE_NAME).map(<[u8]>::to_vec)
+        vfs::read_file(CONF_PATH).ok()
     }
 
     fn save(&mut self, text: &[u8]) -> Result<(), SinkError> {
-        fs::write(disk(), osjeff_core::settings::FILE_NAME, text).map_err(map_fs_error)?;
-        flush_disk();
-        Ok(())
+        ensure_dir(b"/etc");
+        vfs::write_file(CONF_PATH, text).map_err(map_err)
     }
 }
 
-/// The contents of the file at `path` (`name`, or `folder/name`, folders
-/// separated by `/`) in the FS v2 image, if it exists and is a file.
-pub(crate) fn read_path(path: &[u8]) -> Option<&'static [u8]> {
-    let img: &'static [u8] = disk();
-    let mut parent = fs::ROOT;
-    let mut parts = path
-        .split(|&b| b == b'/')
-        .filter(|p| !p.is_empty())
-        .peekable();
-    while let Some(part) = parts.next() {
-        let slot = fs::find_in(img, parent, part)?;
-        if parts.peek().is_some() {
-            if !fs::is_dir(img, slot) {
-                return None;
-            }
-            parent = slot as u8;
-        } else if fs::is_dir(img, slot) {
-            return None;
-        } else {
-            return fs::read_slot(img, slot);
-        }
-    }
-    None
+/// The contents of the file at the absolute `path`, if it exists and is a file.
+pub(crate) fn read_path(path: &[u8]) -> Option<Vec<u8>> {
+    vfs::read_file(path).ok()
 }
