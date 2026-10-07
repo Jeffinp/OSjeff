@@ -191,6 +191,9 @@ pub struct Desktop {
     menu: Option<(i32, i32)>,
     start_open: bool,
     editor_file: FileName,
+    /// Directory slot holding `editor_file` (`fs::ROOT` at the top level), so Ctrl+S
+    /// rewrites the file that was opened rather than a same-named one in the root.
+    editor_dir: u8,
     cursor_x: i32,
     cursor_y: i32,
     prev_left: bool,
@@ -330,6 +333,7 @@ impl Desktop {
             menu: None,
             start_open: false,
             editor_file: FileName::parse(b"notes.txt").unwrap(),
+            editor_dir: fs::ROOT,
             cursor_x: sw / 2,
             cursor_y: sh / 2,
             prev_left: false,
@@ -705,17 +709,6 @@ impl Desktop {
         self.files_sel = 0;
     }
 
-    /// Snapshot the selected row's name into an owned buffer (ends the fs borrow
-    /// before any mutation).
-    fn files_sel_name(&self) -> Option<([u8; fs::MAX_NAME], usize)> {
-        let slot = self.files_slot(self.files_sel)?;
-        let raw = fs::name_at(disk(), slot);
-        let n = raw.len().min(fs::MAX_NAME);
-        let mut buf = [0u8; fs::MAX_NAME];
-        buf[..n].copy_from_slice(&raw[..n]);
-        Some((buf, n))
-    }
-
     pub(crate) fn files_move(&mut self, delta: i32) {
         let rows = self.files_rows();
         if rows == 0 {
@@ -764,14 +757,8 @@ impl Desktop {
             self.files_sel = 0;
             return;
         }
-        let Some((buf, n)) = self.files_sel_name() else {
-            return;
-        };
-        if let Some(f) = FileName::parse(&buf[..n]) {
-            self.editor_file = f;
-            self.fs_load(f);
-            self.open(EDIT);
-        }
+        // Open by slot: the file lives in the current folder, not necessarily the root.
+        self.fs_load_slot(slot);
     }
 
     /// Go to the parent directory (Files view only).

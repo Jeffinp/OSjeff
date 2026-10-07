@@ -23,47 +23,76 @@ impl Desktop {
         n
     }
 
-    /// Ctrl+S: save the editor buffer to its current file.
+    /// Ctrl+S: save the editor buffer to its current file, in the folder it was
+    /// opened from.
     pub(crate) fn save_editor_file(&mut self) {
         if self.focused().map(|w| self.windows[w].kind) != Some(Kind::Editor) {
             return;
         }
-        self.fs_save(self.editor_file);
+        self.fs_save_in(self.editor_dir, self.editor_file);
     }
 
+    /// Terminal `save <name>`: the shell has no current directory, so this is a
+    /// top-level file.
     pub(crate) fn fs_save(&mut self, f: FileName) {
+        self.fs_save_in(fs::ROOT, f);
+    }
+
+    /// Write the editor buffer to file `f` inside directory `dir`. If `dir` was
+    /// trashed or deleted since the file was opened, fall back to the root rather
+    /// than writing under a stale slot.
+    pub(crate) fn fs_save_in(&mut self, dir: u8, f: FileName) {
         let mut buf = [0u8; fs::MAX_FILE_SIZE];
         let n = self.serialize_editor(&mut buf);
-        match fs::write(disk(), f.as_bytes(), &buf[..n]) {
+        let dir = fs::live_dir(disk(), dir);
+        match fs::write_in(disk(), dir, f.as_bytes(), &buf[..n]) {
             Ok(()) => {
                 flush_disk();
                 self.editor.mark_clean();
                 self.editor_file = f;
+                self.editor_dir = dir;
                 self.print_named(b"Saved ", f.as_bytes());
             }
             Err(e) => self.print_fs_err(e),
         }
     }
 
+    /// Terminal `load <name>`: a top-level file.
     pub(crate) fn fs_load(&mut self, f: FileName) {
+        self.fs_load_in(fs::ROOT, f);
+    }
+
+    /// Open file `f` of directory `dir` in the editor.
+    pub(crate) fn fs_load_in(&mut self, dir: u8, f: FileName) {
         // Copy the file out of the static disk before touching the editor.
         let mut buf = [0u8; fs::MAX_FILE_SIZE];
-        let found = match fs::read(disk(), f.as_bytes()) {
-            Some(data) => {
-                let n = data.len();
-                buf[..n].copy_from_slice(data);
-                Some(n)
-            }
-            None => None,
-        };
+        let found = fs::read_in(disk(), dir, f.as_bytes()).map(|data| {
+            let n = data.len();
+            buf[..n].copy_from_slice(data);
+            n
+        });
         match found {
             Some(n) => {
                 self.editor.set_text(&buf[..n]);
                 self.editor_file = f;
+                self.editor_dir = dir;
                 self.open(EDIT);
                 self.print_named(b"Loaded ", f.as_bytes());
             }
             None => self.term.println(b"file not found"),
+        }
+    }
+
+    /// Open the file stored in slot `slot` (the file manager's selection),
+    /// remembering which folder it came from.
+    pub(crate) fn fs_load_slot(&mut self, slot: usize) {
+        let img = disk();
+        if fs::is_dir(img, slot) {
+            return;
+        }
+        let dir = fs::parent_at(img, slot);
+        if let Some(f) = FileName::parse(fs::name_at(img, slot)) {
+            self.fs_load_in(dir, f);
         }
     }
 
