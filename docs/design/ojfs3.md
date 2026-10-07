@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Implementado em `osjeff_core`** (biblioteca pura); integração no kernel é a onda seguinte |
+| Status | **Implementado em `osjeff_core`** (biblioteca pura); a camada de armazenamento do kernel (`ata.rs` `AtaDisk`, `storage.rs`) monta o v3 no boot; a adaptação do desktop/terminal/editor é a onda seguinte |
 | Módulos | `osjeff_core::blockdev`, `osjeff_core::blockcache`, `osjeff_core::fs3` |
 | Substitui | `osjeff_core::fs` (OJFS v2, `OJF2`), que continua intacto e é lido na migração |
 | Restrições | `no_std` + `alloc`, `forbid(unsafe_code)`, sem dependências (CRC32 próprio) |
@@ -424,7 +424,16 @@ impl<D: BlockDevice> Fs3<D> {
 Contrato de durabilidade: **toda operação que retorna `Ok` já está durável** (o commit
 inclui as barreiras de flush). `sync()` só força uma barreira extra no dispositivo.
 
-## 9. Integração prevista no kernel (onda seguinte, fora desta frente)
+## 9. Integração no kernel
+
+**Feito** (`kernel/src/ata.rs`, `kernel/src/storage.rs`): itens 1 a 3 abaixo. O
+desktop ainda usa o v2; os consumidores migram depois via `storage::with_fs`. Detalhes de
+comportamento no kernel: um disco em branco grande recebe o v3 **e** o v2 (o
+`Desktop::new` formata o v2 como antes); `Unknown` nunca é escrito pelo `storage`; se o
+v3 foi perdido (os dois superblocos) mas a imagem v2 ainda existe, o boot **refaz a
+migração a partir do v2** (o `detect` devolve `V2`), o que descarta o que só existia no v3.
+
+Plano original:
 
 1. Implementar `BlockDevice` sobre `ata.rs` (hoje só lê/escreve a imagem inteira; precisa de
    `read_sectors(lba, ..)`/`write_sectors(lba, ..)` genéricos em LBA28 e do `CMD_FLUSH`

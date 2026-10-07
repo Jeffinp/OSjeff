@@ -29,6 +29,7 @@ mod ps2;
 mod rtc;
 mod sched;
 mod serial;
+mod storage;
 mod sync;
 mod theme;
 mod trace;
@@ -323,6 +324,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     });
 
     trace::mark("threads spawned (fetcher, wasmapp)");
+
+    // Storage service: detect/mount/migrate OJFS v3 on the filesystem disk (the desktop
+    // still runs on the v2 image; see storage.rs). Runs with the scheduler up, so the
+    // ATA driver can yield to the other threads between sectors.
+    storage::init();
+    trace::mark("storage init done");
 
     // Boot splash: progress tracks real elapsed time (>= 5 seconds).
     run_splash(&mut *framebuffer, &mut *back, info, n);

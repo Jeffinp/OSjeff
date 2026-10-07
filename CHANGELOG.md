@@ -46,6 +46,12 @@ Auditoria completa de desempenho, segurança e boas práticas
 ([`docs/audit/`](docs/audit/RELATORIO.md)), seguida de duas rodadas de correções.
 Cada mudança é um commit separado, com teste ou prova em QEMU.
 
+### Armazenamento
+- OJFS v3 no kernel: driver ATA de bloco (`AtaDisk`, `BlockDevice` com LBA28 fatiado,
+  `FLUSH CACHE`, cede a CPU entre setores) e serviço `storage` (detecta, migra do v2,
+  formata ou monta o v3 no boot). O desktop segue no v2. Os runners passam a criar o
+  disco do filesystem com 64 MiB (esparso); um disco de 64 KiB continua no v2.
+
 ### Segurança
 - Parsers de rede, disco e HTML/CSS: 9 bugs achados por fuzzing/leitura e corrigidos
   (`dechunk` com tamanho gigante, HTML aninhado estourando a pilha, `parse_color`

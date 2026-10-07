@@ -268,14 +268,11 @@ fn flush_cache(coop: bool) -> Result<(), Fail> {
 ///
 /// Cheap to copy around: it only remembers the capacity; every call takes the
 /// controller lock itself, so several handles (or threads) are safe.
-// TODO(storage): remove once the storage service mounts it (next commit).
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AtaDisk {
     sectors: u64,
 }
 
-#[allow(dead_code)]
 impl AtaDisk {
     /// Probe the filesystem disk with `IDENTIFY`. `None` if no ATA drive answers.
     /// The capacity is capped at the LBA28 limit (128 GiB).

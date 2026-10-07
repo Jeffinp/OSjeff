@@ -755,6 +755,24 @@ desconhecido o disco é **formatado** (é o desenho de um disco dedicado); a esc
 bloqueia o compositor (PIO síncrono, ~45 ms no TCG [A]); o disco de boot não é tocado
 (só `IDENTIFY`).
 
+**Camada de armazenamento do kernel (OJFS v3).** `ata.rs` também expõe `AtaDisk`, uma
+implementação de `osjeff_core::blockdev::BlockDevice` sobre o mesmo canal: LBA28
+arbitrário fatiado em comandos de ≤ 255 setores (`hw::ata::chunks`, testado no core),
+`FLUSH CACHE` em `flush`, capacidade pelo `IDENTIFY`, ERR/DF/timeout viram `IoError`
+(com *soft reset* do canal e falha imediata após 3 falhas seguidas, para um disco travado
+não custar segundos por tentativa) e **cede a CPU entre setores** (`sched::yield_now`),
+para uma transferência longa não congelar o compositor. As portas ATA ficam atrás de um
+`YieldMutex` (sync.rs: espera cedendo a CPU, e que uma thread pode segurar durante E/S).
+`storage.rs` monta o v3 no boot (`storage::init`, antes do desktop): v3 existente →
+`mount` + `fsck`; imagem v2 → `migrate_v2` + `mount`; disco em branco ≥ 1 MiB →
+`format` + arquivos de boas-vindas (o desktop segue formatando o v2 por conta própria);
+disco < 1 MiB (o de 64 KiB antigo) → `TooSmall`, segue no v2; `OJF3` com CRC ruim ou
+conteúdo desconhecido → **não escreve nada**. API para os consumidores futuros:
+`storage::with_fs(|fs| ...)`, `is_v3()`, `state()` e `now()` (segundos Unix em UTC, do
+RTC). **O desktop, o terminal e o editor ainda usam o v2 em RAM**: até migrarem, o v3 é
+um instantâneo feito na migração e a imagem v2 (setores 0..98, nunca tocados pelo v3)
+continua sendo a fonte da verdade da interface.
+
 ## 9. Rede e navegador
 
 ### 9.1 Pilha
