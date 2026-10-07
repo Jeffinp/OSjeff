@@ -63,7 +63,7 @@ impl Perf {
         // "0.2ms  ~5000fps" — frame time is the real smoothness metric; the
         // "possible fps" (1000/ms) shows the headroom even when idle.
         let n = self.0.frame_line(&mut line);
-        text(c, x + 10, y + 8, &line[..n], theme::ACCENT);
+        text(c, x + 10, y + 8, &line[..n], theme::accent());
 
         // "draws/s 60 0.4ms" — how often we actually redraw (= activity,
         // low when idle by design) and the worst frame this second.

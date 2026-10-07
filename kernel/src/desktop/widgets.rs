@@ -36,9 +36,9 @@ pub(crate) fn key_style(k: u8, pending: Option<u8>) -> (Color, Color) {
         0x08 => (theme::HEADER, theme::HEADER_TEXT),
         b'+' | b'-' | b'*' | b'/' => {
             if pending == Some(k) {
-                (theme::WHITE, theme::ACCENT)
+                (theme::WHITE, theme::accent())
             } else {
-                (theme::ACCENT, theme::WHITE)
+                (theme::accent(), theme::WHITE)
             }
         }
         _ => (theme::WINDOW_BODY, theme::TEXT), // digits + dot

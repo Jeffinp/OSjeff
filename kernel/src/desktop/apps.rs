@@ -39,7 +39,7 @@ impl Desktop {
                     (MENU_W - 8) as usize,
                     (MENU_ITEM_H - 4) as usize,
                     6,
-                    theme::ACCENT,
+                    theme::accent(),
                     36,
                 );
             }
@@ -80,7 +80,7 @@ impl Desktop {
         let color = if calc.is_error() {
             theme::CLOSE
         } else {
-            theme::ACCENT
+            theme::accent()
         };
         font::draw_bytes(c, tx, dy + (dh - 7 * dscale) / 2, disp, color, dscale);
 
@@ -198,13 +198,13 @@ impl Desktop {
             if focused {
                 let caret = bs.browser.caret().min(shown.len());
                 let cx = tx + caret * font::cell_w(2);
-                c.fill_rect(cx, ty - 1, 2, 16, theme::ACCENT);
+                c.fill_rect(cx, ty - 1, 2, 16, theme::accent());
             }
         }
 
         // Search/go button (accent) with a magnifier glyph.
-        draw_tool_button(c, ch.go, theme::ACCENT, theme::WHITE);
-        glyph_search(c, ch.go, theme::WHITE, theme::ACCENT);
+        draw_tool_button(c, ch.go, theme::accent(), theme::WHITE);
+        glyph_search(c, ch.go, theme::WHITE, theme::accent());
 
         // ---- body: native start page, loading state, or page text ----
         use osjeff_core::browser::Status;
@@ -266,7 +266,7 @@ impl Desktop {
                 + ((track_h - thumb_h) * bs.scroll as usize)
                     .checked_div(max_scroll)
                     .unwrap_or(0);
-            c.fill_round_rect(track_x, thumb_y, 4, thumb_h, 2, theme::ACCENT);
+            c.fill_round_rect(track_x, thumb_y, 4, thumb_h, 2, theme::accent());
         }
     }
 
@@ -427,7 +427,7 @@ impl Desktop {
             (cx - sw / 2) as usize,
             (logo.bottom() + 60) as usize,
             sub,
-            theme::ACCENT,
+            theme::accent(),
             2,
         );
         let hint = "Pesquise ou digite um endereco na barra acima";
@@ -443,7 +443,7 @@ impl Desktop {
 
         // Shortcut tiles: a colored monogram chip over a centered label.
         let accents = [
-            theme::ACCENT,
+            theme::accent(),
             theme::ACCENT_2,
             Color::rgb(0xF5, 0x9E, 0x0B),
             Color::rgb(0x4C, 0xC2, 0xFF),
@@ -559,7 +559,7 @@ impl Desktop {
                 },
             };
             if hovered == Some(item) {
-                start_row_highlight(c, sx, ry, theme::ACCENT);
+                start_row_highlight(c, sx, ry, theme::accent());
             }
             let (ix, iy) = (
                 (sx + START_PAD) as usize,
@@ -711,7 +711,7 @@ impl Desktop {
         if focused && cxs < max_cols && cys >= first && cys < first + vis {
             let caret_x = tx + cxs * cell;
             let caret_y = top + (cys - first) * line_h;
-            c.fill_rect(caret_x, caret_y, s, 7 * s, theme::ACCENT);
+            c.fill_rect(caret_x, caret_y, s, 7 * s, theme::accent());
         }
 
         let mut status = [b' '; 22];
@@ -771,7 +771,7 @@ impl Desktop {
                     24 * font::cell_w(2),
                     line_h,
                     4,
-                    theme::ACCENT,
+                    theme::accent(),
                     40,
                 );
             }
@@ -887,7 +887,7 @@ impl Desktop {
                     (r.w - 12) as usize,
                     (SWITCH_ROW_H - 4) as usize,
                     8,
-                    theme::ACCENT,
+                    theme::accent(),
                     48,
                 );
             }
@@ -1048,7 +1048,7 @@ fn glyph_globe(c: &mut Canvas, r: Rect) {
         r.w as usize,
         r.w as usize,
         (r.w / 2) as usize,
-        theme::ACCENT,
+        theme::accent(),
     );
     c.fill_rect(
         (cx - rad) as usize,

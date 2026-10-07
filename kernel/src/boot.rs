@@ -51,7 +51,7 @@ pub fn draw_splash(c: &mut Canvas, progress: f32) {
         glow,
         glow,
         glow / 2,
-        theme::ACCENT,
+        theme::accent(),
         22,
     );
     c.draw_rgba(logo::ICON_128, mark, mark, cx - mark / 2, gy);
@@ -91,10 +91,10 @@ pub fn draw_splash(c: &mut Canvas, progress: f32) {
             fill,
             bar_h + 6,
             (bar_h + 6) / 2,
-            theme::ACCENT,
+            theme::accent(),
             60,
         );
-        c.fill_round_rect(bar_x, bar_y, fill, bar_h, bar_h / 2, theme::ACCENT);
+        c.fill_round_rect(bar_x, bar_y, fill, bar_h, bar_h / 2, theme::accent());
     }
 
     let status = "Carregando o sistema...";

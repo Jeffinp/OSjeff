@@ -67,7 +67,7 @@ impl Desktop {
                     6,
                     6,
                     3,
-                    theme::ACCENT,
+                    theme::accent(),
                 );
             }
         }
@@ -239,7 +239,7 @@ impl Desktop {
         c.fill_round_rect(x, y, w, th, radius, header);
         // Accent top line marks focus (teal) vs unfocused (muted).
         let accent = if focused {
-            theme::ACCENT
+            theme::accent()
         } else {
             theme::TEXT_MUTED
         };

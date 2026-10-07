@@ -51,7 +51,7 @@ fn files(c: &mut Canvas, x: usize, y: usize, size: usize) {
         theme::WHITE,
     );
     // Folder body.
-    c.fill_round_rect(x + pad, fy, fw, fh, 4, theme::ACCENT);
+    c.fill_round_rect(x + pad, fy, fw, fh, 4, theme::accent());
 }
 
 /// WebAssembly app: brand-purple squircle with a white "W" glyph.
@@ -76,7 +76,7 @@ fn wasm_app(c: &mut Canvas, x: usize, y: usize, size: usize) {
 /// OSJeff mark: teal squircle, violet diagonal half, white chevron.
 pub fn brand(c: &mut Canvas, x: usize, y: usize, size: usize) {
     let r = size / 4;
-    c.fill_round_rect(x, y, size, size, r, theme::ACCENT);
+    c.fill_round_rect(x, y, size, size, r, theme::accent());
     // Violet lower-right triangle.
     for row in 0..size {
         let start = size.saturating_sub(row);
@@ -104,7 +104,7 @@ fn terminal(c: &mut Canvas, x: usize, y: usize, size: usize) {
         size / 6,
         Color::rgb(0x1D, 0x28, 0x42),
     );
-    let green = theme::ACCENT;
+    let green = theme::accent();
     let u = (size / 10).max(2);
     let px = x + size / 4;
     let py = y + size / 3;
@@ -116,7 +116,7 @@ fn terminal(c: &mut Canvas, x: usize, y: usize, size: usize) {
 }
 
 fn editor(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, theme::ACCENT);
+    c.fill_round_rect(x, y, size, size, size / 5, theme::accent());
     let pad = size / 6;
     let pw = size - pad * 2;
     let ph = size - pad * 2;
@@ -130,7 +130,7 @@ fn editor(c: &mut Canvas, x: usize, y: usize, size: usize) {
         c.fill_rect(lx, ly, w, (lh / 3).max(1), line);
     }
     let f = size / 5;
-    c.fill_round_rect(x + size - pad - f, y + pad, f, f, 2, theme::ACCENT);
+    c.fill_round_rect(x + size - pad - f, y + pad, f, f, 2, theme::accent());
 }
 
 fn calculator(c: &mut Canvas, x: usize, y: usize, size: usize) {
@@ -138,7 +138,7 @@ fn calculator(c: &mut Canvas, x: usize, y: usize, size: usize) {
     let pad = (size / 6).max(2);
     let gap = (size / 12).max(1);
     // Screen.
-    c.fill_round_rect(x + pad, y + pad, size - pad * 2, size / 5, 2, theme::ACCENT);
+    c.fill_round_rect(x + pad, y + pad, size - pad * 2, size / 5, 2, theme::accent());
     // 3x3 keypad.
     let gy = y + pad + size / 5 + gap;
     let cell = ((size - pad * 2).saturating_sub(2 * gap) / 3).max(1);
@@ -192,7 +192,7 @@ fn browser(c: &mut Canvas, x: usize, y: usize, size: usize) {
     let cy = y + size / 2;
     let r = (size / 2).saturating_sub(size / 8).max(3);
     // Ocean disc.
-    c.fill_round_rect(cx - r, cy - r, 2 * r, 2 * r, r, theme::ACCENT);
+    c.fill_round_rect(cx - r, cy - r, 2 * r, 2 * r, r, theme::accent());
     // A couple of violet "continents".
     let l = (r / 2).max(2);
     c.fill_round_rect(cx - r + r / 4, cy - r / 2, l, l, l / 2, theme::ACCENT_2);
@@ -215,7 +215,7 @@ fn taskmgr(c: &mut Canvas, x: usize, y: usize, size: usize) {
     let pad = size / 5;
     let bw = (size - pad * 2) / 4;
     let base = y + size - pad;
-    let colors = [theme::ACCENT, theme::ACCENT_2, Color::rgb(0xF5, 0x9E, 0x0B)];
+    let colors = [theme::accent(), theme::ACCENT_2, Color::rgb(0xF5, 0x9E, 0x0B)];
     for (i, color) in colors.iter().enumerate() {
         let bh = (size - pad * 2) * (i + 2) / 4;
         let bx = x + pad + i * (bw + bw / 3);

@@ -3,6 +3,17 @@
 //! deep indigo base, teal + violet accents, dark window chrome on light bodies.
 
 use crate::fb::Color;
+use core::sync::atomic::{AtomicU32, Ordering};
+
+/// The current accent colour (`0xRRGGBB`), the primary highlight of the whole UI.
+static ACCENT_RGB: AtomicU32 = AtomicU32::new(0x2D_D4_BF);
+
+/// The accent colour in use (teal unless the settings changed it).
+#[inline]
+pub fn accent() -> Color {
+    let v = ACCENT_RGB.load(Ordering::Relaxed);
+    Color::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+}
 
 // Wallpaper / backdrop.
 pub const BG_TOP: Color = Color::rgb(0x0B, 0x0F, 0x1C);
@@ -11,7 +22,8 @@ pub const GLOW_TEAL: Color = Color::rgb(0x2D, 0xD4, 0xBF);
 pub const GLOW_VIOLET: Color = Color::rgb(0x7C, 0x6C, 0xFF);
 
 // Brand accents.
-pub const ACCENT: Color = Color::rgb(0x2D, 0xD4, 0xBF); // teal (primary)
+/// The default accent (teal). The live accent is [`accent`], which the settings app can change.
+pub const ACCENT_DEFAULT: Color = Color::rgb(0x2D, 0xD4, 0xBF);
 pub const ACCENT_2: Color = Color::rgb(0x7C, 0x6C, 0xFF); // violet
 
 // Surfaces.
@@ -29,7 +41,7 @@ pub const TEXT_MUTED: Color = Color::rgb(0x5B, 0x64, 0x7A);
 // Status / controls.
 pub const CLOSE: Color = Color::rgb(0xFF, 0x5C, 0x5C);
 pub const MINIMIZE: Color = Color::rgb(0xFF, 0xC1, 0x4D);
-pub const MAXIMIZE: Color = ACCENT;
+pub const MAXIMIZE: Color = ACCENT_DEFAULT;
 pub const SHADOW: Color = Color::rgb(0, 0, 0);
 pub const WHITE: Color = Color::rgb(0xFF, 0xFF, 0xFF);
 
