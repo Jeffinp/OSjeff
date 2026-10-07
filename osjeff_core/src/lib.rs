@@ -22,6 +22,7 @@ pub mod clipboard;
 pub mod editor;
 pub mod editor2;
 pub mod fs;
+pub mod fs3;
 pub mod gfx;
 pub mod heap;
 pub mod hw;

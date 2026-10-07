@@ -142,9 +142,10 @@ impl RamDisk {
         self.counters
     }
 
-    /// Zero the counters.
+    /// Zero the counters (and the lowest-written-LBA mark).
     pub fn reset_counters(&mut self) {
         self.counters = IoCounters::default();
+        self.min_written_lba = None;
     }
 
     /// Lowest LBA written since creation, if any write happened.
@@ -282,6 +283,28 @@ impl<D: BlockDevice> FaultyDisk<D> {
     pub fn bad_write_range(mut self, lo: u64, hi: u64) -> Self {
         self.bad_write = Some((lo, hi));
         self
+    }
+
+    /// Fail the `n`-th `read_sectors` call (0-based, counted since creation);
+    /// `None` clears it. Unlike [`fail_read_nth`](Self::fail_read_nth) this
+    /// works on a disk that is already in use.
+    pub fn set_fail_read_at(&mut self, n: Option<u64>) {
+        self.fail_read_nth = n;
+    }
+
+    /// Like [`set_fail_read_at`](Self::set_fail_read_at) for `write_sectors`.
+    pub fn set_fail_write_at(&mut self, n: Option<u64>) {
+        self.fail_write_nth = n;
+    }
+
+    /// `read_sectors` calls so far.
+    pub fn read_calls(&self) -> u64 {
+        self.read_calls
+    }
+
+    /// `write_sectors` calls so far.
+    pub fn write_calls(&self) -> u64 {
+        self.write_calls
     }
 
     /// Clear the persistent bad ranges and transient failures.
@@ -579,6 +602,23 @@ mod tests {
         assert_eq!(f.write_sectors(0, &sector(1)), Err(IoError::Write));
         f.write_sectors(0, &sector(1)).unwrap();
         assert_eq!(f.inner().as_bytes()[0], 1);
+    }
+
+    #[test]
+    fn failures_can_be_armed_on_a_disk_in_use() {
+        let mut f = FaultyDisk::new(RamDisk::new(4));
+        let mut b = [0u8; 512];
+        f.read_sectors(0, &mut b).unwrap();
+        f.write_sectors(0, &sector(1)).unwrap();
+        assert_eq!((f.read_calls(), f.write_calls()), (1, 1));
+        f.set_fail_read_at(Some(2));
+        f.set_fail_write_at(Some(2));
+        f.read_sectors(0, &mut b).unwrap();
+        assert_eq!(f.read_sectors(0, &mut b), Err(IoError::Read));
+        f.write_sectors(0, &sector(1)).unwrap();
+        assert_eq!(f.write_sectors(0, &sector(1)), Err(IoError::Write));
+        f.set_fail_read_at(None);
+        f.read_sectors(0, &mut b).unwrap();
     }
 
     #[test]

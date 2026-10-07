@@ -7,6 +7,12 @@ members = ["kernel", "os", "osjeff_core"]
 # `osjeff_core` needs the default unwinding harness. Keeping the profile
 # untouched lets both work.
 
+# `cargo test -p osjeff_core` runs power-cut sweeps (every sector of many
+# operation sequences) and 6000-step property tests over OJFS v3: optimize the
+# core under test (overflow checks and debug assertions stay on).
+[profile.test.package.osjeff_core]
+opt-level = 2
+
 # Release builds the bootable image: optimize hard. LTO + a single codegen
 # unit let the per-pixel/per-frame hot paths inline and vectorize.
 [profile.release]
