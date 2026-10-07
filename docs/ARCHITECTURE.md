@@ -20,11 +20,11 @@ e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espa�
 endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
 o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
 
-- **Dois crates de código.** `osjeff_core` (~11,7 mil linhas com testes, 423 testes
+- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2076 testes
   passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
-- **Multitarefa preemptiva** a 250 Hz, com bloqueio. Três threads: `compositor`,
-  `fetcher` (rede), `appd`.
+- **Multitarefa preemptiva** a 250 Hz, com bloqueio. Cinco threads: `compositor`,
+  `fetcher` (rede), `appd` e duas `shelld` (comandos do terminal).
 - **Memória:** heap fixo de 64 MiB num BSS de ~91 MiB; sem alocador de frames. As page
   tables são do bootloader; o kernel só edita uma entrada de nível 1 por pilha de thread,
   para criar uma **guard page**.
@@ -66,7 +66,7 @@ Quem fica de cada lado:
 
 | `osjeff_core` (testado no host) | `kernel` (ring 0) |
 |---|---|
-| `terminal`, `editor`, `calc`, `clipboard`, `keymap`, `process`, `anim` | `main.rs` (boot e laço do compositor), `gdt`, `interrupts`, `switch.s`, `sched`, `crash`, `vm` |
+| `shell` (motor de comandos, linha, histórico rolável, sessão), `editor2` (editor e diálogos), `calc`, `clipboard`, `keymap`, `process`, `anim` | `main.rs` (boot e laço do compositor), `gdt`, `interrupts`, `switch.s`, `sched`, `crash`, `vm` |
 | `fs` (OJFS), `net`, `lease`, `dns`, `icmp`, `netstats`, `redirect`, `rng` | `allocator`, `sync`, `io`, `serial` |
 | `web` (HTML, CSS, layout), `browser` | `fb`, `font`, `icons`, `desktop/*` |
 | `layout`, `wm`, `window`, `gfx`, `heap`, `paging`, `schedule` | drivers: `ps2`, `rtc`, `ata`, `ne2000`, `pci`, `virtio*` (gpu, net), `power` |
@@ -324,10 +324,11 @@ dava `#GP` fatal sob WHPX não tem sustentação no código atual.
 
 | 1 | `fetcher` (`fetch::worker`) | só se `ne2000::init()` achou a placa | 128 KiB do heap + guard page | morre sozinha |
 | 1 ou 2 | `appd` (`wasm::worker`) | sempre, mesmo sem janela WASM | 128 KiB do heap + guard page | morre sozinha |
+| 2 a 4 | `shelld` e `shelld2` (`desktop::shellhost::worker`, `worker2`) | sempre: executam as linhas de comando dos terminais (`sleep`, `ping`, `curl` esperam aqui, não no compositor) | 128 KiB do heap + guard page | morre sozinha; terminais com comando em andamento são liberados com "the command thread stopped" |
 
 `MAX_THREADS = 8` (`assert!` em `spawn`). Threads **nunca terminam por conta própria**: a
 entrada é `extern "C" fn() -> !` e a tabela só cresce; a única saída é morrer (§3.4), e o
-slot morto continua contando em `thread_count`. O HUD mostra `thr 3` (2 sem NIC).
+slot morto continua contando em `thread_count`. O HUD mostra `thr 5` (4 sem NIC).
 
 ### 4.2 Política e estados
 
@@ -469,6 +470,8 @@ não verifica.
 | `fetch::{NET, REQ_URL, REQ_LEN, RESULT}` | compositor posta, `fetcher` consome e devolve | máquina atômica `STATE` |
 | a NIC (`nic::Port`, dentro de `netstack::Net` dentro de `Netd`) | só a thread `fetcher` (antes dela existir, o boot) | **pelo tipo**: o `Port` é movido para o `Netd`; ninguém mais tem um `&mut` |
 | caixas de ping (`netd::P_*`) | qualquer thread pede, o `fetcher` responde | `P_STATE` atômico (IDLE, CLAIMED, REQUESTED, RUNNING, DONE) |
+| `fetch::{JSTATE, JOB, JRESULT}` | uma thread de comandos (`shelld`) pede e espera, o `fetcher` serve entre as páginas do navegador | `JSTATE` atômico (IDLE, CLAIMED, REQUESTED, RUNNING, DONE, ABANDONED); quem desiste de uma busca em andamento a abandona e a caixa só volta a IDLE quando o worker termina |
+| `shellhost::{QUEUE, FINISHED, UI}` | o compositor posta linhas de comando e recolhe resultados e pedidos de UI; as `shelld` consomem e devolvem | `YieldMutex`; `PENDING` atômico decide se a thread dorme; `CANCEL` (uid do terminal) é um atômico lido pelo executor |
 | `netstack::{TLS_RX,TLS_TX}`, `wasm::{APP,FB_INFO}`, `virtio_gpu::*` | só o worker dono (virtio: boot e DMA) | dono único |
 | `wasm::SURFACE` + `FRONT`/`READY` | worker escreve o buffer de trás, compositor lê o da frente | atômicos, **sem lock**: um compositor preemptado no meio de `blit_surface` pode copiar um quadro rasgado |
 
@@ -611,9 +614,9 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
 - **Reiniciar/Desligar** (`power.rs`): 8042 (`0x64 <- 0xFE`) e `0xCF9`; desligar usa as
   portas `0x604`, `0xB004` e `0x4004` (QEMU, Bochs, cloud-hypervisor). Sem ACPI: em
   hardware real pode acabar em `hlt` **[NV]**.
-- **Clipboard** (`osjeff_core::clipboard`, 256 B): Ctrl+C copia a linha de entrada do
-  terminal, a linha atual do editor, o visor da calculadora ou a URL; Ctrl+V cola
-  reenviando as teclas à janela focada. Ctrl+S salva o editor focado.
+- **Clipboard** (`osjeff_core::clipboard`, 256 B): Ctrl+C copia o visor da calculadora ou a URL
+  (no terminal, Ctrl+Shift+C copia a linha digitada: Ctrl+C sozinho interrompe); Ctrl+V cola
+  na janela focada. O Editor trata Ctrl+C/X/V/S ele mesmo (`editor2`).
 
 ### 7.2 O "processo" do Task Manager
 
@@ -632,25 +635,22 @@ reinicia a selecionada.
 
 Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da janela.
 
-- **Terminal:** grade lógica 40x14 (+ linha de comando de até 32 bytes); `HELP`, `CLS`,
-  `TIME`, `VER`, `ECHO`, `EDIT`, `CALC`, `PS`, `LS`, `CAT`, `SAVE`, `LOAD`, `RM`, `REBOOT`,
-  `SHUTDOWN` (e aliases). Sem diretório corrente: `SAVE`, `LOAD`, `CAT` e `RM` só agem na
-  raiz, e `RM` manda para a lixeira (restaurável no gerenciador). A saída vai para o terminal que emitiu o comando. `SAVE nome`
-  grava o editor usado mais recentemente (ou avisa que não há editor); `LOAD nome` abre
-  o arquivo num editor novo (ou foca o que já o mostra).
-- **Editor:** grade lógica fixa de 44x18. Um arquivo que não cabe na grade (linha com mais
-  de 44 colunas ou mais de 18 linhas) é carregado truncado, mas o buffer fica marcado
-  (`Editor::is_lossy`), a barra de status mostra `TRUNC` e `fs_save_in` **recusa salvar**
-  ("not saved: file is larger than the editor window"), para não destruir o resto. O
-  `leiame.txt` semeado no primeiro boot foi reescrito para caber. Cada janela tem seu
-  buffer e caminho absoluto (`EditorState::path`): Ctrl+S regrava naquele arquivo.
-- **Terminal e Editor em janelas de outro tamanho** (grade lógica fixa): o texto é desenhado
-  na **maior escala inteira de 2 a 4** em que a grade inteira cabe (`layout::fit_scale`),
-  ancorado no canto superior esquerdo, sem distorção; maximizada, a letra fica maior. Em
-  janela menor que a grade em escala 2, o terminal mostra as linhas mais novas (cortando as
-  largas e mostrando o fim da linha de entrada) e o editor rola para manter o cursor à
-  vista; nada é desenhado fora da janela. A barra de status do editor e o rodapé do Task
-  Manager ficam presos à borda inferior.
+- **Terminal** (`desktop/term.rs`, `shellhost.rs`; veja `docs/design/editor-shell.md`, "Integração no
+  desktop"): `osjeff_core::shell::Term` (histórico rolável de até 5000 linhas, linha editável com
+  histórico, Ctrl+R, Tab, Ctrl+C/L/D) sobre um `Shell` de 52 comandos cujo sistema de arquivos é o VFS
+  (`VfsFs`, diretório corrente por terminal, `rm` vai para a lixeira) e cujas informações do sistema
+  (`KSys`) são relógio (SNTP/RTC), uptime, heap, processos e threads, discos, `ping` (`netd`),
+  `nslookup`/`curl`/`wget` (`fetch::run_job`) e `ifconfig`. A grade é o que cabe na janela (escala 2:
+  maximizar mostra mais texto). As linhas rodam em duas threads `shelld` (fila única, resultado
+  recolhido em `step_shell_jobs` a cada tick), então um comando que espera nunca congela o desktop; Ctrl+C
+  cancela. `edit`, `files`, `tasks`, `calc`, `reboot` e `shutdown` pedem ao compositor por uma fila.
+- **Editor** (`desktop/edit.rs`): `osjeff_core::editor2` (UTF-8, desfazer/refazer, buscar/substituir,
+  números de linha, mouse, roda, arquivos de até 16 MiB inteiros) com abrir/salvar como pelo VFS
+  (`Picker`, Ctrl+O, Ctrl+S, Ctrl+Shift+S) e a pergunta **Salvar / Descartar / Cancelar** em toda forma de
+  fechar uma janela com alterações (`request_close`: botão, Ctrl+Q, Task Manager, `kill`, Reiniciar/
+  Desligar). Cada janela tem seu buffer e seu caminho (`EditorState::path`, `None` = sem nome); o título
+  mostra `nome *` enquanto há alterações. A grade acompanha a janela (`sync_editor`) e nada é desenhado
+  fora dela.
 - **Calculadora:** quatro operações, entrada de até 16 caracteres, formatador decimal sem
   intrínsecos de `f64` do `std`. As teclas se esticam com a janela (`calc_layout`).
 - **Gerenciador de arquivos (v2):** navegação por **caminho** sobre o OJFS v3, uma
@@ -668,7 +668,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   confirmação), Restaurar, Esvaziar lixeira, Propriedades, menu de contexto (botão direito),
   F5 atualiza. Enter/duplo clique: pasta entra; `.png/.bmp/.ppm` abre o Visualizador;
   `.wasm` chama `apps_hook::open_wasm` (por ora "Plataforma de apps indisponivel"); texto abre
-  o Editor atual (arquivo maior que a grade: avisa "truncado, somente leitura"). Toda mudança
+  o Editor (a janela que já mostra o arquivo é focada; senão uma nova; até 16 MiB). Toda mudança
   do disco recarrega todas as janelas do gerenciador (`Desktop::fs_changed`); desenhar nunca
   toca o disco. Fechar a janela no meio de uma cópia desfaz o arquivo parcial.
 - **Visualizador de imagens (`Kind::Viewer`):** multi-instância, redimensionável. Abre
@@ -835,6 +835,9 @@ um `VfsError` mostrado ao usuário, nunca um pânico. A API (documentada no topo
 `trash_list`, `restore`, `trash_purge`, `empty_trash`, `move_to`, `copy_plan`/`copy_step`/
 `copy_abort`, `copy` e `generation`.
 
+O terminal usa a mesma camada pelo `VfsFs` (`desktop/shellhost.rs`): `ShellFs` sobre `vfs::*`, caminho
+absoluto por chamada e o diretório corrente guardado no próprio terminal; `rm` e `mv` por cima de um
+arquivo mandam o antigo para a lixeira. O editor lê e grava só com `vfs::read_file`/`write_file`.
 ## 9. Rede e navegador
 
 ### 9.1 Pilha

@@ -2,8 +2,9 @@
 
 Dois módulos novos em `osjeff_core`, ambos puros (`no_std` + `alloc`,
 `#![forbid(unsafe_code)]`, testados no host): `editor2` (editor de texto) e `shell`
-(linha de comando). Nenhum arquivo do kernel, `editor.rs` ou `terminal.rs` foi
-alterado: a integração é uma etapa separada. Teclas com modificadores vêm de
+(linha de comando). Desde a onda W15b eles são o Editor e o Terminal do desktop (veja
+[Integração no desktop](#integração-no-desktop-w15b)); `editor.rs` e `terminal.rs` (a grade fixa
+antiga) foram removidos. Teclas com modificadores vêm de
 `osjeff_core::input` (`KeyEvent`, `KeyCode`, `Mods`), que embrulha o `keymap::Key`
 existente em vez de mudá-lo.
 
@@ -27,7 +28,9 @@ teclado -> Keymap -> Key ----> KeyEvent::from_key(key, Mods{ctrl,shift,alt})
   (~50 µs com 50 mil linhas).
 * **`shell`**: `parse` (lexer + parser com erros tipados e posição) → `exec` (expansão,
   pipelines em buffers de memória, redirecionamentos, controle de fluxo, funções, scripts)
-  → `builtins` (48 comandos). `line` é o editor de linha do terminal.
+  → `builtins` (48 comandos) e `netcmds` (`nslookup`, `curl`, `wget`, `ifconfig`). `line` é o editor
+  de linha do terminal, `screen` o histórico rolável (linhas lógicas, quebra na largura da
+  janela) e `term` a sessão que liga os dois às teclas.
 * O motor só conhece **dois traits** (`ShellFs`, `SysInfo`); o kernel os implementa. Para
   testes e fuzzing existem `MemFs` e `MockSys`.
 
@@ -60,6 +63,10 @@ pub trait SysInfo {
     fn procs(&self) -> Vec<ProcInfo> { vec![] }                           // ps
     fn kill(&mut self, pid: u32, signal: i32) -> Result<(), SysErr>       // kill (padrão: Unsupported)
     fn ping(&mut self, host: &str, count: u32) -> Result<PingStats, SysErr> // ping (padrão: Unsupported)
+    fn resolve(&mut self, host: &str) -> Result<Vec<[u8; 4]>, SysErr>      // nslookup (padrão: Unsupported)
+    fn http_get(&mut self, url: &str, max_body: usize) -> Result<HttpResponse, SysErr> // curl, wget
+    fn net_info(&self) -> Option<NetInfo> { None }                        // ifconfig
+    fn interrupted(&self) -> bool { false }   // Ctrl+C: o executor consulta a cada comando e iteração
     fn sleep_ms(&mut self, ms: u64) {}        // sleep (o shell já limita o valor)
     fn clear_screen(&mut self) {}             // clear
     fn hostname(&self) -> String { "osjeff".into() }                      // prompt
@@ -114,6 +121,103 @@ if let Some(p) = ed.prompt() { /* barra de busca / ir para linha: p.label, p.tex
 // mouse: ed.mouse_down(y, x, cliques, shift); ed.mouse_drag(y, x); ed.scroll_by(+-3)
 ```
 
+## Integração no desktop (W15b)
+
+O Editor e o Terminal do desktop são esses dois módulos; o que o kernel acrescenta é só cola
+(`kernel/src/desktop/`): `edit.rs`, `term.rs` e `shellhost.rs`. Tudo que toca arquivo passa por
+`desktop/vfs.rs`. Os módulos antigos `osjeff_core::editor` e `terminal` (grade fixa 44x18 / 40x14)
+foram removidos.
+
+```text
+tecla ─► Desktop::dispatch_key ─┬─► Terminal: Term::key ─► TermAction::Run(linha)
+                                │        ▲                         │ post
+                                │        │ finish(RunResult)       ▼
+                                │   step_shell_jobs ◄── Done ── thread shelld (x2) ── Shell::run_line
+                                │                                      │ Host { VfsFs, KSys }
+                                └─► Editor: Editor::handle_key / Picker / CloseAsk
+```
+
+### Terminal
+
+* **Estado:** `TermState { uid, term: Term, ctx: Option<Box<Ctx>> }`. `Term` (puro, em
+  `osjeff_core::shell::term`) liga o `LineEditor` ao `Screen`; `Ctx` = `Shell` + `VfsFs` e **muda de
+  mãos** a cada linha: o terminal o entrega à thread de comandos e o recebe de volta com o resultado.
+* **Grade:** texto na escala 2 (célula 12x18 px); colunas e linhas são o que cabe na janela
+  (`term_grid`), então maximizar mostra mais texto em vez de letra maior. O histórico (`Screen`) guarda
+  linhas *lógicas* (no máximo 5000 linhas, 1 Mi caracteres, 2048 caracteres por linha: mais que isso
+  continua na linha seguinte) e quebra na largura atual ao desenhar, de modo que redimensionar refaz a
+  quebra do histórico inteiro. O prompt é desenhado na cor de destaque e há um indicador de rolagem
+  fino à direita.
+* **Teclas:** setas/Home/End/Ctrl+setas, Ctrl+A/E/K/U/W/Y, Ctrl+R (busca reversa), ↑/↓ (histórico),
+  Tab (comandos, variáveis, caminhos; várias opções: prefixo comum e depois a lista em colunas),
+  Ctrl+C (descarta a linha, ou **cancela o comando em execução**), Ctrl+L e `clear`, Ctrl+D (linha vazia
+  fecha), PageUp/PageDown e a roda do mouse rolam o histórico (Ctrl+Home/End: início/fim); digitar volta
+  ao fim. Ctrl+V cola (quebras de linha viram espaços: colar nunca executa) e Ctrl+Shift+C copia a linha
+  digitada (Ctrl+C sozinho interrompe, como num terminal de verdade).
+* **Comandos que esperam:** a linha roda numa de duas threads do kernel (`shelld`, `shelld2`), uma fila
+  só. `sleep`, `ping`, `nslookup`, `curl` e `wget` esperam ali, nunca no compositor: a janela mostra
+  "executando... Ctrl+C cancela" (sem prompt) e é redesenhada a cada quadro; outro terminal continua
+  usável (a segunda thread). Ctrl+C acende uma flag que o executor consulta a cada comando e iteração
+  (`SysInfo::interrupted`) e que `sleep`, `ping` e as buscas de rede consultam enquanto esperam; o
+  resultado volta com status 130. Os limites de recursão são reduzidos (`max_call_depth` 16,
+  `max_sub_depth` 4): a pilha da thread é de 128 KiB.
+* **`ShellFs` (`VfsFs`):** diretório corrente por terminal, caminhos absolutos normalizados. `rm`
+  manda para a **lixeira** (restaurável no gerenciador; pasta não vazia é `NotEmpty`, então `rm -r`
+  desce até as folhas), `mv` sobre um arquivo existente manda o antigo para a lixeira, `df` mostra o
+  volume (`ojfs3` ou `ramfs`) e os discos IDE (`ata::identify`).
+* **`SysInfo` (`KSys`):** `date` vem de `clock::trusted_unix_secs` (SNTP, senão o RTC lido no boot) no
+  fuso das Configurações; `uptime` de `netd::now_ms`; `free` do heap (amostra do monitor); `ps` lista
+  as janelas (a `ProcessTable`) e as threads do kernel (`[fetcher]`, `[shelld]`...), copiadas quando a
+  linha é enviada; `kill PID` fecha a janela do processo (threads e sistema: "operation not permitted");
+  `ping` usa `netd::ping_us` (um pedido ICMP por vez, 1 s entre eles, cancelável); `nslookup`,
+  `curl` e `wget` usam a caixa de correio `fetch::run_job` (veja abaixo); `ifconfig` lê `netd::stats()`.
+  A RTC não é lida pela thread de comandos (as portas CMOS são do compositor).
+* **Comandos do desktop** (registrados com `Shell::register`; deixam um `UiReq` que o compositor
+  aplica): `edit [ARQ]`, `files`, `tasks`, `calc`, `reboot`, `shutdown` (os dois últimos perguntam antes
+  se algum editor tem alterações não salvas).
+* **Rede:** `fetch::run_job(NetJob::Resolve | Get, cancel)` é uma segunda caixa de correio, bloqueante,
+  servida pela thread `fetcher` (a única dona da NIC) entre as páginas do navegador e o serviço de
+  DHCP/ping: `IDLE → CLAIMED → REQUESTED → RUNNING → DONE`, e `ABANDONED` para quem desistiu (Ctrl+C ou
+  90 s) no meio de uma busca: a resposta é descartada e a caixa só volta a `IDLE` quando o worker
+  termina. `curl`/`wget` aceitam `http://` e `https://` (redirecionamentos, TLS e limites do
+  navegador); o corpo vai até 4 MiB para arquivo e `max_output` para a tela.
+
+### Editor
+
+* **Estado:** `EditorState { ed: editor2::Editor, path: Option<Vec<u8>>, modal, msg, ... }`. Números
+  de linha ligados, tabulação de 4 espaços, auto-indentação, UTF-8 (bytes inválidos preservados), `\n`
+  e `\r\n` exatos. Arquivos de até **16 MiB** abrem inteiros (testado com 1 MB e 165 mil linhas, e com
+  60 mil linhas de 16 caracteres); acima disso "Arquivo grande demais".
+* **Teclas:** as do `editor2` (tabela abaixo) mais Ctrl+O (abrir), Ctrl+S (salvar; sem arquivo ainda abre
+  "Salvar como"), Ctrl+Shift+S (salvar como), Ctrl+Q (fechar), Ctrl+N (outro editor), Alt+A/Alt+R/Alt+C
+  na barra de busca. PageUp/PageDown/F3 chegam pelos scancodes (`Special`). Esc não fecha mais a janela
+  (limpa a seleção ou fecha a barra).
+* **Mouse:** clique posiciona, duplo clique seleciona a palavra, triplo a linha, arrastar seleciona (e
+  rola ao sair do texto), a roda rola 3 linhas por notch.
+* **Abrir / Salvar como:** `editor2::dialog::Picker` (pastas primeiro em ordem natural, `..`, campo de
+  nome/caminho com Tab, Backspace sobe uma pasta, mouse, substituir pergunta antes). Ctrl+O sobre um
+  documento já em uso abre o arquivo **em outra janela** (ou na que já o mostra): nada é substituído.
+  A janela de um arquivo aberto pelo Arquivos (`open_path`) e por `edit` é a mesma coisa.
+* **Alterações não salvas:** título `OSJEFF EDIT - nome *`; fechar a janela (botão da barra, Ctrl+Q,
+  Task Manager, `kill`, Reiniciar/Desligar) mostra "Salvar alterações?" com **Salvar / Descartar /
+  Cancelar** (S, D, C, setas+Enter, clique; Esc cancela). Salvar sem nome abre "Salvar como" e só fecha
+  se gravar; erro de gravação mantém a janela aberta com a mensagem.
+* **Limite conhecido:** a área de transferência tem 256 bytes (`clipboard::CAP`): copiar mais que isso
+  copia o começo.
+
+### Capturas (QEMU, `tools/perf/scen/w15b-*.sh`)
+
+| Arquivo (`docs/img/`) | Mostra |
+|---|---|
+| `w15b-terminal-rede.png` | `ping`, `nslookup` (DNS real do QEMU), `ifconfig` |
+| `w15b-terminal-dois.png` | um segundo terminal responde enquanto o primeiro roda `sleep 20` |
+| `w15b-terminal-rolagem.png` | `seq 10000` depois de PageUp, com o indicador de rolagem |
+| `w15b-editor-salvar-como.png` | Ctrl+S num documento sem nome: o seletor de arquivos |
+| `w15b-editor-substituir.png` | Ctrl+H, Alt+A: "1 troca(s)" |
+| `w15b-editor-fechar.png` | a pergunta Salvar / Descartar / Cancelar |
+| `w15b-editor-grande.png` | um arquivo de 1 MB com 165 mil linhas, no fim (Ctrl+End) |
+| `w15b-guarda-desligar.png` | `shutdown` com um editor sujo: o desktop pergunta em vez de desligar |
+
 ## Limites
 
 | Limite | Valor padrão | Onde |
@@ -164,6 +268,7 @@ Estourar um limite nunca derruba o kernel: o executor aborta a execução, escre
 | Tab / Shift+Tab | indentar / desindentar (seleção multilinha indenta as linhas) |
 | Enter | nova linha com auto-indentação (usa `\r\n` se o arquivo usa) |
 | Ctrl+S / Ctrl+Q | `Event::SaveRequested` / `Event::QuitRequested` |
+| Ctrl+O, Ctrl+Shift+S (só no desktop) | abrir, salvar como (ver "Integração no desktop") |
 
 Configurável: `set_tab_width`, `set_use_spaces`, `set_auto_indent`, `set_line_numbers`,
 `set_soft_wrap`, `set_case_sensitive`, `set_undo_limit`.
@@ -177,8 +282,10 @@ lidos. O estado "modificado" volta a falso ao desfazer até o ponto salvo.
 
 `help ls cd pwd cat echo mkdir rm rmdir mv cp touch head tail wc grep sort uniq tee
 clear env export set unset history alias unalias which date uptime free df ps kill ping
-true false test [ sleep`, mais `seq basename dirname stat rev tr cut nl yes` e os que o
-executor trata (`exit return break continue shift source . sh :`). `help NOME` mostra
+true false test [ sleep`, mais `seq basename dirname stat rev tr cut nl yes`, os de rede
+`nslookup curl wget ifconfig` (52 ao todo) e os que o executor trata (`exit return break continue
+shift source . sh :`). No desktop há ainda `edit files tasks calc reboot shutdown`. `tr` aceita
+`\n`, `\t`, `\r` e `\\` nos conjuntos. `help NOME` mostra
 o uso. `grep` aceita regex estendida (`. * + ? | ( ) [] ^ $ \d \w \s`) ou `-F`.
 
 Sintaxe: aspas simples/duplas, `\`, `$VAR`, `${VAR}`, `$?`, `$#`, `$@`, `$*`, `$1..$9`,
@@ -202,6 +309,11 @@ e depois lista).
 ## Limitações conhecidas
 
 * Sem jobs em segundo plano, here-documents e redirecionamento de descritores.
+* No terminal do desktop, enquanto um comando roda a linha de entrada não aceita digitação (só
+  Ctrl+C e rolagem); a saída aparece quando o comando termina (não há saída em fluxo), então
+  `ping -c 4` mostra tudo no fim.
+* `ps` e `kill` enxergam a tabela de processos do compositor (janelas) e as threads do kernel; não
+  há processos de verdade.
 * Variáveis são globais (sem `local`); `{ ...; }` não consome o stdin, cada comando vê
   a entrada inteira; glob só com `*` e `?` e só em literais (não em resultado de `$VAR`).
 * `cat`, `sort` etc. leem o arquivo inteiro: arquivos de vários MB passam pela memória.

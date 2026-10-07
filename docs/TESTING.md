@@ -5,8 +5,8 @@ diferente, e a lista abaixo diz **o que cada uma não cobre**.
 
 | Camada | Pergunta que responde | Comando | Cobre | Não cobre |
 |---|---|---|---|---|
-| Testes unitários | A lógica pura está certa? | `cargo test-core` | `osjeff_core` (terminal, shell, editor, editor2, calc, janelas, heap, FS v2/v3, blockdev/blockcache, rede, HTML/CSS, browser) | `kernel/` (hardware) |
-| Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net` (+ lease DHCP, DNS, ICMP), `fs` (v2 e v3), `web`, `shell`, `editor2`, `image`, `x509` (cadeia de certificados) | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
+| Testes unitários | A lógica pura está certa? | `cargo test-core` | `osjeff_core` (shell, editor2, calc, janelas, heap, FS v2/v3, blockdev/blockcache, rede, HTML/CSS, browser) | `kernel/` (hardware) |
+| Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net` (+ lease DHCP, DNS, ICMP), `fs` (v2 e v3), `web`, `shell` (com sessão de terminal), `editor2` (com os diálogos), `image`, `x509` (cadeia de certificados) | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
 
 | Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net`, `fs` (v2 e v3), `web`, `shell`, `editor2`, manifesto de app (`app_manifest`), sandbox de arquivos (`app_sandbox`) | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
 | Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net` (+ lease DHCP, DNS, ICMP), `fs` (v2 e v3), `web`, `html_img_form` (imagens, formulários, busca, favoritos), `shell`, `editor2`, `image`, `x509` (cadeia de certificados) | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
@@ -53,8 +53,9 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 | `ojfs3_parse` | remendos sobre um OJFS v3 válido (com todos os CRC refeitos, para passar do checksum), bytes crus, ou dispositivo de tamanho qualquer | `detect`, `mount`, caminhada (`readdir/stat/read_at/path_of/trash_list`), `fsck`, 16 operações, `fsck` de novo (um FS são continua são) |
 | `ojfs3_ops` | sequência de operações, com queda de energia opcional (em ordem ou cache volátil) | escrita lida de volta, `fsck` limpo, remount idêntico, estado exatamente antes/depois da operação cortada |
 | `web_parse` | bytes como HTML/CSS/URL/resposta HTTP | parser, CSS, layout, `dechunk`, URL |
-| `shell_parse` | bytes como linha/script de shell | lexer/parser, executor (FS em memória com limites, `SysInfo` mock), editor de linha com Tab |
+| `shell_parse` | bytes como linha/script de shell | lexer/parser, executor (FS em memória com limites, `SysInfo` mock com DNS, página e Ctrl+C), editor de linha com Tab, e uma **sessão de terminal** inteira (`Term`: histórico, rolagem, Ctrl+C, colar) numa janela de tamanho aleatório: o que seria desenhado sempre cabe na janela |
 | `editor_ops` | documento + sequência de operações (`arbitrary`) | `editor2`: teclas, mouse, busca/substituição, undo/redo, wrap; invariantes depois de cada operação |
+| `editor_dialog` | listagem de pasta arbitrária (nomes com `..`, `/`, controles) + teclas, cliques, roda, tamanhos de janela, erros e a pergunta de substituir | `editor2::dialog`: seleção, rolagem e cursor dentro dos limites, campo até `MAX_FIELD`, e todo caminho que o seletor entrega ao kernel é absoluto e normalizado; `CloseAsk` com teclas quaisquer |
 | `image_decode` | bytes como PNG/BMP/PPM/zlib (cru, com CRCs reparados, PNG sintetizado ou BMP com offset ajustado) | `image::decode`, `inflate` (com `max_output` pequeno, também em fluxo), e as operações sobre a imagem decodificada (resize, fit, rotação, composição) mais a ida e volta exata dos codificadores PNG/BMP |
 | `html_img_form` | `[modo, zoom, largura, ...bytes]`: os bytes como HTML cru, dentro de `<img src/alt/width>`, de um `<form>` (action, name, value, size, método) ou como payload `data:image/png;base64,` | `web::Doc` com zoom 50-300% e qualquer estado de imagem (invariantes de geometria, índices de links, imagens e campos), `FormState` (teclas, Tab, foco, colagem, query, `target`, teclas mortas), `Page::find`/`select`, `base64`, `decode_for_page`/`decode_data_uri`/`image_key`, `ImageCache` (sequências de operações dentro do teto de bytes) e o `Browser` (barra, histórico, favoritos, sugestões, páginas `osjeff://`); roda numa thread de pilha pequena |
 | `x509_parse` | `[modo, bytes]`: o leitor DER/X.509 estrito, o casamento de nomes (SAN/curinga), o parser de datas, a validação de cadeia (`rustls-webpki` com âncora real) com os bytes como cadeia de 1 a 4 certificados, como folha ou intermediária substituindo as de uma cadeia de teste válida (chega à checagem de assinatura), e o `CertificateVerify` do TLS 1.3 com os bytes como assinatura | `osjeff_core::x509`, `osjeff_core::tlsverify` (nunca pânico nem travamento; semente: os certificados de `tools/gen-test-certs.py`) |
@@ -72,6 +73,7 @@ cargo fuzz run ojfs3_ops   -- -max_total_time=600
 cargo fuzz run web_parse  -- -max_total_time=600 -dict=dict/web.dict
 cargo fuzz run shell_parse -- -max_total_time=600 -print_final_stats=1 -dict=dict/shell.dict
 cargo fuzz run editor_ops  -- -max_total_time=600 -print_final_stats=1
+cargo fuzz run editor_dialog -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run image_decode -- -max_total_time=600 -print_final_stats=1 -dict=dict/image.dict
 cargo fuzz run x509_parse -- -max_total_time=600 -print_final_stats=1
 
@@ -172,6 +174,17 @@ transparente.png,corrompida.png,pequena.png}` e `--files 2000 /many`):
 | `w15a-files-ops.sh` | copia o arquivo de 3 MB entre pastas (barra de progresso), renomeia (F2), recorta/cola, apaga para a lixeira, restaura, exclusão permanente com confirmação |
 | `w15a-many.sh` | abre a pasta de 2000 arquivos e rola (PageUp/PageDown/setas/Home/End); com `perf-trace`, os tempos de quadro saem no serial (medido: quadro estável 14 a 31 ms no TCG) |
 | `w15a-soak.sh` | 100x abre/fecha o Arquivos e 100x abre/fecha o Visualizador; `tools/perf/w8-heap.sh <serial.log>` mede a deriva do heap (medido: +1544 B em 200 ciclos) |
+
+Cenários do Editor e do Terminal (W15b, `tools/perf/scen/w15b-*.sh`; disco em branco basta, os
+arquivos grandes são criados pelo próprio terminal; `typestr "texto"` em `lib.sh` digita tecla a tecla
+no layout US; rodam em ~2 a 4 minutos no TCG, `QEMU_MEM=256M tools/perf/run.sh <img> bios <saida> 300 <cen>`):
+
+| Cenário | O que faz |
+|---|---|
+| `w15b-probe.sh` | fumaça: o terminal no boot, `echo`, `ls`, Tab (`cd Doc` completa), `pwd`, `free` |
+| `w15b-term.sh` | histórico (↑), Tab em caminho, Ctrl+L, `sleep 20` (a janela mostra "executando" e um segundo terminal responde), Ctrl+C, `ping`, `nslookup` (DNS real do QEMU), `ifconfig`, `curl`, `seq 10000` com PageUp e Ctrl+Home, recursão de função, `yes` (1 MiB de saída) sem travar |
+| `w15b-edit.sh` | digitar, Ctrl+S (Salvar como: digitar substitui o nome sugerido), Ctrl+F/Ctrl+H e Alt+A, Ctrl+Z, fechar com alterações (Cancelar, depois Descartar), reabrir (`edit`), Ctrl+O, Ctrl+Q, um arquivo de 1 MB com 165 mil linhas (Ctrl+End/Home, PageDown) e outro de 60 mil linhas de 16 caracteres |
+| `w15b-ui.sh` | roda do mouse no terminal, Ctrl+Shift+C/Ctrl+V, maximizar (a grade acompanha), clique, duplo clique e arrastar no editor, abrir um texto pelo Arquivos e a pergunta ao fechar com alterações |
 
 Persistência: depois do cenário, `fs3_inject <disco.img> --ls /` lista o que ficou, e um novo
 boot com o mesmo disco monta com `fsck clean`. Queda de energia no meio de uma cópia grande

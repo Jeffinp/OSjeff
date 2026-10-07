@@ -3,6 +3,31 @@
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
 tem releases versionadas; as seções são marcos na `master`.
 
+## 2026-10 — Editor e Terminal de verdade (W15b)
+
+- **Terminal:** o motor `osjeff_core::shell` (52 comandos, pipes, variáveis, scripts) com histórico
+  (↑/↓, Ctrl+R), Tab (comandos, variáveis, caminhos), Ctrl+C / Ctrl+L / `clear`, rolagem (PageUp/
+  PageDown, roda, Ctrl+Home/End; até 5000 linhas), colar sem executar, prompt colorido e grade que
+  acompanha a janela. Sistema de arquivos pelo VFS (`VfsFs`, diretório corrente por terminal; `rm`
+  vai para a lixeira); `date`, `uptime`, `free`, `df`, `ps`, `kill`, `ping`, `ifconfig` com dados
+  reais (`KSys`); **novos** `nslookup`, `curl`, `wget`, `ifconfig` (`SysInfo::resolve`, `http_get`,
+  `net_info`) e `edit`, `files`, `tasks`, `calc`, `reboot`, `shutdown`.
+- **Comandos longos sem congelar:** duas threads `shelld` executam as linhas; Ctrl+C cancela
+  (`SysInfo::interrupted`, status 130). Nova caixa de correio bloqueante no `fetcher`
+  (`fetch::run_job`: DNS e GET) com estado `ABANDONED` para quem desiste no meio.
+- **Editor:** `osjeff_core::editor2` no lugar da grade 44x18: números de linha, UTF-8, desfazer/
+  refazer, Ctrl+F/H/G, mouse (clique, duplo, triplo, arrastar), roda, arquivos de até 16 MiB (testado
+  com 1 MB e 165 mil linhas), Ctrl+O / Ctrl+S / Ctrl+Shift+S pelo VFS (seletor de arquivos com
+  confirmação de substituição). **Fechar com alterações pergunta** Salvar / Descartar / Cancelar
+  (botão, Ctrl+Q, Task Manager, `kill`, Reiniciar/Desligar); o Arquivos abre texto no mesmo editor.
+- **Removidos:** `osjeff_core::editor` e `terminal` (grade fixa). Esc não fecha mais o editor.
+- **Achados dirigindo a interface:** `tr` não entendia `\n` (corrigido), o campo "Salvar como"
+  anexava ao nome sugerido (digitar agora o substitui), Alt+A/R/C não chegavam ao editor.
+- **Testes:** 2071 -> 2076 (+61 novos, -56 dos módulos removidos): `Screen`, `Term`, `Picker`,
+  `CloseAsk`, comandos de rede, Ctrl+C. Fuzz: `shell_parse` agora executa uma sessão de terminal
+  inteira e os comandos de rede; novo alvo `editor_dialog`. Cenários `tools/perf/scen/w15b-*.sh`
+  (`typestr` em `lib.sh`).
+
 ## 2026-10 — Desktop sobre o OJFS v3: gerenciador de arquivos e visualizador de imagens
 
 - **VFS do desktop** (`desktop/vfs.rs` + `osjeff_core::vfs`): uma API de caminhos absolutos

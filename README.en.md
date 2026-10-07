@@ -9,7 +9,7 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly--2026--10--05-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-423%20passing-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-2076%20passing-success?style=for-the-badge)
 ![Fuzz](https://img.shields.io/badge/fuzz-3%20targets-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
@@ -90,7 +90,7 @@ builds with `std` under test. The kernel only wires hardware to it.
 
 ```mermaid
 flowchart LR
-    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 423 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2076 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · documented unsafe<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>BIOS/UEFI image builder"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -100,7 +100,7 @@ flowchart LR
 
 | Verification | Status |
 |---|---|
-| Unit tests | **423** in `osjeff_core`; 96% line coverage (raw, includes the test modules) |
+| Unit tests | **2076** in `osjeff_core`; 96% line coverage (raw, includes the test modules) |
 | Fuzzing | 3 targets (network, disk, HTML/CSS/HTTP); **9 bugs found and fixed**, each with a minimal input and a test |
 | `unsafe` | **100%** of kernel blocks carry `// SAFETY:`, enforced by `clippy::undocumented_unsafe_blocks` |
 | QEMU boot | BIOS **and** UEFI on every kernel commit, desktop compared pixel by pixel to a baseline (`tools/verify-boot.sh`) |
