@@ -9,3 +9,4 @@ pub mod pci;
 pub mod perf;
 pub mod ps2;
 pub mod rtc;
+pub mod virtio;

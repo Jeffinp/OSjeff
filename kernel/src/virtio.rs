@@ -30,49 +30,19 @@ pub fn virt_to_phys(virt: u64, phys_offset: u64) -> Option<u64> {
         .map(|p| p.as_u64())
 }
 
-const VIRTIO_PCI_CAP: u8 = 0x09; // vendor-specific cap carrying virtio config
+pub use osjeff_core::hw::virtio::{
+    CapLoc, S_ACK, S_DRIVER, S_DRIVER_OK, S_FEATURES_OK, VirtioCaps, discover, negotiate,
+};
+use osjeff_core::hw::virtio::{CapSpace, CommonCfg};
 
-// `cfg_type` values inside a virtio_pci_cap.
-pub const CFG_COMMON: u8 = 1;
-pub const CFG_NOTIFY: u8 = 2;
-pub const CFG_ISR: u8 = 3;
-pub const CFG_DEVICE: u8 = 4;
-
-/// Location of one virtio config structure: which BAR, and the offset/length
-/// within it.
-#[derive(Clone, Copy, Default, Debug)]
-pub struct CapLoc {
-    pub bar: u8,
-    pub offset: u32,
-    pub length: u32,
-}
-
-impl CapLoc {
-    /// Whether this config structure was advertised (used by the driver when it
-    /// maps the MMIO windows).
-    #[allow(dead_code)]
-    pub fn present(&self) -> bool {
-        self.length != 0
+impl CapSpace for PciDevice {
+    fn cap_list(&self) -> Option<u8> {
+        PciDevice::cap_list(self)
+    }
+    fn read32(&self, offset: u8) -> u32 {
+        self.cap_read32(offset)
     }
 }
-
-/// The four virtio config structures plus the notify offset multiplier.
-#[derive(Clone, Copy, Default, Debug)]
-pub struct VirtioCaps {
-    pub common: CapLoc,
-    pub notify: CapLoc,
-    pub notify_off_mul: u32,
-    pub isr: CapLoc,
-    pub device: CapLoc,
-}
-
-// virtio device_status bits.
-pub const S_ACK: u8 = 1;
-pub const S_DRIVER: u8 = 2;
-#[allow(dead_code)] // set after the virtqueues exist (next step)
-pub const S_DRIVER_OK: u8 = 4;
-pub const S_FEATURES_OK: u8 = 8;
-pub const S_FAILED: u8 = 128;
 
 /// Volatile accessor over a virtio common-config MMIO window. All access is
 /// MMIO, so every read/write is volatile.
@@ -193,74 +163,29 @@ impl Common {
     }
 }
 
-/// Drive the virtio 1.0 reset + feature negotiation up to FEATURES_OK (the
-/// DRIVER_OK bit is set later, once the virtqueues exist). We accept only
-/// `VIRTIO_F_VERSION_1` (bit 32). Returns false if the device rejects it.
-pub fn negotiate(c: &Common) -> bool {
-    c.set_status(0); // reset
-    let _ = c.status(); // read back to flush the reset
-    c.set_status(S_ACK);
-    c.set_status(S_ACK | S_DRIVER);
-
-    let _have = c.device_features(1); // bits 32..63 (must contain VERSION_1)
-    c.set_driver_features(0, 0);
-    c.set_driver_features(1, 1 << 0); // VIRTIO_F_VERSION_1 (bit 32)
-
-    c.set_status(S_ACK | S_DRIVER | S_FEATURES_OK);
-    let s = c.status();
-    s & S_FEATURES_OK != 0 && s & S_FAILED == 0
+impl CommonCfg for Common {
+    fn status(&self) -> u8 {
+        Common::status(self)
+    }
+    fn set_status(&self, s: u8) {
+        Common::set_status(self, s)
+    }
+    fn device_features(&self, sel: u32) -> u32 {
+        Common::device_features(self, sel)
+    }
+    fn set_driver_features(&self, sel: u32, v: u32) {
+        Common::set_driver_features(self, sel, v)
+    }
 }
 
 /// Physical base address of BAR `bar`, handling 64-bit (two-dword) BARs.
 pub fn bar_base(dev: &PciDevice, bar: u8) -> u64 {
     let lo = dev.bar(bar);
-    if lo & 0b110 == 0b100 {
-        // 64-bit memory BAR: the high half is in the next BAR slot.
-        ((dev.bar(bar + 1) as u64) << 32) | (lo as u64 & !0xF)
+    // 64-bit memory BAR: the high half is in the next BAR slot.
+    let hi = if osjeff_core::hw::pci::bar_is_64bit(lo) {
+        dev.bar(bar + 1)
     } else {
-        lo as u64 & !0xF
-    }
-}
-
-/// Walk `dev`'s PCI capability list and collect its virtio config locations.
-/// `None` if the device exposes no virtio common-config capability.
-pub fn discover(dev: &PciDevice) -> Option<VirtioCaps> {
-    let mut off = dev.cap_list()?;
-    let mut caps = VirtioCaps::default();
-    let mut have_common = false;
-
-    // Capability lists are short; bound the walk to guard against a corrupt loop.
-    for _ in 0..48 {
-        if off == 0 {
-            break;
-        }
-        let w0 = dev.cap_read32(off); // [cap_id][cap_next][cap_len][cfg_type]
-        let id = (w0 & 0xFF) as u8;
-        let next = ((w0 >> 8) & 0xFF) as u8 & 0xFC;
-
-        if id == VIRTIO_PCI_CAP {
-            let cfg_type = ((w0 >> 24) & 0xFF) as u8;
-            let loc = CapLoc {
-                bar: (dev.cap_read32(off + 4) & 0xFF) as u8,
-                offset: dev.cap_read32(off + 8),
-                length: dev.cap_read32(off + 12),
-            };
-            match cfg_type {
-                CFG_COMMON => {
-                    caps.common = loc;
-                    have_common = true;
-                }
-                CFG_NOTIFY => {
-                    caps.notify = loc;
-                    caps.notify_off_mul = dev.cap_read32(off + 16);
-                }
-                CFG_ISR => caps.isr = loc,
-                CFG_DEVICE => caps.device = loc,
-                _ => {}
-            }
-        }
-        off = next;
-    }
-
-    have_common.then_some(caps)
+        0
+    };
+    osjeff_core::hw::pci::bar_address(lo, hi)
 }
