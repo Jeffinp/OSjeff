@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![warn(clippy::undocumented_unsafe_blocks)]
 #![feature(abi_x86_interrupt)]
 
 extern crate alloc;
