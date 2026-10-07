@@ -401,7 +401,7 @@ extern "x86-interrupt" fn security_exception(f: InterruptStackFrame, code: u64) 
 fn note_spurious(slot: usize, irq: u8) {
     let n = SPURIOUS[slot].fetch_add(1, Ordering::Relaxed) + 1;
     if n <= 4 {
-        crate::serial_println!("spurious IRQ{irq} ignored (count {n})");
+        crate::klog!(Warn, "spurious IRQ{irq} ignored (count {n})");
     }
 }
 

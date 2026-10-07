@@ -54,11 +54,12 @@ impl Desktop {
         }
         let (_, icons) = dock_layout(self.sw, self.sh);
         for kind in Kind::ALL {
-            if self
-                .wm
-                .windows()
-                .iter()
-                .any(|w| w.minimized && w.app.kind() == kind)
+            if kind.in_dock()
+                && self
+                    .wm
+                    .windows()
+                    .iter()
+                    .any(|w| w.minimized && w.app.kind() == kind)
             {
                 let r = icons[kind.index() + 1];
                 c.fill_round_rect(
@@ -283,6 +284,7 @@ impl Desktop {
             App::Browser(b) => self.draw_browser(c, r, focused, b),
             App::Wasm(w) => self.draw_wasm(c, r, w),
             App::Files(f) => self.draw_files(c, r, f),
+            App::Log(l) => self.draw_log(c, r, l),
         }
     }
 

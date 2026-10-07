@@ -18,6 +18,7 @@ mod gdt;
 mod icons;
 mod interrupts;
 mod io;
+mod klog;
 mod logo;
 mod ne2000;
 mod netd;
@@ -99,12 +100,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // missing, so driver bring-up is observable without the screen.
     serial::init();
     trace::mark("kernel entry");
-    serial_println!("OSjeff boot: kernel entry");
+    klog!(Info, "OSjeff boot: kernel entry");
 
     // Capture the physical-memory offset before `boot_info` is borrowed for the
     // framebuffer. Needed for DMA (virtio-gpu addresses memory physically).
     let phys_offset = boot_info.physical_memory_offset.into_option();
-    serial_println!("physical_memory_offset: {:#x?}", phys_offset);
+    klog!(Info, "physical_memory_offset: {:#x?}", phys_offset);
     // The page tables are reached through that mapping (thread-stack guard pages, see `vm`).
     vm::init(phys_offset);
 
@@ -175,16 +176,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // First run through the native WebAssembly app engine: prove the OS can load
     // and execute a `.wasm` program (its native app format) end to end. Output
     // lands on serial. The graphics/input ABI (windowed apps) builds on this.
-    serial_println!("OSjeff boot: running native WASM demo");
+    klog!(Info, "OSjeff boot: running native WASM demo");
     wasm::run_demo();
     trace::mark("wasm demo done");
 
     // Enumerate the PCI bus — groundwork for the virtio-gpu driver: locate the
     // device and, when present, enable bus mastering so a later DMA-capable
     // driver can use it. QEMU captures the log via `-serial file:...`.
-    serial_println!("OSjeff boot: enumerating PCI bus 0");
+    klog!(Info, "OSjeff boot: enumerating PCI bus 0");
     pci::for_each(|d| {
-        serial_println!(
+        klog!(
+            Info,
             "  pci {:02x}:{:02x}.{}  {:04x}:{:04x}",
             d.bus,
             d.slot,
@@ -196,7 +198,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     match pci::find_virtio_gpu() {
         Some(gpu) => {
             gpu.enable_bus_master();
-            serial_println!(
+            klog!(
+                Info,
                 "virtio-gpu @ slot {} func {} bar0={:#010x}",
                 gpu.slot,
                 gpu.func,
@@ -204,19 +207,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             );
             match virtio::discover(&gpu) {
                 Some(caps) => {
-                    serial_println!(
+                    klog!(
+                        Info,
                         "  common bar{} off={:#x} len={}",
                         caps.common.bar,
                         caps.common.offset,
                         caps.common.length
                     );
-                    serial_println!(
+                    klog!(
+                        Info,
                         "  notify bar{} off={:#x} mul={}",
                         caps.notify.bar,
                         caps.notify.offset,
                         caps.notify_off_mul
                     );
-                    serial_println!(
+                    klog!(
+                        Info,
                         "  isr    bar{} off={:#x}   device bar{} off={:#x}",
                         caps.isr.bar,
                         caps.isr.offset,
@@ -224,7 +230,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         caps.device.offset
                     );
                 }
-                None => serial_println!("  virtio caps: none (transitional device?)"),
+                None => klog!(Info, "  virtio caps: none (transitional device?)"),
             }
 
             // Bring up the full virtio-gpu driver: negotiate, set up the control
@@ -233,22 +239,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             if let (Some(off), Some(caps)) = (phys_offset, virtio::discover(&gpu)) {
                 match virtio_gpu::GpuDevice::init(&gpu, caps, off) {
                     Some(mut dev) => {
-                        serial_println!("virtio-gpu: control queue up, DRIVER_OK");
+                        klog!(Info, "virtio-gpu: control queue up, DRIVER_OK");
                         match dev.get_display_info() {
                             Some((w, h)) => {
-                                serial_println!("virtio-gpu display 0: {}x{}", w, h)
+                                klog!(Info, "virtio-gpu display 0: {}x{}", w, h)
                             }
-                            None => serial_println!("virtio-gpu: get_display_info failed"),
+                            None => klog!(Warn, "virtio-gpu: get_display_info failed"),
                         }
                         // Exercise the 2D command path (no scanout swap — the VBE
                         // display stays live). The accelerated scanout is the next step.
                         dev.verify_2d();
                     }
-                    None => serial_println!("virtio-gpu: init failed"),
+                    None => klog!(Warn, "virtio-gpu: init failed"),
                 }
             }
         }
-        None => serial_println!("virtio-gpu: absent — using the VBE framebuffer"),
+        None => klog!(Info, "virtio-gpu: absent — using the VBE framebuffer"),
     }
     trace::mark("pci scan + virtio-gpu probe done");
 
@@ -280,7 +286,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Calibrate the TSC against the now-running PIT so the perf HUD can report
     // frame time in real milliseconds.
     let tsc_khz = perf::calibrate_khz();
-    serial_println!("TSC calibrated: {} kHz", tsc_khz);
+    klog!(Info, "TSC calibrated: {} kHz", tsc_khz);
     netd::set_tsc_khz(tsc_khz);
     trace::mark("tsc calibrated (25 PIT ticks)");
     trace::calibrated(tsc_khz);
@@ -705,6 +711,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             if first_frame {
                 first_frame = false;
                 trace::mark("first desktop frame composed + blitted");
+                klog::log_quiet(
+                    klog::Level::Info,
+                    format_args!("first desktop frame composed + blitted"),
+                );
             }
         }
 

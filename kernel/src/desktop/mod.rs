@@ -225,7 +225,8 @@ impl Desktop {
         let read_ok = crate::ata::read_image(disk());
         if !read_ok {
             PERSIST.store(false, core::sync::atomic::Ordering::Relaxed);
-            crate::serial_println!(
+            crate::klog!(
+                Warn,
                 "OJFS: disk read failed; RAM-only filesystem, disk left untouched"
             );
         }
@@ -512,6 +513,7 @@ impl Desktop {
     /// One scheduler quantum: advance CPU-time of running processes.
     pub fn tick_processes(&mut self) {
         self.procs.tick();
+        self.refresh_logs();
     }
 
     pub(crate) fn clamp_menu(&self, x: i32, y: i32, items: usize) -> (i32, i32) {
@@ -582,15 +584,17 @@ impl Desktop {
         draw_clock(&mut c, time);
     }
 
-    /// Screen rect of the Task Manager window when it is visible — its CPU
-    /// figures refresh every second, so the cheap clock-tick path must repaint
-    /// it too. `None` when no Task Manager window is shown.
+    /// Screen rect covering every visible window whose content changes by
+    /// itself each second (the Task Manager's CPU figures, the log viewer's new
+    /// lines): the cheap clock-tick path must repaint them too. `None` when no
+    /// such window is shown.
     pub fn task_window_rect(&self) -> Option<Rect> {
         self.wm
             .windows()
             .iter()
-            .find(|w| w.app.kind() == Kind::TaskMgr && w.shown())
+            .filter(|w| w.app.kind().is_live() && w.shown())
             .map(|w| self.window_box(w))
+            .reduce(|a, b| a.union(&b))
     }
 
     /// Bounding rect of the open overlay(s), inflated for their drop shadows and
@@ -791,9 +795,14 @@ mod files;
 mod files_ui;
 mod input;
 mod instance;
+mod logview;
 mod render;
+mod sysstore;
+mod ui;
 mod wasmwin;
 mod widgets;
 pub(crate) use instance::*;
+pub(crate) use logview::LogState;
+pub(crate) use sysstore::*;
 pub(crate) use wasmwin::*;
 pub(crate) use widgets::*;

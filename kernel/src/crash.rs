@@ -115,6 +115,8 @@ pub fn fault(
 pub fn die(kind: Kind, subtitle: &str, msg: fmt::Arguments<'_>, frame: Option<Frame>) -> ! {
     // Stop the world first: no timer tick may switch away while we paint.
     x86_64::instructions::interrupts::disable();
+    // From here on only the UART is used: the report must not depend on the log ring.
+    crate::klog::freeze();
     if BUSY.swap(true, Ordering::AcqRel) {
         halt(); // fault while reporting a fault
     }

@@ -189,7 +189,8 @@ fn alloc_stack() -> (paging::StackRegions, Option<u64>) {
     match crate::vm::unmap_page(regions.guard_start) {
         Ok(()) => (regions, Some(regions.guard_start)),
         Err(e) => {
-            crate::serial_println!(
+            crate::klog!(
+                Warn,
                 "stack guard page unavailable ({e:?}): using the canary instead"
             );
             // SAFETY: `stack_bottom` is 8-aligned and inside the zeroed block we own.
@@ -206,12 +207,14 @@ pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
 
     let (regions, guard) = alloc_stack();
     match guard {
-        Some(g) => crate::serial_println!(
+        Some(g) => crate::klog!(
+            Info,
             "sched: '{name}' stack {:#x}..{:#x}, guard page {g:#x}",
             regions.stack_bottom,
             regions.stack_top
         ),
-        None => crate::serial_println!(
+        None => crate::klog!(
+            Info,
             "sched: '{name}' stack {:#x}..{:#x}, no guard page (canary)",
             regions.stack_bottom,
             regions.stack_top
@@ -295,7 +298,8 @@ fn reschedule(rsp: u64, timer_tick: bool) -> u64 {
     // is killed right here (we are in the ISR, IF=0): it is marked dead and the
     // pick below simply never chooses it again. No `panic!` in the ISR.
     if cur != 0 && !DEAD[cur].load(Ordering::Relaxed) && !s.threads[cur].stack_intact() {
-        crate::serial_println!(
+        crate::klog!(
+            Error,
             "thread '{}' died: stack overflow (canary clobbered, rsp {:#x})",
             s.threads[cur].name,
             rsp
@@ -407,7 +411,7 @@ pub fn kill_current(reason: core::fmt::Arguments<'_>) -> ! {
         crate::crash::halt(); // fault while killing (callers should have checked)
     }
     let cur = current();
-    crate::serial_println!("thread '{}' died: {}", thread_name(cur), reason);
+    crate::klog!(Error, "thread '{}' died: {}", thread_name(cur), reason);
     if cur < MAX_THREADS {
         DEAD[cur].store(true, Ordering::Release);
         IDLE[cur].store(false, Ordering::Relaxed);

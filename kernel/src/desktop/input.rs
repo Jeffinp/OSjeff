@@ -152,6 +152,7 @@ impl Desktop {
                 }
             }
             Kind::Files => self.files_key(top, key),
+            Kind::LogViewer => self.log_key(top, key),
         }
         true
     }
@@ -339,7 +340,7 @@ impl Desktop {
                 App::Editor(e) => e.editor.line(e.editor.cursor().1),
                 App::Calculator(c) => c.display(),
                 App::Browser(b) => b.browser.url(),
-                App::TaskMgr | App::Wasm(_) | App::Files(_) => &[],
+                App::TaskMgr | App::Wasm(_) | App::Files(_) | App::Log(_) => &[],
             };
             n = text.len().min(clipboard::CAP);
             tmp[..n].copy_from_slice(&text[..n]);
@@ -390,7 +391,7 @@ impl Desktop {
                     }
                 }
             }
-            Some(App::TaskMgr | App::Wasm(_) | App::Files(_)) | None => {}
+            Some(App::TaskMgr | App::Wasm(_) | App::Files(_) | App::Log(_)) | None => {}
         }
     }
 
@@ -513,6 +514,7 @@ impl Desktop {
                 }
             }
             Kind::Files => self.files_click(w, rect, cx, cy),
+            Kind::LogViewer => self.log_click(w, rect, cx, cy),
             Kind::Terminal | Kind::Editor | Kind::TaskMgr => {}
         }
     }

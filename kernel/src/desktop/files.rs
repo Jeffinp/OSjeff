@@ -77,7 +77,7 @@ impl Desktop {
             // holds only part of it: writing it back would silently destroy the rest.
             if e.editor.is_lossy() {
                 self.say(tid, b"not saved: file is larger than the editor window");
-                crate::serial_println!("editor: refusing to save a truncated buffer");
+                crate::klog!(Warn, "editor: refusing to save a truncated buffer");
                 return;
             }
             n = serialize_editor(&e.editor, &mut buf);

@@ -15,6 +15,7 @@ pub enum Icon {
     Browser,
     WasmApp,
     Files,
+    Log,
     Power,
 }
 
@@ -28,7 +29,26 @@ pub fn draw(c: &mut Canvas, icon: Icon, x: usize, y: usize, size: usize) {
         Icon::Browser => browser(c, x, y, size),
         Icon::WasmApp => wasm_app(c, x, y, size),
         Icon::Files => files(c, x, y, size),
+        Icon::Log => log(c, x, y, size),
         Icon::Power => power(c, x, y, size),
+    }
+}
+
+/// System log: a dark tile with colour-coded text lines (info, warning, error).
+fn log(c: &mut Canvas, x: usize, y: usize, size: usize) {
+    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x10, 0x18, 0x2A));
+    let pad = size / 6;
+    let lh = (size / 10).max(2);
+    let gap = (size - pad * 2 - lh * 4) / 3;
+    let w = size - pad * 2;
+    let rows: [(usize, Color); 4] = [
+        (w, theme::HEADER_TEXT),
+        (w * 3 / 4, theme::HEADER_TEXT),
+        (w * 5 / 6, Color::rgb(0xFF, 0xC1, 0x4D)),
+        (w * 2 / 3, theme::CLOSE),
+    ];
+    for (i, (len, col)) in rows.iter().enumerate() {
+        c.fill_round_rect(x + pad, y + pad + i * (lh + gap), *len, lh, lh / 2, *col);
     }
 }
 
@@ -138,7 +158,14 @@ fn calculator(c: &mut Canvas, x: usize, y: usize, size: usize) {
     let pad = (size / 6).max(2);
     let gap = (size / 12).max(1);
     // Screen.
-    c.fill_round_rect(x + pad, y + pad, size - pad * 2, size / 5, 2, theme::accent());
+    c.fill_round_rect(
+        x + pad,
+        y + pad,
+        size - pad * 2,
+        size / 5,
+        2,
+        theme::accent(),
+    );
     // 3x3 keypad.
     let gy = y + pad + size / 5 + gap;
     let cell = ((size - pad * 2).saturating_sub(2 * gap) / 3).max(1);
@@ -215,7 +242,11 @@ fn taskmgr(c: &mut Canvas, x: usize, y: usize, size: usize) {
     let pad = size / 5;
     let bw = (size - pad * 2) / 4;
     let base = y + size - pad;
-    let colors = [theme::accent(), theme::ACCENT_2, Color::rgb(0xF5, 0x9E, 0x0B)];
+    let colors = [
+        theme::accent(),
+        theme::ACCENT_2,
+        Color::rgb(0xF5, 0x9E, 0x0B),
+    ];
     for (i, color) in colors.iter().enumerate() {
         let bh = (size - pad * 2) * (i + 2) / 4;
         let bx = x + pad + i * (bw + bw / 3);

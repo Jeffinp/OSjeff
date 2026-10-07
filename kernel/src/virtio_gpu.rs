@@ -6,7 +6,7 @@
 //! descriptors (request + response) and polling the used ring. The first command
 //! exercised is GET_DISPLAY_INFO, which verifies the whole path end to end.
 
-use crate::serial_println;
+use crate::klog;
 use crate::sync::RacyCell;
 use crate::virtio::{self, CapLoc, Common, VirtioCaps};
 use core::sync::atomic::{Ordering, compiler_fence};
@@ -69,7 +69,7 @@ impl GpuDevice {
         phys_offset: u64,
     ) -> Option<GpuDevice> {
         let Some(common_addr) = mmio_addr(gpu, &caps.common, phys_offset) else {
-            serial_println!("virtio-gpu: invalid common-config BAR/offset");
+            klog!(Warn, "virtio-gpu: invalid common-config BAR/offset");
             return None;
         };
         // SAFETY: `common_addr` is the BAR base + `phys_offset` + capability offset of a memory BAR
@@ -79,7 +79,7 @@ impl GpuDevice {
         let common = unsafe { Common::new(common_addr) };
 
         if !virtio::negotiate(&common) {
-            serial_println!("virtio-gpu: feature negotiation failed");
+            klog!(Warn, "virtio-gpu: feature negotiation failed");
             return None;
         }
 
@@ -92,7 +92,10 @@ impl GpuDevice {
         // Program the control queue (index 0).
         common.select_queue(0);
         let Some(qsize) = virtio::validate_queue_size(common.queue_size(), QSIZE) else {
-            serial_println!("virtio-gpu: control queue unavailable or invalid size");
+            klog!(
+                Warn,
+                "virtio-gpu: control queue unavailable or invalid size"
+            );
             common.set_status(virtio::S_FAILED);
             return None;
         };
@@ -107,7 +110,7 @@ impl GpuDevice {
             virtio::notify_doorbell_offset(&caps.notify, caps.notify_off_mul, notify_off)
                 .and_then(|rel| mmio_addr(gpu, &caps.notify, phys_offset)?.checked_add(rel));
         let Some(notify_addr) = notify_addr else {
-            serial_println!("virtio-gpu: notify doorbell outside its window");
+            klog!(Warn, "virtio-gpu: notify doorbell outside its window");
             common.set_status(virtio::S_FAILED);
             return None;
         };
@@ -212,7 +215,7 @@ impl GpuDevice {
         req[0..4].copy_from_slice(&CMD_GET_DISPLAY_INFO.to_le_bytes());
         let resp_type = self.submit(&req, 408)?; // header + 16 displays * 24
         if resp_type != RESP_OK_DISPLAY_INFO {
-            serial_println!("virtio-gpu: display info resp {:#x}", resp_type);
+            klog!(Warn, "virtio-gpu: display info resp {:#x}", resp_type);
             return None;
         }
         // Response: 24-byte header, then display[0] = { rect{x,y,w,h u32}, ... }.
@@ -303,7 +306,8 @@ impl GpuDevice {
             && self.attach_backing(backing_phys, 16 * 16 * 4)
             && self.transfer(0, 0, 16, 16, 0)
             && self.flush_rect(0, 0, 16, 16);
-        serial_println!(
+        klog!(
+            Info,
             "virtio-gpu: 2D command path (create/attach/xfer/flush) -> {}",
             ok
         );

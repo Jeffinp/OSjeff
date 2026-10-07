@@ -26,8 +26,16 @@ fn write_byte(b: u8) {
     outb(COM1, b);
 }
 
-/// Write a string, translating `\n` to `\r\n` for terminal-friendly output.
+/// Write a string, translating `\n` to `\r\n` for terminal-friendly output,
+/// and mirror it into the system log (`klog::capture`).
 pub fn write_str(s: &str) {
+    crate::klog::capture(s);
+    write_str_raw(s);
+}
+
+/// Like [`write_str`] but without the log mirror: for `klog!`, which stores its
+/// own record, and for the crash path.
+pub fn write_str_raw(s: &str) {
     for b in s.bytes() {
         if b == b'\n' {
             write_byte(b'\r');
