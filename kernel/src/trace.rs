@@ -418,6 +418,7 @@ pub fn report(khz: u64, ticks: u64) {
         st.loops,
         st.hlt_wakes
     );
+    crate::netd::log_stats();
     for p in 0..PATHS {
         if st.path_n[p] > 0 {
             crate::serial_println!(

@@ -4,13 +4,20 @@
 //! the request completes. The `Net` *owns* the port, so nothing else can touch
 //! the NIC while it exists unless it goes through [`Net::port`].
 //!
-//! The interface address, default route and DNS server come from the
-//! [`NetConfig`] the boot obtained over DHCP (or its static fallback, QEMU's
-//! user-mode/SLIRP defaults 10.0.2.15/24, gateway 10.0.2.2, DNS 10.0.2.3). The
-//! DHCP client is `osjeff_core::net` run once at boot; smoltcp's own DHCP socket
-//! is deliberately not used, so there is a single owner of the IP address.
+//! The interface address, default route and DNS servers come from the
+//! [`NetConfig`] that `netd` obtained over DHCP (or its static fallback, QEMU's
+//! user-mode/SLIRP defaults 10.0.2.15/24, gateway 10.0.2.2, DNS 10.0.2.3) and
+//! changes through [`Net::reconfigure`] when the lease is renewed with different
+//! parameters or lost. The DHCP client is `osjeff_core::lease` run by `netd`;
+//! smoltcp's own DHCP socket is deliberately not used, so there is a single owner
+//! of the IP address.
+//!
+//! Names are resolved by `osjeff_core::dns` (not smoltcp's one-server DNS socket):
+//! a TTL cache, every DHCP-supplied server, and failover with a timeout, over a
+//! plain smoltcp UDP socket.
 
-use crate::nic::Port;
+use crate::netd::now_ms;
+use crate::nic::{Port, STATS};
 use crate::sync::RacyCell;
 use crate::{interrupts, io};
 use alloc::vec;
@@ -20,11 +27,12 @@ use osjeff_core::browser::{MAX_RESPONSE_BYTES, append_capped};
 use osjeff_core::rng::WeakMixer;
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
-use smoltcp::socket::{dns, tcp};
+use smoltcp::socket::{tcp, udp};
 use smoltcp::time::Instant;
-use smoltcp::wire::{DnsQueryType, EthernetAddress, IpAddress, IpCidr};
+use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint};
 
-use osjeff_core::net::{self, NetConfig, parse_ipv4};
+use osjeff_core::dns::{self, Cached, Outcome, Resolver, Step};
+use osjeff_core::net::{DnsServers, Ipv4, NetConfig, parse_ipv4};
 
 /// smoltcp `Instant` from the monotonic timer tick (TIMER_HZ).
 fn now() -> Instant {
@@ -91,9 +99,11 @@ pub struct Net {
     iface: Interface,
     sockets: SocketSet<'static>,
     device: Phy,
-    cfg: NetConfig,
+    /// Configuration in force; `None` once the lease is lost.
+    cfg: Option<NetConfig>,
     tcp: SocketHandle,
-    dns: SocketHandle,
+    udp: SocketHandle,
+    resolver: Resolver,
 }
 
 impl Net {
@@ -114,18 +124,15 @@ impl Net {
             tcp::SocketBuffer::new(vec![0u8; 8192]),
             tcp::SocketBuffer::new(vec![0u8; 8192]),
         );
-        // smoltcp's DNS socket holds a single server (feature default); the first one.
-        let dns_servers: Vec<IpAddress> = cfg
-            .dns
-            .first()
-            .map(|d| IpAddress::Ipv4(d.0.into()))
-            .into_iter()
-            .collect();
-        let dns_sock = dns::Socket::new(&dns_servers, vec![]);
+        // UDP socket for DNS: a few datagrams in flight at most.
+        let udp_sock = udp::Socket::new(
+            udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; 4], vec![0u8; 2048]),
+            udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; 4], vec![0u8; 1024]),
+        );
 
         let mut sockets = SocketSet::new(vec![]);
         let tcp = sockets.add(tcp_sock);
-        let dns = sockets.add(dns_sock);
+        let udp = sockets.add(udp_sock);
 
         // Probe the TLS random source now so the serial log records which
         // generator (RDRAND or the weak fallback) this machine will use.
@@ -135,30 +142,44 @@ impl Net {
             iface,
             sockets,
             device,
-            cfg: *cfg,
+            cfg: Some(*cfg),
             tcp,
-            dns,
+            udp,
+            resolver: Resolver::new(cfg.dns),
         }
     }
 
-    /// Answer ARP requests and echo requests for our address (the OS is
-    /// pingable), for at most `budget` received frames. Called by the network
-    /// owner while no fetch is running; during a fetch smoltcp itself answers.
-    pub fn respond_idle(&mut self, budget: usize) {
-        let mac = self.device.port.mac();
-        if !self.device.port.link_up() {
-            return;
-        }
-        let mut rx = [0u8; 1600];
-        let mut tx = [0u8; 1600];
-        for _ in 0..budget {
-            let Some(len) = self.device.port.poll(&mut rx) else {
-                break;
-            };
-            if let Some(reply) = net::respond(&rx[..len], mac, self.cfg.ip, &mut tx) {
-                self.device.port.send(&tx[..reply]);
+    /// The NIC, for the frames smoltcp does not handle (DHCP, ARP/ping for the
+    /// owner's own client). Only the network owner has a `Net`, and it uses this
+    /// between fetches.
+    pub fn port(&mut self) -> &mut Port {
+        &mut self.device.port
+    }
+
+    /// The configuration in force (`None` after the lease was lost).
+    pub fn config(&self) -> Option<&NetConfig> {
+        self.cfg.as_ref()
+    }
+
+    /// Switch the interface to `cfg`: address, default route and resolver servers
+    /// (`None`: no address, the lease is gone). Open connections are dropped and
+    /// the DNS cache is flushed when the servers change.
+    pub fn reconfigure(&mut self, cfg: Option<&NetConfig>) {
+        self.sockets.get_mut::<tcp::Socket>(self.tcp).abort();
+        self.iface.update_ip_addrs(|addrs| {
+            addrs.clear();
+            if let Some(c) = cfg {
+                let _ = addrs.push(IpCidr::new(IpAddress::Ipv4(c.ip.0.into()), c.prefix));
             }
+        });
+        let routes = self.iface.routes_mut();
+        routes.remove_default_ipv4_route();
+        if let Some(gw) = cfg.and_then(|c| c.gateway) {
+            let _ = routes.add_default_ipv4_route(gw.0.into());
         }
+        self.resolver
+            .set_servers(cfg.map_or(DnsServers::NONE, |c| c.dns));
+        self.cfg = cfg.copied();
     }
 
     fn poll(&mut self) {
@@ -175,28 +196,92 @@ impl Net {
         interrupts::ticks() + ms * interrupts::TIMER_HZ as u64 / 1000
     }
 
-    /// Resolve `host` to an IPv4 address (bounded). A dotted-quad literal is
-    /// its own answer and never goes to the DNS server.
+    /// Resolve `host` to an IPv4 address (bounded). A dotted-quad literal is its
+    /// own answer and never goes to the network; otherwise the TTL cache is
+    /// consulted, then the DHCP-supplied servers are asked in turn (rotating on
+    /// timeout or SERVFAIL, see `osjeff_core::dns::Resolve`).
     fn resolve(&mut self, host: &str) -> Option<IpAddress> {
         if let Some(ip) = parse_ipv4(host.as_bytes()) {
             return Some(IpAddress::Ipv4(ip.0.into()));
         }
-        let query = {
-            let s = self.sockets.get_mut::<dns::Socket>(self.dns);
-            s.start_query(self.iface.context(), host, DnsQueryType::A)
-                .ok()?
-        };
-        let end = Self::deadline(5000);
-        while interrupts::ticks() < end {
+        STATS.on_dns_query();
+        let start = now_ms();
+        match self.resolver.lookup(host, start) {
+            Some(Cached::Addr(a)) => {
+                STATS.on_dns_cache_hit();
+                crate::serial_println!("dns: {} -> {} (cache)", host, a);
+                return Some(IpAddress::Ipv4(a.0.into()));
+            }
+            Some(Cached::NxDomain) => {
+                STATS.on_dns_cache_hit();
+                crate::serial_println!("dns: {} does not exist (cache)", host);
+                return None;
+            }
+            None => {}
+        }
+
+        // An unpredictable id and source port are the only defense against a
+        // forged answer from a host that cannot see our packets.
+        let mix = io::rdtsc() ^ interrupts::ticks().rotate_left(29);
+        let id = (mix ^ (mix >> 16) ^ (mix >> 32)) as u16;
+        let local_port = 32768 + (mix % 28000) as u16;
+        let mut query = [0u8; 300];
+        let qlen = dns::build_query(&mut query, id, host)?;
+        {
+            let s = self.sockets.get_mut::<udp::Socket>(self.udp);
+            s.close();
+            s.bind(local_port).ok()?;
+        }
+
+        let mut q = self.resolver.begin(host, id, start);
+        let outcome = 'lookup: loop {
+            match q.poll(now_ms()) {
+                Step::Done(o) => break o,
+                Step::Send { server, .. } => {
+                    if q.attempts() > 1 {
+                        STATS.on_dns_failover();
+                        crate::serial_println!("dns: no answer for {}, trying {}", host, server);
+                    }
+                    let to = IpEndpoint::new(IpAddress::Ipv4(server.0.into()), dns::DNS_PORT);
+                    let s = self.sockets.get_mut::<udp::Socket>(self.udp);
+                    let _ = s.send_slice(&query[..qlen], to);
+                }
+                Step::Wait(_) => {}
+            }
             self.pump();
-            let s = self.sockets.get_mut::<dns::Socket>(self.dns);
-            match s.get_query_result(query) {
-                Ok(addrs) => return addrs.first().copied(),
-                Err(dns::GetQueryResultError::Pending) => {}
-                Err(_) => return None,
+            let s = self.sockets.get_mut::<udp::Socket>(self.udp);
+            while let Ok((data, meta)) = s.recv() {
+                let IpAddress::Ipv4(from) = meta.endpoint.addr;
+                if let Some(o) = q.on_response(Ipv4(from.octets()), data) {
+                    break 'lookup o;
+                }
+            }
+        };
+        self.sockets.get_mut::<udp::Socket>(self.udp).close();
+        self.resolver.finish(&q, outcome, now_ms());
+
+        match outcome {
+            Outcome::Resolved { addr, ttl } => {
+                crate::serial_println!(
+                    "dns: {} -> {} (ttl {} s, {} attempt{})",
+                    host,
+                    addr,
+                    ttl,
+                    q.attempts(),
+                    if q.attempts() == 1 { "" } else { "s" }
+                );
+                Some(IpAddress::Ipv4(addr.0.into()))
+            }
+            Outcome::NxDomain | Outcome::NoData => {
+                crate::serial_println!("dns: {} does not exist", host);
+                None
+            }
+            Outcome::Failed | Outcome::NoServers => {
+                STATS.on_dns_failure();
+                crate::serial_println!("dns: {} failed (no answer from any server)", host);
+                None
             }
         }
-        None
     }
 
     /// Blocking HTTP/1.0 GET over plain TCP. Returns the raw response bytes,

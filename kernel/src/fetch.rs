@@ -23,6 +23,7 @@
 //! hardware. Between fetches it wakes every few ticks to answer ARP and ping
 //! (`Net::respond_idle`); the compositor never touches the NIC.
 
+use crate::netd::Netd;
 use crate::sync::RacyCell;
 use crate::{netstack, serial_println};
 use alloc::vec::Vec;
@@ -38,11 +39,6 @@ const WORKER_DEAD: u8 = 4;
 
 const URL_CAP: usize = 512;
 
-/// While idle the worker wakes this often (ticks of 4 ms) to service the NIC.
-const IDLE_POLL_TICKS: u64 = 4;
-/// Frames answered per idle wake: a flood must not starve the rest of the system.
-const IDLE_RX_BUDGET: usize = 32;
-
 static STATE: AtomicU8 = AtomicU8::new(IDLE);
 /// Scheduler slot of the worker thread (`usize::MAX` until it has started), so
 /// [`try_post`] can wake it from its idle block.
@@ -50,7 +46,7 @@ static TID: AtomicUsize = AtomicUsize::new(usize::MAX);
 /// No NIC was found: every navigation fails at once with a network error instead of
 /// waiting for a worker that does not exist.
 static OFFLINE: AtomicBool = AtomicBool::new(false);
-static NET: RacyCell<Option<netstack::Net>> = RacyCell::new(None);
+static NET: RacyCell<Option<Netd>> = RacyCell::new(None);
 static REQ_URL: RacyCell<[u8; URL_CAP]> = RacyCell::new([0; URL_CAP]);
 static REQ_LEN: RacyCell<usize> = RacyCell::new(0);
 static RESULT: RacyCell<Option<FetchResult>> = RacyCell::new(None);
@@ -68,8 +64,8 @@ pub struct Loaded {
 /// Outcome of one navigation: the page, or why it failed.
 pub type FetchResult = Result<Loaded, FailReason>;
 
-/// Hand the network stack to the fetcher (call once, before spawning [`worker`]).
-pub fn init(net: netstack::Net) {
+/// Hand the network owner to the fetcher (call once, before spawning [`worker`]).
+pub fn init(net: Netd) {
     // SAFETY: called once from `kernel_main` before the fetcher is spawned, so no other thread can
     // touch NET yet.
     unsafe {
@@ -95,6 +91,14 @@ pub fn worker_dead() -> bool {
     let tid = TID.load(Ordering::Acquire);
     STATE.load(Ordering::Acquire) == WORKER_DEAD
         || (tid != usize::MAX && crate::sched::is_dead(tid))
+}
+
+/// Wake the worker from its idle block (a ping request is waiting for it).
+pub fn wake_worker() {
+    let tid = TID.load(Ordering::Acquire);
+    if tid != usize::MAX {
+        crate::sched::wake(tid);
+    }
 }
 
 /// Queue a fetch for `url` if the worker is idle. Returns `true` if accepted.
@@ -164,7 +168,7 @@ pub extern "C" fn worker() -> ! {
             // SAFETY: NET is set once, before this thread exists (`fetch::init`), and used only by this
             // worker, one request at a time, so the `&mut` is unique.
             let result = match unsafe { (*NET.get()).as_mut() } {
-                Some(net) => fetch_url(net, &url),
+                Some(netd) => fetch_url(netd.net_mut(), &url),
                 None => Err(FailReason::Network),
             };
             // SAFETY: STATE is RUNNING here; the compositor only touches RESULT after seeing DONE, which is
@@ -174,16 +178,18 @@ pub extern "C" fn worker() -> ! {
             }
             STATE.store(DONE, Ordering::Release);
         } else {
-            // Idle: answer ARP/ping for our address, then leave the run queue until
-            // a request is posted (`try_post` wakes us) or the poll interval ends.
-            // The scheduler re-checks the condition after announcing the block, so a
-            // request posted in between is not missed.
+            // Idle: service the network (DHCP timers, ARP/ping responder, ping client),
+            // then leave the run queue until a request is posted (`try_post` and
+            // `ping_start` wake us) or the service interval ends. The scheduler
+            // re-checks the condition after announcing the block, so a request posted
+            // in between is not missed.
             // SAFETY: as above: NET is used only by this worker thread.
-            if let Some(net) = unsafe { (*NET.get()).as_mut() } {
-                net.respond_idle(IDLE_RX_BUDGET);
-            }
-            crate::sched::block(crate::interrupts::ticks() + IDLE_POLL_TICKS, || {
-                STATE.load(Ordering::Acquire) != REQUESTED
+            let sleep = match unsafe { (*NET.get()).as_mut() } {
+                Some(netd) => netd.service(),
+                None => crate::netd::IDLE_POLL_TICKS,
+            };
+            crate::sched::block(crate::interrupts::ticks() + sleep, || {
+                STATE.load(Ordering::Acquire) != REQUESTED && !crate::netd::ping_pending()
             });
         }
     }
