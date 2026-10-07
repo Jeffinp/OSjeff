@@ -615,7 +615,7 @@ impl<'a> Inflater<'a> {
                     let dst = &mut out[n..n + take];
                     dst.copy_from_slice(src);
                     for &b in src {
-                        self.window[self.wpos] = b;
+                        self.window[self.wpos & WMASK] = b;
                         self.wpos = (self.wpos + 1) & WMASK;
                     }
                     self.br.pos += take;
@@ -761,14 +761,25 @@ impl<'a> Inflater<'a> {
                     return Err(InflateError::OutputLimit);
                 }
                 let dist = self.pend_dist;
-                let mut w = self.wpos;
-                for o in &mut out[n..n + take] {
-                    let b = self.window[w.wrapping_sub(dist) & WMASK];
-                    self.window[w & WMASK] = b;
-                    *o = b;
-                    w = (w + 1) & WMASK;
+                let src = self.wpos.wrapping_sub(dist) & WMASK;
+                if dist >= take && src + take <= WINDOW && self.wpos + take <= WINDOW {
+                    // Source and destination are disjoint, contiguous ring
+                    // ranges: a plain memmove, no per-byte work.
+                    let dst = self.wpos;
+                    self.window.copy_within(src..src + take, dst);
+                    out[n..n + take].copy_from_slice(&self.window[dst..dst + take]);
+                    self.wpos = (dst + take) & WMASK;
+                } else {
+                    // Overlapping (dist < len, e.g. run-length) or wrapping.
+                    let mut w = self.wpos;
+                    for o in &mut out[n..n + take] {
+                        let b = self.window[w.wrapping_sub(dist) & WMASK];
+                        self.window[w & WMASK] = b;
+                        *o = b;
+                        w = (w + 1) & WMASK;
+                    }
+                    self.wpos = w;
                 }
-                self.wpos = w;
                 self.produced += take;
                 self.pend_len -= take;
                 n += take;
@@ -780,7 +791,7 @@ impl<'a> Inflater<'a> {
                     return Err(InflateError::OutputLimit);
                 }
                 out[n] = sym as u8;
-                self.window[self.wpos] = sym as u8;
+                self.window[self.wpos & WMASK] = sym as u8;
                 self.wpos = (self.wpos + 1) & WMASK;
                 self.produced += 1;
                 n += 1;
