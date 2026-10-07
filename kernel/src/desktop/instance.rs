@@ -233,11 +233,20 @@ pub(crate) struct BrowserState {
     pub notice: Option<String>,
 }
 
-/// The single place that decides where the browser's favourites live. In memory for now: a
-/// persistent store (a file in the filesystem) only has to implement
-/// `osjeff_core::browser::BookmarkStore` and be returned here.
+/// The single place that decides where the browser's favourites live: the file
+/// `/home/.bookmarks` on the desktop volume (written after every change; a missing or
+/// damaged file starts an empty list).
 fn new_bookmark_store() -> Box<dyn osjeff_core::browser::BookmarkStore> {
-    Box::new(osjeff_core::browser::MemoryBookmarks::default())
+    const PATH: &[u8] = b"/home/.bookmarks";
+    let text = super::vfs::read_file(PATH).unwrap_or_default();
+    Box::new(osjeff_core::browser::SavedBookmarks::load(&text, |t| {
+        if !super::vfs::exists(b"/home") {
+            let _ = super::vfs::mkdir(b"/home");
+        }
+        if super::vfs::write_file(PATH, t).is_err() {
+            crate::klog!(Warn, "bookmarks: could not be saved");
+        }
+    }))
 }
 
 /// What the inline name field of a file manager is for.

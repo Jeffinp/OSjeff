@@ -643,6 +643,95 @@ impl BookmarkStore for MemoryBookmarks {
     }
 }
 
+/// The text form of a favourites list: one `url<TAB>title` line each (tabs and
+/// newlines inside a title become spaces).
+pub fn bookmarks_to_text(items: &[Bookmark]) -> String {
+    let mut out = String::new();
+    for b in items {
+        let clean = |s: &str| -> String {
+            s.chars()
+                .map(|c| if c.is_control() { ' ' } else { c })
+                .collect()
+        };
+        out.push_str(&clean(&b.url));
+        out.push('\t');
+        out.push_str(&clean(&b.title));
+        out.push('\n');
+    }
+    out
+}
+
+/// Parse [`bookmarks_to_text`] output. Total: bad UTF-8, lines without a URL and
+/// duplicates are skipped, at most [`MAX_BOOKMARKS`] are kept.
+pub fn bookmarks_from_text(text: &[u8]) -> Vec<Bookmark> {
+    let mut items: Vec<Bookmark> = Vec::new();
+    for line in text.split(|&b| b == b'\n') {
+        let Ok(line) = core::str::from_utf8(line) else {
+            continue;
+        };
+        let (url, title) = line.split_once('\t').unwrap_or((line, ""));
+        let url = url.trim();
+        if url.is_empty() || items.iter().any(|b| b.url == url) {
+            continue;
+        }
+        if items.len() >= MAX_BOOKMARKS {
+            break;
+        }
+        items.push(Bookmark {
+            url: String::from(url),
+            title: String::from(title.trim()),
+        });
+    }
+    items
+}
+
+/// Favourites that write themselves out after every change: `save` receives the
+/// text form of the whole list (the kernel stores it as a file). A failed save
+/// keeps the change in memory.
+pub struct SavedBookmarks<F: FnMut(&[u8])> {
+    inner: MemoryBookmarks,
+    save: F,
+}
+
+impl<F: FnMut(&[u8])> SavedBookmarks<F> {
+    /// Start from the saved `text` (as read from the file, possibly empty or damaged).
+    pub fn load(text: &[u8], save: F) -> Self {
+        let mut inner = MemoryBookmarks::default();
+        for b in bookmarks_from_text(text) {
+            inner.add(b);
+        }
+        Self { inner, save }
+    }
+
+    fn flush(&mut self) {
+        let text = bookmarks_to_text(&self.inner.items);
+        (self.save)(text.as_bytes());
+    }
+}
+
+impl<F: FnMut(&[u8])> BookmarkStore for SavedBookmarks<F> {
+    fn all(&self) -> Vec<Bookmark> {
+        self.inner.all()
+    }
+    fn add(&mut self, b: Bookmark) -> bool {
+        let ok = self.inner.add(b);
+        if ok {
+            self.flush();
+        }
+        ok
+    }
+    fn remove(&mut self, url: &str) -> bool {
+        let ok = self.inner.remove(url);
+        if ok {
+            self.flush();
+        }
+        ok
+    }
+    fn contains(&self, url: &str) -> bool {
+        self.inner.contains(url)
+    }
+}
+
 /// One line of the suggestion list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Suggestion {
@@ -1488,6 +1577,64 @@ impl Browser {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn bookmarks_text_roundtrip_and_damage() {
+        let items = vec![
+            Bookmark {
+                url: "http://a.example/".into(),
+                title: "A\tpage\n".into(),
+            },
+            Bookmark {
+                url: "https://b.example/x".into(),
+                title: String::new(),
+            },
+        ];
+        let text = bookmarks_to_text(&items);
+        let back = bookmarks_from_text(text.as_bytes());
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].title, "A page");
+        assert_eq!(back[1].url, "https://b.example/x");
+        // damage: bad UTF-8, blank lines, duplicates, no tab
+        let junk = b"\xff\xfe\n\n\thttp://x\nhttp://d/\tD\nhttp://d/\tagain\nhttp://e/\n";
+        let got = bookmarks_from_text(junk);
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!(got[0].url, "http://d/");
+        assert_eq!(got[1].title, "");
+        // never more than MAX_BOOKMARKS
+        let mut big = String::new();
+        for i in 0..(MAX_BOOKMARKS + 20) {
+            big.push_str(&format!("http://h{i}/\tt\n"));
+        }
+        assert_eq!(bookmarks_from_text(big.as_bytes()).len(), MAX_BOOKMARKS);
+    }
+
+    #[test]
+    fn saved_bookmarks_flush_on_change_only() {
+        use alloc::rc::Rc;
+        use core::cell::RefCell;
+        let saved: Rc<RefCell<Vec<Vec<u8>>>> = Rc::default();
+        let sink = saved.clone();
+        let mut s = SavedBookmarks::load(b"http://a/\tA\n", move |t: &[u8]| {
+            sink.borrow_mut().push(t.to_vec())
+        });
+        assert!(s.contains("http://a/"));
+        assert!(!s.add(Bookmark {
+            url: "http://a/".into(),
+            title: "dup".into()
+        }));
+        assert!(saved.borrow().is_empty(), "a refused add must not write");
+        assert!(s.add(Bookmark {
+            url: "http://b/".into(),
+            title: "B".into()
+        }));
+        assert_eq!(saved.borrow().len(), 1);
+        assert_eq!(saved.borrow()[0], b"http://a/\tA\nhttp://b/\tB\n");
+        assert!(s.remove("http://a/"));
+        assert!(!s.remove("http://a/"));
+        assert_eq!(saved.borrow().len(), 2);
+        assert_eq!(saved.borrow()[1], b"http://b/\tB\n");
+    }
     use super::*;
 
     #[test]
