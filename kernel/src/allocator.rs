@@ -8,7 +8,7 @@ use core::cell::UnsafeCell;
 use core::mem;
 use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
-use osjeff_core::heap::{adjust_request, fit_region, regions_adjacent};
+use osjeff_core::heap::{adjust_request, fit_region_split, regions_adjacent};
 
 // ---- minimal spin lock ----
 
@@ -199,9 +199,10 @@ impl LinkedListAllocator {
         let mut scanned = 0u64;
         while let Some(ref mut region) = current.next {
             scanned += 1;
-            if let Some((alloc_start, _excess)) =
-                fit_region(region.start_addr(), region.size, size, align, node_size())
+            if let Some(fit) =
+                fit_region_split(region.start_addr(), region.size, size, align, node_size())
             {
+                let alloc_start = fit.alloc_start;
                 let next = region.next.take();
                 let region = current.next.take().unwrap();
                 current.next = next;
@@ -225,10 +226,20 @@ impl LinkedListAllocator {
         match self.find_region(size, align) {
             Some((region, alloc_start)) => {
                 let alloc_end = alloc_start + size;
+                // Read everything we need from the node before the writes below can overwrite it.
+                let region_start = region.start_addr();
                 let excess = region.end_addr() - alloc_end;
+                let front = alloc_start - region_start;
+                if front > 0 {
+                    // SAFETY: `find_region` unlinked the whole region, so `region_start..alloc_start` is free
+                    // and unaliased; both ends are 8-aligned (`alloc_start` is aligned to `align >= 8`, the
+                    // region start is a node address) and `fit_region_split` guarantees `front >= node_size`
+                    // when `front > 0`. This returns the alignment padding that used to leak.
+                    unsafe { self.add_free_region(region_start, front) };
+                }
                 if excess > 0 {
                     // SAFETY: `find_region` unlinked the whole region, so `alloc_end..region_end` is free and
-                    // unaliased; it is 8-aligned (start and size are multiples of node_align) and `fit_region`
+                    // unaliased; it is 8-aligned (start and size are multiples of node_align) and `fit_region_split`
                     // guarantees `excess >= node_size` when `excess > 0`.
                     unsafe { self.add_free_region(alloc_end, excess) };
                 }
