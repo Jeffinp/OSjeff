@@ -6,7 +6,7 @@
 //! would climb above the guest's root is an **error** ([`PathError::Escapes`]),
 //! not a silent clamp: an app that tries `../../etc/x` must learn it did wrong.
 //!
-//! Component grammar: 1..=31 bytes of printable ASCII, none of `\ : * ? " < > |`
+//! Component grammar: 1..=48 bytes of printable ASCII, none of `\ : * ? " < > |`
 //! (and no NUL/control/non-ASCII), not made only of dots, no leading space, no
 //! trailing space or dot. Whole path <= 256 bytes, <= 8 components after
 //! normalization. A component such as `%2e%2e` is just a (legal) file name: the
@@ -16,7 +16,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 pub const MAX_PATH: usize = 256;
-pub const MAX_COMPONENT: usize = 31;
+pub const MAX_COMPONENT: usize = 48;
 pub const MAX_DEPTH: usize = 8;
 
 /// Why a path was refused.

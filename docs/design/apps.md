@@ -162,7 +162,7 @@ A decisão é toda de `osjeff_core::appfs`:
 * **Normalização** (`appfs::normalize`): barras duplas e `.` somem; `..` só resolve
   lexicalmente **dentro** da raiz do guest e, se subir acima dela, é **erro** `ERR_PERM`
   (nunca "preso na raiz": um app que tenta `../../etc/x` deve saber que errou e é
-  contado). Nome de componente: 1..=31 bytes ASCII imprimíveis, sem `/ \ : * ? " < > |`,
+  contado). Nome de componente: 1..=48 bytes ASCII imprimíveis, sem `/ \ : * ? " < > |`,
   sem controle/NUL, não só pontos, sem espaço/ponto no fim, sem bytes não ASCII; caminho
   <= 256 B e <= 8 componentes. O caminho real é `raiz_do_app + normalizado`, juntado
   **por componentes validados**, nunca por concatenação do texto do guest.
