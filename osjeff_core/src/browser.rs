@@ -51,12 +51,24 @@ fn starts_with_ci(s: &[u8], prefix: &[u8]) -> bool {
             .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
+/// True for ASCII control bytes (C0 and DEL). A URL carrying one could split
+/// the request line / smuggle a header once host and path are written into the
+/// HTTP request.
+fn is_control(b: u8) -> bool {
+    b < 0x20 || b == 0x7f
+}
+
 /// Parse an absolute URL. A missing scheme defaults to HTTPS. Returns `None`
-/// only when there is no host at all.
+/// when there is no host at all, or when the URL contains an ASCII control
+/// character (CR/LF/NUL/TAB...) after the leading blanks: such input is never
+/// a legitimate address and would let a hostile `Location` inject headers.
 pub fn parse_url(input: &[u8]) -> Option<Url> {
     let mut s = input;
     while let [b' ' | b'\t', rest @ ..] = s {
         s = rest;
+    }
+    if s.iter().any(|&b| is_control(b)) {
+        return None;
     }
 
     let (https, mut rest) = if starts_with_ci(s, b"https://") {
@@ -395,9 +407,11 @@ fn parse_radix(digits: &[u8], radix: u32) -> Option<u32> {
 /// Returns the number of bytes written.
 /// Decode the first UTF-8 scalar in `bytes`, returning its code point and the
 /// number of bytes consumed. Malformed input yields `(0, 1)` so the caller
-/// skips one byte and makes progress.
+/// skips one byte and makes progress; empty input yields `(0, 0)`.
 pub fn decode_utf8(bytes: &[u8]) -> (u32, usize) {
-    let b0 = bytes[0];
+    let Some(&b0) = bytes.first() else {
+        return (0, 0);
+    };
     let (len, init) = match b0 {
         0x00..=0x7f => return (b0 as u32, 1),
         0xC0..=0xDF => (2, (b0 & 0x1F) as u32),
@@ -816,5 +830,36 @@ mod tests {
         b.loaded();
         assert_eq!(b.status(), Status::Done);
         assert!(!b.is_home());
+    }
+
+    /// Regression: host/path go straight into the request line and `Host:`
+    /// header, so a CR/LF in a URL (typed, or from a server's `Location`)
+    /// allowed request splitting. Any ASCII control now makes the URL invalid.
+    #[test]
+    fn parse_url_rejects_control_characters() {
+        for bad in [
+            &b"http://a.com/x\r\nHost: evil"[..],
+            b"http://a.com\r\nX: y/",
+            b"http://a.com/\0",
+            b"http://a.com/p\tq",
+            b"http://a.com/p\x7fq",
+            b"ex\x01ample.com",
+            b"http://a.com/x y\nz",
+        ] {
+            assert!(parse_url(bad).is_none(), "{:?}", core::str::from_utf8(bad));
+        }
+        // Leading blanks are still tolerated; spaces and non-ASCII are not controls.
+        assert!(parse_url(b" \t http://a.com/x").is_some());
+        assert!(parse_url(b"http://a.com/caf\xc3\xa9").is_some());
+    }
+
+    /// Regression: `decode_utf8(&[])` indexed `bytes[0]` and panicked.
+    #[test]
+    fn decode_utf8_handles_empty_and_truncated_input() {
+        assert_eq!(decode_utf8(&[]), (0, 0));
+        assert_eq!(decode_utf8(b"a"), (0x61, 1));
+        assert_eq!(decode_utf8("\u{e9}".as_bytes()), (0xE9, 2));
+        assert_eq!(decode_utf8(&[0xE2, 0x82]), (0, 1)); // cut mid-sequence
+        assert_eq!(decode_utf8(&[0xFF]), (0, 1));
     }
 }
