@@ -195,22 +195,7 @@ impl Desktop {
                 Key::Esc => self.request_close(top),
                 _ => {}
             },
-            Kind::Browser => match key {
-                Key::Esc => self.request_close(top),
-                // Arrows scroll the rendered page (a pixel at a time feels slow,
-                // so step by a few lines).
-                Key::Up => {
-                    self.scroll_page(top, -48);
-                }
-                Key::Down => {
-                    self.scroll_page(top, 48);
-                }
-                _ => {
-                    if let Some(b) = self.browser_state_mut(top) {
-                        b.browser.on_key(key);
-                    }
-                }
-            },
+            Kind::Browser => self.browser_key(top, key),
             // Forward keystrokes to the guest (printable bytes as-is, Enter as
             // LF, Esc as 0x1B so apps like DOOM get their menu key). A WASM app is
             // closed with the title-bar button, not Esc, so the guest keeps Esc.
@@ -233,32 +218,286 @@ impl Desktop {
         true
     }
 
-    /// Resolve a click inside browser window `id`: toolbar buttons (home /
-    /// reload / search) or, on the start page, the shortcut tiles.
-    pub(crate) fn browser_click(&mut self, id: WindowId, rect: Rect, px: i32, py: i32) {
-        let ch = BrowserChrome::of(rect);
+    /// Keys for the browser window `id`: Ctrl chords (favourite, find, zoom), the find bar, a
+    /// focused form control, then scrolling keys (when the page has the focus) and the address bar.
+    fn browser_key(&mut self, id: WindowId, key: Key) {
+        let ctrl = self.keymap.ctrl();
+        let shift = self.keymap.shift();
+        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
+            return;
+        };
+        let view_h = BrowserChrome::of(rect).content.h;
         let Some(b) = self.browser_state_mut(id) else {
             return;
         };
-        if ch.home.contains(px, py) {
+        b.notice = None;
+        if ctrl {
+            self.browser_ctrl_key(id, key);
+            return;
+        }
+        // The find bar takes the keys while it is open.
+        if b.find.is_open() {
+            use osjeff_core::web::find::FindOutcome;
+            let out = b.find.on_key(key, shift, b.page.as_ref());
+            if out == FindOutcome::Changed
+                && let Some(y) = b.find.current_y()
+            {
+                // Bring the match into the middle of the view.
+                let target = (y - view_h / 2).max(0);
+                let cur = b.scroll;
+                self.scroll_page(id, target - cur);
+            }
+            let _ = out;
+            return;
+        }
+        // A focused form control gets the key first.
+        if b.forms.focus().is_some()
+            && let Some(page) = &b.page
+        {
+            use osjeff_core::web::form::FormOutcome;
+            if key == Key::Tab {
+                let forms = &page.forms;
+                if !b.forms.tab(forms, shift) {
+                    b.browser.set_bar_focus(true);
+                }
+                self.browser_scroll_to_focus(id);
+                return;
+            }
+            match b.forms.on_key(&page.forms, key) {
+                FormOutcome::Submit { form, submitter } => {
+                    self.browser_submit_form(id, form, submitter)
+                }
+                FormOutcome::Blur => {}
+                FormOutcome::Changed => self.browser_scroll_to_focus(id),
+                FormOutcome::Ignored => match key {
+                    Key::PageUp => {
+                        self.scroll_page(id, -(view_h - 40));
+                    }
+                    Key::PageDown => {
+                        self.scroll_page(id, view_h - 40);
+                    }
+                    Key::Up => {
+                        self.scroll_page(id, -48);
+                    }
+                    Key::Down => {
+                        self.scroll_page(id, 48);
+                    }
+                    _ => {}
+                },
+            }
+            return;
+        }
+        // Esc: close the suggestion list, drop the selection, else close the window.
+        if key == Key::Esc {
+            if b.browser.suggestions().is_empty() && b.sel.is_none() {
+                self.request_close(id);
+            } else if let Some(b) = self.browser_state_mut(id) {
+                b.browser.on_key(Key::Esc);
+                b.sel = None;
+            }
+            return;
+        }
+        let page_focus = !b.browser.bar_focus();
+        match key {
+            Key::PageUp => {
+                self.scroll_page(id, -(view_h - 40));
+            }
+            Key::PageDown => {
+                self.scroll_page(id, view_h - 40);
+            }
+            Key::Home if page_focus => {
+                self.scroll_page(id, i32::MIN / 2);
+            }
+            Key::End if page_focus => {
+                self.scroll_page(id, i32::MAX / 2);
+            }
+            Key::Char(b' ') if page_focus => {
+                self.scroll_page(id, if shift { -(view_h - 40) } else { view_h - 40 });
+            }
+            Key::Tab => {
+                // Into the page's controls (if it has any).
+                let has = b.page.as_ref().is_some_and(|p| !p.forms.is_empty());
+                if has && let Some(page) = &b.page {
+                    b.browser.set_bar_focus(false);
+                    if !b.forms.tab(&page.forms, shift) {
+                        b.browser.set_bar_focus(true);
+                    }
+                    self.browser_scroll_to_focus(id);
+                }
+            }
+            Key::Up | Key::Down => {
+                // The suggestion list uses them; otherwise they scroll.
+                if !b.browser.on_key(key) {
+                    self.scroll_page(id, if key == Key::Up { -48 } else { 48 });
+                }
+            }
+            _ => {
+                b.browser.set_bar_focus(true);
+                b.browser.on_key(key);
+            }
+        }
+    }
+
+    /// Ctrl+D favourite, Ctrl+F find, Ctrl+plus/minus/0 zoom, Ctrl+L address bar.
+    fn browser_ctrl_key(&mut self, id: WindowId, key: Key) {
+        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
+            return;
+        };
+        let content = BrowserChrome::of(rect).content;
+        let Some(b) = self.browser_state_mut(id) else {
+            return;
+        };
+        match key {
+            Key::Char(b'd') | Key::Char(b'D') => {
+                b.notice = Some(String::from(match b.browser.toggle_bookmark() {
+                    Some(true) => "Favorito adicionado",
+                    Some(false) => "Favorito removido",
+                    None => "Nada para guardar aqui",
+                }));
+            }
+            Key::Char(b'f') | Key::Char(b'F') => {
+                b.find.open(b.page.as_ref());
+                b.browser.set_bar_focus(false);
+            }
+            Key::Char(b'l') | Key::Char(b'L') => {
+                b.find.close();
+                b.forms.blur();
+                b.browser.select_bar();
+            }
+            Key::Char(b'=')
+            | Key::Char(b'+')
+            | Key::Char(b'-')
+            | Key::Char(b'_')
+            | Key::Char(b'0') => {
+                use osjeff_core::web::{zoom_in, zoom_out};
+                b.zoom = match key {
+                    Key::Char(b'=') | Key::Char(b'+') => zoom_in(b.zoom),
+                    Key::Char(b'-') | Key::Char(b'_') => zoom_out(b.zoom),
+                    _ => 100,
+                };
+                b.notice = Some(alloc::format!("Zoom {}%", b.zoom));
+                let old = b.scroll;
+                b.layout_w = content.w;
+                super::layout_browser(b, content.w, false);
+                let max = b.page.as_ref().map_or(0, |p| (p.height - content.h).max(0));
+                b.scroll = old.clamp(0, max);
+            }
+            _ => {}
+        }
+    }
+
+    /// Submit form `form` (Enter in a field, or a button): navigate to the GET URL, or say why not.
+    fn browser_submit_form(&mut self, id: WindowId, form: usize, submitter: Option<usize>) {
+        let Some(b) = self.browser_state_mut(id) else {
+            return;
+        };
+        let Some(page) = &b.page else {
+            return;
+        };
+        match b.forms.target(&page.forms, form, submitter) {
+            Ok(href) => {
+                b.forms.blur();
+                b.browser.set_bar_focus(false);
+                if !b.browser.open_link(href.as_bytes()) {
+                    b.notice = Some(String::from("endereco do formulario invalido"));
+                }
+            }
+            Err(e) => b.notice = Some(String::from(e.message())),
+        }
+    }
+
+    /// Scroll the page so the focused form control is visible.
+    fn browser_scroll_to_focus(&mut self, id: WindowId) {
+        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
+            return;
+        };
+        let view_h = BrowserChrome::of(rect).content.h;
+        let Some(b) = self.browser_state_mut(id) else {
+            return;
+        };
+        let (Some(page), Some((f, i))) = (&b.page, b.forms.focus()) else {
+            return;
+        };
+        let Some(fb) = page.fields.iter().find(|x| x.form == f && x.field == i) else {
+            return;
+        };
+        let (top, bottom, scroll) = (fb.y, fb.y + fb.h, b.scroll);
+        if top < scroll + 8 {
+            self.scroll_page(id, top - 8 - scroll);
+        } else if bottom > scroll + view_h - 40 {
+            self.scroll_page(id, bottom - (scroll + view_h - 40));
+        }
+    }
+
+    /// Resolve a click inside browser window `id`: toolbar buttons (home /
+    /// reload / search) or, on the start page, the shortcut tiles.
+    pub(crate) fn browser_click(&mut self, id: WindowId, rect: Rect, px: i32, py: i32) -> bool {
+        let ch = BrowserChrome::of(rect);
+        let Some(b) = self.browser_state_mut(id) else {
+            return false;
+        };
+        b.notice = None;
+        // The suggestion list floats over everything below the bar.
+        let n = b.browser.suggestions().len();
+        if let Some(i) = osjeff_core::layout::browser_suggestion_at(ch.bar, n, px, py) {
+            b.browser.pick_suggestion(i);
+            b.browser.set_bar_focus(false);
+            return false;
+        }
+        if ch.back.contains(px, py) {
+            b.browser.back();
+        } else if ch.forward.contains(px, py) {
+            b.browser.forward();
+        } else if ch.home.contains(px, py) {
             b.browser.go_home();
+            b.page = None;
+            b.doc = None;
+            b.browser.set_bar_focus(true);
         } else if ch.reload.contains(px, py) {
             b.browser.reload();
         } else if ch.go.contains(px, py) {
             b.browser.submit();
+        } else if ch.star.contains(px, py) {
+            b.notice = Some(String::from(match b.browser.toggle_bookmark() {
+                Some(true) => "Favorito adicionado",
+                Some(false) => "Favorito removido",
+                None => "Nada para guardar aqui",
+            }));
+        } else if ch.bar.contains(px, py) {
+            b.browser.select_bar();
+            b.forms.blur();
         } else if b.browser.can_continue_insecure()
             && osjeff_core::layout::browser_continue_button(ch.content).contains(px, py)
         {
             // The explicit, per-origin, per-session "continue anyway".
             b.browser.continue_insecure();
-        } else if !b.browser.is_home()
-            && ch.content.contains(px, py)
-            && let Some(page) = &b.page
-            && let Some(href) = page.link_at(px - ch.content.x, py - ch.content.y + b.scroll)
-        {
-            // A click on link text: resolve it against the page and navigate.
-            let href = href.as_bytes().to_vec();
-            b.browser.open_link(&href);
+        } else if !b.browser.is_home() && ch.content.contains(px, py) && b.page.is_some() {
+            let (qx, qy) = (px - ch.content.x, py - ch.content.y + b.scroll);
+            b.browser.set_bar_focus(false);
+            b.sel = None;
+            let page = b.page.as_ref();
+            if let Some(f) = page.and_then(|p| p.field_at(qx, qy)).copied()
+                && let Some(page) = &b.page
+            {
+                // A control: focus a text box, press a button.
+                if f.kind == osjeff_core::web::form::FieldKind::Submit {
+                    b.forms.set_focus(&page.forms, f.form, f.field);
+                    self.browser_submit_form(id, f.form, Some(f.field));
+                } else {
+                    b.forms.set_focus(&page.forms, f.form, f.field);
+                }
+                return false;
+            }
+            b.forms.blur();
+            if let Some(href) = page.and_then(|p| p.link_at(qx, qy)) {
+                // A click on link text: resolve it against the page and navigate.
+                let href = href.as_bytes().to_vec();
+                b.browser.open_link(&href);
+            } else {
+                // Empty page area: start selecting text.
+                b.sel_anchor = Some((qx, qy));
+                return true;
+            }
         } else if b.browser.is_home() {
             let (_logo, tiles) = browser_home_layout(ch.content);
             for (i, t) in tiles.iter().enumerate() {
@@ -269,6 +508,34 @@ impl Desktop {
                 }
             }
         }
+        false
+    }
+
+    /// While the left button drags on a browser page: extend the selection to the pointer.
+    fn browser_select_drag(&mut self, id: WindowId) {
+        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
+            return;
+        };
+        let content = BrowserChrome::of(rect).content;
+        let (cx, cy) = (self.cursor_x, self.cursor_y);
+        let Some(b) = self.browser_state_mut(id) else {
+            return;
+        };
+        let (Some(a), Some(page)) = (b.sel_anchor, &b.page) else {
+            return;
+        };
+        let cur = (cx - content.x, cy - content.y + b.scroll);
+        let sel = page.select(a, cur);
+        if sel != b.sel {
+            b.sel = sel;
+        }
+        // Dragging past the top or bottom edge scrolls.
+        if cy < content.y + 4 {
+            self.scroll_page(id, -24);
+        } else if cy > content.bottom() - 4 {
+            self.scroll_page(id, 24);
+        }
+        self.mark_dirty(rect);
     }
 
     pub(crate) fn calc_input(&mut self, id: WindowId, k: u8) {
@@ -315,6 +582,17 @@ impl Desktop {
         // before mutably borrowing the clipboard.
         let mut tmp = [0u8; clipboard::CAP];
         let mut n = 0;
+        // Selected page text wins over the address bar.
+        if let Some(w) = self.wm.get(top)
+            && let App::Browser(b) = &w.app.app
+            && let (Some(sel), Some(page)) = (b.sel, &b.page)
+        {
+            let text = page.selection_text(sel);
+            let n = text.len().min(clipboard::CAP);
+            tmp[..n].copy_from_slice(&text.as_bytes()[..n]);
+            self.clipboard.set(&tmp[..n]);
+            return;
+        }
         if let Some(w) = self.wm.get(top) {
             let text: &[u8] = match &w.app.app {
                 App::Terminal(t) => t.input(),
@@ -372,9 +650,16 @@ impl Desktop {
                 }
             }
             Some(App::Browser(b)) => {
-                for &ch in data {
-                    if ch != b'\n' && ch != b'\r' {
-                        b.browser.on_key(Key::Char(ch));
+                if b.forms.focus().is_some()
+                    && let Some(page) = &b.page
+                {
+                    let text = String::from_utf8_lossy(data).into_owned();
+                    b.forms.insert_str(&page.forms, &text);
+                } else {
+                    for &ch in data {
+                        if ch != b'\n' && ch != b'\r' {
+                            b.browser.on_key(Key::Char(ch));
+                        }
                     }
                 }
             }
@@ -428,6 +713,47 @@ impl Desktop {
     }
 
     // ---- mouse ----
+
+    /// Is the pointer over something clickable in a browser page (a link, a button, a
+    /// suggestion)? Then the cursor is drawn as a hand.
+    pub(crate) fn cursor_is_hand(&self) -> bool {
+        if self.drag.is_some() || self.overlay_open() {
+            return false;
+        }
+        let (cx, cy) = (self.cursor_x, self.cursor_y);
+        let Some(w) = self.topmost_at(cx, cy) else {
+            return false;
+        };
+        let Some(win) = self.wm.get(w) else {
+            return false;
+        };
+        let App::Browser(b) = &win.app.app else {
+            return false;
+        };
+        let ch = BrowserChrome::of(win.rect);
+        // Toolbar buttons and the suggestion list.
+        let n = b.browser.suggestions().len();
+        if osjeff_core::layout::browser_suggestion_at(ch.bar, n, cx, cy).is_some() {
+            return true;
+        }
+        if [ch.back, ch.forward, ch.reload, ch.home, ch.go, ch.star]
+            .iter()
+            .any(|r| r.contains(cx, cy))
+        {
+            return true;
+        }
+        if b.browser.is_home() || !ch.content.contains(cx, cy) {
+            return false;
+        }
+        let Some(page) = &b.page else {
+            return false;
+        };
+        let (qx, qy) = (cx - ch.content.x, cy - ch.content.y + b.scroll);
+        page.link_at(qx, qy).is_some()
+            || page
+                .field_at(qx, qy)
+                .is_some_and(|f| f.kind == osjeff_core::web::form::FieldKind::Submit)
+    }
 
     /// A mouse-wheel step (`dz` > 0 = wheel toward the user = scroll down). As on desktop
     /// systems the window *under the pointer* gets it, focused or not, and the wheel does not
@@ -564,7 +890,14 @@ impl Desktop {
                     self.calc_input(w, k);
                 }
             }
-            Kind::Browser => self.browser_click(w, rect, cx, cy),
+            Kind::Browser => {
+                if self.browser_click(w, rect, cx, cy) {
+                    self.drag = Some(Drag {
+                        win: w,
+                        mode: DragMode::Select,
+                    });
+                }
+            }
             Kind::WasmApp => {
                 // The press is delivered by `wasm_pointer` (content-local coordinates);
                 // the window grabs the button so drags and the release reach it.
@@ -736,6 +1069,7 @@ impl Desktop {
                     } => {
                         self.wm.resize(w, edge, start, (cx - ox, cy - oy), (sw, sh));
                     }
+                    DragMode::Select => self.browser_select_drag(w),
                 }
                 // NOT scene_dirty: a drag is driven by the per-frame damage path
                 // (keyed on `cursor_moved`), which repaints only the window's

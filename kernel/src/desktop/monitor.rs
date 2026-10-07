@@ -247,7 +247,7 @@ impl App {
             App::Calculator(_) => size_of::<Calc>(),
             App::Browser(b) => {
                 size_of::<BrowserState>()
-                    + b.body.capacity()
+                    + b.images.bytes()
                     + b.page
                         .as_ref()
                         .map_or(0, |p| p.cmds.len() * size_of::<osjeff_core::web::Cmd>())

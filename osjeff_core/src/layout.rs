@@ -131,10 +131,14 @@ pub fn calc_button_at(r: Rect, px: i32, py: i32) -> Option<u8> {
 /// buttons, address bar and content area always agree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BrowserChrome {
-    pub home: Rect,
+    pub back: Rect,
+    pub forward: Rect,
     pub reload: Rect,
+    pub home: Rect,
     pub go: Rect,
     pub bar: Rect,
+    /// The favourite star, inside the right end of the address bar.
+    pub star: Rect,
     pub content: Rect,
 }
 
@@ -144,21 +148,37 @@ impl BrowserChrome {
         let btn = 36;
         let gap = 8;
         let ty = r.y + TITLE_H + 12;
-        let home = Rect::new(r.x + pad, ty, btn, btn);
-        let reload = Rect::new(home.right() + gap, ty, btn, btn);
+        let back = Rect::new(r.x + pad, ty, btn, btn);
+        let forward = Rect::new(back.right() + gap, ty, btn, btn);
+        let reload = Rect::new(forward.right() + gap, ty, btn, btn);
+        let home = Rect::new(reload.right() + gap, ty, btn, btn);
         let go = Rect::new(r.right() - pad - btn, ty, btn, btn);
-        let bar_x = reload.right() + gap;
+        let bar_x = home.right() + gap;
         let bar = Rect::new(bar_x, ty, (go.x - gap - bar_x).max(60), btn);
+        let star = Rect::new(bar.right() - 34, ty + 6, 24, 24);
         let cy = ty + btn + 16;
         let content = Rect::new(r.x + pad, cy, r.w - pad * 2, (r.bottom() - 14 - cy).max(0));
         Self {
-            home,
+            back,
+            forward,
             reload,
+            home,
             go,
             bar,
+            star,
             content,
         }
     }
+}
+
+/// Rect of suggestion row `i` under the address bar (rows are 26 px tall).
+pub fn browser_suggestion_row(bar: Rect, i: usize) -> Rect {
+    Rect::new(bar.x, bar.bottom() + 2 + i as i32 * 26, bar.w, 26)
+}
+
+/// Row of the suggestion list under page-space point `(px, py)` when `n` rows are shown.
+pub fn browser_suggestion_at(bar: Rect, n: usize, px: i32, py: i32) -> Option<usize> {
+    (0..n).find(|&i| browser_suggestion_row(bar, i).contains(px, py))
 }
 
 /// Rect of the error page's "continue anyway (insecure)" button, offered only for
@@ -519,13 +539,29 @@ mod tests {
     fn browser_chrome_toolbar_is_ordered_and_inside_the_window() {
         let r = Rect::new(80, 60, 700, 500);
         let c = BrowserChrome::of(r);
-        assert!(c.home.right() < c.reload.x);
-        assert!(c.reload.right() < c.bar.x);
+        assert!(c.back.right() < c.forward.x);
+        assert!(c.forward.right() < c.reload.x);
+        assert!(c.reload.right() < c.home.x);
+        assert!(c.home.right() < c.bar.x);
         assert!(c.bar.right() < c.go.x);
+        assert!(c.star.x >= c.bar.x && c.star.right() <= c.bar.right());
         assert_eq!(c.go.right(), r.right() - 14);
-        assert_eq!(c.home.y, r.y + TITLE_H + 12);
+        assert_eq!(c.back.y, r.y + TITLE_H + 12);
         assert!(c.content.y > c.home.bottom());
         assert_eq!(c.content.bottom(), r.bottom() - 14);
+    }
+
+    #[test]
+    fn suggestion_rows_stack_under_the_bar() {
+        let bar = Rect::new(100, 50, 400, 36);
+        let r0 = browser_suggestion_row(bar, 0);
+        let r1 = browser_suggestion_row(bar, 1);
+        assert_eq!((r0.x, r0.w), (bar.x, bar.w));
+        assert!(r0.y > bar.bottom());
+        assert_eq!(r1.y - r0.y, 26);
+        assert_eq!(browser_suggestion_at(bar, 3, 120, r1.y + 3), Some(1));
+        assert_eq!(browser_suggestion_at(bar, 1, 120, r1.y + 3), None);
+        assert_eq!(browser_suggestion_at(bar, 3, 5, r0.y), None);
     }
 
     #[test]

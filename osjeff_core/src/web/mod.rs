@@ -12,6 +12,7 @@
 
 mod css;
 mod dom;
+pub mod find;
 pub mod form;
 pub mod imgcache;
 mod layout;
@@ -22,6 +23,12 @@ pub mod textops;
 
 pub use css::{Decl, MAX_RULES, MAX_SELECTORS, Rule, Selector, Specificity, Stylesheet, parse_css};
 pub use dom::{Element, MAX_DEPTH, MAX_NODES, Node, parse_html};
+
+/// Fold text to the bitmap font's printable ASCII (accents lose their mark, controls become
+/// spaces, anything without an ASCII look-alike is dropped).
+pub fn fold_for_display(s: &str) -> alloc::string::String {
+    dom::fold_display(s)
+}
 pub use layout::{
     Cmd, Doc, FieldBox, ImgRef, Layout, LinkHit, MAX_IMAGES, MAX_LINKS, MAX_ZOOM, MIN_ZOOM, Page,
     ZOOM_STEPS, render, zoom_in, zoom_out,

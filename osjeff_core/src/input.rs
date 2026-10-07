@@ -143,6 +143,8 @@ impl KeyEvent {
             Key::Down => KeyCode::Down,
             Key::Home => KeyCode::Home,
             Key::End => KeyCode::End,
+            Key::PageUp => KeyCode::PageUp,
+            Key::PageDown => KeyCode::PageDown,
         };
         Self { code, mods }
     }

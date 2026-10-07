@@ -432,7 +432,7 @@ impl Desktop {
 }
 
 /// ABI key code and modifier bits of a logical key: ASCII, 10 Enter, 27 Esc,
-/// 8 Backspace, 9 Tab, 127 Delete, 0x100.. arrows / Home / End.
+/// 8 Backspace, 9 Tab, 127 Delete, 0x100.. arrows / Home / End / PageUp / PageDown.
 pub(crate) fn wasm_key_code(key: Key) -> i32 {
     match key {
         Key::Char(b) => b as i32,
@@ -447,5 +447,7 @@ pub(crate) fn wasm_key_code(key: Key) -> i32 {
         Key::Down => 0x103,
         Key::Home => 0x104,
         Key::End => 0x105,
+        Key::PageUp => 0x106,
+        Key::PageDown => 0x107,
     }
 }

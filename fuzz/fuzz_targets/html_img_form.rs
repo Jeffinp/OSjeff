@@ -19,6 +19,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use osjeff_core::Key;
+use osjeff_core::browser::{self, Browser, Conn};
 use osjeff_core::base64;
 use osjeff_core::web::form::{FormState, MAX_QUERY, MAX_VALUE};
 use osjeff_core::web::imgcache::{
@@ -222,6 +223,49 @@ fn exercise(data: &[u8]) {
         base: b"http://h.test/",
     };
     let _ = pi.lookup(&text);
+
+    // ---- the browser model: address bar, history, favourites, suggestions, internal pages ----
+    let mut br = Browser::new();
+    for (i, &b) in raw.iter().take(120).enumerate() {
+        match b % 10 {
+            0 => br.open(&raw[i..]),
+            1 => {
+                let _ = br.take_request();
+                br.loaded_with(Conn::Plain, b & 1 == 0);
+            }
+            2 | 3 => {
+                let _ = br.on_key(Key::Char(b));
+            }
+            4 => {
+                let _ = br.toggle_bookmark();
+            }
+            5 => br.select_bar(),
+            6 => br.back(),
+            7 => br.forward(),
+            8 => {
+                br.open(b"osjeff://historico");
+                if let Some(h) = br.take_internal() {
+                    let d = Doc::parse(&h);
+                    check_page(&d.layout(&Layout {
+                        width: 400,
+                        zoom: 100,
+                        images: &NoImages,
+                    }));
+                }
+            }
+            _ => {
+                br.set_page_title(&text);
+                let _ = br.on_key(if b & 1 == 0 { Key::Down } else { Key::Up });
+                let _ = br.suggestions();
+                let _ = br.open_link(&raw[i..]);
+            }
+        }
+        assert!(br.history_len() <= browser::MAX_HISTORY);
+        assert!(br.bookmarks().len() <= browser::MAX_BOOKMARKS);
+        assert!(br.suggestions().len() <= browser::MAX_SUGGESTIONS);
+    }
+    let _ = browser::suggest(&text, &br.bookmarks(), &[text.clone()]);
+    let _ = browser::html_escape(&text);
 }
 
 fuzz_target!(|data: &[u8]| {

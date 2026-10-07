@@ -17,7 +17,7 @@
 //! | bytes downloaded per image | [`MAX_IMAGE_BYTES`] = 512 KiB |
 //! | pixels decoded | [`MAX_DECODE_PIXELS`] = 2 Mpx (8 MiB of RGBA), checked on the header |
 //! | `data:` image payload | [`MAX_DATA_IMAGE_BYTES`] = 64 KiB |
-//! | pixel memory kept | [`CACHE_BYTES`] = 8 MiB, least recently used goes first |
+//! | pixel memory kept | [`CACHE_BYTES`] = 6 MiB, least recently used goes first |
 //!
 //! A decoded image is scaled to the page's column width on the spot
 //! ([`crate::image::Image::fit`]) and flattened over the page background, so
@@ -40,7 +40,7 @@ pub const MAX_DATA_IMAGE_BYTES: usize = 64 * 1024;
 /// Longest `data:` URI kept in a page (`src` attribute), in bytes.
 pub const MAX_DATA_URI_LEN: usize = 96 * 1024;
 /// Pixel memory the cache may hold (RGBA, 4 bytes per pixel).
-pub const CACHE_BYTES: usize = 8 * 1024 * 1024;
+pub const CACHE_BYTES: usize = 6 * 1024 * 1024;
 /// Entries kept (loaded or not).
 pub const MAX_ENTRIES: usize = 24;
 /// Background the pictures are flattened over (the page's white-ish).

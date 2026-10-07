@@ -116,14 +116,129 @@ impl Desktop {
     }
 
     pub(crate) fn draw_browser(&self, c: &mut Canvas, r: Rect, focused: bool, bs: &BrowserState) {
+        self.draw_browser_inner(c, r, focused, bs);
+        let ch = BrowserChrome::of(r);
+        self.draw_browser_overlays(c, &ch, focused, bs);
+    }
+
+    /// What floats over the page: the find bar, the notice line and the suggestion list.
+    fn draw_browser_overlays(
+        &self,
+        c: &mut Canvas,
+        ch: &BrowserChrome,
+        focused: bool,
+        bs: &BrowserState,
+    ) {
+        let content = ch.content;
+        let mut y = content.bottom();
+        let mut bar_line = |c: &mut Canvas, bg: Color, fg: Color, text: &str| {
+            let h = 26;
+            y -= h;
+            c.fill_rect(
+                content.x as usize,
+                y.max(0) as usize,
+                content.w as usize,
+                h as usize,
+                bg,
+            );
+            let room = ((content.w - 16).max(0) as usize) / font::cell_w(2);
+            let t: String = text.chars().take(room).collect();
+            font::draw_text(
+                c,
+                (content.x + 8) as usize,
+                (y + 6).max(0) as usize,
+                &t,
+                fg,
+                2,
+            );
+        };
+        if let Some(msg) = &bs.notice {
+            bar_line(
+                c,
+                Color::rgb(0xFF, 0xE6, 0x9C),
+                Color::rgb(0x6B, 0x3F, 0x00),
+                msg,
+            );
+        }
+        if bs.find.is_open() {
+            let mut t = String::from("Buscar: ");
+            t.push_str(bs.find.query());
+            if focused {
+                t.push('|');
+            }
+            let count = alloc::format!("   {}/{}", bs.find.position(), bs.find.count());
+            t.push_str(&count);
+            bar_line(c, Color::rgb(0xE3, 0xE9, 0xF5), theme::TEXT, &t);
+        }
+        // Suggestions under the address bar.
+        let sugg = bs.browser.suggestions();
+        if !sugg.is_empty() && focused {
+            let sel = bs.browser.suggestion_selected();
+            let first = osjeff_core::layout::browser_suggestion_row(ch.bar, 0);
+            let total = sugg.len() as i32 * first.h;
+            c.fill_round_rect_alpha(
+                (first.x + 3) as usize,
+                (first.y + 5) as usize,
+                first.w as usize,
+                total as usize,
+                8,
+                theme::SHADOW,
+                40,
+            );
+            c.fill_round_rect(
+                first.x as usize,
+                first.y as usize,
+                first.w as usize,
+                total as usize,
+                8,
+                theme::WHITE,
+            );
+            for (i, s) in sugg.iter().enumerate() {
+                let row = osjeff_core::layout::browser_suggestion_row(ch.bar, i);
+                if sel == Some(i) {
+                    c.fill_round_rect_alpha(
+                        (row.x + 3) as usize,
+                        (row.y + 1) as usize,
+                        (row.w - 6) as usize,
+                        (row.h - 2) as usize,
+                        6,
+                        theme::accent(),
+                        60,
+                    );
+                }
+                if s.bookmark {
+                    glyph_star(c, Rect::new(row.x + 8, row.y + 3, 20, 20), true);
+                }
+                let room = ((row.w - 44).max(0) as usize) / font::cell_w(2);
+                let label: String = s.label.chars().take(room).collect();
+                let label = osjeff_core::web::fold_for_display(&label);
+                font::draw_text(
+                    c,
+                    (row.x + 36) as usize,
+                    (row.y + 6) as usize,
+                    &label,
+                    theme::TEXT,
+                    2,
+                );
+            }
+        }
+    }
+
+    fn draw_browser_inner(&self, c: &mut Canvas, r: Rect, focused: bool, bs: &BrowserState) {
         let ch = BrowserChrome::of(r);
 
         // ---- toolbar: nav buttons + address bar + search button ----
         let tool_bg = Color::rgb(0xEC, 0xEF, 0xF5);
-        draw_tool_button(c, ch.home, tool_bg, theme::HEADER);
-        glyph_home(c, ch.home, theme::HEADER);
+        let dim = Color::rgb(0xB8, 0xC0, 0xCE);
+        draw_tool_button(c, ch.back, tool_bg, theme::HEADER);
+        let on = |yes: bool| if yes { theme::HEADER } else { dim };
+        glyph_arrow(c, ch.back, on(bs.browser.can_back()), true);
+        draw_tool_button(c, ch.forward, tool_bg, theme::HEADER);
+        glyph_arrow(c, ch.forward, on(bs.browser.can_forward()), false);
         draw_tool_button(c, ch.reload, tool_bg, theme::HEADER);
         glyph_reload(c, ch.reload, theme::HEADER, tool_bg);
+        draw_tool_button(c, ch.home, tool_bg, theme::HEADER);
+        glyph_home(c, ch.home, theme::HEADER);
 
         // Address bar: white pill with a 1px border, a leading globe, the URL
         // (or a muted placeholder) and a caret when focused.
@@ -145,13 +260,14 @@ impl Desktop {
             theme::WHITE,
         );
         glyph_globe(c, Rect::new(bar.x + 10, bar.y + (bar.h - 18) / 2, 18, 18));
+        glyph_star(c, ch.star, bs.browser.is_bookmarked());
 
         // Connection badge, right-aligned inside the bar. The padlock ("Conexao
         // segura", green) is shown only for a connection whose certificate chain
         // was verified by the TLS client; an https page the user chose to open
         // despite a certificate error says "Certificado invalido" in red, and
         // plain http says it is not encrypted. Text is ASCII (bitmap font).
-        let mut badge_reserved = 0;
+        let mut badge_reserved = 34;
         if let Some(label) = bs.browser.security().label() {
             use osjeff_core::browser::Security;
             let (bg, fg) = match bs.browser.security() {
@@ -165,7 +281,7 @@ impl Desktop {
             let tw = font::text_width(label, scale) as i32;
             let ph = 7 * scale as i32 + 8;
             let pw = tw + 16;
-            let px = bar.x + bar.w - pw - 8;
+            let px = bar.x + bar.w - pw - 42;
             let py = bar.y + (bar.h - ph) / 2;
             c.fill_round_rect(
                 px as usize,
@@ -176,7 +292,7 @@ impl Desktop {
                 bg,
             );
             font::draw_text(c, (px + 8) as usize, (py + 4) as usize, label, fg, scale);
-            badge_reserved = pw + 12;
+            badge_reserved = pw + 46;
         }
 
         let tx = (bar.x + 36) as usize;
@@ -194,8 +310,17 @@ impl Desktop {
             );
         } else {
             let shown = &url[url.len().saturating_sub(bar_cols)..];
+            if focused && bs.browser.bar_selected() {
+                c.fill_rect(
+                    tx.saturating_sub(2),
+                    ty - 2,
+                    shown.len() * font::cell_w(2) + 4,
+                    18,
+                    Color::rgb(0xA8, 0xCB, 0xFF),
+                );
+            }
             font::draw_bytes(c, tx, ty, shown, theme::TEXT, 2);
-            if focused {
+            if focused && bs.browser.bar_focus() {
                 let caret = bs.browser.caret().min(shown.len());
                 let cx = tx + caret * font::cell_w(2);
                 c.fill_rect(cx, ty - 1, 2, 16, theme::accent());
@@ -285,6 +410,36 @@ impl Desktop {
         let bottom = top + content.h;
         let ox = content.x;
         let oy = content.y - top;
+        // Under the text: find matches, then the mouse selection.
+        let mark = |c: &mut Canvas, s: &osjeff_core::web::textops::Span, col: Color| {
+            if s.y + s.h < top || s.y > bottom {
+                return;
+            }
+            let py = (oy + s.y).max(content.y);
+            let ph = (s.y + s.h + oy).min(content.bottom()) - py;
+            let px = ox + s.x;
+            let pw = s.w.min(content.right() - px);
+            if ph > 0 && pw > 0 {
+                c.fill_rect(
+                    px.max(0) as usize,
+                    py.max(0) as usize,
+                    pw as usize,
+                    ph as usize,
+                    col,
+                );
+            }
+        };
+        for s in bs.find.other_spans() {
+            mark(c, s, Color::rgb(0xFF, 0xE0, 0x8A));
+        }
+        for s in bs.find.current_spans() {
+            mark(c, s, Color::rgb(0xFF, 0xA9, 0x4D));
+        }
+        if let Some(range) = bs.sel {
+            for s in &page.selection_spans(range) {
+                mark(c, s, Color::rgb(0xA8, 0xCB, 0xFF));
+            }
+        }
         for cmd in &page.cmds {
             match cmd {
                 Cmd::Image { x, y, w, h, idx } => {
@@ -338,6 +493,49 @@ impl Desktop {
                         font::draw_bytes(c, px + 1, py, bytes, rgb(*color), *scale as usize);
                     }
                 }
+            }
+        }
+        // Form controls: the text they hold, the caret and the focus ring.
+        let focus = bs.forms.focus();
+        for f in &page.fields {
+            if f.y + f.h < top || f.y > bottom {
+                continue;
+            }
+            let (fx, fy) = (ox + f.x, oy + f.y);
+            if f.kind.is_text() {
+                let cw = font::cell_w(f.scale as usize);
+                let cols = ((f.w - 2 * f.pad_x).max(0) as usize / cw).max(1);
+                let (shown, caret_col) = bs.forms.visible(&page.forms, f.form, f.field, cols);
+                let ty = (fy + f.pad_y).max(content.y);
+                if fy + f.pad_y >= content.y
+                    && fy + f.pad_y + 9 * f.scale as i32 <= content.bottom()
+                {
+                    font::draw_text(
+                        c,
+                        (fx + f.pad_x) as usize,
+                        ty as usize,
+                        &shown,
+                        theme::TEXT,
+                        f.scale as usize,
+                    );
+                    if focus == Some((f.form, f.field)) {
+                        c.fill_rect(
+                            (fx + f.pad_x) as usize + caret_col * cw,
+                            ty as usize,
+                            2,
+                            9 * f.scale as usize,
+                            theme::accent(),
+                        );
+                    }
+                }
+            }
+            if focus == Some((f.form, f.field)) && fy >= content.y && fy + f.h <= content.bottom() {
+                let ring = theme::accent();
+                let (x, y, w, h) = (fx as usize, fy as usize, f.w as usize, f.h as usize);
+                c.fill_rect(x, y, w, 2, ring);
+                c.fill_rect(x, y + h - 2, w, 2, ring);
+                c.fill_rect(x, y, 2, h, ring);
+                c.fill_rect(x + w - 2, y, 2, h, ring);
             }
         }
     }
@@ -943,7 +1141,12 @@ impl Desktop {
         let py = self.cursor_y as usize;
         let outline = Color::rgb(0x10, 0x10, 0x10);
         let fill = Color::rgb(0xFF, 0xFF, 0xFF);
-        for (row, line) in CURSOR.iter().enumerate() {
+        let sprite: &[&str] = if self.cursor_is_hand() {
+            &HAND
+        } else {
+            &CURSOR
+        };
+        for (row, line) in sprite.iter().enumerate() {
             for (col, ch) in line.bytes().enumerate() {
                 let color = match ch {
                     b'#' => outline,
@@ -1028,6 +1231,81 @@ fn donut(c: &mut Canvas, cx: i32, cy: i32, rad: i32, thick: i32, color: Color, b
 
 // Small vector glyphs centered in their button rects (the bitmap font has no
 // icon glyphs).
+/// A bitmap drawn at integer scale, centered in `r` (`#` = set).
+fn draw_bitmap(c: &mut Canvas, r: Rect, rows: &[&str], scale: i32, color: Color) {
+    let w = rows.iter().map(|l| l.len()).max().unwrap_or(0) as i32 * scale;
+    let h = rows.len() as i32 * scale;
+    let (x0, y0) = (r.x + (r.w - w) / 2, r.y + (r.h - h) / 2);
+    for (j, line) in rows.iter().enumerate() {
+        for (i, b) in line.bytes().enumerate() {
+            if b == b'#' {
+                c.fill_rect(
+                    (x0 + i as i32 * scale) as usize,
+                    (y0 + j as i32 * scale) as usize,
+                    scale as usize,
+                    scale as usize,
+                    color,
+                );
+            }
+        }
+    }
+}
+
+const ARROW_LEFT: [&str; 9] = [
+    "....#........",
+    "...##........",
+    "..###........",
+    ".############",
+    "#############",
+    ".############",
+    "..###........",
+    "...##........",
+    "....#........",
+];
+const ARROW_RIGHT: [&str; 9] = [
+    "........#....",
+    "........##...",
+    "........###..",
+    "############.",
+    "#############",
+    "############.",
+    "........###..",
+    "........##...",
+    "........#....",
+];
+const STAR: [&str; 11] = [
+    ".....#.....",
+    ".....#.....",
+    "....###....",
+    "###########",
+    ".#########.",
+    "..#######..",
+    "...#####...",
+    "..#######..",
+    "..###.###..",
+    ".###...###.",
+    ".#.......#.",
+];
+
+fn glyph_arrow(c: &mut Canvas, r: Rect, color: Color, left: bool) {
+    draw_bitmap(
+        c,
+        r,
+        if left { &ARROW_LEFT } else { &ARROW_RIGHT },
+        2,
+        color,
+    );
+}
+
+fn glyph_star(c: &mut Canvas, r: Rect, on: bool) {
+    let color = if on {
+        Color::rgb(0xF5, 0x9E, 0x0B)
+    } else {
+        Color::rgb(0xB8, 0xC0, 0xCE)
+    };
+    draw_bitmap(c, r, &STAR, 2, color);
+}
+
 fn glyph_home(c: &mut Canvas, r: Rect, color: Color) {
     let cx = r.x + r.w / 2;
     let top = r.y + r.h / 2 - 8;

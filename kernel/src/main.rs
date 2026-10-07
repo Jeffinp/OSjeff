@@ -835,6 +835,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 browser_redraw = true;
             }
         }
+        if desk.browser_poll_internal() {
+            browser_redraw = true;
+        }
         if let Some(res) = fetch::take_image_result() {
             desk.browser_image_done(res);
             browser_redraw = true;

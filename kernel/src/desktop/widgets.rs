@@ -305,6 +305,25 @@ pub(crate) fn write_uint(buf: &mut [u8], start: usize, width: usize, mut v: u32)
     }
 }
 
+/// The pointing hand over links and buttons (same 10x16 box and hot spot as [`CURSOR`]).
+pub(crate) const HAND: [&str; 15] = [
+    "##        ",
+    "#.#       ",
+    "#.#       ",
+    "#.#       ",
+    "#.####    ",
+    "#.#..###  ",
+    "#.#..#.## ",
+    "#.#..#..# ",
+    "#.......# ",
+    "##......# ",
+    " #......# ",
+    " #.....#  ",
+    "  #....#  ",
+    "  #....#  ",
+    "  ######  ",
+];
+
 pub(crate) const CURSOR: [&str; 16] = [
     "#         ",
     "##        ",

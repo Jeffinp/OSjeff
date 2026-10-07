@@ -222,6 +222,22 @@ pub(crate) struct BrowserState {
     pub img_inflight: Option<String>,
     /// Page zoom in percent.
     pub zoom: u16,
+    /// What the user typed into the page's form controls.
+    pub forms: osjeff_core::web::form::FormState,
+    /// Ctrl+F bar and matches.
+    pub find: osjeff_core::web::find::FindBar,
+    /// Start of a mouse selection (page coordinates) and the selected word range.
+    pub sel_anchor: Option<(i32, i32)>,
+    pub sel: Option<(usize, usize)>,
+    /// A one-line message over the bottom of the page (cleared by the next key or click).
+    pub notice: Option<String>,
+}
+
+/// The single place that decides where the browser's favourites live. In memory for now: a
+/// persistent store (a file in the filesystem) only has to implement
+/// `osjeff_core::browser::BookmarkStore` and be returned here.
+fn new_bookmark_store() -> Box<dyn osjeff_core::browser::BookmarkStore> {
+    Box::new(osjeff_core::browser::MemoryBookmarks::default())
 }
 
 /// An editor window: the buffer and the file it was opened from / saves to.
@@ -378,7 +394,7 @@ impl App {
             Kind::TaskMgr => App::TaskMgr,
             Kind::Calculator => App::Calculator(Box::new(Calc::new())),
             Kind::Browser => App::Browser(Box::new(BrowserState {
-                browser: osjeff_core::Browser::new(),
+                browser: osjeff_core::Browser::with_store(new_bookmark_store()),
                 doc: None,
                 page: None,
                 scroll: 0,
@@ -387,6 +403,11 @@ impl App {
                 img_keys: Vec::new(),
                 img_inflight: None,
                 zoom: 100,
+                forms: osjeff_core::web::form::FormState::default(),
+                find: osjeff_core::web::find::FindBar::new(),
+                sel_anchor: None,
+                sel: None,
+                notice: None,
             })),
             Kind::WasmApp => App::Wasm(Box::new(WasmWin {
                 id: 0,

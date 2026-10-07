@@ -7,6 +7,9 @@
 //! fetches the bytes; the kernel renders them with the `web` engine.
 
 use crate::Key;
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 /// Max bytes of a URL (address bar + resolved navigation target).
 pub const URL_CAP: usize = 480;
@@ -571,6 +574,150 @@ pub fn decode_utf8(bytes: &[u8]) -> (u32, usize) {
     (cp, len)
 }
 
+// ---- favourites, suggestions, internal pages ----
+
+/// Scheme of the browser's own pages.
+pub const INTERNAL_SCHEME: &[u8] = b"osjeff:";
+
+/// Most favourites kept.
+pub const MAX_BOOKMARKS: usize = 64;
+/// Most suggestions shown under the address bar.
+pub const MAX_SUGGESTIONS: usize = 6;
+
+/// A favourite: an absolute URL and the page's title.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Bookmark {
+    pub url: String,
+    pub title: String,
+}
+
+/// Where favourites live. The browser only talks to this trait, so persistence
+/// (a file on the filesystem) is a matter of giving [`Browser::with_store`] another
+/// implementation; [`MemoryBookmarks`] forgets everything at power-off.
+pub trait BookmarkStore {
+    /// Every favourite, oldest first.
+    fn all(&self) -> Vec<Bookmark>;
+    /// Add one; `false` when it is already there or the store is full.
+    fn add(&mut self, b: Bookmark) -> bool;
+    /// Remove the favourite with this URL; `false` when there is none.
+    fn remove(&mut self, url: &str) -> bool;
+    fn contains(&self, url: &str) -> bool {
+        self.all().iter().any(|b| b.url == url)
+    }
+}
+
+/// Favourites in memory, at most [`MAX_BOOKMARKS`].
+#[derive(Default)]
+pub struct MemoryBookmarks {
+    items: Vec<Bookmark>,
+}
+
+impl BookmarkStore for MemoryBookmarks {
+    fn all(&self) -> Vec<Bookmark> {
+        self.items.clone()
+    }
+    fn add(&mut self, b: Bookmark) -> bool {
+        if self.items.len() >= MAX_BOOKMARKS || self.items.iter().any(|x| x.url == b.url) {
+            return false;
+        }
+        self.items.push(b);
+        true
+    }
+    fn remove(&mut self, url: &str) -> bool {
+        let n = self.items.len();
+        self.items.retain(|b| b.url != url);
+        self.items.len() != n
+    }
+    fn contains(&self, url: &str) -> bool {
+        self.items.iter().any(|b| b.url == url)
+    }
+}
+
+/// One line of the suggestion list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Suggestion {
+    pub url: String,
+    /// Text shown: the page title for a favourite, else the URL.
+    pub label: String,
+    pub bookmark: bool,
+}
+
+/// An address without its scheme and a leading `www.`, lower-cased, for matching.
+fn bare(url: &str) -> String {
+    let l = url.trim().to_ascii_lowercase();
+    let l = l
+        .strip_prefix("https://")
+        .or_else(|| l.strip_prefix("http://"))
+        .unwrap_or(&l);
+    l.strip_prefix("www.").unwrap_or(l).into()
+}
+
+/// Rank `url`/`title` against the query: 0 = prefix of the address, 1 = contained in the
+/// address or the title, `None` = no match.
+fn rank(q: &str, url: &str, title: &str) -> Option<u8> {
+    if bare(url).starts_with(q) {
+        Some(0)
+    } else if bare(url).contains(q) || title.to_ascii_lowercase().contains(q) {
+        Some(1)
+    } else {
+        None
+    }
+}
+
+/// Build the suggestion list for `query` from favourites and history (newest first).
+pub fn suggest(query: &str, bookmarks: &[Bookmark], history: &[String]) -> Vec<Suggestion> {
+    let q = bare(query);
+    if q.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<Suggestion> = Vec::new();
+    for want in [0u8, 1] {
+        for b in bookmarks {
+            if rank(&q, &b.url, &b.title) == Some(want) && !out.iter().any(|s| s.url == b.url) {
+                out.push(Suggestion {
+                    url: b.url.clone(),
+                    label: if b.title.is_empty() {
+                        b.url.clone()
+                    } else {
+                        b.title.clone()
+                    },
+                    bookmark: true,
+                });
+            }
+        }
+        for u in history {
+            if rank(&q, u, "") == Some(want) && !out.iter().any(|s| s.url == *u) {
+                out.push(Suggestion {
+                    url: u.clone(),
+                    label: u.clone(),
+                    bookmark: false,
+                });
+            }
+        }
+    }
+    // A single suggestion that is exactly what was typed adds nothing.
+    if out.len() == 1 && bare(&out[0].url) == q {
+        out.clear();
+    }
+    out.truncate(MAX_SUGGESTIONS);
+    out
+}
+
+/// Escape `&`, `<`, `>`, `"` for HTML text and attribute values.
+pub fn html_escape(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => o.push_str("&amp;"),
+            '<' => o.push_str("&lt;"),
+            '>' => o.push_str("&gt;"),
+            '"' => o.push_str("&quot;"),
+            _ => o.push(c),
+        }
+    }
+    o
+}
+
 // ---- the address-bar model ----
 
 /// The browser app's editable address bar and navigation state. The rendered
@@ -591,6 +738,22 @@ pub struct Browser {
     fail_reason: FailReason,
     insecure: InsecureHosts,
     history: History,
+    bookmarks: Box<dyn BookmarkStore>,
+    /// Keyboard focus is in the address bar (else on the page).
+    bar_focus: bool,
+    /// Highlighted suggestion (Up/Down in the address bar).
+    sugg_sel: Option<usize>,
+    /// Esc closed the suggestion list; it stays closed until the text changes.
+    sugg_dismissed: bool,
+    /// The page on screen is an `osjeff://` page generated by the browser.
+    internal: bool,
+    /// An internal page was just opened: the kernel must fetch its HTML with
+    /// [`Browser::take_internal`].
+    internal_ready: bool,
+    /// `<title>` of the page on screen (set by the kernel after layout).
+    page_title: String,
+    /// The whole address is selected (Ctrl+L, a click on the bar): the next edit replaces it.
+    bar_selected: bool,
 }
 
 /// Pages kept in the in-memory history (the oldest is dropped when full).
@@ -704,8 +867,23 @@ impl Browser {
             fail_reason: FailReason::Network,
             insecure: InsecureHosts::new(),
             history: History::default(),
+            bookmarks: Box::new(MemoryBookmarks::default()),
+            bar_focus: true,
+            sugg_sel: None,
+            sugg_dismissed: false,
+            internal: false,
+            internal_ready: false,
+            page_title: String::new(),
+            bar_selected: false,
         };
         b.set_url(b"");
+        b
+    }
+
+    /// A browser whose favourites live in `store` (the one place the kernel plugs persistence in).
+    pub fn with_store(store: Box<dyn BookmarkStore>) -> Self {
+        let mut b = Self::new();
+        b.bookmarks = store;
         b
     }
 
@@ -737,6 +915,7 @@ impl Browser {
     }
 
     fn set_url(&mut self, s: &[u8]) {
+        self.bar_selected = false;
         self.url_len = s.len().min(URL_CAP);
         self.url[..self.url_len].copy_from_slice(&s[..self.url_len]);
         self.caret = self.url_len;
@@ -773,6 +952,48 @@ impl Browser {
     /// Handle a key while the address bar has focus. Returns `true` if anything
     /// changed (so the caller repaints). ENTER submits a navigation/search.
     pub fn on_key(&mut self, key: Key) -> bool {
+        // Suggestion list: Up/Down move through it, Enter opens the highlighted one.
+        let n = self.suggestions().len();
+        match key {
+            Key::Down if n > 0 => {
+                self.sugg_sel = Some(self.sugg_sel.map_or(0, |i| (i + 1).min(n - 1)));
+                return true;
+            }
+            Key::Up if n > 0 => {
+                self.sugg_sel = match self.sugg_sel {
+                    Some(0) | None => None,
+                    Some(i) => Some(i - 1),
+                };
+                return true;
+            }
+            Key::Enter if self.sugg_sel.is_some() => {
+                let i = self.sugg_sel.unwrap_or(0);
+                if let Some(s) = self.suggestions().get(i) {
+                    let url = s.url.clone();
+                    self.open(url.as_bytes());
+                }
+                return true;
+            }
+            Key::Esc if n > 0 => {
+                self.sugg_dismissed = true;
+                self.sugg_sel = None;
+                return true;
+            }
+            Key::Char(_) | Key::Backspace | Key::Delete => {
+                self.sugg_sel = None;
+                self.sugg_dismissed = false;
+                // A selected address is replaced by what is typed (or just deleted).
+                if core::mem::take(&mut self.bar_selected) {
+                    self.url_len = 0;
+                    self.caret = 0;
+                    if matches!(key, Key::Backspace | Key::Delete) {
+                        return true;
+                    }
+                }
+            }
+            Key::Left | Key::Right | Key::Home | Key::End => self.bar_selected = false,
+            _ => {}
+        }
         match key {
             Key::Char(c) => {
                 if self.url_len < URL_CAP {
@@ -839,6 +1060,14 @@ impl Browser {
         if input.trim_ascii().is_empty() {
             return;
         }
+        self.sugg_sel = None;
+        self.sugg_dismissed = true;
+        if starts_with_ci(input.trim_ascii(), INTERNAL_SCHEME) {
+            let url = input.trim_ascii().to_vec();
+            self.open_internal(&url);
+            return;
+        }
+        self.internal = false;
         let mut nav = [0u8; URL_CAP];
         let n = if looks_like_url(input) {
             // Normalize: prepend https:// if no scheme was given.
@@ -925,10 +1154,10 @@ impl Browser {
 
     fn replay_current(&mut self) {
         let url = self.history.urls[self.history.cur].clone();
+        // Set before `submit`: an `osjeff://` page is "loaded" inside it.
+        self.history.replay = true;
         self.set_url(&url);
         self.submit();
-        // `submit` normalizes the address; the stored URL is already absolute.
-        self.history.replay = true;
     }
 
     /// The user clicked a link whose `href` is `href` on the current page:
@@ -936,7 +1165,19 @@ impl Browser {
     /// forms; `javascript:`, `data:` and an https -> http downgrade are refused)
     /// and navigate there. Returns `false` when the link was refused.
     pub fn open_link(&mut self, href: &[u8]) -> bool {
-        let Some(base) = parse_url(self.nav_url()) else {
+        if starts_with_ci(href.trim_ascii(), INTERNAL_SCHEME) {
+            self.set_url(href.trim_ascii());
+            self.submit();
+            return true;
+        }
+        // The browser's own pages have no real address: resolve against a neutral http base so
+        // their absolute links are not mistaken for an https -> http downgrade.
+        let base = if self.internal {
+            parse_url(b"http://osjeff.local/")
+        } else {
+            parse_url(self.nav_url())
+        };
+        let Some(base) = base else {
             return false;
         };
         match crate::redirect::resolve_redirect(&base, href) {
@@ -996,6 +1237,228 @@ impl Browser {
         }
         self.pending = true;
         self.status = Status::Loading;
+    }
+
+    // ---- the browser's own pages, favourites and suggestions ----
+
+    /// True while an `osjeff://` page is on screen.
+    pub fn is_internal(&self) -> bool {
+        self.internal
+    }
+
+    /// Open the internal page `url` (`osjeff://inicio`, `favoritos`, `historico`, `sobre`).
+    /// Unknown names show the "about" page's list of pages.
+    fn open_internal(&mut self, url: &[u8]) {
+        let text = String::from_utf8_lossy(url).to_ascii_lowercase();
+        let rest = text.trim_start_matches("osjeff:").trim_start_matches('/');
+        let (name, query) = rest.split_once('?').unwrap_or((rest, ""));
+        let name = name.trim_end_matches('/');
+        if name == "inicio" || name.is_empty() {
+            self.internal = false;
+            self.go_home();
+            return;
+        }
+        // `osjeff://favoritos?rm=N` removes the N-th favourite, then shows the list.
+        let mut shown = alloc::format!("osjeff://{name}");
+        if name == "favoritos"
+            && let Some(n) = query
+                .strip_prefix("rm=")
+                .and_then(|v| v.parse::<usize>().ok())
+            && let Some(b) = self.bookmarks.all().get(n)
+        {
+            let u = b.url.clone();
+            self.bookmarks.remove(&u);
+            shown = String::from("osjeff://favoritos");
+        }
+        self.set_url(shown.as_bytes());
+        let n = self.url_len;
+        self.nav[..n].copy_from_slice(&self.url[..n]);
+        self.nav_len = n;
+        self.internal = true;
+        self.internal_ready = true;
+        self.security = Security::None;
+        self.truncated = false;
+        self.pending = false;
+        self.home = false;
+        self.loaded();
+    }
+
+    /// The HTML of an internal page that was just opened (once), for the kernel to lay out.
+    pub fn take_internal(&mut self) -> Option<Vec<u8>> {
+        if !core::mem::take(&mut self.internal_ready) {
+            return None;
+        }
+        let name = String::from_utf8_lossy(self.nav_url()).to_ascii_lowercase();
+        let name = name.trim_start_matches("osjeff://");
+        Some(match name {
+            "favoritos" => self.page_bookmarks(),
+            "historico" => self.page_history(),
+            _ => self.page_about(),
+        })
+    }
+
+    fn page_bookmarks(&self) -> Vec<u8> {
+        let mut h =
+            String::from("<html><head><title>Favoritos</title></head><body><h1>Favoritos</h1>");
+        let all = self.bookmarks.all();
+        if all.is_empty() {
+            h.push_str("<p>Nenhum favorito ainda. Abra uma pagina e aperte Ctrl+D.</p>");
+        }
+        for (i, b) in all.iter().enumerate() {
+            h.push_str(&alloc::format!(
+                "<p><a href=\"{u}\">{t}</a> <a href=\"osjeff://favoritos?rm={i}\">[remover]</a><br>{u}</p>",
+                u = html_escape(&b.url),
+                t = html_escape(if b.title.is_empty() { &b.url } else { &b.title }),
+            ));
+        }
+        h.push_str("<p><a href=\"osjeff://inicio\">Inicio</a> | <a href=\"osjeff://historico\">Historico</a></p></body></html>");
+        h.into_bytes()
+    }
+
+    fn page_history(&self) -> Vec<u8> {
+        let mut h =
+            String::from("<html><head><title>Historico</title></head><body><h1>Historico</h1>");
+        let mut any = false;
+        for u in self.history.urls.iter().rev() {
+            let u = String::from_utf8_lossy(u);
+            if u.starts_with("osjeff://") {
+                continue;
+            }
+            any = true;
+            h.push_str(&alloc::format!(
+                "<p><a href=\"{0}\">{0}</a></p>",
+                html_escape(&u)
+            ));
+        }
+        if !any {
+            h.push_str("<p>Nada visitado ainda.</p>");
+        }
+        h.push_str("<p><a href=\"osjeff://inicio\">Inicio</a> | <a href=\"osjeff://favoritos\">Favoritos</a></p></body></html>");
+        h.into_bytes()
+    }
+
+    fn page_about(&self) -> Vec<u8> {
+        let mut h = String::from(
+            "<html><head><title>Sobre o navegador</title></head><body><h1>Navegador OSjeff</h1>",
+        );
+        h.push_str("<p>HTTPS com certificado verificado (TLS 1.3), links, historico, imagens PNG/BMP/PPM, formularios GET, favoritos, busca na pagina e zoom.</p>");
+        h.push_str("<h3>Teclas</h3><ul><li>Alt+Esq / Alt+Dir: voltar e avancar</li><li>Ctrl+D: favorito</li><li>Ctrl+F: buscar na pagina</li><li>Ctrl+ + / - / 0: zoom</li><li>PgUp, PgDn, Home, End, Espaco: rolar</li><li>Ctrl+C: copia o texto selecionado</li></ul>");
+        h.push_str("<h3>Paginas</h3><ul><li><a href=\"osjeff://inicio\">osjeff://inicio</a></li><li><a href=\"osjeff://favoritos\">osjeff://favoritos</a></li><li><a href=\"osjeff://historico\">osjeff://historico</a></li><li><a href=\"osjeff://sobre\">osjeff://sobre</a></li></ul></body></html>");
+        h.into_bytes()
+    }
+
+    /// Remember the `<title>` of the page on screen (for favourites and the window title).
+    pub fn set_page_title(&mut self, title: &str) {
+        self.page_title.clear();
+        // Cut at a character boundary: a title is page-controlled UTF-8.
+        let mut end = title.len().min(80);
+        while !title.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.page_title.push_str(&title[..end]);
+    }
+
+    /// `<title>` of the page on screen (empty when none).
+    pub fn page_title(&self) -> &str {
+        &self.page_title
+    }
+
+    /// Is the page on screen a favourite?
+    pub fn is_bookmarked(&self) -> bool {
+        !self.home
+            && !self.nav_url().is_empty()
+            && self
+                .bookmarks
+                .contains(&String::from_utf8_lossy(self.nav_url()))
+    }
+
+    /// Ctrl+D / the star: add the page to the favourites, or remove it. Returns the new state
+    /// (`true` = now a favourite) or `None` when there is nothing to bookmark (start page, full).
+    pub fn toggle_bookmark(&mut self) -> Option<bool> {
+        if self.home || self.nav_url().is_empty() {
+            return None;
+        }
+        let url = String::from_utf8_lossy(self.nav_url()).into_owned();
+        if self.bookmarks.contains(&url) {
+            self.bookmarks.remove(&url);
+            return Some(false);
+        }
+        let title = if self.page_title.is_empty() {
+            url.clone()
+        } else {
+            self.page_title.clone()
+        };
+        self.bookmarks.add(Bookmark { url, title }).then_some(true)
+    }
+
+    /// The favourites.
+    pub fn bookmarks(&self) -> Vec<Bookmark> {
+        self.bookmarks.all()
+    }
+
+    /// Select the whole address (Ctrl+L): typing replaces it.
+    pub fn select_bar(&mut self) {
+        self.bar_focus = true;
+        self.bar_selected = self.url_len > 0;
+        self.sugg_dismissed = true;
+    }
+
+    /// Is the whole address selected?
+    pub fn bar_selected(&self) -> bool {
+        self.bar_selected
+    }
+
+    /// Keyboard focus is in the address bar (true) or on the page (false).
+    pub fn bar_focus(&self) -> bool {
+        self.bar_focus
+    }
+
+    pub fn set_bar_focus(&mut self, on: bool) {
+        self.bar_focus = on;
+        if !on {
+            self.sugg_sel = None;
+        }
+    }
+
+    /// The history, oldest first (absolute URLs).
+    pub fn history_urls(&self) -> impl Iterator<Item = &[u8]> {
+        self.history.urls.iter().map(|u| u.as_slice())
+    }
+
+    /// Address-bar suggestions for the text typed so far: favourites then history, prefix matches
+    /// before substring matches, at most [`MAX_SUGGESTIONS`]. Empty when the bar has no text, does
+    /// not have the focus, was dismissed with Esc, or only the typed address itself matches.
+    pub fn suggestions(&self) -> Vec<Suggestion> {
+        if !self.bar_focus || self.sugg_dismissed || self.url_len == 0 {
+            return Vec::new();
+        }
+        let q = String::from_utf8_lossy(self.url());
+        let hist: Vec<String> = self
+            .history
+            .urls
+            .iter()
+            .rev()
+            .map(|u| String::from_utf8_lossy(u).into_owned())
+            .filter(|u| !u.starts_with("osjeff://"))
+            .collect();
+        suggest(&q, &self.bookmarks.all(), &hist)
+    }
+
+    /// The highlighted suggestion index.
+    pub fn suggestion_selected(&self) -> Option<usize> {
+        self.sugg_sel
+    }
+
+    /// Choose suggestion `i` (a click): open it.
+    pub fn pick_suggestion(&mut self, i: usize) -> bool {
+        match self.suggestions().get(i) {
+            Some(s) => {
+                let url = s.url.clone();
+                self.open(url.as_bytes());
+                true
+            }
+            None => false,
+        }
     }
 
     /// Mark the current fetch as failed (the kernel shows the error state).
@@ -1618,3 +2081,6 @@ mod tests {
         assert!(b.take_request().is_none());
     }
 }
+
+#[cfg(test)]
+mod ui_tests;

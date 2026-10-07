@@ -137,6 +137,8 @@ pub(crate) enum DragMode {
         ox: i32,
         oy: i32,
     },
+    /// Selecting text on a browser page (the anchor lives in the window's browser state).
+    Select,
 }
 
 pub(crate) struct Drag {
@@ -722,6 +724,57 @@ impl Desktop {
             b.layout_w = content_w;
             layout_browser(b, content_w, true);
         }
+        self.browser_page_changed(id);
+    }
+
+    /// Render the HTML of a page the browser generated itself (`osjeff://...`), if one was just
+    /// opened. Called every frame by the main loop, right next to the network hand-off.
+    pub fn browser_poll_internal(&mut self) -> bool {
+        let Some(id) = self.browser_id() else {
+            return false;
+        };
+        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
+            return false;
+        };
+        let content_w = BrowserChrome::of(rect).content.w;
+        let Some(b) = self.browser_state_mut(id) else {
+            return false;
+        };
+        let Some(html) = b.browser.take_internal() else {
+            return false;
+        };
+        b.doc = Some(osjeff_core::web::Doc::parse(&html));
+        b.images.begin_page();
+        b.img_inflight = None;
+        b.scroll = 0;
+        b.layout_w = content_w;
+        layout_browser(b, content_w, true);
+        self.browser_page_changed(id);
+        true
+    }
+
+    /// A new page is on screen: window title from its `<title>`, selection and find reset.
+    fn browser_page_changed(&mut self, id: WindowId) {
+        let mut title = String::from("NAVEGADOR");
+        if let Some(b) = self.browser_state_mut(id) {
+            let t = b
+                .doc
+                .as_ref()
+                .map(|d| String::from(d.title()))
+                .unwrap_or_default();
+            b.browser.set_page_title(&t);
+            b.sel = None;
+            b.sel_anchor = None;
+            b.notice = None;
+            b.find.refresh(b.page.as_ref());
+            if !t.is_empty() {
+                title.push_str(" - ");
+                title.extend(t.chars().take(48));
+            }
+        }
+        if let Some(w) = self.wm.get_mut(id) {
+            w.app.title = title;
+        }
     }
 
     /// Mark the in-flight browser fetch as failed.
@@ -731,7 +784,13 @@ impl Desktop {
         {
             b.page = None;
             b.doc = None;
+            b.sel = None;
             b.browser.fail_with(reason);
+        }
+        if let Some(id) = self.browser_id()
+            && let Some(w) = self.wm.get_mut(id)
+        {
+            w.app.title = String::from("NAVEGADOR");
         }
     }
 
@@ -856,6 +915,7 @@ fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
     };
     let mut page = lay(&b.images);
     if register {
+        b.forms = osjeff_core::web::form::FormState::new(&page.forms);
         b.img_keys.clear();
         for r in &page.images {
             let key = image_key(&base, &r.src);
@@ -880,6 +940,13 @@ fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
     }
     let _ = changed;
     b.page = Some(page);
+    // The words moved: the selection (word indices) and the find matches follow the new layout.
+    b.find.refresh(b.page.as_ref());
+    if let Some(p) = &b.page
+        && b.sel.is_some_and(|(_, e)| e >= p.word_count())
+    {
+        b.sel = None;
+    }
 }
 
 mod apps;

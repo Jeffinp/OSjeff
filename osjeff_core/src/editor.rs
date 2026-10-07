@@ -131,6 +131,8 @@ impl Editor {
                     self.insert(b' ');
                 }
             }
+            Key::PageUp => (0..10).for_each(|_| self.move_up()),
+            Key::PageDown => (0..10).for_each(|_| self.move_down()),
             Key::Esc => {}
         }
     }

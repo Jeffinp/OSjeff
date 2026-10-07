@@ -19,6 +19,8 @@ pub enum Key {
     Down,
     Home,
     End,
+    PageUp,
+    PageDown,
 }
 
 /// Physical keyboard layout the scancodes are read with.
@@ -239,6 +241,8 @@ impl Keymap {
                 0x4D => Some(Key::Right),
                 0x47 => Some(Key::Home),
                 0x4F => Some(Key::End),
+                0x49 => Some(Key::PageUp),
+                0x51 => Some(Key::PageDown),
                 0x53 => Some(Key::Delete),
                 _ => None,
             };
