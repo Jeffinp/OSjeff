@@ -56,6 +56,23 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo llvm-cov -p osjeff_core --branch --fail-under-lines 90 --summary-only
 
+  # Replays every minimised crash input (fuzz/regressions) through the fuzz targets
+  # with overflow checks on. A fixed bug that comes back fails here.
+  fuzz-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - uses: taiki-e/install-action@cargo-fuzz
+      - run: |
+          cd fuzz
+          for t in net_parse ojfs_parse web_parse; do
+            cargo fuzz run "$t" regressions/"$t"/*
+          done
+
   supply-chain:
     runs-on: ubuntu-latest
     steps:
