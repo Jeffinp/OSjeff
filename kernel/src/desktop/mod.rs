@@ -124,12 +124,12 @@ pub(crate) struct MenuState {
 pub(crate) enum DragMode {
     /// Moving the window: offset of the grab point inside it.
     Move { grab_dx: i32, grab_dy: i32 },
-    /// Resizing from `edge`; `start` is the window rect and `(ox, oy)` the
-    /// pointer position when the drag began.
     /// Dragging the image of a viewer window: last pointer position.
     Pan { last_x: i32, last_y: i32 },
     /// Extending a text selection in an editor window.
     Select,
+    /// Resizing from `edge`; `start` is the window rect and `(ox, oy)` the
+    /// pointer position when the drag began.
     Resize {
         edge: ResizeEdge,
         start: Rect,
@@ -137,7 +137,7 @@ pub(crate) enum DragMode {
         oy: i32,
     },
     /// Selecting text on a browser page (the anchor lives in the window's browser state).
-    Select,
+    PageSelect,
 }
 
 pub(crate) struct Drag {

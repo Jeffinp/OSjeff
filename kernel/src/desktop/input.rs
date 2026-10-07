@@ -794,11 +794,9 @@ impl Desktop {
                 true
             }
             // Nothing to scroll (the WASM guest has no wheel ABI).
-            Kind::Calculator
-            | Kind::WasmApp
-            | Kind::Monitor
-            | Kind::Settings
-            | Kind::LogViewer => false,
+            Kind::Calculator | Kind::WasmApp | Kind::Monitor | Kind::Settings | Kind::LogViewer => {
+                false
+            }
         };
         if changed && let Some(r) = self.wm.get(w).map(|win| self.window_box(win)) {
             // The target may not be the focused window: make sure it is uploaded.
@@ -883,7 +881,7 @@ impl Desktop {
                 if self.browser_click(w, rect, cx, cy) {
                     self.drag = Some(Drag {
                         win: w,
-                        mode: DragMode::Select,
+                        mode: DragMode::PageSelect,
                     });
                 }
             }
@@ -1060,7 +1058,7 @@ impl Desktop {
                     } => {
                         self.wm.resize(w, edge, start, (cx - ox, cy - oy), (sw, sh));
                     }
-                    DragMode::Select => self.browser_select_drag(w),
+                    DragMode::PageSelect => self.browser_select_drag(w),
                 }
                 // NOT scene_dirty: a drag is driven by the per-frame damage path
                 // (keyed on `cursor_moved`), which repaints only the window's
