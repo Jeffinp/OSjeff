@@ -34,6 +34,9 @@ static LINE: RacyCell<LineAsm> = RacyCell::new(LineAsm::new());
 /// Sequence number the next record will get (mirror of the ring's, readable
 /// without entering the critical section).
 static SEQ: AtomicU32 = AtomicU32::new(0);
+/// `1 + seq` of the newest record at WARN or above (0 = none yet): lets the
+/// toast overlay notice a warning with one atomic load per pass.
+static WARN_SEQ: AtomicU32 = AtomicU32::new(0);
 /// Mirror serial output into the ring. Cleared by [`freeze`] when the kernel is dying.
 static CAPTURE: AtomicBool = AtomicBool::new(true);
 
@@ -52,6 +55,9 @@ fn record(ring: &mut LogRing<RING_BYTES>, level: Level, text: &[u8]) {
     let origin = u8::try_from(crate::sched::current()).unwrap_or(255);
     let seq = ring.push(ts, level, origin, text);
     SEQ.store(seq.wrapping_add(1), Ordering::Release);
+    if level >= Level::Warn {
+        WARN_SEQ.store(seq.wrapping_add(1), Ordering::Release);
+    }
 }
 
 /// Sink for `core::fmt` that mirrors every piece to the UART (exactly as
@@ -149,4 +155,58 @@ pub fn snapshot(out: &mut Vec<u8>) {
     out.resize(RING_BYTES, 0);
     let n = with_ring(|r| r.copy_out(out));
     out.truncate(n);
+}
+
+/// Milliseconds since boot (4 ms resolution), the clock log records use.
+pub fn ticks_to_ms_now() -> u32 {
+    ticks_to_ms(crate::interrupts::ticks(), crate::interrupts::TIMER_HZ)
+}
+
+/// `1 + seq` of the newest WARN-or-above record, 0 if there is none.
+pub fn warn_seq() -> u32 {
+    WARN_SEQ.load(Ordering::Acquire)
+}
+
+/// A WARN-or-above message seen by [`take_warnings`].
+#[derive(Clone, Copy)]
+pub struct Warning {
+    pub level: Level,
+    text: [u8; 64],
+    len: u8,
+}
+
+impl Warning {
+    pub fn text(&self) -> &[u8] {
+        &self.text[..self.len as usize]
+    }
+}
+
+/// Collect (up to `out.len()`) WARN-or-above records newer than `*seen`
+/// (advancing it to the current sequence) and return how many. One atomic load
+/// when nothing new has been logged.
+pub fn take_warnings(seen: &mut u32, out: &mut [Option<Warning>]) -> usize {
+    let w = warn_seq();
+    // A warning exists since `seen` iff its `1 + seq` is above `seen`.
+    if w == 0 || (w.wrapping_sub(*seen) as i32) <= 0 {
+        return 0;
+    }
+    let from = *seen;
+    let mut n = 0;
+    with_ring(|r| {
+        r.for_each_since(from, Level::Warn, |e| {
+            if n < out.len() {
+                let mut text = [0u8; 64];
+                let l = e.text.len().min(64);
+                text[..l].copy_from_slice(&e.text[..l]);
+                out[n] = Some(Warning {
+                    level: e.level,
+                    text,
+                    len: l as u8,
+                });
+                n += 1;
+            }
+        });
+        *seen = r.next_seq();
+    });
+    n
 }

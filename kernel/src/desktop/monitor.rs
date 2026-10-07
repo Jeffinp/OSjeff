@@ -380,6 +380,11 @@ impl Desktop {
             && let Some(w) = self.window_of_pid(row.pid)
         {
             self.request_close(w);
+            crate::notify!(
+                Info,
+                "Encerrado: {}",
+                core::str::from_utf8(row.name()).unwrap_or("?")
+            );
         }
     }
 

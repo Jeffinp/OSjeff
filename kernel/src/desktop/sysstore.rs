@@ -12,7 +12,10 @@ use osjeff_core::sysif::{
 
 fn map_fs_error(e: fs::FsError) -> SinkError {
     match e {
-        fs::FsError::NoSpace => SinkError::NoSpace,
+        fs::FsError::NoSpace => {
+            crate::klog!(Warn, "disk full: the file could not be written");
+            SinkError::NoSpace
+        }
         fs::FsError::NameTooLong | fs::FsError::EmptyName => SinkError::BadName,
         _ => SinkError::Unavailable,
     }

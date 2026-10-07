@@ -228,7 +228,10 @@ impl Desktop {
 
     pub(crate) fn print_fs_err(&mut self, tid: Option<WindowId>, e: fs::FsError) {
         let msg: &[u8] = match e {
-            fs::FsError::NoSpace => b"error: disk full",
+            fs::FsError::NoSpace => {
+                crate::klog!(Warn, "disk full: the file could not be written");
+                b"error: disk full"
+            }
             fs::FsError::TooBig => b"error: file too big",
             fs::FsError::NameTooLong => b"error: name too long",
             fs::FsError::NotFound => b"error: not found",

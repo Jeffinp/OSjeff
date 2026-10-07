@@ -66,8 +66,8 @@ static PERSIST: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool:
 /// Persist the in-memory filesystem image to the ATA disk (best effort: a no-op
 /// if there is no disk, or if the disk could not be read at boot).
 fn flush_disk() {
-    if PERSIST.load(core::sync::atomic::Ordering::Relaxed) {
-        let _ = crate::ata::write_image(disk());
+    if PERSIST.load(core::sync::atomic::Ordering::Relaxed) && !crate::ata::write_image(disk()) {
+        crate::klog!(Error, "disk: write failed, changes are only in RAM");
     }
 }
 
@@ -184,6 +184,12 @@ pub struct Desktop {
     sysmon: SysMon,
     /// The wallpaper or accent changed: the compositor must repaint the cached background.
     bg_dirty: bool,
+    /// The toast overlay (see `toasts_ui`).
+    toasts: osjeff_core::notify::Toasts,
+    /// Log sequence number up to which WARN+ records already became toasts.
+    toast_seen: u32,
+    /// A toast appeared or was dismissed since the compositor last repainted them.
+    toast_dirty: bool,
     /// Network identity the boot obtained (`nic present`, config), for the settings page.
     net: Option<(bool, osjeff_core::net::NetConfig)>,
     /// The dynamic window table; every window owns an app instance.
@@ -271,6 +277,9 @@ impl Desktop {
             procs,
             sysmon: SysMon::new(),
             bg_dirty: false,
+            toasts: osjeff_core::notify::Toasts::new(),
+            toast_seen: crate::klog::seq(),
+            toast_dirty: false,
             net: None,
             wm: WindowManager::new(osjeff_core::winman::DEFAULT_MAX_WINDOWS),
             drag: None,
@@ -812,6 +821,7 @@ mod monitor;
 mod render;
 mod settings_ui;
 mod sysstore;
+mod toasts_ui;
 mod ui;
 mod wasmwin;
 mod widgets;

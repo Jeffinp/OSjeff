@@ -22,7 +22,7 @@ pub const QUEUE_CAP: usize = 8;
 pub const LIFETIME_MS: u32 = 4000;
 /// Longest message (bytes); the rest is cut.
 pub const TEXT_CAP: usize = 64;
-pub const TOAST_W: i32 = 360;
+pub const TOAST_W: i32 = 420;
 pub const TOAST_H: i32 = 50;
 pub const GAP: i32 = 8;
 /// Distance from the right screen edge.

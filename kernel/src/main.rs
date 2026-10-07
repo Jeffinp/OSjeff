@@ -25,6 +25,7 @@ mod netd;
 mod netstack;
 mod netstats;
 mod nic;
+mod notify;
 mod pci;
 mod perf;
 mod power;
@@ -399,6 +400,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // scheduled (the timer preempts round-robin across all threads).
     const DT_PER_TICK: f32 = 0.03;
     let mut first_frame = true;
+    // Screen area the toasts covered at the last repaint (to restore it).
+    let mut prev_toast_rect = Rect::new(0, 0, 0, 0);
 
     loop {
         let rt = rtc::now();
@@ -753,6 +756,30 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     format_args!("first desktop frame composed + blitted"),
                 );
             }
+        }
+
+        // Toast notifications: new events (WARN+ log records, notify() calls) and
+        // expiry. Only while a toast is on screen, or has just left, is anything
+        // repainted: restore the scene under them from `back`, draw them on top.
+        let toast_changed = desk.poll_toasts(klog::ticks_to_ms_now());
+        if toast_changed || (work && !desk.toasts_idle()) {
+            let tt = trace::t();
+            let cur = desk.toast_bounds();
+            let r = if prev_toast_rect.is_empty() {
+                cur
+            } else if cur.is_empty() {
+                prev_toast_rect
+            } else {
+                prev_toast_rect.union(&cur)
+            };
+            blit_rect(framebuffer.buffer_mut(), back, info, r.x, r.y, r.w, r.h, n);
+            {
+                let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
+                desk.draw_toasts(&mut c);
+            }
+            cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
+            prev_toast_rect = cur;
+            trace::stage(trace::Stage::Hud, tt);
         }
 
         // Perf HUD: refresh ~10x/s as a framebuffer overlay restored from `back`,

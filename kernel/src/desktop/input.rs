@@ -580,7 +580,13 @@ impl Desktop {
         }
 
         if left_pressed {
-            if self.start_open {
+            if self
+                .toasts
+                .click(cx, cy, self.sw, self.sh, toasts_ui::now_ms())
+            {
+                // A click on a toast only dismisses it.
+                self.toast_dirty = true;
+            } else if self.start_open {
                 // Resolve a click on the open start panel (app / power / dismiss).
                 let rows = self.start_rows();
                 let (psx, psy) = start_origin(self.sw, self.sh, rows);
