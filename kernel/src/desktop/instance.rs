@@ -38,6 +38,7 @@ pub(crate) enum Kind {
     Monitor,
     Settings,
     LogViewer,
+    Viewer,
 }
 
 /// How many of the [`Kind::ALL`] apps (the first ones) have a dock slot. The later
@@ -46,7 +47,7 @@ pub(crate) enum Kind {
 pub(crate) const DOCK_APPS: usize = 7;
 
 impl Kind {
-    pub(crate) const ALL: [Kind; 10] = [
+    pub(crate) const ALL: [Kind; 11] = [
         Kind::Terminal,
         Kind::Editor,
         Kind::TaskMgr,
@@ -57,6 +58,7 @@ impl Kind {
         Kind::Monitor,
         Kind::Settings,
         Kind::LogViewer,
+        Kind::Viewer,
     ];
 
     /// Does the window's content change on its own every second (so the
@@ -91,6 +93,7 @@ impl Kind {
             Kind::Monitor => "monitor",
             Kind::Settings => "settings",
             Kind::LogViewer => "syslog",
+            Kind::Viewer => "viewer",
         }
     }
 
@@ -107,6 +110,7 @@ impl Kind {
             Kind::Monitor => "MONITOR DO SISTEMA",
             Kind::Settings => "CONFIGURACOES",
             Kind::LogViewer => "LOG DO SISTEMA",
+            Kind::Viewer => "IMAGENS",
         }
     }
 
@@ -123,6 +127,7 @@ impl Kind {
             Kind::Monitor => "Monitor",
             Kind::Settings => "Configuracoes",
             Kind::LogViewer => "Log do sistema",
+            Kind::Viewer => "Imagens",
         }
     }
 
@@ -138,6 +143,7 @@ impl Kind {
             Kind::Monitor => Icon::Monitor,
             Kind::Settings => Icon::Settings,
             Kind::LogViewer => Icon::Log,
+            Kind::Viewer => Icon::Viewer,
         }
     }
 
@@ -148,7 +154,7 @@ impl Kind {
     pub(crate) const fn multi(self) -> bool {
         matches!(
             self,
-            Kind::Terminal | Kind::Editor | Kind::Calculator | Kind::Files | Kind::WasmApp
+            Kind::Terminal | Kind::Editor | Kind::Calculator | Kind::Files | Kind::WasmApp | Kind::Viewer
         )
     }
 
@@ -161,7 +167,8 @@ impl Kind {
             Kind::Calculator => Rect::new(470, 150, 300, 420),
             Kind::Browser => Rect::new(150, 60, 916, 560),
             Kind::WasmApp => Rect::new(240, 130, 720, 470),
-            Kind::Files => Rect::new(250, 120, 780, 520),
+            Kind::Files => Rect::new(220, 110, 860, 520),
+            Kind::Viewer => Rect::new(200, 90, 820, 540),
             Kind::Monitor => Rect::new(210, 90, 800, 560),
             Kind::Settings => Rect::new(220, 84, 820, 560),
             Kind::LogViewer => Rect::new(180, 110, 860, 460),
@@ -177,7 +184,8 @@ impl Kind {
             Kind::Calculator => (280, 360),
             Kind::Browser => (420, 260),
             Kind::WasmApp => (720, 470),
-            Kind::Files => (440, 260),
+            Kind::Files => (580, 320),
+            Kind::Viewer => (360, 260),
             Kind::Monitor => (660, 420),
             Kind::Settings => (700, 460),
             Kind::LogViewer => (520, 280),
@@ -206,19 +214,120 @@ pub(crate) struct BrowserState {
 /// An editor window: the buffer and the file it was opened from / saves to.
 pub(crate) struct EditorState {
     pub editor: Editor,
-    pub file: FileName,
-    /// Directory slot holding `file` (`fs::ROOT` at the top level), so Ctrl+S
-    /// rewrites the file that was opened rather than a same-named one in the root.
-    pub dir: u8,
+    /// Absolute path Ctrl+S writes to (`/notes.txt` for a fresh editor).
+    pub path: Vec<u8>,
 }
 
-/// A file-manager window: selected row, view (0 = files, 1 = trash, 2/3 = disk
-/// panels, 4 = installed apps) and the current directory slot.
-#[derive(Clone, Copy)]
+/// What the inline name field of a file manager is for.
+pub(crate) enum EditPurpose {
+    NewFile,
+    NewFolder,
+    /// Renaming the item at this path.
+    Rename(Vec<u8>),
+}
+
+/// The inline name editor (new file / new folder / rename).
+pub(crate) struct NameEdit {
+    pub input: osjeff_core::fileman::TextInput,
+    pub purpose: EditPurpose,
+}
+
+/// A question the file manager waits on (Enter confirms, Esc cancels).
+pub(crate) enum Confirm {
+    /// Delete these paths for good.
+    Purge(Vec<Vec<u8>>),
+    /// Delete these trash items for good (by trash id).
+    PurgeTrash(Vec<Vec<u8>>),
+    EmptyTrash,
+}
+
+/// An open context menu of a file manager (screen coordinates).
+pub(crate) struct CtxMenu {
+    pub x: i32,
+    pub y: i32,
+    pub items: Vec<(osjeff_core::fileman::Cmd, &'static str)>,
+}
+
+/// A copy running in steps (see `Desktop::step_file_jobs`).
+pub(crate) struct Job {
+    pub copy: vfs::CopyJob,
+    pub label: &'static str,
+}
+
+/// A file-manager window.
 pub(crate) struct FilesState {
-    pub sel: usize,
-    pub view: u8,
-    pub cwd: u8,
+    pub view: osjeff_core::fileman::FileView,
+    pub input: Option<NameEdit>,
+    pub confirm: Option<Confirm>,
+    /// Lines of the properties panel while it is open.
+    pub props: Option<Vec<String>>,
+    pub menu: Option<CtxMenu>,
+    pub job: Option<Job>,
+    /// Last status message and whether it is an error.
+    pub msg: Option<(String, bool)>,
+    pub usage: vfs::Usage,
+}
+
+impl FilesState {
+    pub(crate) fn new() -> Self {
+        FilesState {
+            view: osjeff_core::fileman::FileView::new(),
+            input: None,
+            confirm: None,
+            props: None,
+            menu: None,
+            job: None,
+            msg: None,
+            usage: vfs::Usage::default(),
+        }
+    }
+
+    pub(crate) fn say(&mut self, text: &str, error: bool) {
+        self.msg = Some((String::from(text), error));
+    }
+
+    /// True while a modal element (name field, question, properties) owns the keys.
+    pub(crate) fn modal(&self) -> bool {
+        self.input.is_some() || self.confirm.is_some() || self.props.is_some()
+    }
+}
+
+/// An image-viewer window.
+pub(crate) struct ViewerState {
+    pub path: Vec<u8>,
+    pub image: Option<osjeff_core::image::Image>,
+    /// Box-filtered copy for zooms below 100 %: `(zoom, image)`.
+    pub scaled: Option<(u32, osjeff_core::image::Image)>,
+    pub opaque: bool,
+    pub view: osjeff_core::viewer::View,
+    pub list: osjeff_core::viewer::ImageList,
+    pub format: Option<osjeff_core::image::Format>,
+    pub file_bytes: u64,
+    /// Why the file could not be shown.
+    pub error: Option<[String; 2]>,
+    pub show_info: bool,
+    /// The "save as" prompt.
+    pub save: Option<osjeff_core::fileman::TextInput>,
+    pub msg: Option<(String, bool)>,
+}
+
+impl ViewerState {
+    pub(crate) fn new() -> Self {
+        ViewerState {
+            path: Vec::new(),
+            image: None,
+            scaled: None,
+            opaque: true,
+            view: osjeff_core::viewer::View::default(),
+            list: osjeff_core::viewer::ImageList::default(),
+            format: None,
+            file_bytes: 0,
+            error: None,
+            show_info: false,
+            save: None,
+            msg: None,
+        }
+    }
 }
 
 /// A WASM app window: the `AppManager` instance behind it and which package it is.
@@ -237,7 +346,8 @@ pub(crate) enum App {
     Calculator(Box<Calc>),
     Browser(Box<BrowserState>),
     Wasm(Box<WasmWin>),
-    Files(FilesState),
+    Files(Box<FilesState>),
+    Viewer(Box<ViewerState>),
     Monitor(Box<MonitorState>),
     Settings(Box<SettingsState>),
     Log(Box<LogState>),
@@ -250,9 +360,7 @@ impl App {
             Kind::Terminal => App::Terminal(Box::new(Terminal::new())),
             Kind::Editor => App::Editor(Box::new(EditorState {
                 editor: Editor::new(),
-                // `notes.txt` is a valid name (non-empty, <= FNAME_MAX).
-                file: FileName::parse(b"notes.txt").unwrap(),
-                dir: fs::ROOT,
+                path: b"/notes.txt".to_vec(),
             })),
             Kind::TaskMgr => App::TaskMgr,
             Kind::Calculator => App::Calculator(Box::new(Calc::new())),
@@ -267,11 +375,8 @@ impl App {
                 id: 0,
                 app_id: String::new(),
             })),
-            Kind::Files => App::Files(FilesState {
-                sel: 0,
-                view: 0,
-                cwd: fs::ROOT,
-            }),
+            Kind::Files => App::Files(Box::new(FilesState::new())),
+            Kind::Viewer => App::Viewer(Box::new(ViewerState::new())),
             Kind::Monitor => App::Monitor(Box::new(MonitorState::new())),
             Kind::Settings => App::Settings(Box::new(SettingsState::new())),
             Kind::LogViewer => App::Log(Box::new(LogState::new())),
@@ -290,6 +395,7 @@ impl App {
             App::Monitor(_) => Kind::Monitor,
             App::Settings(_) => Kind::Settings,
             App::Log(_) => Kind::LogViewer,
+            App::Viewer(_) => Kind::Viewer,
         }
     }
 }
@@ -319,153 +425,3 @@ impl Inst {
 pub(crate) type Win = osjeff_core::winman::Window<Inst>;
 
 pub(crate) use osjeff_core::winman::numbered_name;
-
-// ---------------------------------------------------------------- file manager
-
-impl FilesState {
-    /// The effective current directory: `cwd` if it is still a live folder, else
-    /// fall back to the root (e.g. after the folder was trashed).
-    pub(crate) fn cwd(&self) -> u8 {
-        let c = self.cwd;
-        if c == fs::ROOT {
-            return fs::ROOT;
-        }
-        let img = disk();
-        if fs::is_active(img, c as usize) && fs::is_dir(img, c as usize) {
-            c
-        } else {
-            fs::ROOT
-        }
-    }
-
-    /// Rows shown in the current view. Views: 0 = files (within the current
-    /// directory), 1 = trash, 2/3 = the boot / filesystem disk panels (no rows).
-    pub(crate) fn rows(&self) -> usize {
-        let img = disk();
-        match self.view {
-            0 => {
-                let cwd = self.cwd();
-                (0..fs::MAX_FILES)
-                    .filter(|&i| fs::is_active(img, i) && fs::parent_at(img, i) == cwd)
-                    .count()
-            }
-            1 => fs::count_trashed(img),
-            _ => 0,
-        }
-    }
-
-    /// The filesystem slot backing visible row `n` of the current view.
-    pub(crate) fn slot(&self, n: usize) -> Option<usize> {
-        let img = disk();
-        match self.view {
-            0 => {
-                let cwd = self.cwd();
-                (0..fs::MAX_FILES)
-                    .filter(|&i| fs::is_active(img, i) && fs::parent_at(img, i) == cwd)
-                    .nth(n)
-            }
-            1 => (0..fs::MAX_FILES)
-                .filter(|&i| fs::is_trashed(img, i))
-                .nth(n),
-            _ => None,
-        }
-    }
-
-    /// Switch the view from a sidebar selection (0..=3).
-    pub(crate) fn set_view(&mut self, v: u8) {
-        self.view = v.min(4);
-        self.sel = 0;
-    }
-
-    pub(crate) fn move_sel(&mut self, delta: i32) {
-        let rows = self.rows();
-        if rows == 0 {
-            self.sel = 0;
-            return;
-        }
-        let cur = self.sel.min(rows - 1) as i32;
-        self.sel = (cur + delta).clamp(0, rows as i32 - 1) as usize;
-    }
-
-    /// Cycle through the sidebar views (Files -> Trash -> boot -> FS -> ...).
-    pub(crate) fn toggle_view(&mut self) {
-        self.view = (self.view + 1) % 5;
-        self.sel = 0;
-    }
-
-    /// Delete: in Files view, move the selection (a folder takes its contents) to
-    /// the trash; in Trash view, delete it permanently. Recursive for folders.
-    pub(crate) fn delete(&mut self) {
-        let Some(slot) = self.slot(self.sel) else {
-            return;
-        };
-        if self.view == 0 {
-            fs::trash_slot(disk(), slot);
-        } else {
-            fs::purge_slot(disk(), slot);
-        }
-        flush_disk();
-        self.move_sel(0);
-    }
-
-    /// Go to the parent directory (Files view only).
-    pub(crate) fn up(&mut self) {
-        if self.view == 0 && self.cwd != fs::ROOT {
-            self.cwd = fs::parent_at(disk(), self.cwd as usize);
-            self.sel = 0;
-        }
-    }
-
-    /// Create a new auto-named folder in the current directory (Files view).
-    pub(crate) fn mkdir(&mut self) {
-        if self.view != 0 {
-            return;
-        }
-        let cwd = self.cwd();
-        let base: &[u8] = b"nova pasta";
-        let mut name = [0u8; fs::MAX_NAME];
-        for n in 1..=9u8 {
-            let len = if n == 1 {
-                name[..base.len()].copy_from_slice(base);
-                base.len()
-            } else {
-                name[..base.len()].copy_from_slice(base);
-                name[base.len()] = b' ';
-                name[base.len() + 1] = b'0' + n;
-                base.len() + 2
-            };
-            if fs::find_in(disk(), cwd, &name[..len]).is_none() {
-                let _ = fs::mkdir(disk(), cwd, &name[..len]);
-                flush_disk();
-                break;
-            }
-        }
-        self.move_sel(0);
-    }
-
-    /// Select row `row` (for clicks); ignored past the last row.
-    pub(crate) fn select_at(&mut self, row: usize) {
-        if row < self.rows() {
-            self.sel = row;
-        }
-    }
-
-    /// Enter / primary action on the selection. Trash view: restore; a folder:
-    /// open it. For a file returns its slot so the desktop can open it in an
-    /// editor window (it owns the window table).
-    pub(crate) fn primary(&mut self) -> Option<usize> {
-        let slot = self.slot(self.sel)?;
-        if self.view == 1 {
-            fs::restore_slot(disk(), slot);
-            flush_disk();
-            self.move_sel(0);
-            return None;
-        }
-        if fs::is_dir(disk(), slot) {
-            self.cwd = slot as u8;
-            self.sel = 0;
-            return None;
-        }
-        Some(slot)
-    }
-}

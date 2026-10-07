@@ -61,7 +61,10 @@ impl Desktop {
                     .iter()
                     .any(|w| w.minimized && w.app.kind() == kind)
             {
-                let r = icons[kind.index() + 1];
+                // Kinds past the dock (the viewer) have no icon to mark.
+                let Some(r) = icons.get(kind.index() + 1).copied() else {
+                    continue;
+                };
                 c.fill_round_rect(
                     (r.x + r.w / 2 - 3) as usize,
                     (r.bottom() + 4) as usize,
@@ -288,6 +291,7 @@ impl Desktop {
             App::Monitor(m) => self.draw_monitor(c, r, m),
             App::Settings(s) => self.draw_settings(c, r, s),
             App::Log(l) => self.draw_log(c, r, l),
+            App::Viewer(v) => self.draw_viewer(c, r, v),
         }
         // What this window cost to draw (the monitor's per-app CPU figure).
         win.app

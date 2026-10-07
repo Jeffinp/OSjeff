@@ -18,6 +18,7 @@ pub enum Icon {
     Monitor,
     Settings,
     Log,
+    Viewer,
     Power,
 }
 
@@ -34,6 +35,7 @@ pub fn draw(c: &mut Canvas, icon: Icon, x: usize, y: usize, size: usize) {
         Icon::Monitor => monitor(c, x, y, size),
         Icon::Settings => settings(c, x, y, size),
         Icon::Log => log(c, x, y, size),
+        Icon::Viewer => viewer(c, x, y, size),
         Icon::Power => power(c, x, y, size),
     }
 }
@@ -162,6 +164,35 @@ fn files(c: &mut Canvas, x: usize, y: usize, size: usize) {
     );
     // Folder body.
     c.fill_round_rect(x + pad, fy, fw, fh, 4, theme::accent());
+}
+
+/// Image viewer: a picture frame with a sun and two hills.
+fn viewer(c: &mut Canvas, x: usize, y: usize, size: usize) {
+    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x12, 0x1A, 0x2E));
+    let pad = size / 6;
+    let (fw, fh) = (size - pad * 2, size - pad * 2);
+    c.fill_round_rect(x + pad, y + pad, fw, fh, 4, theme::WHITE);
+    let (ix, iy, iw, ih) = (x + pad + 2, y + pad + 2, fw - 4, fh - 4);
+    c.fill_round_rect(ix, iy, iw, ih, 3, Color::rgb(0x8F, 0xD3, 0xF4));
+    // Sun.
+    c.fill_round_rect(
+        ix + iw * 2 / 3,
+        iy + ih / 8,
+        iw / 4,
+        iw / 4,
+        iw / 8,
+        Color::rgb(0xFF, 0xC1, 0x4D),
+    );
+    // Hills.
+    c.fill_round_rect(ix, iy + ih / 2, iw * 3 / 5, ih / 2, iw / 6, theme::ACCENT);
+    c.fill_round_rect(
+        ix + iw / 3,
+        iy + ih * 3 / 5,
+        iw * 2 / 3,
+        ih * 2 / 5,
+        iw / 8,
+        theme::ACCENT_2,
+    );
 }
 
 /// WebAssembly app: brand-purple squircle with a white "W" glyph.

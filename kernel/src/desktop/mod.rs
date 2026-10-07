@@ -16,7 +16,6 @@ pub(crate) use crate::theme;
 pub(crate) use alloc::string::String;
 pub(crate) use alloc::vec::Vec;
 pub(crate) use osjeff_core::clipboard::{self, Clipboard};
-pub(crate) use osjeff_core::fs;
 pub(crate) use osjeff_core::window::{ResizeEdge, TITLE_H, WindowId};
 pub(crate) use osjeff_core::winman::{ClickTracker, Switcher, WindowManager, WindowSpec};
 pub(crate) use osjeff_core::{
@@ -42,34 +41,6 @@ const SCRATCH_BYTES: usize = 640 * 440 * 4;
 #[repr(C, align(64))]
 struct AlignedScratch([u8; SCRATCH_BYTES]);
 static SCRATCH: RacyCell<AlignedScratch> = RacyCell::new(AlignedScratch([0; SCRATCH_BYTES]));
-
-// In-memory copy of the filesystem image, loaded from / flushed to the ATA disk
-// (sector-aligned so whole 512-byte sectors transfer cleanly). The fs logic only
-// touches the first `fs::IMAGE_SIZE` bytes; the tail is sector padding.
-const DISK_BYTES: usize = fs::IMAGE_SIZE.div_ceil(512) * 512;
-static DISK: RacyCell<[u8; DISK_BYTES]> = RacyCell::new([0; DISK_BYTES]);
-
-fn disk() -> &'static mut [u8] {
-    // SAFETY: DISK is `DISK_BYTES` long and only accessed from the compositor thread (Desktop,
-    // files UI, terminal), so the slice is valid.
-    // NOTE: not guaranteed by the type: safe fn returning `&'static mut`; `FilesState::rows`/`slot`
-    // hold one while `cwd` calls `disk()` again (read-only aliasing, docs/audit/01 #6).
-    unsafe { core::slice::from_raw_parts_mut(DISK.get() as *mut u8, DISK_BYTES) }
-}
-
-/// Whether the in-memory image may be written back to the disk. Cleared when the
-/// boot-time read failed: the image in RAM is then a freshly formatted
-/// placeholder, and flushing it would overwrite a perfectly good filesystem
-/// after a transient ATA error.
-static PERSIST: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
-
-/// Persist the in-memory filesystem image to the ATA disk (best effort: a no-op
-/// if there is no disk, or if the disk could not be read at boot).
-fn flush_disk() {
-    if PERSIST.load(core::sync::atomic::Ordering::Relaxed) && !crate::ata::write_image(disk()) {
-        crate::klog!(Error, "disk: write failed, changes are only in RAM");
-    }
-}
 
 /// Cursor sprite bounding box (used by the dirty-rect overlay path).
 pub const CURSOR_W: i32 = 10;
@@ -158,6 +129,8 @@ pub(crate) enum DragMode {
     Move { grab_dx: i32, grab_dy: i32 },
     /// Resizing from `edge`; `start` is the window rect and `(ox, oy)` the
     /// pointer position when the drag began.
+    /// Dragging the image of a viewer window: last pointer position.
+    Pan { last_x: i32, last_y: i32 },
     Resize {
         edge: ResizeEdge,
         start: Rect,
@@ -174,10 +147,9 @@ pub(crate) struct Drag {
 pub struct Desktop {
     sw: i32,
     sh: i32,
-    // One snapshot of the two IDE disks (boot + filesystem) for the file
-    // manager's disk panels.
-    disks: [Option<crate::ata::DiskInfo>; 2],
     clipboard: Clipboard,
+    /// Paths set aside by the file managers' Copy / Cut (shared by all windows).
+    pathclip: osjeff_core::fileman::PathClip,
     keymap: Keymap,
     procs: ProcessTable,
     /// Sampled system history for the resource monitor.
@@ -230,48 +202,11 @@ impl Desktop {
         procs.spawn(b"kernel", ProcKind::System, ProcState::Running);
         procs.spawn(b"compositor", ProcKind::System, ProcState::Running);
 
-        // Load the filesystem from disk. If no disk responds or it holds no
-        // valid filesystem (blank / first boot), format and persist a fresh one.
-        // A missing disk simply leaves us with a RAM-only filesystem.
-        let read_ok = crate::ata::read_image(disk());
-        if !read_ok {
-            PERSIST.store(false, core::sync::atomic::Ordering::Relaxed);
-            crate::klog!(
-                Warn,
-                "OJFS: disk read failed; RAM-only filesystem, disk left untouched"
-            );
-        }
-        if !read_ok || !fs::is_formatted(disk()) {
-            fs::format(disk());
-            // Seed a couple of welcome files so the file manager has content on a
-            // fresh disk (and to document its keys).
-            let _ = fs::write(
-                disk(),
-                b"leiame.txt",
-                // Fits the editor grid (44 columns x 18 rows), so it can be opened and
-                // saved without loss.
-                b"Bem-vindo ao OSjeff.\nGerenciador de arquivos:\n setas   navegam\n Del     manda pra lixeira\n Tab     alterna arquivos/lixeira\n Enter   abre\n",
-            );
-            let _ = fs::write(disk(), b"notas.txt", b"Arquivo de exemplo do OSjeff.");
-            if let Ok(d) = fs::mkdir(disk(), fs::ROOT, b"Documentos") {
-                let _ = fs::write_in(
-                    disk(),
-                    d as u8,
-                    b"projeto.txt",
-                    b"Arquivo dentro de uma pasta.",
-                );
-            }
-            flush_disk();
-        }
-
         let mut desk = Self {
             sw,
             sh,
-            disks: [
-                crate::ata::identify(0x1F0, 0x3F6, false),
-                crate::ata::identify(0x170, 0x376, false),
-            ],
             clipboard: Clipboard::new(),
+            pathclip: osjeff_core::fileman::PathClip::new(),
             keymap: Keymap::new(),
             procs,
             sysmon: SysMon::new(),
@@ -373,7 +308,15 @@ impl Desktop {
             resizable: kind.resizable(),
         };
         match self.wm.open(spec, inst) {
-            Ok(id) => Some(id),
+            Ok(id) => {
+                if kind == Kind::Files {
+                    self.files_refresh(id);
+                    if let Some(f) = self.files_mut(id) {
+                        f.view.select_first();
+                    }
+                }
+                Some(id)
+            }
             Err(inst) => {
                 self.procs.kill(inst.pid);
                 None
@@ -460,6 +403,13 @@ impl Desktop {
         }
     }
 
+    pub(crate) fn viewer_mut(&mut self, id: WindowId) -> Option<&mut ViewerState> {
+        match self.app_mut(id) {
+            Some(App::Viewer(v)) => Some(v),
+            _ => None,
+        }
+    }
+
     /// The (single) browser window, if open.
     fn browser_id(&self) -> Option<WindowId> {
         self.wm
@@ -502,8 +452,14 @@ impl Desktop {
     /// Advance all running animations by `dt`. Returns `true` while any window
     /// is still animating (the caller keeps rendering).
     pub fn animate(&mut self, dt: f32) -> bool {
+        self.step_file_jobs();
         let (active, gone) = self.wm.step(dt);
-        for w in gone {
+        for mut w in gone {
+            if let App::Files(f) = &mut w.app.app
+                && let Some(mut job) = f.job.take()
+            {
+                vfs::copy_abort(&mut job.copy);
+            }
             // Closing an app terminates its process (removed from the table),
             // matching how a desktop app behaves; dropping `w` frees its state.
             self.procs.kill(w.app.pid);
@@ -671,6 +627,7 @@ impl Desktop {
             // on its own clock), so it is kept out of the cached static layer and
             // repainted through the per-frame damage path like an animation.
             || (w.shown() && w.app.kind() == Kind::WasmApp)
+            || (w.shown() && matches!(&w.app.app, App::Files(f) if f.job.is_some()))
     }
 
     /// True while any window is opening, closing, being dragged, or is a live
@@ -678,11 +635,12 @@ impl Desktop {
     /// app gets continuous frames, rather than the steady (repaint-on-change) one.
     pub fn has_animation(&self) -> bool {
         self.drag.is_some()
-            || self
-                .wm
-                .windows()
-                .iter()
-                .any(|w| w.shown() && (w.anim.is_some() || w.app.kind() == Kind::WasmApp))
+            || self.wm.windows().iter().any(|w| {
+                w.shown()
+                    && (w.anim.is_some()
+                        || w.app.kind() == Kind::WasmApp
+                        || matches!(&w.app.app, App::Files(f) if f.job.is_some()))
+            })
     }
 
     /// Consume the "repaint everything" request (maximize, restore, ...).
@@ -810,6 +768,7 @@ impl Desktop {
 }
 
 mod apps;
+mod apps_hook;
 mod files;
 mod files_ui;
 mod input;
@@ -822,8 +781,10 @@ mod sysstore;
 mod toasts_ui;
 mod ui;
 mod vfs;
+mod viewer;
 mod wasmwin;
 mod widgets;
+pub(crate) use input::Special;
 pub(crate) use instance::*;
 pub(crate) use logview::LogState;
 pub use monitor::SysInputs;

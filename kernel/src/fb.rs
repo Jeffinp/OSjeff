@@ -97,6 +97,43 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Write one row of opaque `0xAARRGGBB` pixels (alpha ignored) starting at
+    /// `(x, y)`, clipped to the framebuffer. The image viewer's fast path: the 4-byte
+    /// formats are converted straight into the buffer.
+    pub fn put_row(&mut self, x: usize, y: usize, px: &[u32]) {
+        if y >= self.info.height || x >= self.info.width {
+            return;
+        }
+        let n = px.len().min(self.info.width - x);
+        let bpp = self.info.bytes_per_pixel;
+        let fmt = self.info.pixel_format;
+        if bpp == 4 && matches!(fmt, PixelFormat::Rgb | PixelFormat::Bgr) {
+            let off = (y * self.info.stride + x) * bpp;
+            let (dst, _) = self.buf[off..off + n * 4].as_chunks_mut::<4>();
+            let bgr = matches!(fmt, PixelFormat::Bgr);
+            for (d, p) in dst.iter_mut().zip(px) {
+                let (r, g, b) = ((*p >> 16) as u8, (*p >> 8) as u8, *p as u8);
+                if bgr {
+                    d[0] = b;
+                    d[1] = g;
+                    d[2] = r;
+                } else {
+                    d[0] = r;
+                    d[1] = g;
+                    d[2] = b;
+                }
+            }
+            return;
+        }
+        for (i, p) in px.iter().take(n).enumerate() {
+            self.put(
+                x + i,
+                y,
+                Color::rgb((*p >> 16) as u8, (*p >> 8) as u8, *p as u8),
+            );
+        }
+    }
+
     /// Alpha-blit a tightly-packed RGBA image (`iw*ih*4` bytes) at `(x0, y0)`.
     pub fn draw_rgba(&mut self, data: &[u8], iw: usize, ih: usize, x0: usize, y0: usize) {
         for y in 0..ih {

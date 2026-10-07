@@ -1,442 +1,522 @@
-//! `Desktop::draw_files`: the file manager window's rendering — a macOS
-//! Finder-style layout: a dark sidebar (Favoritos + Discos) on the left and a
-//! main pane that shows the file list, the trash, or a disk's details. The
-//! manager's logic (navigation, trash/restore/purge) lives in `FilesState`
-//! (`instance.rs`); each file-manager window draws its own state.
+//! `Desktop::draw_files`: the file manager window. Pure drawing: the state is
+//! `FilesState` (rows already loaded: no disk access happens while painting) and
+//! the geometry is `osjeff_core::fileman::Layout`, shared with the mouse handler.
+//!
+//! Light theme with dark text everywhere on the light surfaces (the old dark-on-
+//! light mix had unreadable rows); selected rows are white on blue.
 
+use super::files::{MENU_ROW_H, MENU_W_FILES, menu_height};
 use super::*;
+use osjeff_core::fileman::{self, CELL, Layout, Place, ROW_H, SortKey};
 
-const SBW: i32 = 176; // sidebar width
-const ROW: i32 = 30; // list / sidebar row height
-const BLUE: Color = Color::rgb(0x0A, 0x84, 0xFF); // macOS selection blue
-const SIDEBAR: Color = Color::rgb(0x18, 0x1D, 0x27);
-const FG: Color = Color::rgb(0xE6, 0xEA, 0xF2);
-const MUTED: Color = Color::rgb(0x86, 0x90, 0xA4);
-const SEP: Color = Color::rgb(0x2A, 0x31, 0x40);
-const ERRC: Color = Color::rgb(0xE0, 0x70, 0x70);
+const BLUE: Color = Color::rgb(0x25, 0x63, 0xEB);
+const TOOLBAR: Color = Color::rgb(0xE9, 0xED, 0xF5);
+const SIDEBAR: Color = Color::rgb(0xE2, 0xE7, 0xF1);
+const HEADER_BG: Color = Color::rgb(0xEE, 0xF1, 0xF8);
+const ZEBRA: Color = Color::rgb(0xEF, 0xF2, 0xF9);
+const SEP: Color = Color::rgb(0xCB, 0xD2, 0xE0);
+const BTN: Color = Color::rgb(0xFF, 0xFF, 0xFF);
+const ERR: Color = Color::rgb(0xC0, 0x2B, 0x2B);
+const OKC: Color = Color::rgb(0x1B, 0x7F, 0x5F);
 
-/// Append `src` to `buf` at `off`, clamped to the buffer; returns the new offset.
-fn push(buf: &mut [u8], off: usize, src: &[u8]) -> usize {
-    let n = src.len().min(buf.len().saturating_sub(off));
-    buf[off..off + n].copy_from_slice(&src[..n]);
-    off + n
+fn text(c: &mut Canvas, x: i32, y: i32, s: &[u8], col: Color) {
+    if x >= 0 && y >= 0 {
+        font::draw_bytes(c, x as usize, y as usize, s, col, 2);
+    }
 }
 
-/// Append the decimal digits of `v` to `buf` at `off`.
-fn push_num(buf: &mut [u8], off: usize, mut v: u32) -> usize {
-    if v == 0 {
-        return push(buf, off, b"0");
+fn rect(c: &mut Canvas, x: i32, y: i32, w: i32, h: i32, col: Color) {
+    if w > 0 && h > 0 {
+        c.fill_rect(
+            x.max(0) as usize,
+            y.max(0) as usize,
+            w as usize,
+            h as usize,
+            col,
+        );
     }
-    let mut tmp = [0u8; 10];
-    let mut i = tmp.len();
-    while v > 0 {
-        i -= 1;
-        tmp[i] = b'0' + (v % 10) as u8;
-        v /= 10;
-    }
-    push(buf, off, &tmp[i..])
 }
 
-/// Small sidebar/list glyph by id: 0 folder, 1 trash, 2 disk, 3 document.
-fn glyph(c: &mut Canvas, id: u8, x: i32, y: i32, s: i32, col: Color) {
-    let (x, y, s) = (x as usize, y as usize, s as usize);
+fn round(c: &mut Canvas, x: i32, y: i32, w: i32, h: i32, rad: i32, col: Color) {
+    if w > 0 && h > 0 {
+        c.fill_round_rect(
+            x.max(0) as usize,
+            y.max(0) as usize,
+            w as usize,
+            h as usize,
+            rad.max(0) as usize,
+            col,
+        );
+    }
+}
+
+/// Small glyph by id: 0 folder, 1 trash, 2 disk, 3 document.
+fn glyph(c: &mut Canvas, id: u8, x: i32, y: i32, s: i32, col: Color, bg: Color) {
     match id {
         0 => {
-            // folder: tab + body
-            c.fill_round_rect(x, y + 1, s / 2, s / 4, 2, col);
-            c.fill_round_rect(x, y + s / 5, s, s - s / 5, 2, col);
+            round(c, x, y + 1, s / 2, s / 4 + 1, 2, col);
+            round(c, x, y + s / 5, s, s - s / 5, 2, col);
         }
         1 => {
-            // trash: lid + can
-            c.fill_rect(x, y + s / 6, s, s / 12 + 1, col);
-            c.fill_round_rect(x + s / 8, y + s / 4, s - s / 4, s - s / 3, 2, col);
+            rect(c, x, y + s / 6, s, s / 12 + 1, col);
+            round(c, x + s / 8, y + s / 4, s - s / 4, s - s / 3, 2, col);
         }
         2 => {
-            // disk: rounded square + spindle hole
-            c.fill_round_rect(x, y, s, s, s / 4, col);
-            c.fill_round_rect(
+            round(c, x, y, s, s, s / 4, col);
+            round(
+                c,
                 x + s / 2 - s / 8,
                 y + s / 2 - s / 8,
                 s / 4,
                 s / 4,
                 s / 8,
-                SIDEBAR,
+                bg,
             );
         }
         _ => {
-            // document: sheet + a couple of lines
-            c.fill_round_rect(x + s / 6, y, s - s / 3, s, 2, col);
-            let lc = Color::rgb(0x6A, 0x74, 0x88);
-            c.fill_rect(x + s / 4, y + s / 3, s / 2, 1, lc);
-            c.fill_rect(x + s / 4, y + s / 2, s / 2, 1, lc);
+            round(c, x + s / 6, y, s - s / 3, s, 2, col);
+            rect(c, x + s / 4, y + s / 3, s / 2, 1, bg);
+            rect(c, x + s / 4, y + s / 2, s / 2, 1, bg);
         }
     }
 }
 
+/// Fit `name` (UTF-8) in `cols` columns for the ASCII font.
+fn shown(name: &[u8], cols: usize) -> Vec<u8> {
+    fileman::ellipsize(&fileman::display_ascii(name), cols)
+}
+
 impl Desktop {
     pub(crate) fn draw_files(&self, c: &mut Canvas, r: Rect, st: &FilesState) {
-        let cy0 = r.y + TITLE_H;
+        let lay = Layout::of(r);
+        let v = &st.view;
+        let vis = lay.visible_rows();
+
+        // ---- toolbar ----
+        rect(
+            c,
+            r.x + 1,
+            r.y + TITLE_H,
+            r.w - 2,
+            fileman::TOOLBAR_H,
+            TOOLBAR,
+        );
+        let nav = [
+            (lay.back, b"<", v.history.can_back()),
+            (lay.forward, b">", v.history.can_forward()),
+            (lay.up, b"^", !vfs::is_root(&v.cwd)),
+        ];
+        for (b, label, on) in nav {
+            round(c, b.x, b.y, b.w, b.h, 6, BTN);
+            let col = if on { theme::TEXT } else { SEP };
+            text(c, b.x + (b.w - CELL) / 2, b.y + (b.h - 14) / 2, label, col);
+        }
+        let ab = lay.address;
+        round(c, ab.x, ab.y, ab.w, ab.h, 8, SEP);
+        round(c, ab.x + 1, ab.y + 1, ab.w - 2, ab.h - 2, 7, BTN);
+        let crumbs = fileman::breadcrumbs(&v.cwd);
+        let labels: Vec<usize> = crumbs
+            .iter()
+            .map(|k| fileman::display_ascii(&k.label).len())
+            .collect();
+        let (spans, folded) = lay.crumb_spans(&labels);
+        let ty = ab.y + (ab.h - 14) / 2;
+        if folded {
+            text(c, ab.x + 10, ty, b"...", theme::TEXT_MUTED);
+        }
+        let last = crumbs.len() - 1;
+        for (n, &(i, x, _)) in spans.iter().enumerate() {
+            let col = if i == last { theme::TEXT } else { BLUE };
+            text(c, x, ty, &fileman::display_ascii(&crumbs[i].label), col);
+            if n + 1 < spans.len() {
+                let w = labels[i] as i32 * CELL;
+                text(c, x + w + CELL, ty, b">", theme::TEXT_MUTED);
+            }
+        }
 
         // ---- sidebar ----
-        c.fill_rect(
-            r.x.max(0) as usize,
-            cy0.max(0) as usize,
-            SBW as usize,
-            (r.bottom() - cy0).max(0) as usize,
+        rect(
+            c,
+            lay.sidebar.x,
+            lay.sidebar.y,
+            lay.sidebar.w,
+            lay.sidebar.h,
             SIDEBAR,
         );
-        let sx = r.x + 14;
-        let mut yy = cy0 + 12;
-        let items: [(&[u8], u8, u8); 4] = [
-            (b"Arquivos", 0, 0),
-            (b"Lixeira", 1, 1),
-            (b"boot", 2, 2),
-            (b"FS", 3, 2),
-        ];
-        font::draw_bytes(c, sx as usize, yy as usize, b"Favoritos", MUTED, 2);
-        yy += 22;
-        for it in &items[..2] {
-            yy = self.sb_item(c, sx, yy, *it, st);
-        }
-        yy += 12;
-        font::draw_bytes(c, sx as usize, yy as usize, b"Discos", MUTED, 2);
-        yy += 22;
-        for it in &items[2..] {
-            yy = self.sb_item(c, sx, yy, *it, st);
-        }
-        yy += 12;
-        self.sb_item(c, sx, yy, (b"Apps", 4, 3), st);
-
-        // ---- main pane ----
-        let mx = r.x + SBW + 16;
-        let mw = r.right() - 16 - mx;
-        match st.view {
-            0 | 1 => self.draw_file_list(c, r, mx, mw, st),
-            4 => self.draw_apps_list(c, r, mx, mw, st),
-            v => self.draw_disk_panel(c, r, mx, (v - 2) as usize, st),
-        }
-    }
-
-    /// Draw one sidebar row; returns the next y.
-    fn sb_item(
-        &self,
-        c: &mut Canvas,
-        sx: i32,
-        y: i32,
-        item: (&[u8], u8, u8),
-        st: &FilesState,
-    ) -> i32 {
-        let (label, view, gid) = item;
-        let selected = st.view == view;
-        if selected {
-            c.fill_round_rect(
-                (sx - 6) as usize,
-                y as usize,
-                (SBW - 16) as usize,
-                ROW as usize,
-                7,
-                BLUE,
-            );
-        }
-        let tc = if selected { theme::WHITE } else { FG };
-        let gc = if selected { theme::WHITE } else { BLUE };
-        glyph(c, gid, sx + 2, y + (ROW - 16) / 2, 16, gc);
-        font::draw_bytes(
+        text(
             c,
-            (sx + 26) as usize,
-            (y + (ROW - 14) / 2) as usize,
-            label,
-            tc,
-            2,
+            lay.sidebar.x + 12,
+            lay.sidebar.y + 6,
+            b"Locais",
+            theme::TEXT_MUTED,
         );
-        y + ROW + 2
-    }
-
-    /// Main pane: the Files or Trash list.
-    fn draw_file_list(&self, c: &mut Canvas, r: Rect, mx: i32, mw: i32, st: &FilesState) {
-        let right = mx + mw;
-        let mut my = r.y + TITLE_H + 14;
-        if st.view == 1 {
-            font::draw_text(c, mx as usize, my as usize, "Lixeira", FG, 3);
-        } else {
-            // Breadcrumb: the current folder name (or "Arquivos" at the root).
-            let cwd = st.cwd();
-            if cwd == fs::ROOT {
-                font::draw_text(c, mx as usize, my as usize, "Arquivos", FG, 3);
-            } else {
-                let name = fs::name_at(disk(), cwd as usize);
-                let nw = name.len() as i32 * font::cell_w(3) as i32;
-                font::draw_text(c, mx as usize, my as usize, "Arquivos / ", MUTED, 2);
-                let off = font::text_width("Arquivos / ", 2) as i32;
-                font::draw_bytes(c, (mx + off) as usize, my as usize, name, FG, 2);
-                let _ = nw;
-            }
-        }
-        my += 36;
-        font::draw_text(c, mx as usize, my as usize, "Nome", MUTED, 2);
-        let th = font::text_width("Tamanho", 2) as i32;
-        font::draw_text(c, (right - th) as usize, my as usize, "Tamanho", MUTED, 2);
-        my += 20;
-        c.fill_rect(mx as usize, my as usize, mw as usize, 1, SEP);
-        my += 8;
-
-        let rows = st.rows();
-        if rows == 0 {
-            font::draw_text(c, mx as usize, (my + 6) as usize, "(vazio)", MUTED, 2);
-        }
-        for n in 0..rows {
-            let ry = my + n as i32 * ROW;
-            if ry + ROW > r.bottom() - 34 {
-                break;
-            }
-            let sel = st.sel == n;
-            if sel {
-                c.fill_round_rect(
-                    (mx - 6) as usize,
-                    (ry - 1) as usize,
-                    (mw + 12) as usize,
-                    (ROW - 2) as usize,
-                    6,
-                    BLUE,
-                );
-            }
-            let Some(slot) = st.slot(n) else {
-                break;
+        let docs = v.cwd.starts_with(b"/Documentos");
+        for (p, pr) in lay.places() {
+            let (label, gid, active): (&[u8], u8, bool) = match p {
+                Place::Root => (b"Raiz", 2, v.cwd == b"/"),
+                Place::Documents => (b"Documentos", 0, docs),
+                Place::Trash => (b"Lixeira", 1, v.in_trash()),
+                Place::Disk => (b"", 2, false),
             };
-            let img = disk();
-            let tc = if sel { theme::WHITE } else { FG };
-            let is_dir = fs::is_dir(img, slot);
-            let gcol = if sel {
-                theme::WHITE
-            } else if is_dir {
-                BLUE
+            if p == Place::Disk {
+                self.draw_sidebar_disk(c, lay.sidebar.x, pr, st);
+                continue;
+            }
+            if active {
+                round(c, pr.x, pr.y, pr.w, pr.h, 7, BLUE);
+            }
+            let (tc, gc) = if active {
+                (theme::WHITE, theme::WHITE)
             } else {
-                MUTED
+                (theme::TEXT, BLUE)
             };
             glyph(
                 c,
-                if is_dir { 0 } else { 3 },
-                mx,
-                ry + (ROW - 18) / 2,
-                18,
-                gcol,
+                gid,
+                pr.x + 8,
+                pr.y + (pr.h - 16) / 2,
+                16,
+                gc,
+                if active { BLUE } else { SIDEBAR },
             );
-            font::draw_bytes(
-                c,
-                (mx + 26) as usize,
-                (ry + (ROW - 14) / 2) as usize,
-                fs::name_at(img, slot),
-                tc,
-                2,
-            );
-            let mut sz = [0u8; 12];
-            let q = push_num(&mut sz, 0, fs::size_at(img, slot) as u32);
-            let q2 = push(&mut sz, q, b" B");
-            let sw = font::text_width(core::str::from_utf8(&sz[..q2]).unwrap_or(""), 2) as i32;
-            let szc = if sel { theme::WHITE } else { MUTED };
-            font::draw_bytes(
-                c,
-                (right - sw) as usize,
-                (ry + (ROW - 14) / 2) as usize,
-                &sz[..q2],
-                szc,
-                2,
-            );
+            text(c, pr.x + 32, pr.y + (pr.h - 14) / 2, label, tc);
         }
 
-        self.files_footer(c, r, mx, rows, st);
-    }
-
-    /// Main pane: the installed apps (and bundled packages not yet installed).
-    fn draw_apps_list(&self, c: &mut Canvas, r: Rect, mx: i32, mw: i32, st: &FilesState) {
-        let right = mx + mw;
-        let mut my = r.y + TITLE_H + 14;
-        font::draw_text(c, mx as usize, my as usize, "Apps", theme::TEXT, 3);
-        my += 36;
-        font::draw_text(c, mx as usize, my as usize, "Nome", MUTED, 2);
-        let th = font::text_width("Estado", 2) as i32;
-        font::draw_text(c, (right - th) as usize, my as usize, "Estado", MUTED, 2);
-        my += 20;
-        c.fill_rect(mx as usize, my as usize, mw as usize, 1, SEP);
-        my += 8;
-        let rows = self.app_rows();
-        if rows.is_empty() {
-            font::draw_text(c, mx as usize, (my + 6) as usize, "(nenhum app)", MUTED, 2);
-        }
-        let sel_i = st.sel.min(rows.len().saturating_sub(1));
-        for (n, row) in rows.iter().enumerate() {
-            let ry = my + n as i32 * ROW;
-            if ry + ROW > r.bottom() - 34 {
-                break;
-            }
-            let sel = sel_i == n;
-            if sel {
-                c.fill_round_rect(
-                    (mx - 6) as usize,
-                    (ry - 1) as usize,
-                    (mw + 12) as usize,
-                    (ROW - 2) as usize,
-                    6,
+        // ---- column header ----
+        let h = lay.header;
+        rect(c, h.x, h.y, h.w, h.h, HEADER_BG);
+        rect(c, h.x, h.bottom() - 1, h.w, 1, SEP);
+        let date_title: &[u8] = if v.in_trash() {
+            b"Apagado em"
+        } else {
+            b"Modificado"
+        };
+        let cols: [(&[u8], i32, SortKey); 3] = [
+            (b"Nome", lay.name_x, SortKey::Name),
+            (b"Tamanho", lay.size_x + 8, SortKey::Size),
+            (date_title, lay.date_x + 8, SortKey::Modified),
+        ];
+        for (title, x, key) in cols {
+            text(c, x, h.y + (h.h - 14) / 2, title, theme::TEXT);
+            if v.sort.key == key {
+                let ax = x + title.len() as i32 * CELL + 4;
+                text(
+                    c,
+                    ax,
+                    h.y + (h.h - 14) / 2,
+                    if v.sort.asc { b"^" } else { b"v" },
                     BLUE,
                 );
             }
-            let tc = if sel { theme::WHITE } else { theme::TEXT };
-            let icon = self
-                .apps
-                .iter()
-                .find(|a| a.id == row.id)
-                .and_then(|a| a.icon.as_deref());
-            match icon {
-                Some(rgba) => {
-                    c.draw_rgba(rgba, 24, 24, mx as usize, (ry + (ROW - 24) / 2) as usize)
-                }
-                None => glyph(
-                    c,
-                    3,
-                    mx,
-                    ry + (ROW - 18) / 2,
-                    18,
-                    if sel { theme::WHITE } else { MUTED },
-                ),
-            }
-            let name = &row.name.as_bytes()[..row.name.len().min(24)];
-            font::draw_bytes(
-                c,
-                (mx + 32) as usize,
-                (ry + (ROW - 14) / 2) as usize,
-                name,
-                tc,
-                2,
-            );
-            let status: &str = if row.installed {
-                "instalado"
+        }
+
+        // ---- rows ----
+        let l = lay.list;
+        rect(c, l.x, l.y, l.w, l.h, theme::WINDOW_BODY);
+        if v.rows.is_empty() {
+            let msg: &[u8] = if v.in_trash() {
+                b"(lixeira vazia)"
             } else {
-                "nao instalado"
+                b"(pasta vazia)"
             };
-            let sw = font::text_width(status, 2) as i32;
-            let sc = if sel { theme::WHITE } else { MUTED };
-            font::draw_text(
+            text(c, lay.name_x, l.y + 10, msg, theme::TEXT_MUTED);
+        }
+        let name_cols = ((lay.size_x - lay.name_x - 8) / CELL).max(4) as usize;
+        for i in v.scroll..v.rows.len().min(v.scroll + vis + 1) {
+            let y = lay.row_y(i, v.scroll);
+            if y + ROW_H > l.bottom() {
+                break;
+            }
+            let row = &v.rows[i];
+            let sel = v.sel.is_selected(i);
+            let cut = !v.in_trash() && self.pathclip.is_cut_path(&vfs::join(&v.cwd, &row.name));
+            if sel {
+                round(c, l.x + 4, y, l.w - 8, ROW_H - 2, 6, BLUE);
+            } else if i % 2 == 1 {
+                rect(c, l.x, y, l.w, ROW_H - 2, ZEBRA);
+            }
+            if !sel && i == v.sel.cursor() && st.input.is_none() && !v.rows.is_empty() {
+                rect(c, l.x + 4, y, l.w - 8, 1, BLUE);
+                rect(c, l.x + 4, y + ROW_H - 3, l.w - 8, 1, BLUE);
+            }
+            let (tc, mc) = if sel {
+                (theme::WHITE, theme::WHITE)
+            } else if cut {
+                (SEP, SEP)
+            } else {
+                (theme::TEXT, theme::TEXT_MUTED)
+            };
+            let gcol = if sel {
+                theme::WHITE
+            } else if row.is_dir() {
+                BLUE
+            } else {
+                theme::TEXT_MUTED
+            };
+            let bg = if sel { BLUE } else { theme::WINDOW_BODY };
+            glyph(
                 c,
-                (right - sw) as usize,
-                (ry + (ROW - 14) / 2) as usize,
-                status,
-                sc,
-                2,
+                if row.is_dir() { 0 } else { 3 },
+                lay.name_x - 26,
+                y + (ROW_H - 18) / 2,
+                16,
+                gcol,
+                bg,
+            );
+            let ty = y + (ROW_H - 2 - 14) / 2;
+            text(c, lay.name_x, ty, &shown(&row.name, name_cols), tc);
+            let size: String = if row.is_dir() {
+                String::from("--")
+            } else {
+                fileman::format_size(row.size)
+            };
+            let sx = lay.date_x - 8 - size.len() as i32 * CELL;
+            text(c, sx, ty, size.as_bytes(), mc);
+            text(c, lay.date_x + 8, ty, files_local(row.mtime).as_bytes(), mc);
+        }
+
+        // ---- scrollbar ----
+        let sb = lay.scrollbar;
+        rect(c, sb.x, sb.y, sb.w, sb.h, HEADER_BG);
+        if v.rows.len() > vis {
+            let (ty, th) = lay.thumb(v.scroll, v.rows.len());
+            round(
+                c,
+                sb.x + 2,
+                ty,
+                sb.w - 4,
+                th,
+                4,
+                Color::rgb(0x9A, 0xA5, 0xBD),
             );
         }
-        let by = r.bottom() - 26;
-        c.fill_rect(
-            (r.x + 1) as usize,
-            (by - 8) as usize,
-            (r.w - 2) as usize,
-            1,
-            SEP,
-        );
-        let hint = "Enter abre  I instala  Del remove";
-        let hw = font::text_width(hint, 2) as i32;
-        font::draw_text(
-            c,
-            (r.right() - 16 - hw) as usize,
-            by as usize,
-            hint,
-            MUTED,
-            2,
-        );
-        if let Some((msg, _)) = self.files_msg.as_ref() {
-            font::draw_text(c, mx as usize, by as usize, msg, ERRC, 2);
+
+        // ---- status bar ----
+        self.draw_files_status(c, &lay, st);
+
+        // ---- overlays ----
+        if let Some(edit) = &st.input {
+            self.draw_name_box(c, r, edit);
+        }
+        if let Some(q) = &st.confirm {
+            self.draw_confirm(c, r, q);
+        }
+        if let Some(lines) = &st.props {
+            self.draw_props(c, r, lines);
+        }
+        if let Some(m) = &st.menu {
+            self.draw_files_menu(c, m);
         }
     }
 
-    /// Main pane: a single disk's details (Finder's "Get Info" feel).
-    fn draw_disk_panel(&self, c: &mut Canvas, r: Rect, mx: i32, idx: usize, st: &FilesState) {
-        let mut my = r.y + TITLE_H + 14;
-        glyph(c, 2, mx, my, 56, BLUE);
-        let tx = mx + 72;
-        let d = self.disks.get(idx).copied().flatten();
-        match d {
-            Some(d) => font::draw_bytes(
-                c,
-                tx as usize,
-                (my + 6) as usize,
-                &d.model[..d.model_len],
-                FG,
-                3,
-            ),
-            None => font::draw_text(c, tx as usize, (my + 6) as usize, "Disco ausente", FG, 3),
-        }
-        let role: &str = if idx == 0 {
-            "Disco de inicializacao - onde o OSjeff esta instalado"
+    fn draw_sidebar_disk(&self, c: &mut Canvas, sx: i32, pr: Rect, st: &FilesState) {
+        let usage = st.usage;
+        let label: &[u8] = if vfs::volume() == vfs::Volume::Memory {
+            b"Memoria"
         } else {
-            "Disco do sistema de arquivos"
+            b"Disco"
         };
-        font::draw_text(c, tx as usize, (my + 34) as usize, role, MUTED, 2);
-        my += 80;
-        c.fill_rect(
-            mx as usize,
-            my as usize,
-            (r.right() - 16 - mx) as usize,
-            1,
-            SEP,
-        );
-        my += 16;
-
-        if let Some(d) = d {
-            let kind: &str = if d.ssd {
-                "SSD (memoria nao-rotacional)"
-            } else if d.rpm > 0 {
-                "HD (disco rotacional)"
+        text(c, sx + 12, pr.y - 22, b"Discos", theme::TEXT_MUTED);
+        glyph(c, 2, pr.x + 8, pr.y + 2, 16, BLUE, SIDEBAR);
+        text(c, pr.x + 32, pr.y + 2, label, theme::TEXT);
+        let bar_x = pr.x + 8;
+        let bar_w = pr.w - 16;
+        round(c, bar_x, pr.y + 22, bar_w, 8, 4, SEP);
+        let fill = bar_w * usage.used_permille() as i32 / 1000;
+        if fill > 0 {
+            let col = if usage.used_permille() > 900 {
+                ERR
             } else {
-                "HD / nao reportado"
+                BLUE
             };
-            self.disk_row(c, mx, &mut my, "Tipo", kind.as_bytes());
-            let mut cap = [0u8; 16];
-            let p = push_num(&mut cap, 0, d.mib() as u32);
-            let p = push(&mut cap, p, b" MiB");
-            self.disk_row(c, mx, &mut my, "Capacidade", &cap[..p]);
-            let mut sec = [0u8; 16];
-            let p = push_num(&mut sec, 0, d.sectors as u32);
-            self.disk_row(c, mx, &mut my, "Setores", &sec[..p]);
-            if d.rpm > 0 {
-                let mut rp = [0u8; 16];
-                let p = push_num(&mut rp, 0, d.rpm as u32);
-                let p = push(&mut rp, p, b" RPM");
-                self.disk_row(c, mx, &mut my, "Rotacao", &rp[..p]);
-            }
+            round(c, bar_x, pr.y + 22, fill.max(8), 8, 4, col);
         }
-        self.files_footer(c, r, mx, 0, st);
-    }
-
-    fn disk_row(&self, c: &mut Canvas, mx: i32, my: &mut i32, key: &str, val: &[u8]) {
-        font::draw_text(c, mx as usize, *my as usize, key, MUTED, 2);
-        font::draw_bytes(c, (mx + 140) as usize, *my as usize, val, FG, 2);
-        *my += 26;
-    }
-
-    /// Bottom status bar: item count + key hints.
-    fn files_footer(&self, c: &mut Canvas, r: Rect, mx: i32, rows: usize, st: &FilesState) {
-        let by = r.bottom() - 26;
-        c.fill_rect(
-            (r.x + 1) as usize,
-            (by - 8) as usize,
-            (r.w - 2) as usize,
-            1,
-            SEP,
-        );
-        if st.view <= 1 {
-            let mut s = [0u8; 16];
-            let p = push_num(&mut s, 0, rows as u32);
-            let p = push(&mut s, p, b" itens");
-            font::draw_bytes(c, mx as usize, by as usize, &s[..p], MUTED, 2);
-        }
-        let hint = "N pasta  Bksp volta  Del apaga";
-        let hw = font::text_width(hint, 2) as i32;
-        font::draw_text(
+        let s = alloc::format!("{} livres", fileman::format_size(usage.free));
+        font::draw_bytes(
             c,
-            (r.right() - 16 - hw) as usize,
-            by as usize,
-            hint,
-            MUTED,
-            2,
+            bar_x.max(0) as usize,
+            (pr.y + 36).max(0) as usize,
+            s.as_bytes(),
+            theme::TEXT_MUTED,
+            1,
         );
     }
+
+    fn draw_files_status(&self, c: &mut Canvas, lay: &Layout, st: &FilesState) {
+        let s = lay.status;
+        rect(c, s.x + 1, s.y, s.w - 2, s.h - 1, TOOLBAR);
+        rect(c, s.x + 1, s.y, s.w - 2, 1, SEP);
+        let ty = s.y + (s.h - 14) / 2;
+        let cols = ((s.w - 24) / CELL).max(8) as usize;
+        if let Some(job) = &st.job {
+            // Progress: label, bar, percent. Esc cancels.
+            let pm = job.copy.permille();
+            let name = shown(job.copy.current_name(), 22);
+            let left = alloc::format!("{} {}", job.label, String::from_utf8_lossy(&name));
+            text(c, s.x + 12, ty, left.as_bytes(), theme::TEXT);
+            let bw = (s.w / 3).max(80);
+            let bx = s.right() - 12 - bw - 5 * CELL;
+            round(c, bx, ty + 2, bw, 10, 5, SEP);
+            round(c, bx, ty + 2, (bw * pm as i32 / 1000).max(10), 10, 5, BLUE);
+            let pct = alloc::format!("{:>3}%", pm / 10);
+            text(c, bx + bw + 8, ty, pct.as_bytes(), theme::TEXT);
+            return;
+        }
+        let summary = st.view.summary();
+        text(c, s.x + 12, ty, summary.as_bytes(), theme::TEXT_MUTED);
+        if let Some((m, err)) = &st.msg {
+            let x = s.x + 12 + (summary.len() as i32 + 3) * CELL;
+            let room = ((s.right() - 12 - x) / CELL).max(0) as usize;
+            let col = if *err { ERR } else { OKC };
+            let mb = m.as_bytes();
+            text(c, x, ty, &fileman::ellipsize(mb, room.min(cols)), col);
+        }
+    }
+
+    /// The name field (new file / new folder / rename), centered in the window.
+    fn draw_name_box(&self, c: &mut Canvas, r: Rect, edit: &NameEdit) {
+        let title: &[u8] = match edit.purpose {
+            EditPurpose::NewFile => b"Novo arquivo",
+            EditPurpose::NewFolder => b"Nova pasta",
+            EditPurpose::Rename(_) => b"Renomear",
+        };
+        let w = (r.w - 80).clamp(260, 460);
+        let h = 96;
+        let x = r.x + (r.w - w) / 2;
+        let y = r.y + (r.h - h) / 2;
+        round(c, x - 3, y - 3, w + 6, h + 6, 12, SEP);
+        round(c, x, y, w, h, 10, theme::WINDOW_BODY);
+        text(c, x + 14, y + 10, title, theme::TEXT);
+        let (bx, by, bw) = (x + 14, y + 34, w - 28);
+        round(c, bx, by, bw, 26, 6, BLUE);
+        round(c, bx + 2, by + 2, bw - 4, 22, 5, BTN);
+        let cols = ((bw - 16) / CELL).max(4) as usize;
+        let disp = fileman::display_ascii(edit.input.text());
+        let caret = edit.input.caret_column();
+        // Scroll the text so the caret stays inside the box.
+        let start = (caret + 1).saturating_sub(cols);
+        let end = disp.len().min(start + cols);
+        text(
+            c,
+            bx + 8,
+            by + 6,
+            &disp[start.min(disp.len())..end],
+            theme::TEXT,
+        );
+        rect(
+            c,
+            bx + 8 + ((caret - start) as i32) * CELL,
+            by + 5,
+            2,
+            16,
+            BLUE,
+        );
+        text(
+            c,
+            x + 14,
+            y + 70,
+            b"Enter confirma   Esc cancela",
+            theme::TEXT_MUTED,
+        );
+    }
+
+    fn draw_confirm(&self, c: &mut Canvas, r: Rect, q: &Confirm) {
+        let (l1, n): (&str, usize) = match q {
+            Confirm::Purge(p) => ("Excluir permanentemente?", p.len()),
+            Confirm::PurgeTrash(p) => ("Excluir da lixeira para sempre?", p.len()),
+            Confirm::EmptyTrash => ("Esvaziar a lixeira?", 0),
+        };
+        let w = (r.w - 80).clamp(280, 440);
+        let h = 104;
+        let x = r.x + (r.w - w) / 2;
+        let y = r.y + (r.h - h) / 2;
+        round(c, x - 3, y - 3, w + 6, h + 6, 12, ERR);
+        round(c, x, y, w, h, 10, theme::WINDOW_BODY);
+        text(c, x + 14, y + 12, l1.as_bytes(), theme::TEXT);
+        let l2 = if n > 0 {
+            alloc::format!("{n} item(ns). Nao ha como desfazer.")
+        } else {
+            String::from("Tudo sera apagado. Nao ha como desfazer.")
+        };
+        text(
+            c,
+            x + 14,
+            y + 38,
+            &fileman::ellipsize(l2.as_bytes(), ((w - 28) / CELL) as usize),
+            theme::TEXT_MUTED,
+        );
+        text(
+            c,
+            x + 14,
+            y + 74,
+            b"Enter confirma   Esc cancela",
+            theme::TEXT,
+        );
+    }
+
+    fn draw_props(&self, c: &mut Canvas, r: Rect, lines: &[String]) {
+        let w = (r.w - 60).clamp(280, 520);
+        let h = 44 + lines.len() as i32 * 20;
+        let x = r.x + (r.w - w) / 2;
+        let y = r.y + (r.h - h).max(0) / 2;
+        round(c, x - 3, y - 3, w + 6, h + 6, 12, SEP);
+        round(c, x, y, w, h, 10, theme::WINDOW_BODY);
+        text(c, x + 14, y + 10, b"Propriedades", BLUE);
+        let cols = ((w - 28) / CELL) as usize;
+        for (i, l) in lines.iter().enumerate() {
+            text(
+                c,
+                x + 14,
+                y + 34 + i as i32 * 20,
+                &fileman::ellipsize(l.as_bytes(), cols),
+                theme::TEXT,
+            );
+        }
+    }
+
+    fn draw_files_menu(&self, c: &mut Canvas, m: &CtxMenu) {
+        let h = menu_height(m.items.len());
+        round(
+            c,
+            m.x + 3,
+            m.y + 5,
+            MENU_W_FILES,
+            h,
+            10,
+            Color::rgb(0xB5, 0xBC, 0xCB),
+        );
+        round(c, m.x, m.y, MENU_W_FILES, h, 9, theme::WINDOW_BODY);
+        round(c, m.x, m.y, MENU_W_FILES, 1, 0, SEP);
+        for (i, (cmd, label)) in m.items.iter().enumerate() {
+            let y = m.y + 4 + i as i32 * MENU_ROW_H;
+            let hover = self.cursor_x >= m.x
+                && self.cursor_x < m.x + MENU_W_FILES
+                && self.cursor_y >= y
+                && self.cursor_y < y + MENU_ROW_H;
+            if hover {
+                round(c, m.x + 4, y + 1, MENU_W_FILES - 8, MENU_ROW_H - 2, 6, BLUE);
+            }
+            let col = if hover {
+                theme::WHITE
+            } else if matches!(
+                cmd,
+                fileman::Cmd::DeletePermanent | fileman::Cmd::EmptyTrash
+            ) {
+                ERR
+            } else {
+                theme::TEXT
+            };
+            text(
+                c,
+                m.x + 14,
+                y + (MENU_ROW_H - 14) / 2,
+                label.as_bytes(),
+                col,
+            );
+        }
+    }
+}
+
+fn files_local(t: u64) -> String {
+    super::files::local_time(t)
 }

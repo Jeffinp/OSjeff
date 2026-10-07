@@ -4,11 +4,54 @@
 
 use super::*;
 
+/// Keys the [`Keymap`] has no `Key` for; read from the raw scancode.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Special {
+    F2,
+    F5,
+    PageUp,
+    PageDown,
+    KpPlus,
+    KpMinus,
+}
+
+/// The special key of a scancode, if it is one.
+fn special_of(scan: u8, extended: bool) -> Option<Special> {
+    match (scan, extended) {
+        (0x3C, false) => Some(Special::F2),
+        (0x3F, false) => Some(Special::F5),
+        (0x49, true) => Some(Special::PageUp),
+        (0x51, true) => Some(Special::PageDown),
+        (0x4E, false) => Some(Special::KpPlus),
+        (0x4A, false) => Some(Special::KpMinus),
+        _ => None,
+    }
+}
+
 impl Desktop {
     // ---- keyboard ----
 
+    /// A special key for the focused file manager or viewer. `true` when consumed.
+    fn handle_special(&mut self, sp: Special) -> bool {
+        let Some(top) = self.focused() else {
+            return false;
+        };
+        match self.kind_of(top) {
+            Some(Kind::Files) => self.files_special(top, sp),
+            Some(Kind::Viewer) => self.viewer_special(top, sp),
+            _ => false,
+        }
+    }
+
     pub fn handle_key(&mut self, scan: u8, extended: bool, pressed: bool, time: Time) -> bool {
         let alt_before = self.keymap.alt();
+        if pressed
+            && !alt_before
+            && let Some(sp) = special_of(scan, extended)
+            && self.handle_special(sp)
+        {
+            return true;
+        }
         let key = self.keymap.process(scan, extended, pressed);
         let alt_now = self.keymap.alt();
 
@@ -90,6 +133,17 @@ impl Desktop {
         // Ctrl+C / Ctrl+V / Ctrl+S / Ctrl+N are intercepted before the app sees the key
         // (a WASM app gets every chord itself).
         if self.keymap.ctrl() && kind != Kind::WasmApp {
+            // The file manager owns Ctrl+A/C/X/V/R (files, not text).
+            if kind == Kind::Files
+                && let Key::Char(ch) = key
+                && ch != b'n'
+                && ch != b'N'
+                && ch != b's'
+                && ch != b'S'
+                && self.files_ctrl(top, ch)
+            {
+                return true;
+            }
             match key {
                 Key::Char(b'c') | Key::Char(b'C') => {
                     self.copy_from_focused();
@@ -100,7 +154,11 @@ impl Desktop {
                     return true;
                 }
                 Key::Char(b's') | Key::Char(b'S') => {
-                    self.save_editor_file();
+                    if kind == Kind::Viewer {
+                        self.viewer_save_prompt(top);
+                    } else {
+                        self.save_editor_file();
+                    }
                     return true;
                 }
                 // Ctrl+N: another window of the focused app (single-instance
@@ -166,88 +224,9 @@ impl Desktop {
             Kind::Monitor => self.monitor_key(top, key),
             Kind::Settings => self.settings_key(top, key),
             Kind::LogViewer => self.log_key(top, key),
+            Kind::Viewer => self.viewer_key(top, key),
         }
         true
-    }
-
-    fn files_key(&mut self, id: WindowId, key: Key) {
-        if key == Key::Esc {
-            self.request_close(id);
-            return;
-        }
-        if self.files_mut(id).is_some_and(|f| f.view == 4) {
-            self.files_apps_key(id, key);
-            return;
-        }
-        if matches!(key, Key::Enter | Key::Right) {
-            let slot = self.files_mut(id).and_then(|f| f.primary());
-            if let Some(slot) = slot {
-                self.fs_load_slot(slot);
-            }
-            return;
-        }
-        let Some(f) = self.files_mut(id) else {
-            return;
-        };
-        match key {
-            Key::Up => f.move_sel(-1),
-            Key::Down => f.move_sel(1),
-            Key::Left | Key::Backspace => f.up(),
-            Key::Tab => f.toggle_view(),
-            Key::Delete => f.delete(),
-            Key::Char(b'n') | Key::Char(b'N') => f.mkdir(),
-            _ => {}
-        }
-    }
-
-    /// Keys of the Files "Apps" view: Enter runs (installing first when needed),
-    /// `I` installs, `Del` removes, arrows move, Tab switches view.
-    fn files_apps_key(&mut self, id: WindowId, key: Key) {
-        let rows = self.app_rows();
-        self.files_msg = None;
-        let Some(f) = self.files_mut(id) else {
-            return;
-        };
-        let sel = f.sel.min(rows.len().saturating_sub(1));
-        match key {
-            Key::Up => f.sel = sel.saturating_sub(1),
-            Key::Down => f.sel = (sel + 1).min(rows.len().saturating_sub(1)),
-            Key::Tab => f.toggle_view(),
-            Key::Left | Key::Backspace => f.set_view(0),
-            _ => {
-                let Some(row) = rows.get(sel) else {
-                    return;
-                };
-                let result = match key {
-                    Key::Enter | Key::Right => {
-                        if row.installed {
-                            self.launch_wasm_app(&row.id);
-                            Ok(())
-                        } else {
-                            self.install_bundled(&row.id).map(|()| {
-                                self.launch_wasm_app(&row.id);
-                            })
-                        }
-                    }
-                    Key::Char(b'i') | Key::Char(b'I') => {
-                        if row.installed {
-                            Err(String::from("ja instalado"))
-                        } else {
-                            self.install_bundled(&row.id)
-                        }
-                    }
-                    Key::Delete => {
-                        if row.installed {
-                            self.remove_app(&row.id)
-                        } else {
-                            Err(String::from("nao instalado"))
-                        }
-                    }
-                    _ => return,
-                };
-                self.files_msg = result.err().map(|e| (e, 0));
-            }
-        }
     }
 
     /// Resolve a click inside browser window `id`: toolbar buttons (home /
@@ -285,21 +264,6 @@ impl Desktop {
                     break;
                 }
             }
-        }
-    }
-
-    /// Resolve a click in file-manager window `id`. Geometry mirrors
-    /// `files_ui::draw_files` (sidebar width 176, rows 30px high). Sidebar items
-    /// switch the view; clicks in the main list select a row.
-    pub(crate) fn files_click(&mut self, id: WindowId, rect: Rect, px: i32, py: i32) {
-        use osjeff_core::layout::{FilesHit, files_hit};
-        let Some(f) = self.files_mut(id) else {
-            return;
-        };
-        match files_hit(rect, f.view, px, py) {
-            Some(FilesHit::View(v)) => f.set_view(v),
-            Some(FilesHit::Row(i)) => f.select_at(i),
-            None => {}
         }
     }
 
@@ -356,6 +320,7 @@ impl Desktop {
                 App::TaskMgr
                 | App::Wasm(_)
                 | App::Files(_)
+                | App::Viewer(_)
                 | App::Monitor(_)
                 | App::Settings(_)
                 | App::Log(_) => &[],
@@ -413,6 +378,7 @@ impl Desktop {
                 App::TaskMgr
                 | App::Wasm(_)
                 | App::Files(_)
+                | App::Viewer(_)
                 | App::Monitor(_)
                 | App::Settings(_)
                 | App::Log(_),
@@ -466,6 +432,7 @@ impl Desktop {
         if self.wm.toggle_maximize(id, work) {
             self.force_full = true;
             self.relayout_browser(id);
+            self.relayout_viewer(id);
         }
     }
 
@@ -539,12 +506,31 @@ impl Desktop {
                     self.wasm_grab = Some(w);
                 }
             }
-            Kind::Files => self.files_click(w, rect, cx, cy),
+            Kind::Files => self.files_click(w, rect, cx, cy, false),
+            Kind::Viewer => self.viewer_click(w, rect, cx, cy),
             Kind::Monitor => self.monitor_click(w, rect, cx, cy),
             Kind::Settings => self.settings_click(w, rect, cx, cy),
             Kind::LogViewer => self.log_click(w, rect, cx, cy),
             Kind::Terminal | Kind::Editor | Kind::TaskMgr => {}
         }
+    }
+
+    /// Mouse wheel (`notches` > 0 is away from the user): scroll a file manager,
+    /// zoom the image viewer, whichever is under the cursor. `true` when it
+    /// changed something.
+    pub fn handle_wheel(&mut self, notches: i32) -> bool {
+        if notches == 0 {
+            return false;
+        }
+        let Some(w) = self.topmost_at(self.cursor_x, self.cursor_y) else {
+            return false;
+        };
+        match self.kind_of(w) {
+            Some(Kind::Files) => self.files_wheel(w, notches),
+            Some(Kind::Viewer) => self.viewer_wheel(w, notches),
+            _ => return false,
+        }
+        true
     }
 
     pub fn handle_mouse(&mut self, dx: i32, dy: i32, left: bool, right: bool) -> MouseResult {
@@ -560,7 +546,20 @@ impl Desktop {
 
         // Right click opens a context menu at the cursor: the app menu on a dock
         // icon ("Nova janela"), the launcher elsewhere.
-        if right_pressed && self.wasm_pointer_target(cx, cy).is_none() {
+        let files_right = right_pressed
+            && self.menu.is_none()
+            && !self.start_open
+            && self.topmost_at(cx, cy).is_some_and(|w| {
+                self.kind_of(w) == Some(Kind::Files)
+                    && self.wm.get(w).is_some_and(|win| !win.rect.on_title(cx, cy))
+            });
+        if files_right && let Some(w) = self.topmost_at(cx, cy) {
+            self.wm.raise(w);
+            if let Some(rect) = self.wm.get(w).map(|win| win.rect) {
+                self.files_click(w, rect, cx, cy, true);
+            }
+            scene = true;
+        } else if right_pressed && self.wasm_pointer_target(cx, cy).is_none() {
             let kind = match self.dock_hit(cx, cy) {
                 Some(DockAction::Open(k)) => MenuKind::Dock(k),
                 _ => MenuKind::Desktop,
@@ -658,6 +657,7 @@ impl Desktop {
             // A resized browser lays its page out again for the new width.
             if matches!(d.mode, DragMode::Resize { .. }) {
                 self.relayout_browser(d.win);
+                self.relayout_viewer(d.win);
             }
         }
 
@@ -666,6 +666,16 @@ impl Desktop {
                 let (w, mode) = (d.win, d.mode);
                 let (sw, sh) = (self.sw, self.sh);
                 match mode {
+                    DragMode::Pan { last_x, last_y } => {
+                        self.viewer_pan(w, cx - last_x, cy - last_y);
+                        self.drag = Some(Drag {
+                            win: w,
+                            mode: DragMode::Pan {
+                                last_x: cx,
+                                last_y: cy,
+                            },
+                        });
+                    }
                     DragMode::Move { grab_dx, grab_dy } => {
                         self.wm.move_to(w, cx - grab_dx, cy - grab_dy, sw, sh);
                     }

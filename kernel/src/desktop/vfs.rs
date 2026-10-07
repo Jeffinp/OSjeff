@@ -16,7 +16,7 @@
 //!
 //! | Call | Does |
 //! |---|---|
-//! | `read_file(path)` / `write_file(path, data)` / `append(path, data)` | whole-file read, atomic create-or-replace, append (creates) |
+//! | `read_file(path)` / `read_range(path, off, len)` / `write_file(path, data)` / `append(path, data)` | whole-file read, a slice of it, atomic create-or-replace, append (creates) |
 //! | `list(dir)` -> `Vec<Entry>` | name, kind, size, mtime (storage order; `.trash` hidden) |
 //! | `stat(path)` -> `Info` / `exists(path)` / `statfs()` -> `Usage` | metadata, free space |
 //! | `mkdir(path)` / `new_file(dir, name)` / `new_folder(dir, name)` | create (name is validated, returns the path) |
@@ -52,8 +52,8 @@ use osjeff_core::vfs as core_vfs;
 
 #[allow(unused_imports)]
 pub use core_vfs::{
-    Backend, CopyJob, Entry, EntryKind, Info, MoveReport, Progress, TrashItem, Usage, VfsError,
-    base_name, join, parent,
+    Backend, CopyJob, Entry, EntryKind, Info, MAX_NAME, MoveReport, Progress, TrashItem, Usage,
+    VfsError, base_name, is_root, join, parent, trim_name, validate_name,
 };
 
 /// Result of this module's calls.
@@ -179,6 +179,12 @@ fn with<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
     }
 }
 
+/// Run `f` on the active volume without marking it modified (for read-only
+/// walks such as the file manager's reload). `f` gets the [`Backend`].
+pub fn with_backend<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
+    with(f)
+}
+
 /// Run a mutating `f` and mark the filesystem as touched.
 fn with_mut<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
     let r = with(f);
@@ -201,6 +207,22 @@ pub fn append(path: &[u8], data: &[u8]) -> Result<()> {
         }
         b.append(path, data, now())
     })?
+}
+
+/// Read up to `len` bytes of `path` starting at `off` (a prefix of a big file).
+pub fn read_range(path: &[u8], off: u64, len: usize) -> Result<Vec<u8>> {
+    with(|b| {
+        let mut buf = alloc::vec![0u8; len];
+        let n = b.read_at(path, off, &mut buf)?;
+        buf.truncate(n);
+        Ok(buf)
+    })?
+}
+
+/// A name based on `base` that is free in folder `dir` (`Nova pasta (2)`).
+pub fn unique_name_in(dir: &[u8], base: &[u8]) -> Vec<u8> {
+    with(|b| core_vfs::unique_name(base, |n| core_vfs::exists(b, &join(dir, n))))
+        .unwrap_or_else(|_| base.to_vec())
 }
 
 pub fn list(dir: &[u8]) -> Result<Vec<Entry>> {
