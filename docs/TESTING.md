@@ -52,6 +52,7 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 | `web_parse` | bytes como HTML/CSS/URL/resposta HTTP | parser, CSS, layout, `dechunk`, URL |
 | `shell_parse` | bytes como linha/script de shell | lexer/parser, executor (FS em memória com limites, `SysInfo` mock), editor de linha com Tab |
 | `editor_ops` | documento + sequência de operações (`arbitrary`) | `editor2`: teclas, mouse, busca/substituição, undo/redo, wrap; invariantes depois de cada operação |
+| `image_decode` | bytes como PNG/BMP/PPM/zlib (cru, com CRCs reparados, PNG sintetizado ou BMP com offset ajustado) | `image::decode`, `inflate` (com `max_output` pequeno, também em fluxo), e as operações sobre a imagem decodificada (resize, fit, rotação, composição) mais a ida e volta exata dos codificadores PNG/BMP |
 
 ```bash
 cargo install cargo-fuzz
@@ -63,6 +64,7 @@ cargo fuzz run ojfs3_ops   -- -max_total_time=600
 cargo fuzz run web_parse  -- -max_total_time=600 -dict=dict/web.dict
 cargo fuzz run shell_parse -- -max_total_time=600 -print_final_stats=1 -dict=dict/shell.dict
 cargo fuzz run editor_ops  -- -max_total_time=600 -print_final_stats=1
+cargo fuzz run image_decode -- -max_total_time=600 -print_final_stats=1 -dict=dict/image.dict
 ```
 
 O perfil de release do `fuzz/` liga `overflow-checks` e `debug-assertions`: um
@@ -84,6 +86,7 @@ Resultado da auditoria (10 minutos por alvo, em paralelo, QEMU não envolvido):
 | `net_parse` | 38,2 M | 63 mil | `net.rs` 99,35% das linhas |
 | `ojfs_parse` | 1,0 M | 1,7 mil | `fs.rs` 97,25% |
 | `web_parse` | 0,69 M | 0,4–0,6 mil | layout/style 100%, dom 99%, css 98,6%, `browser.rs` 63,6% |
+| `image_decode` | 0,30 M (10 min, 4 núcleos compartilhados) | 0,5 mil | `bmp.rs` 94,9% das linhas, `png.rs` 93,9%, `ppm.rs` 88,6%, `image.rs` 83,6%, `inflate.rs` 82,6%, `deflate.rs` 82,0% (o restante é `Display`, ramos de alocação falha e erros só alcançáveis por teste unitário) |
 
 `web_parse` ainda ganhava cobertura no fim: rode por horas antes de confiar nele.
 

@@ -70,6 +70,8 @@ bench = false
 [[bin]]
 name = "editor_ops"
 path = "fuzz_targets/editor_ops.rs"
+name = "image_decode"
+path = "fuzz_targets/image_decode.rs"
 test = false
 doc = false
 bench = false
