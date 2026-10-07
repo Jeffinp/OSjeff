@@ -711,6 +711,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             if let Some(len) = desk.browser_take_request(&mut url) {
                 fetch::try_post(&url[..len]);
             }
+        } else if fetch::worker_dead() {
+            // The fetcher thread died: fail the navigation now instead of leaving the
+            // browser on "Carregando" forever.
+            let mut url = [0u8; 256];
+            if desk.browser_take_request(&mut url).is_some() {
+                desk.browser_fail(osjeff_core::browser::FailReason::WorkerDied);
+                browser_redraw = true;
+            }
         }
         if let Some(result) = fetch::take_result() {
             match result {
@@ -1005,10 +1013,13 @@ fn heap_smoke_test() {
 fn panic(info: &PanicInfo) -> ! {
     // COM1 and the screen both get the report (see `crash`); without this every
     // panic, including allocation failure, was a silent `hlt`.
-    crash::die(
+    // A panic in a plain thread context kills only that thread (see `sched::kill_current`); one in the
+    // compositor, in an ISR or with interrupts off, or a second one while killing, is fatal.
+    crash::fault(
         crash::Kind::Panic,
         "the kernel panicked",
         format_args!("{info}"),
         None,
+        x86_64::instructions::interrupts::are_enabled(),
     )
 }

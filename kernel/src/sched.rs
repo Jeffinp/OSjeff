@@ -21,6 +21,20 @@
 //!
 //! The Task Manager's per-thread "CPU" counts only the timer ticks that found
 //! the thread *running* (`IDLE` marks the ones spent in `hlt`).
+//!
+//! # Dead threads
+//!
+//! A thread other than the compositor (slot 0) that panics, takes a CPU
+//! exception or trips its stack canary is not allowed to stop the machine: it is
+//! marked *dead* (`DEAD`), never scheduled again, and the CPU is handed to
+//! another thread without returning to it ([`kill_current`], or the ISR itself
+//! for the canary). The compositor, a fault with interrupts off (inside an ISR or
+//! a spin lock: the interrupted code held state nobody can repair), a double
+//! fault, and any fault *while* a thread is being killed stay fatal
+//! (`crash::die`). Resources a dead thread owned are not reclaimed: its stack and
+//! whatever it had allocated stay allocated, and a lock it held without
+//! disabling interrupts stays held. The heap lock cannot be one of those, because
+//! it keeps interrupts off while held (see [`containable`]).
 
 use crate::sync::RacyCell;
 use alloc::boxed::Box;
@@ -75,6 +89,10 @@ static TICKS: [AtomicU64; MAX_THREADS] = [const { AtomicU64::new(0) }; MAX_THREA
 static WAKE: [AtomicU64; MAX_THREADS] = [const { AtomicU64::new(0) }; MAX_THREADS];
 /// `WAKE` value meaning "blocked until [`wake`] is called".
 pub const FOREVER: u64 = u64::MAX;
+/// Threads that died (see [`kill_current`]). A dead slot is never scheduled again.
+static DEAD: [AtomicBool; MAX_THREADS] = [const { AtomicBool::new(false) }; MAX_THREADS];
+/// Set while [`kill_current`] runs, so a fault inside it is not "contained" a second time.
+static KILLING: AtomicBool = AtomicBool::new(false);
 /// Set by a thread while it sits in `hlt` waiting for an interrupt, so the tick
 /// sampler does not charge that time as CPU use.
 static IDLE: [AtomicBool; MAX_THREADS] = [const { AtomicBool::new(false) }; MAX_THREADS];
@@ -186,6 +204,12 @@ pub extern "C" fn yield_switch(rsp: u64) -> u64 {
     reschedule(rsp, false)
 }
 
+/// May slot `i` be scheduled at tick `now`: not dead and not blocked.
+#[inline]
+fn runnable(i: usize, now: u64) -> bool {
+    i >= MAX_THREADS || (!DEAD[i].load(Ordering::Acquire) && WAKE[i].load(Ordering::Acquire) <= now)
+}
+
 fn reschedule(rsp: u64, timer_tick: bool) -> u64 {
     // SAFETY: runs inside an ISR with IF=0, so it is neither re-entered nor preempted.
     // Other users run with IF=0 (`spawn`, via `without_interrupts`) or only read fields the ISR
@@ -205,9 +229,16 @@ fn reschedule(rsp: u64, timer_tick: bool) -> u64 {
     }
 
     // Catch a stack overflow the instant the offending thread is preempted,
-    // before its wild writes corrupt the heap and detonate elsewhere.
-    if !s.threads[cur].stack_intact() {
-        panic!("stack overflow in thread '{}'", s.threads[cur].name);
+    // before its wild writes corrupt the heap and detonate elsewhere. The thread
+    // is killed right here (we are in the ISR, IF=0): it is marked dead and the
+    // pick below simply never chooses it again. No `panic!` in the ISR.
+    if cur != 0 && !DEAD[cur].load(Ordering::Relaxed) && !s.threads[cur].stack_intact() {
+        crate::serial_println!(
+            "thread '{}' died: stack overflow (canary clobbered, rsp {:#x})",
+            s.threads[cur].name,
+            rsp
+        );
+        DEAD[cur].store(true, Ordering::Release);
     }
 
     if timer_tick && cur < MAX_THREADS && !IDLE[cur].load(Ordering::Relaxed) {
@@ -215,17 +246,14 @@ fn reschedule(rsp: u64, timer_tick: bool) -> u64 {
     }
 
     // Next runnable thread after `cur`, round-robin; `cur` itself is the last
-    // candidate, so it keeps the CPU when nobody else can run.
+    // candidate, so it keeps the CPU when nobody else can run (unless it died).
     let n = s.threads.len();
     let now = crate::interrupts::ticks();
-    let mut next = cur;
-    for step in 1..=n {
-        let cand = (cur + step) % n;
-        if cand >= MAX_THREADS || WAKE[cand].load(Ordering::Acquire) <= now {
-            next = cand;
-            break;
-        }
-    }
+    let next = match osjeff_core::schedule::next_runnable(cur, n, |i| runnable(i, now)) {
+        Some(next) => next,
+        // Only possible if the compositor were dead or missing, which `kill_current` forbids.
+        None => crate::crash::halt(),
+    };
     if next == cur {
         return rsp; // nothing else to run: state unchanged, `cur` resumes
     }
@@ -261,6 +289,80 @@ fn reschedule(rsp: u64, timer_tick: bool) -> u64 {
     s.threads[next].rsp
 }
 
+// ---- thread death ----
+
+unsafe extern "C" {
+    /// `switch.s`: load `rsp` (a context saved by the ISR: 15 GPRs, then an `iretq` frame), pop it and
+    /// `iretq` into that thread. Never returns.
+    fn resume_context(rsp: u64) -> !;
+}
+
+/// `true` if thread slot `id` has died (see [`kill_current`]).
+pub fn is_dead(id: usize) -> bool {
+    id < MAX_THREADS && DEAD[id].load(Ordering::Acquire)
+}
+
+/// Can a failure in the running thread be contained to that thread?
+///
+/// `if_was_set` is the interrupt flag of the failing context (RFLAGS.IF of the
+/// faulting code, or the live flag for a panic). Containment needs all of:
+///
+/// - **not the compositor** (slot 0): the desktop is the one thread whose loss is
+///   the machine's loss; it keeps the red error screen;
+/// - **IF was set**: plain thread context. Interrupt gates and [`SpinLock`] both
+///   run with IF clear, so IF=1 proves we were in neither an ISR (a half-served IRQ,
+///   no EOI) nor inside the heap lock or another critical section, so no lock
+///   is left held by a thread that vanishes;
+/// - **not already killing**: a fault inside [`kill_current`] is fatal.
+///
+/// [`SpinLock`]: crate::allocator::SpinLock
+pub fn containable(if_was_set: bool) -> bool {
+    if_was_set && current() != 0 && !KILLING.load(Ordering::Acquire) && thread_count() > 1
+}
+
+/// Kill the running thread and switch to another one; never returns.
+///
+/// Logs the thread's name and `reason` on COM1, marks the slot dead and jumps
+/// straight into the next runnable thread's saved context with `resume_context`,
+/// abandoning the current stack (which may be the exhausted one that just
+/// overflowed, or the IST stack of the fault). Callers check [`containable`] first.
+pub fn kill_current(reason: core::fmt::Arguments<'_>) -> ! {
+    x86_64::instructions::interrupts::disable();
+    if KILLING.swap(true, Ordering::AcqRel) {
+        crate::crash::halt(); // fault while killing (callers should have checked)
+    }
+    let cur = current();
+    crate::serial_println!("thread '{}' died: {}", thread_name(cur), reason);
+    if cur < MAX_THREADS {
+        DEAD[cur].store(true, Ordering::Release);
+        IDLE[cur].store(false, Ordering::Relaxed);
+    }
+
+    let s = scheduler();
+    let now = crate::interrupts::ticks();
+    let Some(next) =
+        osjeff_core::schedule::next_runnable(cur, s.threads.len(), |i| runnable(i, now))
+    else {
+        crate::serial_println!("no runnable thread left");
+        crate::crash::halt();
+    };
+    s.current = next;
+    CURRENT.store(next, Ordering::Relaxed);
+    // SAFETY: `fpu_ptr()` is the 16-aligned 512-byte area of `next` (never freed), seeded or written by
+    // `fxsave`, so `fxrstor` cannot #GP; same as the restore in `reschedule`.
+    unsafe {
+        core::arch::asm!(
+            "fxrstor [{}]", in(reg) s.threads[next].fpu_ptr(),
+            options(nostack, readonly, preserves_flags),
+        );
+    }
+    KILLING.store(false, Ordering::Release);
+    // SAFETY: `next != cur` is runnable and not the running thread, so its `rsp` was saved by the ISR
+    // (timer or yield) when it was switched out: 15 GPRs followed by an `iretq` frame, exactly what
+    // `resume_context` pops. IF=0 until that `iretq`, so no tick can intervene.
+    unsafe { resume_context(s.threads[next].rsp) }
+}
+
 // ---- blocking API (thread context, IF=1) ----
 
 /// Hand the CPU to the next runnable thread right now (`int 0x81`). Returns when
@@ -288,7 +390,7 @@ pub fn wake(id: usize) {
 fn others_ready(me: usize) -> bool {
     let n = thread_count().min(MAX_THREADS);
     let now = crate::interrupts::ticks();
-    (0..n).any(|i| i != me && WAKE[i].load(Ordering::Acquire) <= now)
+    (0..n).any(|i| i != me && runnable(i, now))
 }
 
 /// Sleep in `hlt` until the next interrupt, unless `skip()` says there is
@@ -364,6 +466,11 @@ pub fn thread_name(i: usize) -> &'static str {
     unsafe { (*SCHED.get()).as_ref() }
         .and_then(|s| s.threads.get(i))
         .map_or("", |t| t.name)
+}
+
+/// `true` if the thread in slot `i` died (shown as DEAD in the Task Manager).
+pub fn thread_dead(i: usize) -> bool {
+    is_dead(i)
 }
 
 pub fn thread_ticks(i: usize) -> u64 {

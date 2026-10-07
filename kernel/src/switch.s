@@ -40,6 +40,11 @@
     mov rdi, rsp        /* arg0 = current (outgoing) stack pointer */
     call \target
     mov rsp, rax        /* switch to the next thread's stack        */
+    RESTORE_AND_IRET
+.endm
+
+/* Pop a saved context (15 GPRs) off the current stack and `iretq` into it. */
+.macro RESTORE_AND_IRET
     pop r15
     pop r14
     pop r13
@@ -66,3 +71,15 @@ timer_isr:
 .global yield_isr
 yield_isr:
     CONTEXT_SWITCH_ISR {yield_schedule}
+
+/*
+ * resume_context(rsp: u64) -> !   (System V: rsp in rdi)
+ *
+ * Jump into a thread whose context was saved by the ISR above, without
+ * returning to the caller. Used to leave a thread that has just been killed:
+ * the caller's own stack is simply abandoned.
+ */
+.global resume_context
+resume_context:
+    mov rsp, rdi
+    RESTORE_AND_IRET

@@ -226,8 +226,10 @@ extern "x86-interrupt" fn mouse(_f: InterruptStackFrame) {
 
 extern "x86-interrupt" fn breakpoint(_f: InterruptStackFrame) {}
 
-/// Report a fatal CPU exception on COM1 and on screen, then halt (`cli; hlt`).
-/// Uses no allocation or locks; see `crash::die`.
+/// Handle a CPU exception raised by software (#GP, #PF, #UD, ...): if it happened in
+/// a plain thread context it kills only that thread, otherwise it is fatal. In the
+/// fatal case it reports on COM1 and on screen, using no allocation or locks; see
+/// `crash::fault` and `crash::die`.
 fn fatal(name: &str, f: &InterruptStackFrame, code: Option<u64>) -> ! {
     fatal_msg(name, f, code, format_args!("unrecoverable CPU exception"))
 }
@@ -238,21 +240,47 @@ fn fatal_msg(
     code: Option<u64>,
     msg: core::fmt::Arguments<'_>,
 ) -> ! {
+    crate::crash::fault(
+        crate::crash::Kind::Exception,
+        name,
+        msg,
+        Some(frame_of(f, code)),
+        f.cpu_flags
+            .contains(x86_64::registers::rflags::RFlags::INTERRUPT_FLAG),
+    )
+}
+
+/// An exception that is never contained to a thread: a double fault, NMI, machine check or
+/// anything that signals broken hardware or a broken kernel rather than a buggy thread.
+fn fatal_always(name: &str, f: &InterruptStackFrame, code: Option<u64>) -> ! {
+    fatal_always_msg(name, f, code, format_args!("unrecoverable CPU exception"))
+}
+
+fn fatal_always_msg(
+    name: &str,
+    f: &InterruptStackFrame,
+    code: Option<u64>,
+    msg: core::fmt::Arguments<'_>,
+) -> ! {
     crate::crash::die(
         crate::crash::Kind::Exception,
         name,
         msg,
-        Some(crate::crash::Frame {
-            rip: f.instruction_pointer.as_u64(),
-            rsp: f.stack_pointer.as_u64(),
-            rflags: f.cpu_flags.bits(),
-            code,
-        }),
+        Some(frame_of(f, code)),
     )
 }
 
+fn frame_of(f: &InterruptStackFrame, code: Option<u64>) -> crate::crash::Frame {
+    crate::crash::Frame {
+        rip: f.instruction_pointer.as_u64(),
+        rsp: f.stack_pointer.as_u64(),
+        rflags: f.cpu_flags.bits(),
+        code,
+    }
+}
+
 extern "x86-interrupt" fn double_fault(f: InterruptStackFrame, code: u64) -> ! {
-    fatal_msg(
+    fatal_always_msg(
         "#DF double fault",
         &f,
         Some(code),
@@ -296,11 +324,11 @@ extern "x86-interrupt" fn stack_segment_fault(f: InterruptStackFrame, code: u64)
 // ---- remaining exceptions: report and halt ----
 
 extern "x86-interrupt" fn debug_exception(f: InterruptStackFrame) {
-    fatal("#DB debug exception", &f, None)
+    fatal_always("#DB debug exception", &f, None)
 }
 
 extern "x86-interrupt" fn nmi(f: InterruptStackFrame) {
-    fatal("NMI non-maskable interrupt", &f, None)
+    fatal_always("NMI non-maskable interrupt", &f, None)
 }
 
 extern "x86-interrupt" fn overflow(f: InterruptStackFrame) {
@@ -328,7 +356,7 @@ extern "x86-interrupt" fn alignment_check(f: InterruptStackFrame, code: u64) {
 }
 
 extern "x86-interrupt" fn machine_check(f: InterruptStackFrame) -> ! {
-    fatal("#MC machine check", &f, None)
+    fatal_always("#MC machine check", &f, None)
 }
 
 extern "x86-interrupt" fn simd_floating_point(f: InterruptStackFrame) {
@@ -336,23 +364,23 @@ extern "x86-interrupt" fn simd_floating_point(f: InterruptStackFrame) {
 }
 
 extern "x86-interrupt" fn virtualization(f: InterruptStackFrame) {
-    fatal("#VE virtualization exception", &f, None)
+    fatal_always("#VE virtualization exception", &f, None)
 }
 
 extern "x86-interrupt" fn cp_protection(f: InterruptStackFrame, code: u64) {
-    fatal("#CP control protection", &f, Some(code))
+    fatal_always("#CP control protection", &f, Some(code))
 }
 
 extern "x86-interrupt" fn hv_injection(f: InterruptStackFrame) {
-    fatal("#HV hypervisor injection exception", &f, None)
+    fatal_always("#HV hypervisor injection exception", &f, None)
 }
 
 extern "x86-interrupt" fn vmm_communication(f: InterruptStackFrame, code: u64) {
-    fatal("#VC VMM communication exception", &f, Some(code))
+    fatal_always("#VC VMM communication exception", &f, Some(code))
 }
 
 extern "x86-interrupt" fn security_exception(f: InterruptStackFrame, code: u64) {
-    fatal("#SX security exception", &f, Some(code))
+    fatal_always("#SX security exception", &f, Some(code))
 }
 
 // ---- spurious PIC interrupts ----

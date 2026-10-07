@@ -78,6 +78,36 @@ pub fn halt() -> ! {
     }
 }
 
+/// Handle a failure in the running thread: if it can be contained (see
+/// [`crate::sched::containable`]) kill just that thread and keep the machine
+/// running; otherwise fall through to [`die`] (error screen, halt).
+///
+/// `if_was_set` is the interrupt flag of the failing context: RFLAGS.IF of the
+/// faulting code for an exception, the live flag for a panic. Never returns.
+pub fn fault(
+    kind: Kind,
+    subtitle: &str,
+    msg: fmt::Arguments<'_>,
+    frame: Option<Frame>,
+    if_was_set: bool,
+) -> ! {
+    if kind != Kind::Unsupported && crate::sched::containable(if_was_set) {
+        match frame {
+            Some(f) => crate::sched::kill_current(format_args!(
+                "{subtitle}: {msg} (rip={:#x} rsp={:#x} code={:?} cr2={:#x})",
+                f.rip,
+                f.rsp,
+                f.code,
+                x86_64::registers::control::Cr2::read_raw()
+            )),
+            // A panic message already says "panicked at <location>: <text>".
+            None if kind == Kind::Panic => crate::sched::kill_current(format_args!("{msg}")),
+            None => crate::sched::kill_current(format_args!("{subtitle}: {msg}")),
+        }
+    }
+    die(kind, subtitle, msg, frame)
+}
+
 /// Report a fatal condition on COM1 and on the screen, then halt. Never returns.
 ///
 /// `subtitle` is the exception name (`"#PF page fault"`) or a short reason;

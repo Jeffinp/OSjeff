@@ -660,7 +660,12 @@ impl Desktop {
             let mut line = [b' '; 24];
             let n = name.len().min(14);
             line[..n].copy_from_slice(&name[..n]);
-            write_uint(&mut line, 17, 6, sched::thread_ticks(i) as u32);
+            if sched::thread_dead(i) {
+                // A dead thread is never scheduled again: show that instead of a stale tick count.
+                line[17..21].copy_from_slice(b"DEAD");
+            } else {
+                write_uint(&mut line, 17, 6, sched::thread_ticks(i) as u32);
+            }
             font::draw_bytes(c, tx, ty, &line, theme::TEXT, 2);
             ty += line_h;
         }

@@ -685,11 +685,20 @@ pub extern "C" fn worker() -> ! {
     }
 }
 
+/// True if the worker thread died (panic or CPU fault inside the app engine, see
+/// `sched::kill_current`). The window then shows the same "encerrado" notice as a
+/// normal termination; the thread is not restarted.
+fn worker_dead() -> bool {
+    let tid = TID.load(Ordering::Acquire);
+    tid != usize::MAX && crate::sched::is_dead(tid)
+}
+
 /// Copy the latest finished app frame into the live `Canvas` at content origin
 /// `(cx, cy)`. Shows a placeholder until the first frame is ready (the worker may
 /// still be loading — e.g. DOOM parsing its WAD).
 pub fn blit_surface(c: &mut Canvas, cx: i32, cy: i32) {
-    if !READY.load(Ordering::Acquire) {
+    let dead = worker_dead();
+    if dead || !READY.load(Ordering::Acquire) {
         c.fill_rect(
             cx.max(0) as usize,
             cy.max(0) as usize,
@@ -698,6 +707,7 @@ pub fn blit_surface(c: &mut Canvas, cx: i32, cy: i32) {
             Color::rgb(0x10, 0x14, 0x20),
         );
         let text = match MSG.load(Ordering::Acquire) {
+            _ if dead => "App WASM encerrado",
             MSG_LOAD_FAILED => "App WASM nao carregou",
             MSG_TERMINATED => "App WASM encerrado",
             _ => "Carregando app WASM...",

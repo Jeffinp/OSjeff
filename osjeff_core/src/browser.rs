@@ -67,6 +67,8 @@ pub enum FailReason {
     RedirectLoop,
     /// More than [`crate::redirect::MAX_REDIRECTS`] redirects.
     TooManyRedirects,
+    /// The background fetcher thread died (panic or CPU fault) and cannot serve requests.
+    WorkerDied,
 }
 
 impl FailReason {
@@ -78,6 +80,7 @@ impl FailReason {
             FailReason::RedirectInvalid => "Redirecionamento invalido.",
             FailReason::RedirectLoop => "Redirecionamento em ciclo.",
             FailReason::TooManyRedirects => "Redirecionamentos demais.",
+            FailReason::WorkerDied => "O carregador de paginas falhou (thread encerrada).",
         }
     }
 
@@ -1101,5 +1104,20 @@ mod tests {
             FailReason::from_redirect(E::Downgrade),
             FailReason::RedirectDowngrade
         );
+    }
+
+    #[test]
+    fn worker_died_is_a_distinct_ascii_failure() {
+        let mut b = Browser::new();
+        b.open(b"example.com");
+        let _ = b.take_request();
+        b.fail_with(FailReason::WorkerDied);
+        assert_eq!(b.status(), Status::Error);
+        assert_eq!(b.fail_reason(), FailReason::WorkerDied);
+        assert_ne!(FailReason::WorkerDied, FailReason::Network);
+        assert!(FailReason::WorkerDied.message().is_ascii());
+        // The next navigation starts clean.
+        b.open(b"example.org");
+        assert_eq!(b.status(), Status::Loading);
     }
 }

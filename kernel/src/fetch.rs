@@ -9,6 +9,13 @@
 //! IDLE --try_post--> REQUESTED --worker--> RUNNING --worker--> DONE --take_result--> IDLE
 //! ```
 //!
+//! If the worker thread dies (panic, CPU fault: see `sched::kill_current`) the
+//! request in flight is answered with [`FailReason::WorkerDied`] by
+//! [`take_result`], the machine moves to `WORKER_DEAD`, and from then on
+//! [`is_idle`] is false for good, so nothing posts to the dead thread and the
+//! compositor stops polling the NIC the worker may have left half-programmed.
+//! The main loop turns later navigations into the same error via [`worker_dead`].
+//!
 //! Only one fetch is ever in flight, and the NIC is touched solely by the worker
 //! while a fetch runs (the main loop gates its ARP responder on [`is_idle`]), so
 //! there is no concurrent access to the single NE2000 from the two threads.
@@ -23,6 +30,8 @@ const IDLE: u8 = 0;
 const REQUESTED: u8 = 1;
 const RUNNING: u8 = 2;
 const DONE: u8 = 3;
+/// The worker thread died; terminal (nothing leaves this state).
+const WORKER_DEAD: u8 = 4;
 
 const URL_CAP: usize = 512;
 
@@ -60,12 +69,20 @@ pub fn init(net: netstack::Net) {
 /// True when no fetch is in flight — the main loop may safely poll the NIC for
 /// its ARP/ping responder only in this state.
 pub fn is_idle() -> bool {
-    STATE.load(Ordering::Acquire) == IDLE
+    STATE.load(Ordering::Acquire) == IDLE && !worker_dead()
+}
+
+/// True once the worker thread has died. It never comes back: every later
+/// navigation has to fail instead of waiting for a thread that no longer exists.
+pub fn worker_dead() -> bool {
+    let tid = TID.load(Ordering::Acquire);
+    STATE.load(Ordering::Acquire) == WORKER_DEAD
+        || (tid != usize::MAX && crate::sched::is_dead(tid))
 }
 
 /// Queue a fetch for `url` if the worker is idle. Returns `true` if accepted.
 pub fn try_post(url: &[u8]) -> bool {
-    if STATE.load(Ordering::Acquire) != IDLE {
+    if STATE.load(Ordering::Acquire) != IDLE || worker_dead() {
         return false;
     }
     let n = url.len().min(URL_CAP);
@@ -87,7 +104,13 @@ pub fn try_post(url: &[u8]) -> bool {
 /// If a fetch has finished, return its result and reset to idle. Yields `None`
 /// while nothing is ready.
 pub fn take_result() -> Option<FetchResult> {
-    if STATE.load(Ordering::Acquire) != DONE {
+    let state = STATE.load(Ordering::Acquire);
+    if matches!(state, REQUESTED | RUNNING) && worker_dead() {
+        // The worker died with a request in flight: it will never answer.
+        STATE.store(WORKER_DEAD, Ordering::Release);
+        return Some(Err(FailReason::WorkerDied));
+    }
+    if state != DONE {
         return None;
     }
     // SAFETY: STATE == DONE (Acquire) means the worker finished writing RESULT and will not touch it
