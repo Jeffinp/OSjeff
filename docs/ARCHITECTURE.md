@@ -20,28 +20,31 @@ e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espa�
 endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
 o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
 
-- **Dois crates de código.** `osjeff_core` (~10,7 mil linhas com testes, 379 testes
-  passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~10,5 mil linhas,
+- **Dois crates de código.** `osjeff_core` (~11,7 mil linhas com testes, 423 testes
+  passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
 - **Multitarefa preemptiva** a 250 Hz, com bloqueio. Três threads: `compositor`,
   `fetcher` (rede), `wasmapp`.
-- **Memória:** heap fixo de 64 MiB num BSS de ~91 MiB; sem alocador de frames nem page
-  tables próprias (o bootloader mapeia, o kernel só lê).
-- **Falhas:** todas as exceções têm handler; panic e exceção fatal pintam uma tela de
-  erro e escrevem na serial, e então a **máquina inteira** para. Não existe "matar só a
-  thread".
-- **Rede, web e WASM:** NE2000 ISA, `smoltcp`, TLS 1.3 **sem verificação de
-  certificado**, motor HTML/CSS próprio, `wasmi` (um app por build); a rede só funciona
-  com o IP, gateway e DNS do lease DHCP (fallback estático do SLIRP).
-- **Boot [M]:** primeiro frame ~5,1 s (BIOS) e ~4,5 s (UEFI) após a entrada do kernel,
-  quase tudo é o splash.
+- **Memória:** heap fixo de 64 MiB num BSS de ~91 MiB; sem alocador de frames. As page
+  tables são do bootloader; o kernel só edita uma entrada de nível 1 por pilha de thread,
+  para criar uma **guard page**.
+- **Falhas:** todas as exceções têm handler. Um panic ou exceção no `fetcher` ou no
+  `wasmapp` **mata só aquela thread** (log na serial, o resto segue). Falha no compositor,
+  #DF/NMI/#MC, qualquer falha com interrupções desligadas ou durante a morte de uma thread
+  pinta uma tela de erro e para a **máquina inteira**. A thread morta não é reiniciada
+  nem liberada.
+- **Rede, web e WASM:** NE2000 ISA, `smoltcp` configurado pelo DHCP do boot (IP, rota,
+  DNS; fallback estático do SLIRP), TLS 1.3 **sem verificação de certificado**, motor
+  HTML/CSS próprio, `wasmi` (um app por build).
+- **Boot [M]:** primeiro frame em ~5 s (BIOS e UEFI) após a entrada do kernel, quase tudo
+  é o splash.
 
 ## 1. Visão geral e fronteira core ↔ kernel
 
 | Crate | Tipo | Tamanho | Papel |
 |---|---|---|---|
-| `osjeff_core` | lib, `no_std` fora de testes, `forbid(unsafe_code)` | 10,7 mil linhas, 379 testes [M] | lógica pura, testável no host |
-| `kernel` | bin `x86_64-unknown-none`, `test = false` | 10,5 mil linhas + `switch.s` (68) | hardware, scheduler, compositor, drivers, rede, WASM |
+| `osjeff_core` | lib, `no_std` fora de testes, `forbid(unsafe_code)` | 11,7 mil linhas, 423 testes [M] | lógica pura, testável no host |
+| `kernel` | bin `x86_64-unknown-none`, `test = false` | 11,0 mil linhas + `switch.s` (85) | hardware, scheduler, compositor, drivers, rede, WASM |
 | `os` | builder | ~70 linhas | `build.rs` gera `osjeff-bios.img` e `osjeff-uefi.img`; `main.rs` lança o QEMU |
 
 Fora do workspace, cada um com seu `Cargo.lock`: `fuzz/` (3 alvos), `bench/` (criterion,
@@ -61,17 +64,18 @@ Quem fica de cada lado:
 
 | `osjeff_core` (testado no host) | `kernel` (ring 0) |
 |---|---|
-| `terminal`, `editor`, `calc`, `clipboard`, `keymap`, `process`, `anim` | `main.rs` (boot e laço do compositor), `gdt`, `interrupts`, `switch.s`, `sched`, `crash` |
+| `terminal`, `editor`, `calc`, `clipboard`, `keymap`, `process`, `anim` | `main.rs` (boot e laço do compositor), `gdt`, `interrupts`, `switch.s`, `sched`, `crash`, `vm` |
 | `fs` (OJFS), `net`, `redirect`, `rng` | `allocator`, `sync`, `io`, `serial` |
 | `web` (HTML, CSS, layout), `browser` | `fb`, `font`, `icons`, `desktop/*` |
-| `layout`, `wm`, `window`, `gfx`, `heap` | drivers: `ps2`, `rtc`, `ata`, `ne2000`, `pci`, `virtio*`, `power` |
+| `layout`, `wm`, `window`, `gfx`, `heap`, `paging`, `schedule` | drivers: `ps2`, `rtc`, `ata`, `ne2000`, `pci`, `virtio*`, `power` |
 | `hw::{ps2, rtc, ata, pci, virtio, perf}` | `netstack`, `fetch`, `wasm/*`, `perf`, `trace` |
 
 
 Regra do projeto: **decisão vai para o core com teste; o kernel liga o hardware a ela.**
 O kernel faz a porta de E/S ou o MMIO e entrega bytes a `osjeff_core::hw::*`, que
 decodifica (PS/2, BCD/12h/fuso do RTC, `IDENTIFY` e LBA do ATA, varredura PCI, capabilities
-virtio, estatísticas do HUD), ou a `gfx`, `layout`, `wm`, `redirect`. A regra **ainda
+virtio, estatísticas do HUD, a conta de páginas das guard pages em `paging`, a escolha
+da próxima thread em `schedule`), ou a `gfx`, `layout`, `wm`, `redirect`. A regra **ainda
 não vale para tudo** [L]: o despacho de entrada (`desktop/input.rs`), a lógica de dano
 (`desktop/render.rs`), as primitivas de `fb.rs`, o ring de eventos do WASM e os drivers
 de porta de E/S seguem no kernel, sem teste automatizado. O comentário de `lib.rs`
@@ -95,21 +99,26 @@ páginas de 2 MiB, RW+NX; cria o `BootInfo` e salta para o kernel.
 `BOOT_CONFIG` (`main.rs`) muda duas coisas do default: `physical_memory = Dynamic` (o
 virtio traduz endereços) e `kernel_stack_size = 512 KiB` (era 80 KiB). Medido [M]:
 `physical_memory_offset = 0x28000000000`, kernel PIE em `0x10000000000`. O kernel não lê
-`memory_regions` nem `rsdp_addr` e não toca em CR0/CR4/EFER.
+`memory_regions` nem `rsdp_addr` e não toca em CR0/CR4/EFER; só lê CR3 e edita uma PTE
+por pilha de thread (§2.6, §3.1).
 
 ### 2.2 Sequência de `kernel_main`
 
 ```text
-serial -> framebuffer (registra p/ crash, guarda de tamanho, zera) -> BACK/BG/STATIC
+serial -> vm::init(physical_memory_offset) -> framebuffer (registra p/ crash, guarda de
+tamanho, zera) -> BACK/BG/STATIC
 -> ALLOCATOR.init(HEAP 64 MiB) + smoke test -> wasm::run_demo (sem IRQ ainda)
--> PCI + sonda virtio-gpu -> ata::detect -> gdt::init -> sched::init -> ps2::init
+-> PCI + sonda virtio-gpu -> ata::detect -> gdt::init -> sched::init (acha a guard page
+da pilha de boot) -> ps2::init
 -> interrupts::init (IDT, PIC, PIT 250 Hz, sti) -> calibra TSC (25 ticks)
--> ne2000::init + DHCP + ARP gratuito -> spawn fetcher (só com NIC) e wasmapp
+-> ne2000::init + DHCP (NetConfig) + ARP gratuito -> spawn fetcher (só com NIC, stack
+com guard page) e wasmapp
 -> splash -> wallpaper em BG -> Desktop::new (lê o FS do ATA) -> laço do compositor
 ```
 
 A ordem importa [L]: `gdt::init` precede `sched::init` e `interrupts::init` porque os gates
-da IDT e `spawn` capturam os seletores `CS`/`SS` vivos; `ps2::init` roda antes de `sti`
+da IDT e `spawn` capturam os seletores `CS`/`SS` vivos, e `vm::init` precede `spawn`
+porque criar a guard page exige o `physical_memory_offset`; `ps2::init` roda antes de `sti`
 para o handshake não correr com as ISRs. Marcos de boot saem na serial em qualquer build
 (`[trace] boot + N ms`). Medidos [M]: demo WASM 60-75 ms, calibração do TSC ~100 ms,
 splash 4,2 s (UEFI) a 4,8 s (BIOS), `Desktop::new` 30-40 ms. O splash é um laço ocupado
@@ -121,8 +130,8 @@ framebuffer do bootloader, e no runner padrão o dispositivo nem existe [M].
 
 O arquivo de imagem tem ~4,6 MiB, mas o **bootloader materializa o BSS inteiro** (um
 frame físico por página, zerado). O custo do BSS é RAM. Segmentos do ELF neste build
-[M, `readelf`]: `R`, `R E` (~1,5 MiB), `RW` (~28 KiB) e `RW` com `MemSiz = 0x5b20708`
-(**95.569.672 B, 91,14 MiB** de `.data`+`.bss`).
+[M, `readelf`]: `R`, `R E` (~1,5 MiB), `RW` (~29 KiB) e `RW` com `MemSiz = 0x5b28900`
+(**95.586.560 B, 91,16 MiB** de `.data`+`.bss`).
 
 | Símbolo | Bytes | Uso |
 |---|---|---|
@@ -131,9 +140,9 @@ frame físico por página, zerado). O custo do BSS é RAM. Segmentos do ELF nest
 | `wasm::SURFACE` | 2.291.904 | 2 x 692x414x4, duplo buffer do app WASM |
 | `desktop::SCRATCH` | 1.126.400 | 640x440x4, o que está atrás de uma janela em fade |
 | `desktop::DISK` | 50.688 | imagem OJFS em RAM (99 setores) |
-| `gdt::IST_STACK` | 32.768 | pilha do #DF |
+| `gdt::IST_STACK`, `gdt::PF_IST_STACK` | 2 x 32.768 | pilhas IST do #DF e do #PF |
 | `TLS_RX`, `TLS_TX` | 2 x 16.384 | registros TLS |
-| `virtio_gpu` (3 páginas), `EVENTS`, `RING`, demais | ~42 KiB | |
+| `virtio_gpu` (3 páginas), `EVENTS`, `RING`, demais | ~27 KiB | |
 
 Heap e buffers são 96% do BSS. O resto da RAM física **não é usado**: não há alocador de
 frames.
@@ -155,22 +164,35 @@ buffer com um panic mudo. Uma tela 1920x1200 a 32 bpp (9,2 MB) é recusada. Em B
 
 ### 2.5 RAM mínima
 
-Conta [L]: BSS 91,14 MiB + ELF ~1,8 MiB + pilha de boot + tabelas de página, em frames
+Conta [L]: BSS 91,16 MiB + ELF ~1,8 MiB + pilha de boot + tabelas de página, em frames
 acima de 1 MiB. **UEFI com 128 MiB não chega ao kernel**: o bootloader panica em
-`load_kernel.rs` (`Option::unwrap()` sobre `None`, ao mapear o BSS) [M]; **192 MiB boota** (desktop em ~4,8 s [M]), o mínimo
-registrado em `os/src/main.rs`; 256 MiB (valor de `os/src/main.rs` e `run.ps1`) boota em
-UEFI e BIOS [M]. BIOS com 128 MiB boota [A], não repetido. No UEFI o alocador do
-bootloader só usa regiões `CONVENTIONAL` e o OVMF consome parte da RAM; a causa exata do
-limite de 192 MiB é **[NV]**.
+`load_kernel.rs` (`Option::unwrap()` sobre `None`, ao mapear o BSS) [M]. **192 MiB boota**
+(desktop em ~4,8 s, com as guard pages instaladas [M]), o mínimo registrado em
+`os/src/main.rs`; 256 MiB (valor de `os/src/main.rs` e `run.ps1`) boota em UEFI e BIOS
+[M]. BIOS com 128 MiB boota [A], não repetido. No UEFI o alocador do bootloader só usa
+regiões `CONVENTIONAL` e o OVMF consome parte da RAM; a causa exata do limite de 192 MiB
+é **[NV]**.
 
 ### 2.6 Pilhas
 
-A thread `compositor` roda na pilha de **512 KiB** do bootloader (com página de guarda,
-sem canário); `fetcher` e `wasmapp` usam **128 KiB** de `vec!` no heap (canário de 8 B,
-**sem guarda**); o #DF tem uma pilha IST de 32 KiB (§3.2). Folga medida pela auditoria
-[A, sem handshake TLS real]: compositor ~11 KiB, `fetcher` ~9 KiB, `wasmapp` ~13 KiB; o
-pico do `fetcher` num handshake real é **[NV]**. A pilha de boot subiu de 80 para 512 KiB
-porque o layout HTML/CSS recursivo e o TLS são os usuários mais fundos.
+- **compositor** (thread 0): a pilha de **512 KiB** do bootloader, que tem uma página de
+  guarda não mapeada logo abaixo; `sched::init` a acha descendo página a página a partir
+  do `rsp` (`vm::find_guard_below`). O estouro é reportado como tal, mas continua fatal.
+- **`fetcher` e `wasmapp`:** `sched::spawn` aloca com `alloc_zeroed` um bloco **alinhado a
+  4096** de 1 página de guarda mais **128 KiB**, e `vm::unmap_page` tira a guarda das page
+  tables (limpa `PRESENT` na PTE de nível 1 e faz `invlpg`). O bloco **nunca é liberado**
+  (devolver ao allocator uma página não mapeada o faria faltar ao escrever o nó da
+  free-list). Isso só é possível porque o `.bss` do kernel, onde mora o heap, é mapeado
+  com páginas de 4 KiB, e `vm` recusa páginas de 2 MiB ou 1 GiB. Em BIOS e UEFI as duas
+  guardas foram instaladas (`sched: 'fetcher' stack ..., guard page ...` na serial) [M].
+- **Canário** de 8 B no menor endereço: só como *fallback*, plantado quando a guarda não
+  pôde ser instalada (§4.5).
+- **IST:** #DF e #PF têm 32 KiB estáticos cada (§3.2).
+
+Folga medida pela auditoria, antes das guard pages [A, sem handshake TLS real]: compositor
+~11 KiB, `fetcher` ~9 KiB, `wasmapp` ~13 KiB; o pico do `fetcher` num handshake real é
+**[NV]**. A pilha de boot subiu de 80 para 512 KiB porque o layout HTML/CSS recursivo e o
+TLS são os usuários mais fundos.
 
 ## 3. Privilégio, GDT/TSS, exceções e falhas
 
@@ -178,9 +200,12 @@ porque o layout HTML/CSS recursivo e o TLS são os usuários mais fundos.
 
 - **Tudo em ring 0**: nenhum descritor de usuário, nenhuma página `USER_ACCESSIBLE`,
   nenhum `syscall`/`sysret` [L, `grep`]. O único `iretq` escrito à mão é o de `switch.s`.
-- **Um espaço de endereçamento**: o CR3 do bootloader, nunca trocado. O kernel só o
-  **lê** (`virtio.rs`, `OffsetPageTable`, para traduzir endereços); não cria, altera nem
-  trata page tables.
+- **Um espaço de endereçamento**: o CR3 do bootloader, nunca trocado. O kernel o **lê**
+  (`virtio.rs` traduz endereços; `vm.rs` caminha as tabelas pelo `physical_memory_offset`)
+  e **edita um único tipo de entrada**: limpa `PRESENT` na PTE de nível 1 de cada guard
+  page de pilha (`vm::unmap_page`, com `invlpg`). Não cria tabelas nem mapeia nada, e
+  recusa páginas de 2 MiB ou 1 GiB. A matemática (índices por nível, entrada presente ou
+  huge, página canônica) é de `osjeff_core::paging`, testada no host.
 - **Toda a RAM física está mapeada RW+NX**, inclusive as page tables: qualquer código do
   kernel, ou um guest WASM que escape do interpretador, alcança tudo.
 - **W^X e NX** valem para o que o bootloader mapeia (texto `R-X`, `.rodata` `R--`,
@@ -194,17 +219,25 @@ A escolha entre ring 3 e WASM como fronteira está em
 
 O bootloader deixa uma GDT mínima e **nenhum TSS**. Sem TSS, um #PF ao empilhar o frame
 numa pilha esgotada escala para #DF e triple fault: reset silencioso. `gdt::init` monta a
-GDT própria (código, dados, TSS), recarrega `CS/SS/DS/ES` e faz `ltr`. O TSS preenche só
-**IST[0]**, apontando a pilha estática de 32 KiB do handler de #DF; não há RSP0 (não há
-ring 3). NMI e #MC rodam na pilha corrente. Que o estouro da pilha de boot chegue ao #DF
-e produza a tela de erro, em BIOS e UEFI, foi mostrado com `-d cpu_reset` [A].
+GDT própria (código, dados, TSS), recarrega `CS/SS/DS/ES` e faz `ltr`. O TSS preenche
+**duas** entradas IST, cada uma com uma pilha estática de 32 KiB: **IST[0] para o #DF** e
+**IST[1] para o #PF**. O #PF precisa da sua: uma thread que estoura a pilha acerta a guard
+page com o `rsp` ainda no fim da pilha esgotada, onde a CPU não consegue empilhar o frame.
+Slots distintos evitam que uma falha *dentro* do handler de #PF seja entregue por cima da
+pilha que ele já usa. Não há RSP0 (não há ring 3). NMI e #MC rodam na pilha corrente. Que o
+estouro da pilha de boot chegue ao #DF e produza a tela de erro, em BIOS e UEFI, foi mostrado
+com `-d cpu_reset` antes do IST do #PF existir [A]; a trilha atual de estouro de pilha
+(guard page, #PF na IST[1], morte da thread) **não foi disparada por mim nesta revisão
+[NV]**.
 
 ### 3.3 IDT e fontes de interrupção (`interrupts.rs`)
 
 | Vetor | Handler | Observação |
 |---|---|---|
-| exceções arquiteturais (`#DE`, `#DB`, NMI, `#OF`, `#BR`, `#UD`, `#NM`, `#TS`, `#NP`, `#SS`, `#GP`, `#PF`, `#MF`, `#AC`, `#MC`, `#XM`, `#VE`, `#CP`, `#HV`, `#VC`, `#SX`) | `fatal` → `crash::die` | todas as que o crate `x86_64` expõe; nenhuma se recupera |
-| `#DF` | `double_fault` na **IST[0]** | idem, com pilha conhecida |
+| `#DE`, `#UD`, `#NP`, `#SS`, `#GP`, `#OF`, `#BR`, `#NM`, `#TS`, `#MF`, `#AC`, `#XM` | `fatal` → `crash::fault` | **contidas** (mata a thread) se couber (§3.4); senão `die` |
+| `#PF` | `page_fault` na **IST[1]** → `crash::fault` | acerto numa guard page vira "stack overflow in thread '<nome>'" (`sched::guard_owner`) |
+| `#DF` | `double_fault` na **IST[0]** | sempre fatal (`fatal_always` → `die`) |
+| `#DB`, NMI, `#MC`, `#VE`, `#CP`, `#HV`, `#VC`, `#SX` | `fatal_always` → `die` | sempre fatais: indicam hardware ou kernel quebrado, não uma thread |
 | `#BP` | handler vazio | retorna |
 | 32 (IRQ0) | `timer_isr` (asm) | tick e troca de contexto |
 | 0x81 | `yield_isr` (asm) | troca voluntária, sem tick nem EOI |
@@ -219,24 +252,51 @@ APIC nem SMP. Os handlers são gates de interrupção (IF zerado na entrada).
 num ring SPSC de 512 entradas, `head`/`tail` atômicos com Acquire/Release; cheio, o byte
 é descartado. O único consumidor é `ps2::poll`, no compositor.
 
-### 3.4 Falhas fatais (`crash.rs`)
+### 3.4 Falhas: thread morta ou máquina morta (`crash.rs`, `sched.rs`)
 
-`crash::die(tipo, subtítulo, mensagem, frame)` é o destino único de panic, exceção fatal e
-framebuffer não suportado: (1) desabilita interrupções; (2) se já está dentro de `die`,
-faz só `cli; hlt`; (3) escreve **uma linha na COM1** (`KERNEL PANIC: ...` ou `FATAL
-EXCEPTION: ... rip= rsp= rflags= cr2=`); (4) pinta uma **tela de erro** direto no
-framebuffer registrado (faixa `KERNEL PANIC` / `CPU EXCEPTION` / `UNSUPPORTED SCREEN`,
-mensagem, nome da thread, RIP/RSP/RFLAGS/CR2/código); (5) para em `cli; hlt`. Não usa
-alocação, locks nem os buffers do compositor. O `panic_handler` só chama
-`die(Kind::Panic, ...)`; falha de alocação e canário violado chegam como `panic!`.
-Capturas reais: `docs/img/panic-*.png`.
+Panic e exceções passam por `crash::fault(tipo, subtítulo, mensagem, frame, if_was_set)`,
+que decide entre **matar só a thread** e **parar a máquina** com `crash::die`.
+`sched::containable(if_was_set)` exige, ao mesmo tempo:
+
+1. **não ser o compositor** (slot 0): perder o desktop é perder a máquina;
+2. **IF=1 no contexto que falhou** (RFLAGS.IF do código que faltou, ou o IF vivo num
+   panic): gates de interrupção e `SpinLock` rodam com IF=0, então IF=1 prova que não
+   estávamos numa ISR (IRQ meio atendida, sem EOI) nem dentro do lock do heap, e nenhum
+   lock fica preso por uma thread que some;
+3. **não estar já matando** outra thread (`KILLING`) e haver mais de uma thread.
+
+**Caminho contido.** `sched::kill_current(motivo)` (IF=0): loga na COM1
+`thread '<nome>' died: <motivo>`, marca `DEAD[slot]`, escolhe a próxima thread com
+`osjeff_core::schedule::next_runnable` (que nunca devolve uma thread morta), faz `fxrstor`
+da próxima e salta para o contexto salvo dela com `resume_context` (`switch.s`),
+**abandonando a pilha atual** (que pode ser a esgotada, ou a IST do #PF). Efeitos
+visíveis: o Gerenciador de tarefas mostra `DEAD` no lugar dos ticks; o navegador mostra
+`FailReason::WorkerDied` ("O carregador de paginas falhou"); a janela WASM mostra "App WASM
+encerrado". O canário violado também mata a thread, a partir da própria ISR do timer.
+
+**Continua fatal** (`die`): falha no compositor; #DF, NMI, #MC, #DB e demais abortos
+(`fatal_always`); qualquer falha com IF=0 (numa ISR ou sob o spin lock do heap); uma falha
+durante a morte de uma thread; framebuffer não suportado. `die` desabilita interrupções,
+escreve **uma linha na COM1** (`KERNEL PANIC: ...` ou `FATAL EXCEPTION: ... rip= rsp=
+rflags= cr2=`), pinta uma **tela de erro** direto no framebuffer registrado (faixa `KERNEL
+PANIC` / `CPU EXCEPTION` / `UNSUPPORTED SCREEN`, mensagem, nome da thread,
+RIP/RSP/RFLAGS/CR2/código) e para em `cli; hlt`; se já está dentro de `die`, só faz
+`cli; hlt`. Não usa alocação, locks nem os buffers do compositor. Falha de alocação também
+é um `panic!`. Capturas reais: `docs/img/panic-*.png`. A lógica de escolha da próxima
+thread e de páginas é testada no host (`schedule`, `paging`); **a trilha de morte em si
+(`kill_current` e `resume_context`) é de kernel e não tem teste automatizado**, e eu não a
+disparei nesta revisão **[NV]**.
 
 **O que ainda NÃO existe:**
 
-- **Matar a thread em vez da máquina.** Um panic ou exceção em qualquer thread para
-  tudo; um bug no `fetcher` derruba o compositor. É o item 1 do [`ROADMAP.md`](ROADMAP.md).
-- **Guard page nas pilhas das threads** (`fetcher`, `wasmapp`): só o canário (§4.5).
-- Pilha própria para NMI e #MC; watchdog; reinício automático; dump ou backtrace.
+- **Liberar os recursos de uma thread morta:** pilha (e sua guard page), memória do heap
+  que ela alocou e, no `wasmapp`, a `Store` do `wasmi` continuam alocadas.
+- **Locks que a thread segurava com IF=1 ficam presos** para sempre (só o lock do heap é
+  imune, porque roda com IF=0).
+- **Reiniciar a thread:** nunca. Um slot morto continua contando em `thr N` do HUD.
+  Sem `fetcher`, o navegador falha toda navegação; sem `wasmapp`, o app não volta.
+- O compositor é um ponto único de falha; NMI e #MC sem pilha própria; sem watchdog,
+  reinício automático, dump ou backtrace.
 
 ### 3.5 FPU/SSE
 
@@ -251,22 +311,25 @@ dava `#GP` fatal sob WHPX não tem sustentação no código atual.
 
 ### 4.1 Threads
 
-| Slot | Thread | Existe quando | Pilha |
-|---|---|---|---|
-| 0 | `compositor` (`kernel_main`) | sempre, é o contexto de boot | 512 KiB do bootloader, sem canário |
-| 1 | `fetcher` (`fetch::worker`) | só se `ne2000::init()` achou a placa | 128 KiB do heap, canário |
-| 1 ou 2 | `wasmapp` (`wasm::worker`) | sempre, mesmo sem janela WASM | 128 KiB do heap, canário |
+| Slot | Thread | Existe quando | Pilha | Se falhar |
+|---|---|---|---|---|
+| 0 | `compositor` (`kernel_main`) | sempre, é o contexto de boot | 512 KiB do bootloader, guard page achada por `sched::init` | **fatal** (tela de erro) |
+| 1 | `fetcher` (`fetch::worker`) | só se `ne2000::init()` achou a placa | 128 KiB do heap + guard page | morre sozinha |
+| 1 ou 2 | `wasmapp` (`wasm::worker`) | sempre, mesmo sem janela WASM | 128 KiB do heap + guard page | morre sozinha |
 
-`MAX_THREADS = 8` (`assert!` em `spawn`). Threads **nunca terminam**: a entrada é
-`extern "C" fn() -> !` e a tabela só cresce. O HUD mostra `thr 3` (2 sem NIC).
+`MAX_THREADS = 8` (`assert!` em `spawn`). Threads **nunca terminam por conta própria**: a
+entrada é `extern "C" fn() -> !` e a tabela só cresce; a única saída é morrer (§3.4), e o
+slot morto continua contando em `thread_count`. O HUD mostra `thr 3` (2 sem NIC).
 
 ### 4.2 Política e estados
 
 Round-robin de quantum fixo (1 tick, 4 ms), sem prioridades. Uma thread é **executável**
-se `WAKE[i] <= agora`: `0` é "pronta" e `FOREVER` (`u64::MAX`) é "estacionada até
-`wake`". A ISR percorre as threads a partir da seguinte e escolhe a primeira executável;
-se nenhuma outra for, a atual continua. O estado compartilhado entre ISR e threads
-(`WAKE`, `TICKS`, `IDLE`, `CURRENT`) é atômico: a ISR não usa locks nem aloca.
+se não está morta **e** `WAKE[i] <= agora`: `0` é "pronta" e `FOREVER` (`u64::MAX`) é
+"estacionada até `wake`". A escolha é `osjeff_core::schedule::next_runnable(cur, n, pred)`
+(testada no host): tenta `cur+1, cur+2, ..., cur`, então a thread atual é a **última**
+candidata e só continua se ainda for executável; devolve `None` se nenhuma é (o kernel
+então para, mas o compositor nunca morre). O estado compartilhado entre ISR e threads
+(`WAKE`, `TICKS`, `IDLE`, `DEAD`, `CURRENT`) é atômico: a ISR não usa locks nem aloca.
 
 ```mermaid
 stateDiagram-v2
@@ -279,10 +342,12 @@ stateDiagram-v2
     Bloqueada --> Pronta: wake(id)
     Executando --> EmHlt: sti, hlt (flag IDLE)
     EmHlt --> Executando: proxima interrupcao
+    Executando --> Morta: panic, excecao ou canario (kill_current)
+    Morta --> [*]
 ```
 
 `EmHlt` não é estado do scheduler, só a marca `IDLE[i]` para a contabilidade de CPU: a
-thread segue executável.
+thread segue executável. `Morta` é terminal: o slot nunca mais é escolhido.
 
 ### 4.3 Troca de contexto (`switch.s`)
 
@@ -293,7 +358,9 @@ pelo valor devolvido, restaura e faz `iretq`. O lado Rust do timer (`timer_sched
 faz `TICKS += 1`, chama `sched::switch_current` (credita o tick, escolhe a próxima) e dá
 **EOI antes do `iretq`**; o do yield (`yield_schedule`) só escolhe, sem tick nem EOI.
 Quando a próxima é outra thread, `reschedule` faz `fxsave` da atual, grava seu `rsp` e faz
-`fxrstor` da próxima.
+`fxrstor` da próxima. O epílogo é uma macro (`RESTORE_AND_IRET`) reaproveitada por um
+terceiro ponto de entrada, `resume_context(rsp)`: carrega `rsp`, restaura os 15 registradores
+e faz `iretq` **sem voltar ao chamador**, que é como `kill_current` sai de uma thread morta.
 
 **Nascimento de uma thread:** `spawn` fabrica a pilha que o epílogo da ISR sabe
 restaurar: de `thread_rsp = (topo & !0xF) - 8` para baixo, um frame de `iretq` (`SS`,
@@ -328,17 +395,26 @@ sequenceDiagram
     C->>C: fetch::take_result (DONE para IDLE), browser_load, repinta
 ```
 
-### 4.5 Contabilidade de CPU e canário
+### 4.5 Contabilidade de CPU, guard pages e canário
 
 - **CPU:** a ISR soma 1 em `TICKS[atual]` só se `IDLE[atual]` for falso, isto é, só conta
   o tick em que a thread **estava executando**, não parada em `hlt`. O Task Manager
-  mostra esses ticks acumulados (coluna `CPU`), não um percentual. É amostragem a 250 Hz.
-- **Canário:** `0xDEAD_C0DE_CAFE_F00D` nos 8 B mais baixos da pilha de `fetcher` e
-  `wasmapp`, **só**. É checado em `reschedule` para a thread que acabou de rodar, a cada
-  tick ou yield; falha dispara `panic!("stack overflow in thread ...")` **dentro da
-  ISR**, que cai em `crash::die` e para a máquina com o nome da thread na tela. Limites:
-  a detecção é tardia (as escritas já passaram) e parcial (8 bytes; um frame grande que
-  salte o canário não é visto, pois não há sondagem de pilha [inferido]).
+  mostra esses ticks acumulados (coluna `CPU`), não um percentual, ou `DEAD` se a thread
+  morreu. É amostragem a 250 Hz.
+- **Guard page (mecanismo principal).** Estourar a pilha de `fetcher` ou `wasmapp` acerta
+  uma página não mapeada: #PF na IST[1], `sched::guard_owner(cr2)` reconhece a guarda de
+  qual thread foi e a mensagem vira `stack overflow in thread '<nome>': guard page hit at
+  ...`; a thread morre (§3.4). A guarda falta no primeiro acesso, não no próximo tick; um
+  frame grande não a pula porque o rustc sonda cada página de um frame grande (comentário
+  de `sched.rs`; não o verifiquei).
+- **Canário (só *fallback*).** `0xDEAD_C0DE_CAFE_F00D` nos 8 B mais baixos da pilha, plantado
+  **apenas** se a guard page não pôde ser instalada (sem `physical_memory_offset`, página
+  huge). É checado em `reschedule` para a thread que acabou de rodar, a cada tick ou
+  yield, e uma violação **marca a thread morta na própria ISR**, sem `panic!`. É fraco:
+  detecção tardia (as escritas já passaram), 8 bytes, e um teste forçado da auditoria
+  mostrou corrupção do heap antes da detecção [A]. Nas duas execuções desta revisão o
+  fallback não foi usado (as duas guardas foram instaladas) [M].
+- O compositor também tem guarda (a do bootloader); estourá-la é fatal.
 
 ## 5. Allocator e concorrência
 
@@ -356,8 +432,12 @@ sequenceDiagram
 - **Lock:** `SpinLock` que **desabilita interrupções enquanto travado** e restaura o IF
   anterior no `Drop`. Sem isso, um tick com o lock seguro levaria a thread seguinte a girar
   para sempre na mesma trava. Não é reentrante; **nenhuma ISR aloca** [L].
-- Esgotado, `alloc` devolve `null`, que vira `panic!` (tela de erro, §3.4). Não há quota
-  por consumidor; os tetos são por origem (resposta HTTP 256 KiB, memória WASM 24 MiB).
+- **Pilhas de thread** saem deste heap (bloco de 4096 B de alinhamento) e **nunca voltam**:
+  uma delas tem uma página sem `PRESENT`, e a free-list escreveria nela ao liberar. O
+  alinhamento de 4096 usa o mesmo caminho de `front`/`excess` acima.
+- Esgotado, `alloc` devolve `null`, que vira `panic!` (§3.4: fatal no compositor; num
+  worker com IF=1 mata só a thread). Não há quota por consumidor; os tetos são por origem
+  (resposta HTTP 256 KiB, memória WASM 24 MiB).
 - `HEAP` é `[u8; 64 MiB]` com alinhamento 1 em Rust; `init` exige 8 B e só tem
   `debug_assert!` (o linker o põe alinhado a página). O boot roda um smoke test (alocar,
   crescer, fragmentar, exigir um bloco maior que qualquer pedaço).
@@ -374,9 +454,9 @@ não verifica.
 |---|---|---|
 | `BACK`, `BG`, `STATIC`, `SCRATCH`, `DISK`, `DECODER`, `trace::{MARKS,STATS}` | só o compositor | dono único |
 | `HEAP` | só o allocator | spinlock com IF=0 |
-| `IDT`, `GDT`, `TSS`, `IST_STACK`, `crash::SCREEN` | boot escreve; a CPU (ou `die`) lê | antes de `sti`; `SCREEN_READY` Release/Acquire |
-| `SCHED` | ISR (muta `rsp`, `current`, FPU) e compositor (`init`, `spawn`, leitura de `name`/`len`) | `spawn` com IF=0. **Formalmente o `&mut` da ISR sobrepõe os `&` de leitura** |
-| `WAKE`, `TICKS`, `IDLE`, `CURRENT`, `interrupts::TICKS` | ISR e threads | atômicos |
+| `IDT`, `GDT`, `TSS`, `IST_STACK`, `PF_IST_STACK`, `crash::SCREEN` | boot escreve; a CPU (ou `die`) lê | antes de `sti`; `SCREEN_READY` Release/Acquire |
+| `SCHED` | ISR (muta `rsp`, `current`, FPU), `kill_current`, o handler de #PF (`guard_owner`, leitura) e compositor (`init`, `spawn`, leitura de `name`/`len`) | `spawn` com IF=0. **Formalmente o `&mut` da ISR sobrepõe os `&` de leitura** (inclusive o do #PF) |
+| `WAKE`, `TICKS`, `IDLE`, `DEAD`, `KILLING`, `CURRENT`, `interrupts::TICKS`, `vm::PHYS_OFFSET` | ISR, threads e handlers de falha | atômicos |
 | input `RING`; `wasm::{EVENTS,EV_HEAD,EV_TAIL}` | produtor e consumidor distintos | SPSC com Acquire/Release |
 | `fetch::{NET, REQ_URL, REQ_LEN, RESULT}` | compositor posta, `fetcher` consome e devolve | máquina atômica `STATE` |
 | `ne2000::NEXT` e a NIC | compositor (boot, responder) **ou** `fetcher` | **só por protocolo**: o compositor só toca a NIC com `fetch::is_idle()`; sem lock |
@@ -398,11 +478,11 @@ portas corromperia a leitura.
 
 `osjeff_core` proíbe. No kernel, `main.rs` liga `#![warn(clippy::undocumented_unsafe_blocks)]`
 e o lint roda com `-D warnings` (`cargo lint-kernel`, e no CI): **todo bloco ou `impl`
-`unsafe` precisa de `// SAFETY:` com a invariante**; passa limpo neste checkout [M].
-Quando a garantia é convenção e não o tipo, o comentário traz `NOTE: not guaranteed by the
-type`. São ~135 ocorrências da palavra `unsafe` em 21 arquivos do kernel (grep). Isso
-torna o `unsafe` **justificado e fiscalizado**, não **isolado**: está em drivers,
-scheduler, allocator, framebuffer e WASM.
+`unsafe` precisa de `// SAFETY:` com a invariante**; passa limpo neste checkout [M], então
+não há `unsafe` sem justificativa. Quando a garantia é convenção e não o tipo, o comentário
+traz `NOTE: not guaranteed by the type`. São ~146 ocorrências da palavra `unsafe` em 22
+arquivos do kernel (grep). Isso torna o `unsafe` **justificado e fiscalizado**, não
+**isolado**: está em drivers, scheduler, allocator, framebuffer e WASM.
 
 ## 6. Gráficos e compositor
 
@@ -497,7 +577,8 @@ em `osjeff_core::layout`.
 
 `ProcessTable` tem no máximo 8 entradas (pid, nome, estado, ticks): um **modelo de UI**,
 sem ligação com threads. A tabela de cima ("PID NAME ST UP") mostra esse modelo; a de
-baixo ("KERNEL THREADS CPU") mostra as threads reais com os ticks **executados** (§4.5).
+baixo ("KERNEL THREADS CPU") mostra as threads reais com os ticks **executados** (§4.5), ou
+`DEAD` para uma thread morta (§3.4).
 `DEL` numa linha só fecha a janela; para o app WASM, fechá-la (`set_active(false)`) faz o
 worker descartar o app de verdade (§10.4).
 
@@ -506,8 +587,11 @@ worker descartar o app de verdade (§10.4).
 - **Terminal:** grade 40x14, entrada de até 32 bytes; `HELP`, `CLS`, `TIME`, `VER`, `ECHO`,
   `EDIT`, `CALC`, `PS`, `LS`, `CAT`, `SAVE`, `LOAD`, `RM`, `REBOOT`, `SHUTDOWN` (e aliases).
   Sem diretório corrente: `SAVE`, `LOAD`, `CAT` e `RM` só agem na raiz, e `RM` apaga de vez.
-- **Editor:** grade fixa de 44x18. **Abrir um arquivo maior que a grade o trunca em
-  silêncio** (linhas cortadas, linhas excedentes descartadas), e salvar grava o truncado.
+- **Editor:** grade fixa de 44x18. Um arquivo que não cabe na grade (linha com mais de 44
+  colunas ou mais de 18 linhas) é carregado truncado, mas o buffer fica marcado
+  (`Editor::is_lossy`), a barra de status mostra `TRUNC` e `fs_save_in` **recusa salvar**
+  ("not saved: file is larger than the editor window"), para não destruir o resto. O
+  `leiame.txt` semeado no primeiro boot foi reescrito para caber.
 - **Calculadora:** quatro operações, entrada de até 16 caracteres, formatador decimal sem
   intrínsecos de `f64` do `std`.
 - **Gerenciador de arquivos:** vistas Arquivos, Lixeira e painéis dos dois discos IDE
@@ -573,7 +657,8 @@ bloqueia o compositor (PIO síncrono, ~45 ms no TCG [A]); o disco de boot não �
 
 Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → thread
 `fetcher` → `redirect` → `netstack` (`smoltcp`, DNS, TCP, TLS) → `ne2000`. Em paralelo, o
-compositor atende ARP e ping por `osjeff_core::net`, **só com `fetch::is_idle()`**.
+compositor atende ARP e ping por `osjeff_core::net`, **só com `fetch::is_idle()`** (que também
+é falso para sempre se o `fetcher` morreu).
 
 - **NIC:** NE2000 (DP8390) ISA em `0x300`, MAC fixo `52:54:00:12:34:56` (tem de bater
   com `-device ne2k_isa`). Transferência byte a byte por porta, anel de recepção nas
@@ -588,11 +673,16 @@ compositor atende ARP e ping por `osjeff_core::net`, **só com `fetch::is_idle()
   gateway, DNS, lease). O ACK é interpretado de forma total (máscara não contígua,
   endereço inválido e lease 0 são recusados). `netstack::Net::new(&NetConfig)` usa esse
   resultado para o endereço da interface `smoltcp`, a rota padrão e o DNS, e o responder
-  ARP/ping usa o mesmo IP. Sem servidor DHCP, cai para o fallback estático
-  `10.0.2.15/24`, gateway `10.0.2.2`, DNS `10.0.2.3` (os do SLIRP) e registra
-  `net: static fallback (...)` na serial. O lease **não é renovado**: ao expirar só há um
-  registro na serial. Literais IPv4 em URLs não consultam o DNS. Provado em QEMU com
-  `192.168.77.0/24` (ARP ao gateway do lease, DNS ao servidor do lease).
+  ARP/ping usa o mesmo IP. Sem servidor DHCP (ou sem NIC), uma oferta sem server id ou
+  um ACK recusado, cai para `NetConfig::STATIC_FALLBACK` (`10.0.2.15/24`, gateway
+  `10.0.2.2`, DNS `10.0.2.3`, os do SLIRP) e registra `net: static fallback (...)` na
+  serial. O lease **não é renovado** (só o DISCOVER/REQUEST do boot): ao expirar há apenas
+  um registro na serial e o endereço segue em uso. Literais IPv4 em URLs não consultam o
+  DNS (`parse_ipv4`). Medido [M]: no SLIRP padrão a serial mostra `net: DHCP lease
+  10.0.2.15/24 gw 10.0.2.2 dns 10.0.2.3` com lease de 86400 s, e com
+  `QEMU_NETDEV` numa sub-rede 192.168.77.0/24 o lease sai `192.168.77.15/24 gw
+  192.168.77.2 dns 192.168.77.3`; que a pilha de fato usou esse gateway e esse DNS numa
+  navegação foi mostrado pelos autores [A], eu não carreguei uma página.
 - **`smoltcp` 0.12:** um socket TCP (buffers de 8 KiB) e um DNS, **uma conexão por vez**;
   prazos de 5 s (DNS), 8 s (conexão), 10 s (leitura HTTP), 12 s (cada operação TLS).
   O pedido é `GET ... HTTP/1.0` com `Connection: close` (evita *chunked* e keep-alive).
@@ -609,13 +699,16 @@ compositor atende ARP e ping por `osjeff_core::net`, **só com `fetch::is_idle()
 - **`fetch.rs`:** `STATE` (IDLE, REQUESTED, RUNNING, DONE) com caixas estáticas. Segue até
   `MAX_REDIRECTS = 5` redirects via `osjeff_core::redirect`: mantém o esquema, **bloqueia
   https para http**, rejeita controles, espaços e valores grandes, detecta ciclos. Devolve
-  `Loaded { data, https, truncated }` ou um `FailReason` distinto.
+  `Loaded { data, https, truncated }` ou um `FailReason` distinto, incluindo `WorkerDied`:
+  se a thread `fetcher` morre (§3.4), `take_result` responde ao pedido em andamento com
+  esse erro e o estado vira `WORKER_DEAD` (terminal), o laço do compositor falha toda
+  navegação seguinte e deixa de varrer a NIC que o worker pode ter largado no meio.
 - **Limites:** `MAX_RESPONSE_BYTES = 256 KiB` (cabeçalhos mais corpo) **nos dois
   caminhos**; acima disso a resposta é cortada e a página marcada como truncada. URL do
   navegador 220 B, host 80 B.
 - Sem placa, `fetch::init` e o `spawn` do `fetcher` não ocorrem, mas o compositor ainda
   posta o pedido: ele nunca é consumido e o navegador fica em "Carregando" [inferido da
-  leitura, não executado].
+  leitura, não executado]; `WorkerDied` só vale para um `fetcher` que existiu.
 
 ### 9.2 Navegador e motor web
 
@@ -702,7 +795,10 @@ frente (`blit_surface`). A entrada vai por uma fila SPSC de 128 eventos (`on_key
 **Término real:** `OutOfFuel`, trap, falha de carga ou de `_initialize` e `proc_exit` (um
 erro de saída que desenrola o guest) chamam `terminate`: registra o motivo na serial,
 **destrói a `Store`** (a memória linear volta ao heap) e mantém a janela com a mensagem
-até ser fechada; reabrir cria instância nova.
+até ser fechada; reabrir cria instância nova. Isso vale para falhas **do guest**. Se a
+própria **thread** `wasmapp` morre (panic ou exceção dentro do motor, §3.4), nada disso
+roda: `blit_surface` passa a mostrar "App WASM encerrado" (`worker_dead`), a `Store` e a
+pilha ficam alocadas e a thread não volta.
 
 **Fronteira de confiança:** o isolamento é o do interpretador mais as host functions, no
 mesmo ring 0. A TCB inclui o `wasmi` (~135 `unsafe` nas crates `wasmi*` [A]) e as 31
@@ -716,13 +812,14 @@ funções, que **não são fuzzadas**: um bug ali é fuga total.
 | Tudo em ring 0, espaço único, CR3 do bootloader | sem alocador de frames, page tables nem syscalls: o caminho curto até um desktop | **zero isolamento**: um bug em qualquer parte é um bug no kernel; o ADR segue "Proposto" |
 | Heap estático de 64 MiB no BSS, free-list *first-fit* | não exige alocador de frames; simples | O(n); o BSS de 91 MiB eleva a RAM mínima do UEFI; resto da RAM ocioso; heap único sem quota por consumidor |
 | `SpinLock` com IF=0; `RacyCell` no lugar de `static mut` | evitar deadlock sob preempção; a edição 2024 proíbe `&mut` a `static mut` | lock não reentrante, só vale porque nenhuma ISR aloca; soundness por convenção, 5 `fn` seguras devolvem `&'static mut` |
-| Round-robin preemptivo com bloqueio por atômicos | a ISR não pode travar nem alocar; worker ocioso não deve custar fatia | quantum fixo de 4 ms, sem prioridades, threads imortais, máximo 8 |
-| GDT/TSS próprios com IST só para #DF | estouro de pilha vira relatório, não reset | um IST; NMI e #MC na pilha corrente |
-| Falha fatal = tela de erro, serial e parada total | falha visível e simples | uma thread que falha mata a máquina (ROADMAP, item 1) |
-| Canário de pilha em vez de guard page | as pilhas vêm do heap e o kernel não edita page tables | detecção tardia e parcial; o compositor não tem |
+| Round-robin preemptivo com bloqueio por atômicos | a ISR não pode travar nem alocar; worker ocioso não deve custar fatia | quantum fixo de 4 ms, sem prioridades, máximo 8 threads, nenhuma sai (só morre) |
+| GDT/TSS próprios com IST para #DF e para #PF | estouro de pilha vira relatório, não reset; o #PF da guard page precisa de pilha que não seja a esgotada | duas pilhas de 32 KiB; NMI e #MC na pilha corrente |
+| Thread morta em vez de máquina morta, só se for seguro | um bug no `fetcher` ou no `wasmapp` não deve derrubar o desktop | contenção só com IF=1, fora do compositor e fora de abortos; nada da thread é liberado, locks presos ficam presos, sem reinício |
+| Guard page por PTE editada pelo kernel (`vm`), canário só de *fallback* | detecta o estouro no primeiro acesso, sem alocador de frames nem page tables próprias | depende de o `.bss` estar em páginas de 4 KiB (senão recusa e cai no canário fraco); o bloco da pilha nunca volta ao heap |
+| Fatal total para o compositor, #DF, NMI, #MC e falhas com IF=0 | sem o desktop ou com estado de IRQ/lock incerto não há o que preservar | tela de erro e parada, como antes |
 | Buffers de render fixos de 1080p | sem alocação, custo zero | recusa telas maiores; em 24 bpp usa um terço do reservado |
 | Damage tracking e camada `STATIC` | animação proporcional à área do dano | vários caminhos de desenho e uma assinatura de cena que precisa invalidar certo (já colidiu com ≥ 9 janelas; corrigido) |
-| NE2000 ISA polled, `smoltcp`, DHCP próprio | NIC mais simples de programar; funciona no QEMU | só QEMU (NE2000 é ISA rara); lease sem renovação |
+| NE2000 ISA polled, `smoltcp`, DHCP próprio no boot (`NetConfig`) | NIC mais simples de programar; um único dono do endereço (sem socket DHCP do `smoltcp`) | só exercitado no QEMU (NE2000 é ISA rara); lease sem renovação |
 | Fetcher em thread própria, NIC com dono por protocolo | o handshake TLS por software não pode congelar a UI | exclusão da NIC é convenção (`STATE`, `is_idle`), não lock |
 | TLS 1.3 sem verificação de certificado | sem trust store nem relógio confiável | cifra sem autenticar; rótulo honesto na UI; RNG fraco sem `RDRAND` |
 | `wasmi` com combustível, teto de memória e término real | WebAssembly como formato nativo de apps (Rust e C) | interpretador 25-37x mais lento que nativo [A]; combustível não retomável; um app por build; `unsafe` do `wasmi` na TCB |
@@ -735,49 +832,54 @@ funções, que **não são fuzzadas**: um bug ali é fuga total.
   desligado). BIOS fixa em 1280x720 e 24 bpp; telas maiores que 1920x1080x4 são recusadas,
   sem adaptação. UEFI exige ≥ 192 MiB e o excedente não é usado. Single-core, PIC 8259,
   sem ACPI, APIC ou SMP. Splash obrigatório de 4-5 s.
-- **Robustez.** Uma falha em qualquer thread derruba a máquina. Pilhas de threads sem guard
-  page; canário só em duas e checado tarde. NMI e #MC sem pilha própria; sem watchdog.
-  Corretude por convenção em `RacyCell` e nas 5 `fn` seguras `&'static mut`; `SURFACE`
-  pode rasgar um quadro; a serial não tem lock.
+- **Robustez.** O compositor é ponto único de falha, e #DF, NMI, #MC e qualquer falha com
+  IF=0 param a máquina. Uma thread morta (`fetcher`, `wasmapp`) **não é liberada** (pilha,
+  heap, `Store` do `wasmi`), **não reinicia**, deixa presos os locks que segurava com IF=1
+  e continua contando no HUD. A guard page cai para o canário (fraco) se o `.bss` deixar
+  de ser mapeado em 4 KiB. NMI e #MC sem pilha própria; sem watchdog. Corretude por
+  convenção em `RacyCell` e nas 5 `fn` seguras `&'static mut`; `SURFACE` pode rasgar um
+  quadro; a serial não tem lock.
 - **Rede e web.** HTTPS **não autentica o servidor**, e sem `RDRAND` (o caso do QEMU/TCG
-  padrão) o RNG do handshake é fraco. IP, gateway e DNS fixos; uma conexão por vez,
+  padrão) o RNG do handshake é fraco. Só o QEMU/SLIRP foi exercitado, e o lease DHCP não é
+  renovado; uma conexão por vez,
   HTTP/1.0, sem cookies, imagens nem JS. Sem NIC o navegador fica em "Carregando"
   (inferido). `smoltcp` e o driver NE2000 não são fuzzados. A renderização de página roda
   na thread do compositor.
 - **Armazenamento.** 48 entradas, 1 KiB por arquivo, nomes de 16 B; sem metadados,
-  checksum nem journal; escrita de 99 setores não atômica e síncrona. O editor trunca em
-  silêncio arquivos maiores que sua grade de 44x18. `LS` lista todos os itens ativos sem
+  checksum nem journal; escrita de 99 setores não atômica e síncrona. O editor abre
+  truncado um arquivo maior que sua grade de 44x18 e então se recusa a salvá-lo (`TRUNC`):
+  não há como editar esses arquivos. `LS` lista todos os itens ativos sem
   caminho; os outros comandos de arquivo só veem a raiz. Disco com magic desconhecido é
   formatado.
 - **WebAssembly.** Um app por build, sem loader; `plasma` órfão; DOOM não reproduzível do
   checkout. Combustível não retomável: um quadro legítimo pesado (carga de nível do DOOM
   [A]) pode estourar 20 M e ser encerrado. WASI é subconjunto; as escritas no FS fingem
   sucesso. O guest roda no ring 0 (§10.4).
-- **Código e documentação.** Comentários desatualizados: `osjeff_core/src/process.rs`
-  ("sem scheduler preemptivo ainda"), `kernel/src/ata.rs` ("~17 KiB"),
-  `osjeff_core/src/fs.rs` ("98 setores", são 99), o cabeçalho de `kernel/build.rs` (cita
-  `plasma`) e o rótulo "artificial >= 5 s" do splash. Muita lógica do kernel segue sem
-  teste (desktop, drivers, `fb.rs`).
+- **Código e documentação.** O rótulo "artificial >= 5 s" do marco de splash em `main.rs`
+  não bate com os 4-5 s reais. Muita lógica do kernel segue sem teste (desktop, drivers,
+  `fb.rs`, `kill_current`/`resume_context`, `vm`).
 
 O que vem a seguir, com critério de aceite, está em [`ROADMAP.md`](ROADMAP.md).
 
 ## 13. Verificação e segurança
 
 **Verificação**, sem duplicar os guias: [`TESTING.md`](TESTING.md) cobre os testes do core
-(`cargo test-core`, 379 [M]; o CI exige ≥ 90% de linhas), o **fuzzing** (`fuzz/`:
+(`cargo test-core`, 423 [M]; cobertura de linhas bruta 96,52% medida com `cargo llvm-cov -p
+osjeff_core` [M], incluindo os próprios módulos de teste; o CI exige ≥ 90%), o **fuzzing** (`fuzz/`:
 `net_parse`, `ojfs_parse`, `web_parse`, com regressões versionadas), o harness de boot em
 QEMU (`tools/qemu-headless.sh`, `tools/verify-boot.sh`: BIOS e UEFI, detecta `KERNEL
 PANIC`/`FATAL`, compara o desktop com uma baseline), desempenho (`perf-trace`,
 `tools/perf/`, `bench/`), lint e supply chain; [`BUILDING.md`](BUILDING.md) cobre
 pré-requisitos, imagens, execução e variantes WASM. O CI (`.github/workflows/ci.yml`)
 roda `test-core` (inclui compilar o core para `x86_64-unknown-none`), `lint`,
-`build-image`, `coverage`, `supply-chain` e um canário semanal do nightly; **boots em QEMU
-e fuzzing não rodam no CI**. O `kernel/` **não** tem testes automatizados: os caminhos de
+`build-image`, `coverage`, `fuzz-regressions` (reexecuta as entradas de crash versionadas
+nos 3 alvos), `supply-chain` e um canário semanal do nightly; **boots em QEMU e campanhas
+de fuzzing não rodam no CI**. O `kernel/` **não** tem testes automatizados: os caminhos de
 falha foram exercitados na auditoria com ganchos temporários de build.
 
 **Segurança.** Todo dado de fora (rede, disco, HTML/CSS, `.wasm`) passa por código sem
 `unsafe` e com limites explícitos; rede, disco e HTML/CSS são fuzzados. O que o kernel faz
-para se defender (IST, handlers, tela de erro, canário parcial, guarda de framebuffer,
-`PERSIST`) e o que **não** protege (HTTPS não autenticado, ring 0 único, pilhas sem guard
-page, nenhuma garantia fora do QEMU) está em [`SECURITY-MODEL.md`](SECURITY-MODEL.md); a
+para se defender (IST, handlers, thread morta em vez de máquina morta, guard pages, tela
+de erro, guarda de framebuffer, `PERSIST`) e o que **não** protege (HTTPS não autenticado,
+ring 0 único, recursos de thread morta não liberados, nenhuma garantia fora do QEMU) está em [`SECURITY-MODEL.md`](SECURITY-MODEL.md); a
 política de relato, em `SECURITY.md`.
