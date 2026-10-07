@@ -3,7 +3,7 @@
 //!
 //! Pure logic only (no drawing, no I/O): the kernel feeds [`KeyEvent`]s and mouse
 //! coordinates in, and draws what [`Editor::visible_rows`] yields. It is the v2
-//! replacement for the fixed-grid [`crate::editor::Editor`] (which is untouched).
+//! replacement for the old fixed 44x18 grid editor, which is gone.
 //!
 //! # Buffer choice: gap buffer + line-start index
 //!
