@@ -32,6 +32,7 @@ mod theme;
 mod trace;
 mod virtio;
 mod virtio_gpu;
+mod vm;
 mod wasm;
 
 use bootloader_api::config::{BootloaderConfig, Mapping};
@@ -99,6 +100,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // framebuffer. Needed for DMA (virtio-gpu addresses memory physically).
     let phys_offset = boot_info.physical_memory_offset.into_option();
     serial_println!("physical_memory_offset: {:#x?}", phys_offset);
+    // The page tables are reached through that mapping (thread-stack guard pages, see `vm`).
+    vm::init(phys_offset);
 
     let framebuffer = match boot_info.framebuffer.as_mut() {
         Some(fb) => fb,

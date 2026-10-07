@@ -59,7 +59,11 @@ pub fn init() {
         idt.breakpoint.set_handler_fn(breakpoint);
         idt.general_protection_fault
             .set_handler_fn(general_protection);
-        idt.page_fault.set_handler_fn(page_fault);
+        // On its own IST stack: a stack overflow faults on the guard page with `rsp` still at the end of
+        // the exhausted stack, where the CPU could not push the exception frame.
+        idt.page_fault
+            .set_handler_fn(page_fault)
+            .set_stack_index(crate::gdt::PAGE_FAULT_IST_INDEX);
         idt.double_fault
             .set_handler_fn(double_fault)
             .set_stack_index(crate::gdt::DOUBLE_FAULT_IST_INDEX);
@@ -293,16 +297,24 @@ extern "x86-interrupt" fn general_protection(f: InterruptStackFrame, code: u64) 
 }
 
 extern "x86-interrupt" fn page_fault(f: InterruptStackFrame, code: PageFaultErrorCode) {
-    fatal_msg(
-        "#PF page fault",
-        &f,
-        Some(code.bits()),
-        format_args!(
-            "page fault accessing {:#x}: {:?}",
-            x86_64::registers::control::Cr2::read_raw(),
-            code
+    let cr2 = x86_64::registers::control::Cr2::read_raw();
+    // A hit on a thread's guard page is a stack overflow (that thread's own, normally).
+    match crate::sched::guard_owner(cr2) {
+        Some(owner) => fatal_msg(
+            "#PF page fault",
+            &f,
+            Some(code.bits()),
+            format_args!(
+                "stack overflow in thread '{owner}': guard page hit at {cr2:#x} ({code:?})"
+            ),
         ),
-    )
+        None => fatal_msg(
+            "#PF page fault",
+            &f,
+            Some(code.bits()),
+            format_args!("page fault accessing {cr2:#x}: {code:?}"),
+        ),
+    }
 }
 
 extern "x86-interrupt" fn divide_error(f: InterruptStackFrame) {

@@ -37,23 +37,28 @@
 //! it keeps interrupts off while held (see [`containable`]).
 
 use crate::sync::RacyCell;
+use alloc::alloc::{Layout, alloc_zeroed, handle_alloc_error};
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use osjeff_core::paging::{self, PAGE_SIZE};
 use x86_64::registers::segmentation::{CS, SS, Segment};
 
 // Per-thread stack. Sized generously (128 KiB) because the background fetcher
-// runs the TLS 1.3 handshake (P-256 + record processing) on its own stack.
+// runs the TLS 1.3 handshake (P-256 + record processing) on its own stack. Each one is
+// a page-aligned heap block with an unmapped guard page below it (see `alloc_stack`).
 const STACK_SIZE: usize = 128 * 1024;
 const MAX_THREADS: usize = 8;
 
-/// Sentinel written to the lowest 8 bytes of every spawned stack. A stack
-/// overflow grows *downward* past the usable region and clobbers this word
-/// before running off the end of the heap allocation into unrelated data — so a
-/// mismatch on context switch means "this thread overflowed its stack" and is
-/// caught here instead of silently corrupting the heap (the worst failure mode:
-/// a wild write with no fault, surfacing as nondeterministic garbage later).
+/// Sentinel written to the lowest 8 bytes of a spawned stack *that has no guard page* (the
+/// fallback when the page tables cannot be edited, see `alloc_stack`). A stack overflow grows
+/// *downward* past the usable region, so a mismatch seen on context switch means "this thread
+/// overflowed" and its thread is killed, instead of the wild writes silently corrupting the heap.
+///
+/// With a guard page the canary is redundant and is not planted: an overflow cannot get past the
+/// guard (rustc probes every page of a large frame, so even a 150 KiB frame touches it), and
+/// the guard faults at the first bad access instead of at the next tick.
 const STACK_CANARY: u64 = 0xDEAD_C0DE_CAFE_F00D;
 
 /// 512-byte, 16-byte-aligned save area for `fxsave`/`fxrstor` (x87 + SSE state:
@@ -100,7 +105,10 @@ static IDLE: [AtomicBool; MAX_THREADS] = [const { AtomicBool::new(false) }; MAX_
 struct Thread {
     name: &'static str,
     rsp: u64,
-    stack: Box<[u8]>, // owns the stack (empty for the boot thread)
+    /// Lowest usable stack address, `0` for the boot thread (its stack is the bootloader's).
+    stack_bottom: u64,
+    /// The unmapped guard page just below the stack (`None`: no guard, the canary stands in).
+    guard: Option<u64>,
     fpu: Box<FxArea>, // x87/SSE save area, swapped on context switch
 }
 
@@ -111,14 +119,16 @@ impl Thread {
         &*self.fpu as *const FxArea as *mut u8
     }
 
-    /// `true` if this thread's stack canary is intact (or it has no canary, like
-    /// the boot thread). A `false` means the stack overflowed its bounds.
+    /// `true` if this thread's stack canary is intact (or it has none: the boot thread, or a stack
+    /// with a guard page). A `false` means the stack overflowed its bounds.
     #[inline]
     fn stack_intact(&self) -> bool {
-        match self.stack.first_chunk::<8>() {
-            Some(bytes) => u64::from_ne_bytes(*bytes) == STACK_CANARY,
-            None => true, // boot thread: no owned stack, nothing to check
+        if self.stack_bottom == 0 || self.guard.is_some() {
+            return true;
         }
+        // SAFETY: `stack_bottom` is the base of a stack block `spawn` allocated and never frees, 8-aligned,
+        // with the canary written there; reading 8 bytes stays inside the block.
+        unsafe { (self.stack_bottom as *const u64).read_volatile() == STACK_CANARY }
     }
 }
 
@@ -131,10 +141,14 @@ static SCHED: RacyCell<Option<Scheduler>> = RacyCell::new(None);
 
 /// Register the current (boot) context as thread 0. Run before interrupts.
 pub fn init() {
+    // The boot thread runs on the bootloader's stack, which has a guard page of its own: find it so a
+    // stack overflow in the compositor is reported as such (and stays fatal).
+    let boot_guard = crate::vm::find_guard_below(current_sp());
     let boot = Thread {
         name: "compositor",
         rsp: 0, // captured on the first preemption
-        stack: Vec::new().into_boxed_slice(),
+        stack_bottom: 0,
+        guard: boot_guard,
         fpu: FxArea::seeded(),
     };
     // SAFETY: runs on the boot thread before `interrupts::init()` enables IF (see `kernel_main`),
@@ -147,19 +161,66 @@ pub fn init() {
     }
 }
 
+/// Current stack pointer (to locate the boot stack).
+fn current_sp() -> u64 {
+    let sp: u64;
+    // SAFETY: reads RSP into a register; no memory access, no stack use, no flags change.
+    unsafe {
+        core::arch::asm!("mov {}, rsp", out(reg) sp, options(nomem, nostack, preserves_flags));
+    }
+    sp
+}
+
+/// Allocate a thread stack: a 4096-aligned heap block of one guard page plus `STACK_SIZE` bytes, then
+/// take the guard page out of the page tables so running off the stack faults (see `vm`). Returns the
+/// block's regions and the guard page's address, or `None` for the guard if it could not be installed
+/// (no physical-memory mapping, huge page), in which case the canary is planted instead.
+fn alloc_stack() -> (paging::StackRegions, Option<u64>) {
+    let size = paging::guarded_block_size(STACK_SIZE).expect("stack size");
+    let layout = Layout::from_size_align(size, PAGE_SIZE as usize).expect("stack layout");
+    // SAFETY: `layout` has a non-zero size.
+    let base = unsafe { alloc_zeroed(layout) };
+    if base.is_null() {
+        handle_alloc_error(layout);
+    }
+    let regions = paging::stack_regions(base as u64, STACK_SIZE).expect("page-aligned stack block");
+    // The block is never freed, so the unmapped page never gets back to the allocator (whose free-list
+    // node writes would fault on it): a dead thread's stack stays allocated for good.
+    match crate::vm::unmap_page(regions.guard_start) {
+        Ok(()) => (regions, Some(regions.guard_start)),
+        Err(e) => {
+            crate::serial_println!(
+                "stack guard page unavailable ({e:?}): using the canary instead"
+            );
+            // SAFETY: `stack_bottom` is 8-aligned and inside the zeroed block we own.
+            unsafe { (regions.stack_bottom as *mut u64).write(STACK_CANARY) };
+            (regions, None)
+        }
+    }
+}
+
 /// Spawn a preemptible kernel thread starting at `entry` (must never return).
 pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
     let s = scheduler();
     assert!(s.threads.len() < MAX_THREADS, "too many threads");
 
-    let mut stack = vec![0u8; STACK_SIZE].into_boxed_slice();
-    // Plant the overflow tripwire in the lowest 8 bytes (see `STACK_CANARY`).
-    stack[..8].copy_from_slice(&STACK_CANARY.to_ne_bytes());
-    let top = stack.as_ptr() as u64 + STACK_SIZE as u64;
+    let (regions, guard) = alloc_stack();
+    match guard {
+        Some(g) => crate::serial_println!(
+            "sched: '{name}' stack {:#x}..{:#x}, guard page {g:#x}",
+            regions.stack_bottom,
+            regions.stack_top
+        ),
+        None => crate::serial_println!(
+            "sched: '{name}' stack {:#x}..{:#x}, no guard page (canary)",
+            regions.stack_bottom,
+            regions.stack_top
+        ),
+    }
 
     // Running stack pointer once the thread is live (≡ 8 mod 16, as if just
     // called, per the SysV ABI).
-    let thread_rsp = (top & !0xF) - 8;
+    let thread_rsp = paging::initial_rsp(regions.stack_top);
 
     let cs = CS::get_reg().0 as u64;
     let ss = SS::get_reg().0 as u64;
@@ -169,9 +230,9 @@ pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
     let mut p = thread_rsp;
     let mut push = |val: u64| {
         p -= 8;
-        // SAFETY: `p` lies inside `stack` (20 words below `thread_rsp`, above the canary, in a block
-        // we own) and is 8-aligned (`thread_rsp` is 8 mod 16, steps of 8). The new thread is not on
-        // the scheduler list yet, so nobody else reads this memory.
+        // SAFETY: `p` lies inside the stack block (20 words below `thread_rsp`, far above the bottom, in
+        // memory we own) and is 8-aligned (`thread_rsp` is 8 mod 16, steps of 8). The new thread is not
+        // on the scheduler list yet, so nobody else reads this memory.
         unsafe { (p as *mut u64).write(val) };
     };
     push(ss); // SS
@@ -187,7 +248,8 @@ pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
     s.threads.push(Thread {
         name,
         rsp,
-        stack,
+        stack_bottom: regions.stack_bottom,
+        guard,
         fpu: FxArea::seeded(),
     });
 }
@@ -295,6 +357,19 @@ unsafe extern "C" {
     /// `switch.s`: load `rsp` (a context saved by the ISR: 15 GPRs, then an `iretq` frame), pop it and
     /// `iretq` into that thread. Never returns.
     fn resume_context(rsp: u64) -> !;
+}
+
+/// The thread whose stack guard page contains `addr`, if any: a fault there is that thread's stack
+/// overflow. Touches only scheduler fields the ISR leaves alone; callable from the #PF handler.
+pub fn guard_owner(addr: u64) -> Option<&'static str> {
+    // SAFETY: read-only walk of `threads`, which `spawn` resizes only with IF=0 and the fault handler
+    // runs on one core, so it is not resized under us; `name`/`guard` never change after `spawn`.
+    // NOTE: this shared ref can overlap the ISR's `&mut` (not guaranteed by the type).
+    let s = unsafe { (*SCHED.get()).as_ref() }?;
+    s.threads
+        .iter()
+        .find(|t| t.guard.is_some_and(|g| paging::guard_hit(addr, g)))
+        .map(|t| t.name)
 }
 
 /// `true` if thread slot `id` has died (see [`kill_current`]).
