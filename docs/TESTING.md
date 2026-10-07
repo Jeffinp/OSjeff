@@ -184,6 +184,7 @@ no layout US; rodam em ~2 a 4 minutos no TCG, `QEMU_MEM=256M tools/perf/run.sh <
 | `w15b-probe.sh` | fumaça: o terminal no boot, `echo`, `ls`, Tab (`cd Doc` completa), `pwd`, `free` |
 | `w15b-term.sh` | histórico (↑), Tab em caminho, Ctrl+L, `sleep 20` (a janela mostra "executando" e um segundo terminal responde), Ctrl+C, `ping`, `nslookup` (DNS real do QEMU), `ifconfig`, `curl`, `seq 10000` com PageUp e Ctrl+Home, recursão de função, `yes` (1 MiB de saída) sem travar |
 | `w15b-edit.sh` | digitar, Ctrl+S (Salvar como: digitar substitui o nome sugerido), Ctrl+F/Ctrl+H e Alt+A, Ctrl+Z, fechar com alterações (Cancelar, depois Descartar), reabrir (`edit`), Ctrl+O, Ctrl+Q, um arquivo de 1 MB com 165 mil linhas (Ctrl+End/Home, PageDown) e outro de 60 mil linhas de 16 caracteres |
+| `w15b-soak.sh` | 50x: editor pelo dock + um caractere + fechar com Descartar, e um terminal novo (Ctrl+N) que roda `seq 50` numa thread de comandos e fecha com Ctrl+D; com `--features perf-trace`, `tools/perf/w8-heap.sh` (medido: +832 B em 50 rodadas, 375 amostras) |
 | `w15b-ui.sh` | roda do mouse no terminal, Ctrl+Shift+C/Ctrl+V, maximizar (a grade acompanha), clique, duplo clique e arrastar no editor, abrir um texto pelo Arquivos e a pergunta ao fechar com alterações |
 
 Persistência: depois do cenário, `fs3_inject <disco.img> --ls /` lista o que ficou, e um novo
