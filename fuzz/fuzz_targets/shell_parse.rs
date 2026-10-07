@@ -1,23 +1,29 @@
 //! Fuzz target: the shell engine (`osjeff_core::shell`).
 //!
 //! Arbitrary bytes (decoded lossily, so invalid UTF-8 becomes U+FFFD) go through
-//! three layers:
+//! four layers:
 //!
 //! 1. the lexer/parser alone (`parse::parse`), which must return a typed error
 //!    and never panic or recurse without bound;
 //! 2. the executor: the input runs as one script and each NUL-separated chunk
 //!    runs as a command line, in one shell with persistent state, against an
-//!    in-memory filesystem with tight limits and a mock `SysInfo`. Output, pipes,
-//!    steps, loops and recursion are capped, so every input must finish quickly;
+//!    in-memory filesystem with tight limits and a mock `SysInfo` (with a DNS
+//!    answer, a web page and sometimes a Ctrl+C after a few polls). Output,
+//!    pipes, steps, loops and recursion are capped, so every input must finish
+//!    quickly;
 //! 3. the line editor with Tab completion, driven by keys derived from the
-//!    bytes.
+//!    bytes;
+//! 4. a whole terminal session (`Term`: scrollback, history, Ctrl+C, paste, Tab)
+//!    driven by the same keys at a random window size, checking that what it would
+//!    draw always fits the window; and `Screen::print` on the raw bytes.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use osjeff_core::input::{KeyCode, KeyEvent, Mods};
 use osjeff_core::shell::fs::{MemFs, ShellFs};
 use osjeff_core::shell::line::{LineEditor, ShellCompleter};
-use osjeff_core::shell::{Host, Limits, MockSys, Shell};
+use osjeff_core::shell::sys::HttpResponse;
+use osjeff_core::shell::{Host, Limits, MockSys, Screen, Shell, Term, TermAction};
 
 const MAX_INPUT: usize = 4096;
 
@@ -46,6 +52,54 @@ fn fresh_fs() -> MemFs {
     fs
 }
 
+fn fresh_sys(data: &[u8]) -> MockSys {
+    let mut sys = MockSys::default();
+    sys.dns.push(("a.org".to_string(), [10, 0, 0, 1]));
+    sys.web.push((
+        "http://a.org/".to_string(),
+        HttpResponse {
+            status: 200,
+            head: b"HTTP/1.1 200 OK\r\n\r\n".to_vec(),
+            body: data.to_vec(),
+            truncated: false,
+        },
+    ));
+    // Some inputs get a Ctrl+C after a few polls of the interrupt flag.
+    sys.interrupt_after = data
+        .first()
+        .filter(|b| **b % 5 == 0)
+        .map(|b| u32::from(*b));
+    sys
+}
+
+/// A key from two bytes.
+fn key_of(pair: &[u8]) -> KeyEvent {
+    let b = pair[0];
+    let m = pair.get(1).copied().unwrap_or(0);
+    let code = match b % 28 {
+        0 => KeyCode::Enter,
+        1 => KeyCode::Backspace,
+        2 => KeyCode::Delete,
+        3 => KeyCode::Tab,
+        4 => KeyCode::Esc,
+        5 => KeyCode::Left,
+        6 => KeyCode::Right,
+        7 => KeyCode::Up,
+        8 => KeyCode::Down,
+        9 => KeyCode::Home,
+        10 => KeyCode::End,
+        11 => KeyCode::PageUp,
+        12 => KeyCode::PageDown,
+        _ => KeyCode::Char(char::from(b)),
+    };
+    let mods = Mods {
+        ctrl: m & 1 != 0,
+        shift: m & 2 != 0,
+        alt: m & 4 != 0 && m & 8 == 0,
+    };
+    KeyEvent::new(code, mods)
+}
+
 fuzz_target!(|data: &[u8]| {
     if data.len() > MAX_INPUT {
         return;
@@ -63,7 +117,7 @@ fuzz_target!(|data: &[u8]| {
     // 2. Executor.
     let mut sh = Shell::with_limits(small_limits());
     let mut fs = fresh_fs();
-    let mut sys = MockSys::default();
+    let mut sys = fresh_sys(data);
     {
         let mut host = Host {
             fs: &mut fs,
@@ -82,33 +136,54 @@ fuzz_target!(|data: &[u8]| {
     // 3. Line editor + completion.
     let mut ed = LineEditor::new(&sh.prompt(&fs, &sys));
     for pair in data.chunks(2).take(512) {
-        let b = pair[0];
-        let m = pair.get(1).copied().unwrap_or(0);
-        let code = match b % 24 {
-            0 => KeyCode::Enter,
-            1 => KeyCode::Backspace,
-            2 => KeyCode::Delete,
-            3 => KeyCode::Tab,
-            4 => KeyCode::Esc,
-            5 => KeyCode::Left,
-            6 => KeyCode::Right,
-            7 => KeyCode::Up,
-            8 => KeyCode::Down,
-            9 => KeyCode::Home,
-            10 => KeyCode::End,
-            _ => KeyCode::Char(char::from(b)),
-        };
-        let mods = Mods {
-            ctrl: m & 1 != 0,
-            shift: m & 2 != 0,
-            alt: m & 4 != 0 && m & 8 == 0,
-        };
         let comp = ShellCompleter {
             shell: &sh,
             fs: &fs,
         };
-        let _ = ed.handle_key(KeyEvent::new(code, mods), sh.history(), &comp);
+        let _ = ed.handle_key(key_of(pair), sh.history(), &comp);
         assert!(ed.cursor() <= ed.text().chars().count());
         let _ = ed.display();
     }
+
+    // 4. A terminal session at a random window size.
+    let cols = 1 + usize::from(data.first().copied().unwrap_or(0)) % 60;
+    let rows = 1 + usize::from(data.get(1).copied().unwrap_or(0)) % 20;
+    let mut sh = Shell::with_limits(small_limits());
+    let mut fs = fresh_fs();
+    let mut sys = fresh_sys(data);
+    let mut term = Term::new(&sh.prompt(&fs, &sys));
+    term.resize(cols, rows);
+    for pair in data.chunks(2).take(256) {
+        let action = term.key(key_of(pair), Some((&sh, &fs as &dyn ShellFs)));
+        if let TermAction::Run(line) = action {
+            let r = {
+                let mut host = Host {
+                    fs: &mut fs,
+                    sys: &mut sys,
+                };
+                sh.run_line(&line, &mut host)
+            };
+            let prompt = sh.prompt(&fs, &sys);
+            let _ = term.finish(&r, &prompt);
+        }
+        let v = term.view();
+        assert!(v.rows.len() <= rows);
+        for row in &v.rows {
+            assert!(row.chars().count() <= cols);
+        }
+        if let Some((r, c)) = v.cursor {
+            assert!(r < v.rows.len() && c < cols);
+        }
+        if data.len() % 3 == 0 {
+            term.paste(&text);
+        }
+    }
+    let mut screen = Screen::new();
+    for chunk in data.chunks(7) {
+        screen.print(chunk);
+    }
+    let v = screen.view(cols, rows, "$ ", 2);
+    assert!(v.rows.len() <= rows);
+    screen.scroll(isize::MAX / 2, cols, rows, 3);
+    let _ = screen.view(cols, rows, "$ ", 2);
 });
