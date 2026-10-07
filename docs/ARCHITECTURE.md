@@ -947,7 +947,13 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
   navegação seguinte e deixa de varrer a NIC que o worker pode ter largado no meio.
 - **Limites:** `MAX_RESPONSE_BYTES = 256 KiB` (cabeçalhos mais corpo) **nos dois
   caminhos**; acima disso a resposta é cortada e a página marcada como truncada. URL do
-  navegador 220 B, host 80 B.
+  navegador 480 B, host 80 B. O teto é um parâmetro do pedido (`http_get`/`https_get`):
+  **imagens** usam 512 KiB + cabeçalhos.
+- **Imagens (W17).** A mesma caixa de correio carrega um segundo tipo de pedido
+  (`fetch::try_post_image` / `take_image_result`): o `fetcher` baixa a imagem, confere o
+  cabeçalho (2 Mpx), decodifica e reduz à coluna **na própria thread**, e o compositor só
+  recebe os pixels prontos. Uma imagem por vez, até 8 por página; um pedido de página que
+  chega durante uma imagem espera o fim dela (no máximo os tempos de conexão e leitura).
 - Sem NIC, `fetch::init_offline` faz `try_post` responder `FailReason::Network` na hora
   (o navegador mostra "Falha ao carregar a pagina", visto [M] com `QEMU_NIC=none`);
   `WorkerDied` só vale para um `fetcher` que existiu.
@@ -969,7 +975,7 @@ depois da cadeia e da assinatura do handshake verificadas.
 `osjeff_core::web` é um motor de caixas no estilo "robinson": HTML para DOM, CSS (agente
 de usuário mais `<style>`), árvore estilizada, layout de blocos com fluxo inline, lista
 de comandos de desenho que o kernel rasteriza. **Não é um navegador de padrões**: sem
-flexbox, grid, float, JavaScript nem imagens; do seletor complexo só vale o composto mais
+flexbox, grid, float nem JavaScript; do seletor complexo só vale o composto mais
 à direita (combinadores são ignorados, o que super-casa).
 
 Limites: `MAX_DEPTH = 40` (~550 B de pilha nativa por nível, ~22 KiB; o layout é
@@ -978,6 +984,17 @@ recursivo), `MAX_NODES = 8.000` e `MAX_RULES = 1.000` / `MAX_SELECTORS = 2.000` 
 4.096 px, resposta de 256 KiB (§9.1). O excesso **trunca a página, não a recusa**. Parse e layout rodam **na thread do
 compositor** (`browser_load`), nos 512 KiB da pilha de boot; páginas no teto ainda travam
 a UI durante a renderização (~0,2 s em release num host, segundo o teste do core [L]).
+
+**W17: imagens, formulários, UI.** `web::Doc` guarda DOM e folhas de estilo (a análise roda
+uma vez por página) e `Doc::layout(Layout { width, zoom, images })` diagrama de novo ao
+redimensionar, mudar o zoom ou chegar uma imagem. Imagens e controles de formulário são
+*objetos em linha* nas linhas de texto (alinhados à linha de base). `web::imgcache` (limites,
+decodificação para a página, cache LRU de 6 MiB), `web::form` (campos, edição, query GET, teclas
+mortas), `web::textops` (busca e seleção sobre a lista de desenho) e `web::find` são puros e
+testados; `browser::` ganhou favoritos (`BookmarkStore`), sugestões e páginas `osjeff://`.
+Detalhes e provas em [`design/tls-browser.md`](design/tls-browser.md) §8. A roda do mouse é
+do sistema todo: `hw::ps2` decodifica pacotes de 3 e 4 bytes e `Desktop::handle_wheel` entrega
+a rolagem à janela sob o ponteiro.
 
 ## 10. WebAssembly
 
@@ -1120,7 +1137,7 @@ código seguro em `osjeff_core`, testado e fuzzado, mas a cola em `abi2.rs` e `m
 - **Rede e web.** HTTPS **não autentica o servidor**, e sem `RDRAND` (o caso do QEMU/TCG
   padrão) o RNG do handshake é fraco. Só o QEMU/SLIRP foi exercitado (o lease é renovado,
   mas só provado contra o servidor DHCP do SLIRP); uma conexão por vez, HTTP/1.0, sem
-  cookies, imagens nem JS. IPv6, `e1000`/`rtl8139`, virtio só-legado, MSI-X/interrupções da
+  cookies, JPEG/GIF/WebP nem JS. IPv6, `e1000`/`rtl8139`, virtio só-legado, MSI-X/interrupções da
   NIC e RELEASE no desligamento não existem. `smoltcp` e os drivers de NIC não são fuzzados
   (o fuzz cobre a máquina de lease, o DNS e o ICMP, que são puros). O DHCP e o DNS não são
   autenticados. A renderização de página roda na thread do compositor.

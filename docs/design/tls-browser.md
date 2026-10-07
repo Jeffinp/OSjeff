@@ -1,8 +1,9 @@
-# HTTPS verificado e navegador (W16)
+# HTTPS verificado e navegador (W16, W17)
 
 Estado: **certificado verificado, hora confirmada por SNTP, gzip/deflate, links
-clicáveis e histórico (Alt+←/Alt+→)**. Imagens, formulários, favoritos e a barra de
-sugestões **não** foram feitos nesta frente (ver "O que ficou de fora").
+clicáveis e histórico** (W16); **imagens PNG/BMP/PPM, formulários GET, favoritos,
+sugestões na barra, busca na página, zoom, seleção e cópia de texto, páginas internas
+`osjeff://` e roda do mouse** (W17, §8). O que continua de fora está em §7.
 
 ## 1. Modelo de confiança
 
@@ -148,7 +149,7 @@ fica marcada "Certificado invalido". Nada é gravado em disco.
 - **gzip/deflate** (`osjeff_core::gzip`): cabeçalho completo do gzip, CRC-32 e tamanho
   conferidos, `deflate` com ou sem envoltório zlib, limite de 1 MiB descompactado.
 
-## 6. Provas (QEMU)
+## 6. Provas (QEMU) da W16
 
 Neste ambiente de testes todo HTTPS de saída passa por um gateway que **reassina** os
 sites com a CA "sandbox-egress-gateway-production": com a trust store de produção
@@ -191,14 +192,102 @@ idêntico à baseline (`tools/verify-boot.sh`: 0 pixels, BIOS e UEFI).
 
 ## 7. O que ficou de fora
 
-- **Navegador**: `<img>` (PNG/BMP/PPM, com caixa de `alt` para o resto), formulários GET,
-  favoritos (`BookmarkStore`), sugestões do histórico na barra, botões de voltar/avançar na
-  barra de ferramentas (hoje só Alt+←/Alt+→), cursor "mão", roda do mouse e
-  PageUp/PageDown/Home/End (as setas e a barra de rolagem já existiam). A base existe
-  (decodificadores de imagem, `inflate`); falta o motor `web` emitir imagens e campos no
-  `Page` e um segundo pedido por recurso (cada imagem abriria um handshake novo).
+- **Navegador** (depois da W17): formulários `POST`, `<select>`, `<textarea>`, caixas de
+  seleção e botões de rádio; JPEG, GIF, WebP e SVG (a imagem vira uma caixa com o `alt` e
+  "formato nao suportado"); JavaScript, cookies, `float`/flexbox; reuso de conexão (cada
+  imagem abre uma conexão e, em HTTPS, um handshake); persistência dos favoritos (a
+  interface `BookmarkStore` e o ponto único de troca existem, o armazenamento é em
+  memória); seleção por caractere (é por palavra); a área de transferência tem 256 bytes
+  (uma seleção longa é cortada); acentos só no campo de formulário (a fonte é ASCII: a tela
+  mostra a letra sem acento, o valor enviado é UTF-8 correto).
 - Revogação (CRL/OCSP), *pinning*, HSTS, Certificate Transparency.
 - Sem `RDRAND` o RNG do handshake continua sendo o fallback fraco (o servidor é
   autenticado, mas a confidencialidade da sessão não é garantida nessa CPU).
 - Ed25519 em certificados de servidor.
-- Reuso de conexão/sessão TLS (cada recurso abriria um handshake novo).
+- Reuso de conexão/sessão TLS (cada recurso abre um handshake novo).
+
+## 8. Navegador na W17: imagens, formulários, UI e roda do mouse
+
+### 8.1 Imagens
+
+`<img src alt width height>` (até 200 por página no layout, **8 baixadas** por página).
+O fluxo, sem travar a interface:
+
+1. o layout reserva uma caixa cinza do tamanho declarado (`width`/`height`; só um dos
+   dois usa a proporção quando a imagem já é conhecida, senão 4:3; sem atributos, 160x120);
+2. o desktop pede as imagens uma por vez à thread `fetcher` (`fetch::try_post_image`):
+   mesma pilha, mesmas regras de redirect, corpo de **no máximo 512 KiB**; o `fetcher`
+   confere as dimensões no cabeçalho (**no máximo 2 Mpx**, antes de reservar memória),
+   decodifica (`osjeff_core::image`), reduz à largura da coluna (`Image::fit`) e achata sobre
+   o fundo da página, ali mesmo, fora da thread do compositor;
+3. a imagem entra num cache LRU (`web::imgcache::ImageCache`, **6 MiB** de pixels, 24 entradas,
+   mantido entre páginas), a página é diagramada de novo (sem reanalisar o HTML: `Doc`
+   guarda o DOM) e a rolagem é preservada.
+
+JPEG/GIF/WebP/SVG, falha de rede, status diferente de 200, imagem grande demais e a nona
+imagem viram uma caixa com o texto `alt` e o motivo ("formato nao suportado", "falha ao
+carregar", "imagem grande demais", "limite de imagens"). `data:image/...;base64,` é decodificada
+no próprio navegador (decodificador base64 puro, 64 KiB), sem rede. `<a><img></a>` é
+clicável. `src` relativo resolve contra a URL da página; **https para http (conteúdo misto)
+é recusado**. Memória: a prova de 100 navegações com 4 imagens novas cada (`perf-trace`)
+estabiliza o heap em ~8,4 MiB (6 MiB de cache + o resto do sistema), com picos de ~15 MiB só
+durante a decodificação da imagem de 1,26 Mpx.
+
+### 8.2 Formulários GET
+
+`<form method=get action>` com `input` de texto (`text`, `search`, `url`, `email`, `tel`,
+`number`, sem tipo), `password` (bolinhas), `hidden`, `submit`/`<button>`. Foco por clique ou
+Tab/Shift+Tab, caret, Backspace/Delete/setas/Home/End, Ctrl+V; Enter ou botão envia:
+`action?nome=valor&...` com `application/x-www-form-urlencoded` sobre os bytes UTF-8 (a query
+do `action` é trocada, o botão só entra se foi o apertado, no máximo 380 bytes). **`method=post`
+mostra "formularios POST nao suportados"** e não navega. `textarea`, `select`, caixas de seleção
+e rádios não são desenhados. Como o teclado é US, as teclas `'` `` ` `` `~` `^` `"` são
+*teclas mortas* nos campos (estilo US-Internacional): `'` e `c` dão `ç`, `~` e `a` dão `ã`; `'`
+e espaço dão o apóstrofo; antes de outra letra saem as duas. Prova: digitar `a'c~ao` e `Jos'e`
+envia `q=caf%C3%A9+a%C3%A7%C3%A3o&nome=Jos%C3%A9` e o servidor decodifica `café ação`/`José`.
+
+### 8.3 Barra, atalhos e páginas internas
+
+| Item | Comportamento |
+|---|---|
+| Botões | voltar, avançar (cinza sem histórico), recarregar, início, buscar; estrela de favorito |
+| Cursor | mão sobre link, botão de formulário, botão da barra e sugestão |
+| Endereço | Ctrl+L ou clique seleciona tudo (digitar substitui); sugestões (favoritos, depois histórico; prefixo antes de substring; até 6; ↑/↓/Enter/clique; Esc fecha) |
+| Favoritos | Ctrl+D ou a estrela; `BookmarkStore` (trait) com `MemoryBookmarks` (até 64); o ponto único de troca é `new_bookmark_store()` em `kernel/src/desktop/instance.rs` (não existe `desktop/vfs.rs` na base desta frente, então nada é gravado em `/home/.bookmarks`) |
+| Páginas internas | `osjeff://inicio` (a tela inicial), `favoritos` (com "[remover]"), `historico`, `sobre`: HTML gerado e diagramado pelo mesmo motor, sem rede |
+| Rolagem | setas, PageUp/PageDown, Home/End e Espaço/Shift+Espaço (com o foco na página; Home/End movem o caret quando o foco é a barra), roda do mouse |
+| Busca na página | Ctrl+F, destaca todas as ocorrências (a atual em laranja), Enter/Shift+Enter navega, Esc fecha |
+| Zoom | Ctrl+`+`/`-`/`0`: 50, 75, 100, 125, 150, 200, 250, 300% (aritmética inteira; escala da fonte arredondada, medidas proporcionais) |
+| Seleção | arrastar o mouse sobre o texto (por palavra), Ctrl+C copia (256 bytes) |
+| Título | o `<title>` vai para a barra de título da janela (`NAVEGADOR - ...`) |
+
+### 8.4 Roda do mouse (sistema todo)
+
+O PS/2 negocia o IntelliMouse (taxas 200, 100, 80 e `0xF2`: id 3 liga pacotes de 4 bytes
+com eixo Z); qualquer outra resposta mantém o pacote de 3 bytes (`ps2: mouse id 0 (no wheel)`
+na serial). `Event::Mouse` ganhou `dz` (positivo = roda para o usuário = rolar para baixo; o
+`mouse_move 0 0 <dz>` do monitor do QEMU tem o **sinal invertido**: `-1` rola para baixo). O
+desktop entrega a rolagem à **janela sob o ponteiro**, focada ou não, sem mudar o foco:
+Navegador rola 3 linhas por passo, Gerenciador de tarefas e Arquivos movem a seleção, Editor
+move o cursor 3 linhas; Terminal e Calculadora não têm o que rolar.
+
+### 8.5 Provas (QEMU, BIOS e UEFI)
+
+| Cenário | Evidência |
+|---|---|
+| página local com PNG pequeno e grande (1400x900, reduzido para 864x555), PNG sem atributos, BMP, JPEG (caixa "formato nao suportado"), `data:`, imagem como link e uma quebrada (404) | serial `img: ... -> 1400x900 (shown 864x555)`, `img: ... failed: Unsupported`; `docs/img/browser-images.png`, `browser-images-errors.png` |
+| formulário GET com acentos, campo oculto e um formulário POST | o servidor recebe `q=caf%C3%A9+a%C3%A7%C3%A3o&nome=Jos%C3%A9&origem=osjeff%2F%C3%A7%C3%A3o` e responde `q = [café ação] (12 bytes UTF-8)`; `browser-form.png`, `browser-form-result.png` |
+| roda: `mouse_move 0 0 -1` repetido | o navegador rola; sobre uma janela **não focada** rola ela e o foco fica onde estava; Task Manager e Arquivos movem a seleção; com a negociação desligada (gancho temporário) a serial diz `id 0` e o mouse continua movendo e clicando, sem roda |
+| favoritos, sugestões, busca na página, zoom, seleção e cópia | `browser-suggest.png`, `browser-find.png` |
+| 100 navegações com imagens novas (`perf-trace`) | heap: primeiro 327 KiB, platô de 8,4 MiB, sem deriva (`tools/perf/w8-heap.sh`) |
+| desktop ocioso | `tools/verify-boot.sh`: 0 pixels de diferença contra a baseline, BIOS e UEFI |
+
+### 8.6 Fuzz e limites
+
+`fuzz/fuzz_targets/html_img_form.rs` (img com `src`/`alt`/tamanhos hostis, `data:`/base64, formulários
+e edição, layout com zoom, busca, seleção, cache de imagens, modelo do navegador com favoritos e
+páginas internas): 661 s e 640 s sem falha restante. Achou **um** bug, corrigido com teste e
+arquivo em `fuzz/regressions/html_img_form/`: `set_page_title` cortava em 80 bytes dentro de um
+caractere de vários bytes (pânico). Nenhum teto anterior mudou (corpo HTML 256 KiB, 8000 nós,
+1000 regras, profundidade 40); a URL do navegador subiu de 220 para 480 bytes para caber a query
+de um formulário.

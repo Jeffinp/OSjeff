@@ -9,6 +9,7 @@ diferente, e a lista abaixo diz **o que cada uma não cobre**.
 | Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net` (+ lease DHCP, DNS, ICMP), `fs` (v2 e v3), `web`, `shell`, `editor2`, `image`, `x509` (cadeia de certificados) | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
 
 | Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net`, `fs` (v2 e v3), `web`, `shell`, `editor2`, manifesto de app (`app_manifest`), sandbox de arquivos (`app_sandbox`) | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
+| Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net` (+ lease DHCP, DNS, ICMP), `fs` (v2 e v3), `web`, `html_img_form` (imagens, formulários, busca, favoritos), `shell`, `editor2`, `image`, `x509` (cadeia de certificados) | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
 | Boot em QEMU | O kernel sobe e o desktop é o mesmo? | `tools/verify-boot.sh` | BIOS e UEFI, panic/exceção na serial, imagem do desktop | Hardware real, rede real |
 | Lint | Há `unsafe` sem justificativa, avisos? | `cargo lint-kernel`, `cargo lint-host` | Todo o código | Corretude |
 | Supply chain | Dependência vulnerável ou de licença ruim? | `cargo deny check`, `cargo audit` | `Cargo.lock` | Código das dependências |
@@ -55,6 +56,7 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 | `shell_parse` | bytes como linha/script de shell | lexer/parser, executor (FS em memória com limites, `SysInfo` mock), editor de linha com Tab |
 | `editor_ops` | documento + sequência de operações (`arbitrary`) | `editor2`: teclas, mouse, busca/substituição, undo/redo, wrap; invariantes depois de cada operação |
 | `image_decode` | bytes como PNG/BMP/PPM/zlib (cru, com CRCs reparados, PNG sintetizado ou BMP com offset ajustado) | `image::decode`, `inflate` (com `max_output` pequeno, também em fluxo), e as operações sobre a imagem decodificada (resize, fit, rotação, composição) mais a ida e volta exata dos codificadores PNG/BMP |
+| `html_img_form` | `[modo, zoom, largura, ...bytes]`: os bytes como HTML cru, dentro de `<img src/alt/width>`, de um `<form>` (action, name, value, size, método) ou como payload `data:image/png;base64,` | `web::Doc` com zoom 50-300% e qualquer estado de imagem (invariantes de geometria, índices de links, imagens e campos), `FormState` (teclas, Tab, foco, colagem, query, `target`, teclas mortas), `Page::find`/`select`, `base64`, `decode_for_page`/`decode_data_uri`/`image_key`, `ImageCache` (sequências de operações dentro do teto de bytes) e o `Browser` (barra, histórico, favoritos, sugestões, páginas `osjeff://`); roda numa thread de pilha pequena |
 | `x509_parse` | `[modo, bytes]`: o leitor DER/X.509 estrito, o casamento de nomes (SAN/curinga), o parser de datas, a validação de cadeia (`rustls-webpki` com âncora real) com os bytes como cadeia de 1 a 4 certificados, como folha ou intermediária substituindo as de uma cadeia de teste válida (chega à checagem de assinatura), e o `CertificateVerify` do TLS 1.3 com os bytes como assinatura | `osjeff_core::x509`, `osjeff_core::tlsverify` (nunca pânico nem travamento; semente: os certificados de `tools/gen-test-certs.py`) |
 
 | `app_manifest` | bytes como `.wasm` inteiro, como payload de `osjeff.manifest` ou de `osjeff.icon` (embrulhado numa seção válida), ou como manifesto/ícone soltos | `wasmsec` (cabeçalho, seções, LEB128), `appmanifest` (chaves, quotas, ícone PNG até 64x64) e as invariantes do manifesto aceito |
@@ -75,6 +77,7 @@ cargo fuzz run x509_parse -- -max_total_time=600 -print_final_stats=1
 
 cargo fuzz run app_manifest -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run app_sandbox -- -max_total_time=600 -print_final_stats=1
+cargo fuzz run html_img_form -- -max_total_time=600 -print_final_stats=1
 ```
 
 O perfil de release do `fuzz/` liga `overflow-checks` e `debug-assertions`: um

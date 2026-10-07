@@ -92,6 +92,14 @@ Erros são enums sem dados (`Copy`, `Display`): `DecodeError` embrulha
    senão; filtro adaptativo + LZ77 com Huffman fixo) ou `Format::Bmp`
    (24 bits se opaca, 32 com alfa).
 
+## Uso no navegador (W17)
+
+`web::imgcache::decode_for_page` é o decodificador das páginas: confere o tamanho do corpo
+(512 KiB) e as dimensões do cabeçalho (`peek_dims`, no máximo 2 Mpx) antes de `image::decode`,
+reduz à largura da coluna com `Image::fit(.., Filter::Auto)` e achata sobre o fundo da página.
+Roda na thread `fetcher`; o compositor só guarda o resultado no `ImageCache` (LRU, 6 MiB).
+Detalhes em [`tls-browser.md`](tls-browser.md) §8.1.
+
 ## Comportamentos que valem registrar
 
 * PNG: gamma/`iCCP`/`sRGB` são ignorados; 16 bits viram 8 por `(v + 128) / 257`;

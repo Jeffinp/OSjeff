@@ -22,6 +22,20 @@ tem releases versionadas; as seções são marcos na `master`.
 - **Pontos de extensão:** `desktop::apps_hook::{open_wasm, set_wallpaper}` (as frentes de apps WASM e
   de Configurações ligam depois).
 - Ferramenta de host `fs3_inject` (injeta arquivos numa imagem v3). Testes: 1546 -> 1680 (+134).
+## 2026-10 — Navegador completo e roda do mouse
+
+- **Roda do mouse** no sistema todo: negociação IntelliMouse no PS/2 (pacote de 4 bytes, com
+  queda para o de 3), `dz` no `Event::Mouse`, e a rolagem vai para a janela sob o ponteiro
+  (Navegador, Task Manager, Arquivos, Editor).
+- **Navegador:** imagens PNG/BMP/PPM (`<img>`, `data:` base64, `<a><img>`, no máximo 8 por página,
+  512 KiB cada, 2 Mpx, decodificadas na thread de rede, cache LRU de 6 MiB), formulários GET
+  (campos editáveis, Tab, Enter, acentos por teclas mortas, query UTF-8), botões de
+  voltar/avançar, cursor de mão, sugestões (favoritos e histórico), favoritos (Ctrl+D,
+  `osjeff://favoritos`, `BookmarkStore`), páginas `osjeff://`, PageUp/PageDown/Home/End/Espaço,
+  busca na página (Ctrl+F), zoom 50-300%, seleção e cópia de texto, título da janela.
+- `web::Doc` separa análise e diagramação; `base64` puro; `keymap::Key` ganhou PageUp/PageDown;
+  a URL do navegador passou de 220 para 480 bytes.
+- Testes: 1695 para 1910 (215 novos); novo alvo de fuzz `html_img_form` (um bug achado e corrigido).
 
 ## 2026-10 — Rede gerenciável
 
