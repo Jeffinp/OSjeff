@@ -35,6 +35,7 @@ pub mod keymap;
 pub mod layout;
 pub mod net;
 pub mod paging;
+pub mod png;
 pub mod process;
 pub mod redirect;
 pub mod rng;
