@@ -74,6 +74,14 @@ pub enum SysErr {
     Denied,
     /// Name resolution or network failure.
     Network,
+    /// The name does not exist (DNS answered, with no address).
+    HostNotFound,
+    /// Nothing answered in time.
+    Timeout,
+    /// The user pressed Ctrl+C while the call was waiting.
+    Cancelled,
+    /// The request was made but the transfer failed (TLS, redirect, size...).
+    Failed,
 }
 
 impl SysErr {
@@ -83,8 +91,45 @@ impl SysErr {
             SysErr::NoSuchProcess => "no such process",
             SysErr::Denied => "operation not permitted",
             SysErr::Network => "network is unreachable",
+            SysErr::HostNotFound => "host not found",
+            SysErr::Timeout => "timed out",
+            SysErr::Cancelled => "interrupted",
+            SysErr::Failed => "transfer failed",
         }
     }
+}
+
+/// A fetched HTTP(S) response ([`SysInfo::http_get`]).
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct HttpResponse {
+    /// Status code of the final response (after redirects), 0 if unknown.
+    pub status: u16,
+    /// Raw status line and headers of the final response (CRLF separated).
+    pub head: Vec<u8>,
+    /// The body, at most the `max_body` the caller asked for.
+    pub body: Vec<u8>,
+    /// The body was cut at `max_body` (or at the kernel's own cap).
+    pub truncated: bool,
+}
+
+/// What `ifconfig` prints about the network interface.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct NetInfo {
+    /// Driver / card name (`ne2000`, `virtio-net`).
+    pub nic: String,
+    pub link_up: bool,
+    /// Dotted-quad address, `None` while no address is held.
+    pub ip: Option<String>,
+    /// Prefix length of the subnet (`24`).
+    pub prefix: u8,
+    pub gateway: Option<String>,
+    pub dns: Vec<String>,
+    /// `bound`, `static`, `init`... (free text).
+    pub dhcp: String,
+    pub rx_packets: u64,
+    pub rx_bytes: u64,
+    pub tx_packets: u64,
+    pub tx_bytes: u64,
 }
 
 /// System services behind `date`, `uptime`, `free`, `df`, `ps`, `kill`,
@@ -120,6 +165,32 @@ pub trait SysInfo {
         Err(SysErr::Unsupported)
     }
 
+    /// Resolve `host` to its IPv4 addresses through DNS (`nslookup`); blocks
+    /// until the answer or a timeout. An address literal need not be resolved
+    /// by the implementation (the builtin handles it).
+    fn resolve(&mut self, _host: &str) -> Result<Vec<[u8; 4]>, SysErr> {
+        Err(SysErr::Unsupported)
+    }
+
+    /// Fetch `url` (`http://` or `https://`), following redirects, keeping at
+    /// most `max_body` bytes of the body (`curl`, `wget`); blocks until done.
+    fn http_get(&mut self, _url: &str, _max_body: usize) -> Result<HttpResponse, SysErr> {
+        Err(SysErr::Unsupported)
+    }
+
+    /// The network interface state (`ifconfig`); `None` without a NIC.
+    fn net_info(&self) -> Option<NetInfo> {
+        None
+    }
+
+    /// True once the user asked to stop the running command (Ctrl+C). The
+    /// executor polls it between commands and loop iterations and aborts with
+    /// status 130; implementations of long waits (`sleep_ms`, `ping`,
+    /// `http_get`) should poll it too and return early.
+    fn interrupted(&self) -> bool {
+        false
+    }
+
     /// Wait `ms` milliseconds (`sleep`). The shell already caps the value with
     /// [`crate::shell::Limits::max_sleep_ms`].
     fn sleep_ms(&mut self, _ms: u64) {}
@@ -146,6 +217,15 @@ pub struct MockSys {
     pub cleared: u32,
     pub killed: Vec<(u32, i32)>,
     pub ping_ok: bool,
+    /// Name -> address answered by `resolve` (several entries = several addresses).
+    pub dns: Vec<(String, [u8; 4])>,
+    /// URL -> response served by `http_get`; the URLs asked for go to `fetched`.
+    pub web: Vec<(String, HttpResponse)>,
+    pub fetched: Vec<String>,
+    pub net: Option<NetInfo>,
+    /// `interrupted` turns true after this many polls (`None` = never).
+    pub interrupt_after: Option<u32>,
+    polls: core::cell::Cell<u32>,
 }
 
 impl Default for MockSys {
@@ -183,6 +263,12 @@ impl Default for MockSys {
             cleared: 0,
             killed: Vec::new(),
             ping_ok: true,
+            dns: Vec::new(),
+            web: Vec::new(),
+            fetched: Vec::new(),
+            net: None,
+            interrupt_after: None,
+            polls: core::cell::Cell::new(0),
         }
     }
 }
@@ -228,6 +314,43 @@ impl SysInfo for MockSys {
         } else {
             Err(SysErr::Network)
         }
+    }
+
+    fn resolve(&mut self, host: &str) -> Result<Vec<[u8; 4]>, SysErr> {
+        let found: Vec<[u8; 4]> = self
+            .dns
+            .iter()
+            .filter(|(n, _)| n.eq_ignore_ascii_case(host))
+            .map(|(_, a)| *a)
+            .collect();
+        if found.is_empty() {
+            Err(SysErr::HostNotFound)
+        } else {
+            Ok(found)
+        }
+    }
+
+    fn http_get(&mut self, url: &str, max_body: usize) -> Result<HttpResponse, SysErr> {
+        self.fetched.push(String::from(url));
+        let Some((_, r)) = self.web.iter().find(|(u, _)| u == url) else {
+            return Err(SysErr::Network);
+        };
+        let mut r = r.clone();
+        if r.body.len() > max_body {
+            r.body.truncate(max_body);
+            r.truncated = true;
+        }
+        Ok(r)
+    }
+
+    fn net_info(&self) -> Option<NetInfo> {
+        self.net.clone()
+    }
+
+    fn interrupted(&self) -> bool {
+        let n = self.polls.get().saturating_add(1);
+        self.polls.set(n);
+        self.interrupt_after.is_some_and(|k| n > k)
     }
 
     fn sleep_ms(&mut self, ms: u64) {
@@ -302,8 +425,47 @@ mod tests {
             SysErr::NoSuchProcess,
             SysErr::Denied,
             SysErr::Network,
+            SysErr::HostNotFound,
+            SysErr::Timeout,
+            SysErr::Cancelled,
+            SysErr::Failed,
         ] {
             assert!(!e.message().is_empty());
         }
+    }
+
+    #[test]
+    fn minimal_sys_network_defaults() {
+        let mut s = MinimalSys;
+        assert_eq!(s.resolve("example.org"), Err(SysErr::Unsupported));
+        assert_eq!(s.http_get("http://x/", 10), Err(SysErr::Unsupported));
+        assert!(s.net_info().is_none());
+        assert!(!s.interrupted());
+    }
+
+    #[test]
+    fn mock_interrupt_after_polls() {
+        let mut s = MockSys::default();
+        assert!(!s.interrupted());
+        s.interrupt_after = Some(2);
+        assert!(!s.interrupted()); // 2nd poll since creation
+        assert!(s.interrupted());
+    }
+
+    #[test]
+    fn mock_http_truncates_to_the_requested_size() {
+        let mut s = MockSys::default();
+        s.web.push((
+            String::from("http://a/"),
+            HttpResponse {
+                status: 200,
+                body: alloc::vec![7; 100],
+                ..HttpResponse::default()
+            },
+        ));
+        let r = s.http_get("http://a/", 10).unwrap();
+        assert_eq!((r.body.len(), r.truncated), (10, true));
+        assert_eq!(s.http_get("http://b/", 10), Err(SysErr::Network));
+        assert_eq!(s.fetched, ["http://a/", "http://b/"]);
     }
 }

@@ -196,6 +196,7 @@ impl Registry {
     pub fn standard() -> Self {
         let mut r = Self::new();
         super::builtins::register_all(&mut r);
+        super::netcmds::register_all(&mut r);
         r
     }
 
@@ -301,6 +302,8 @@ pub struct Shell {
     ctl: Ctl,
     clear: bool,
     notified_limit: bool,
+    /// The last run was stopped by `SysInfo::interrupted` (status 130).
+    interrupted: bool,
     /// Status of the last `$( )` run while expanding the current command.
     last_sub: Option<i32>,
 }
@@ -367,6 +370,7 @@ impl Shell {
             ctl: Ctl::None,
             clear: false,
             notified_limit: false,
+            interrupted: false,
             last_sub: None,
         }
     }
@@ -494,6 +498,12 @@ impl Shell {
                 });
                 let s = self.exec_list(&list, &[], &mut Out::Display, h);
                 self.frames.pop();
+                // A wait inside the last command may have been cut short by Ctrl+C
+                // with no later step to notice it.
+                if !self.interrupted && h.sys.interrupted() {
+                    self.interrupted = true;
+                    self.say("interrupted");
+                }
                 self.finish_status(s)
             }
         };
@@ -502,6 +512,9 @@ impl Shell {
     }
 
     fn finish_status(&mut self, s: i32) -> i32 {
+        if self.interrupted {
+            return 130;
+        }
         match self.ctl {
             Ctl::Exit(c) | Ctl::Return(c) => c,
             _ => s,
@@ -516,6 +529,7 @@ impl Shell {
         self.clear = false;
         self.pipe_truncated = false;
         self.notified_limit = false;
+        self.interrupted = false;
         self.display = OutBuf::new(self.limits.max_output);
     }
 
@@ -556,8 +570,14 @@ impl Shell {
         self.display.push(b"\n");
     }
 
-    fn tick(&mut self) -> bool {
+    fn tick(&mut self, sys: &dyn SysInfo) -> bool {
         if self.ctl == Ctl::Abort {
+            return false;
+        }
+        if sys.interrupted() {
+            self.interrupted = true;
+            self.say("interrupted");
+            self.ctl = Ctl::Abort;
             return false;
         }
         self.steps += 1;
@@ -698,7 +718,7 @@ impl Shell {
                         status = 1;
                         break;
                     }
-                    if !self.tick() {
+                    if !self.tick(h.sys) {
                         break;
                     }
                     self.env.set(var, &item);
@@ -719,7 +739,7 @@ impl Shell {
                         break;
                     }
                     iters += 1;
-                    if !self.tick() {
+                    if !self.tick(h.sys) {
                         break;
                     }
                     let c = self.exec_list(cond, stdin, out, h);
@@ -777,7 +797,7 @@ impl Shell {
         out: &mut Out<'_>,
         h: &mut Host<'_>,
     ) -> i32 {
-        if !self.tick() {
+        if !self.tick(h.sys) {
             return 1;
         }
         // Expand words (command substitutions run here).

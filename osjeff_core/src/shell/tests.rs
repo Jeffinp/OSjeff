@@ -1131,3 +1131,5 @@ fn arbitrary_bytes_never_panic_the_whole_pipeline() {
         let _ = sh.run_line(&line, &mut h);
     }
 }
+
+mod net;

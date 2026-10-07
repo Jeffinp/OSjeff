@@ -113,18 +113,18 @@ pub fn register_all(r: &mut Registry) {
 // ---- helpers ---------------------------------------------------------------
 
 /// Parsed option letters and operands.
-struct Opts {
-    flags: Vec<char>,
-    values: Vec<(char, String)>,
-    operands: Vec<String>,
+pub(super) struct Opts {
+    pub(super) flags: Vec<char>,
+    pub(super) values: Vec<(char, String)>,
+    pub(super) operands: Vec<String>,
 }
 
 impl Opts {
-    fn has(&self, c: char) -> bool {
+    pub(super) fn has(&self, c: char) -> bool {
         self.flags.contains(&c)
     }
 
-    fn value(&self, c: char) -> Option<&str> {
+    pub(super) fn value(&self, c: char) -> Option<&str> {
         self.values
             .iter()
             .rev()
@@ -135,7 +135,7 @@ impl Opts {
 
 /// Parse `-abc`, `-n 5`, `-n5`, `--`. `valued` lists letters taking a value;
 /// `numeric` maps `-5` to that letter's value. Unknown letters are an error.
-fn parse_opts(
+pub(super) fn parse_opts(
     cx: &mut CmdCtx<'_>,
     known: &str,
     valued: &str,
@@ -192,7 +192,7 @@ fn parse_opts(
     Some(o)
 }
 
-fn fs_err(cx: &mut CmdCtx<'_>, path: &str, e: FsErr) {
+pub(super) fn fs_err(cx: &mut CmdCtx<'_>, path: &str, e: FsErr) {
     let msg = format!("{path}: {}", e.message());
     cx.error(&msg);
 }

@@ -29,6 +29,7 @@ pub mod fs;
 pub mod glob;
 pub mod history;
 pub mod line;
+pub mod netcmds;
 pub mod parse;
 pub mod regex;
 pub mod sys;
@@ -40,4 +41,4 @@ pub use exec::{BuiltinFn, Builtins, CmdCtx, Host, Limits, Registry, RunResult, S
 pub use fs::{FsErr, MemFs, ShellFs};
 pub use history::History;
 pub use line::{Completer, LineEditor, LineEvent, ShellCompleter};
-pub use sys::{MockSys, SysInfo};
+pub use sys::{HttpResponse, MockSys, NetInfo, SysErr, SysInfo};
