@@ -19,6 +19,7 @@ mod icons;
 mod interrupts;
 mod io;
 mod klog;
+mod logd;
 mod logo;
 mod ne2000;
 mod netd;
@@ -357,6 +358,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ATA driver can yield to the other threads between sectors.
     storage::init();
     trace::mark("storage init done");
+    // logd: persists the system log off the compositor thread (the boot log is written
+    // after the first desktop frame, see `logd`).
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        sched::spawn("logd", logd::worker);
+    });
 
     // Boot splash: progress tracks real elapsed time (>= 5 seconds).
     run_splash(&mut *framebuffer, &mut *back, info, n);
@@ -760,6 +766,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     klog::Level::Info,
                     format_args!("first desktop frame composed + blitted"),
                 );
+                logd::request_boot_flush();
             }
         }
 

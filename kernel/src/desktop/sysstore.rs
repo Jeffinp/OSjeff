@@ -21,7 +21,10 @@ fn map_err(e: VfsError) -> SinkError {
             SinkError::NoSpace
         }
         VfsError::InvalidName | VfsError::InvalidPath | VfsError::NameTooLong => SinkError::BadName,
-        _ => SinkError::Unavailable,
+        other => {
+            crate::klog!(Warn, "sysstore: write failed: {:?}", other);
+            SinkError::Unavailable
+        }
     }
 }
 
@@ -100,7 +103,9 @@ impl SettingsStore for VfsStore {
     }
 }
 
-/// The contents of the file at the absolute `path`, if it exists and is a file.
+/// The contents of the file at `path` (a volume path, or a bare name relative to the
+/// root as the settings page and older settings files store it), if it exists and is
+/// a file.
 pub(crate) fn read_path(path: &[u8]) -> Option<Vec<u8>> {
-    vfs::read_file(path).ok()
+    vfs::read_file(&osjeff_core::settings::absolute_path(path)).ok()
 }

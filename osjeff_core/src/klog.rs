@@ -684,6 +684,21 @@ pub fn render_text<'n>(
     }
 }
 
+/// The whole log of `snapshot` as text (every level, the same line format as "save
+/// to file"), cut to its newest whole lines if it exceeds `cap` bytes. Returns the
+/// text and whether older lines were dropped. This is what the boot-time flush
+/// writes to `/var/log/boot.log`: the result never exceeds `cap`.
+pub fn dump_bounded<'n>(
+    snapshot: &[u8],
+    thread_name: impl Fn(u8) -> &'n str,
+    cap: usize,
+) -> (Vec<u8>, bool) {
+    let mut text = Vec::new();
+    render_text(snapshot, &Filter::new(), thread_name, &mut text);
+    let (body, cut) = tail_lines(&text, cap);
+    (body.to_vec(), cut)
+}
+
 /// The newest part of a text dump that fits `cap` bytes, starting at a line
 /// start (so no line is cut in half), and whether anything was dropped. For
 /// file systems with a small file size limit.
@@ -993,6 +1008,66 @@ mod tests {
             &mut out,
         );
         assert_eq!(out, b"    1.500 I kernel boot\n");
+    }
+
+    #[test]
+    fn dump_bounded_keeps_every_level_and_the_newest_whole_lines() {
+        let mut r = Ring::new();
+        r.push(10, Level::Trace, 0, b"first");
+        r.push(20, Level::Debug, 0, b"second");
+        r.push(30, Level::Error, 1, b"third");
+        let s = snap(&r);
+        let name = |o: u8| if o == 0 { "kernel" } else { "appd" };
+        // Plenty of room: everything, in order, nothing dropped.
+        let (all, cut) = dump_bounded(&s, name, 1 << 16);
+        assert!(!cut);
+        assert_eq!(
+            all,
+            b"    0.010 T kernel first\n    0.020 D kernel second\n    0.030 E appd third\n"
+        );
+        // Tight: only the newest whole lines, starting on a line boundary.
+        let line = b"    0.030 E appd third\n".len();
+        let (tail, cut) = dump_bounded(&s, name, line + 3);
+        assert!(cut);
+        assert_eq!(tail, b"    0.030 E appd third\n");
+        // Never above the cap, whatever the cap.
+        for cap in 0..all.len() + 4 {
+            let (t, _) = dump_bounded(&s, name, cap);
+            assert!(t.len() <= cap, "cap {cap}: {}", t.len());
+            assert!(t.is_empty() || t.ends_with(b"\n"));
+        }
+        // An empty log is an empty file.
+        let (none, cut) = dump_bounded(&[], name, 100);
+        assert!(none.is_empty() && !cut);
+    }
+
+    #[test]
+    fn a_full_ring_dumps_within_the_boot_log_bound() {
+        // The kernel's ring (64 KiB of records) rendered with prefixes and thread
+        // names stays a bounded file: the flush never writes more than its cap.
+        let mut r: Box<LogRing<RING_BYTES>> = Box::default();
+        for i in 0..5000u32 {
+            let mut m = String::new();
+            let _ = write!(m, "storage: line {i} with some typical boot text in it");
+            r.push(i, Level::Info, (i % 4) as u8, m.as_bytes());
+        }
+        let s = snap(&*r);
+        let (t, cut) = dump_bounded(&s, |_| "kernel", 48 * 1024);
+        assert!(
+            cut && t.len() <= 48 * 1024 && t.len() > 40 * 1024,
+            "{}",
+            t.len()
+        );
+        assert!(t.ends_with(b"\n"));
+        // The newest message is the last line.
+        assert!(
+            core::str::from_utf8(&t)
+                .unwrap()
+                .lines()
+                .last()
+                .unwrap()
+                .contains("line 4999 ")
+        );
     }
 
     #[test]

@@ -201,7 +201,18 @@ fn settle_result(r: Result<(), Fail>) -> Result<(), Fail> {
     match r {
         Ok(()) => FAILS.store(0, Ordering::Relaxed),
         Err(f) => {
-            FAILS.fetch_add(1, Ordering::Relaxed);
+            let n = FAILS.fetch_add(1, Ordering::Relaxed) + 1;
+            crate::klog!(
+                Warn,
+                "ata: transfer failed ({:?}), {} consecutive{}",
+                f,
+                n,
+                if n >= MAX_FAILS {
+                    ": controller declared dead"
+                } else {
+                    ""
+                }
+            );
             if f != Fail::Absent {
                 soft_reset();
             }
