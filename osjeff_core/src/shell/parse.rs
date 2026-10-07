@@ -15,8 +15,8 @@
 //! `2>` and `>&` (descriptor redirections), unbalanced quotes and
 //! substitutions, and nesting deeper than [`MAX_DEPTH`].
 
-use alloc::sync::Arc;
 use alloc::string::{String, ToString};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 /// Maximum nesting of compound commands and `$( )`.

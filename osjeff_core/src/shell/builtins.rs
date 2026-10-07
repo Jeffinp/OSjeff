@@ -1784,8 +1784,27 @@ fn rev(cx: &mut CmdCtx<'_>) -> i32 {
     i32::from(!ok)
 }
 
+/// The characters of a `tr` set: ranges (`a-z`) and the escapes `\n`, `\t`, `\r`, `\\`.
 fn expand_set(s: &str) -> Vec<char> {
-    let c: Vec<char> = s.chars().collect();
+    let mut c: Vec<char> = Vec::new();
+    let mut it = s.chars();
+    while let Some(ch) = it.next() {
+        if ch != '\\' {
+            c.push(ch);
+            continue;
+        }
+        match it.next() {
+            Some('n') => c.push('\n'),
+            Some('t') => c.push('\t'),
+            Some('r') => c.push('\r'),
+            Some('\\') => c.push('\\'),
+            Some(o) => {
+                c.push('\\');
+                c.push(o);
+            }
+            None => c.push('\\'),
+        }
+    }
     let mut out = Vec::new();
     let mut i = 0;
     while i < c.len() {

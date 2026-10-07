@@ -171,3 +171,16 @@ fn ctrl_c_during_the_last_command_is_still_reported() {
     assert_eq!(r.status, 130);
     assert!(r.text().contains("interrupted"));
 }
+
+#[test]
+fn tr_understands_backslash_escapes() {
+    let mut t = T::new();
+    // Joining lines is the classic use: delete or translate the newline.
+    assert_eq!(t.out("seq 3 | tr -d '\\n'"), "123");
+    assert_eq!(t.out("seq 3 | tr '\\n' ' '"), "1 2 3 ");
+    assert_eq!(t.out("echo 'a b' | tr ' ' '\\t'"), "a\tb\n");
+    assert_eq!(t.out("echo 'a\\b' | tr '\\\\' '/'"), "a/b\n");
+    // Unknown escapes stay as typed; a trailing backslash is a backslash.
+    assert_eq!(t.out("echo 'x\\q' | tr -d '\\q'"), "x\n");
+    assert_eq!(t.out("echo 'x\\' | tr -d '\\'"), "x\n");
+}

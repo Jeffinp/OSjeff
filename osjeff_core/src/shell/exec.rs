@@ -10,8 +10,8 @@ use super::parse::{
 };
 use super::sys::SysInfo;
 use alloc::collections::BTreeMap;
-use alloc::sync::Arc;
 use alloc::string::{String, ToString};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 /// Resource limits that keep a runaway script from hanging the kernel.
