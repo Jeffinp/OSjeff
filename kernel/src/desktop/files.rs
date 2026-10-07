@@ -42,6 +42,14 @@ impl Desktop {
     /// trashed or deleted since the file was opened, fall back to the root rather
     /// than writing under a stale slot.
     pub(crate) fn fs_save_in(&mut self, dir: u8, f: FileName) {
+        // The file did not fit the editor grid when it was opened, so the buffer
+        // holds only part of it: writing it back would silently destroy the rest.
+        if self.editor.is_lossy() {
+            self.term
+                .println(b"not saved: file is larger than the editor window");
+            crate::serial_println!("editor: refusing to save a truncated buffer");
+            return;
+        }
         let mut buf = [0u8; fs::MAX_FILE_SIZE];
         let n = self.serialize_editor(&mut buf);
         let dir = fs::live_dir(disk(), dir);

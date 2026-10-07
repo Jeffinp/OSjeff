@@ -603,6 +603,10 @@ impl Desktop {
         if self.editor.dirty() {
             status[14] = b'*';
         }
+        // The loaded file did not fit the grid: Ctrl+S is refused (see fs_save_in).
+        if self.editor.is_lossy() {
+            status[16..21].copy_from_slice(b"TRUNC");
+        }
         font::draw_bytes(c, tx, y + 350 - 22, &status, theme::TEXT_MUTED, 2);
     }
 

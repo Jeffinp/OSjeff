@@ -214,7 +214,9 @@ impl Desktop {
             let _ = fs::write(
                 disk(),
                 b"leiame.txt",
-                b"Bem-vindo ao OSjeff. Gerenciador: setas navegam, Del manda pra lixeira, Tab alterna arquivos/lixeira, Enter abre.",
+                // Fits the editor grid (44 columns x 18 rows), so it can be opened and
+                // saved without loss.
+                b"Bem-vindo ao OSjeff.\nGerenciador de arquivos:\n setas   navegam\n Del     manda pra lixeira\n Tab     alterna arquivos/lixeira\n Enter   abre\n",
             );
             let _ = fs::write(disk(), b"notas.txt", b"Arquivo de exemplo do OSjeff.");
             if let Ok(d) = fs::mkdir(disk(), fs::ROOT, b"Documentos") {

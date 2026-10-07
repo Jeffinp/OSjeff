@@ -17,6 +17,8 @@ pub struct Editor {
     cx: usize,
     cy: usize,
     dirty: bool,
+    /// The last `set_text` dropped content that did not fit the grid.
+    lossy: bool,
 }
 
 impl Default for Editor {
@@ -34,6 +36,7 @@ impl Editor {
             cx: 0,
             cy: 0,
             dirty: false,
+            lossy: false,
         }
     }
 
@@ -57,6 +60,14 @@ impl Editor {
         self.dirty
     }
 
+    /// True when the file loaded by the last [`Editor::set_text`] did not fit the
+    /// fixed grid (lines over [`COLS`] or more than [`ROWS`] rows), so the buffer
+    /// holds only part of it. Saving such a buffer would silently destroy the rest
+    /// of the file, so callers must refuse to write it back.
+    pub fn is_lossy(&self) -> bool {
+        self.lossy
+    }
+
     /// Clear the dirty flag (e.g. just after a successful save).
     pub fn mark_clean(&mut self) {
         self.dirty = false;
@@ -64,14 +75,23 @@ impl Editor {
 
     /// Replace the whole buffer with `data`, splitting on `\n` and truncating
     /// over-long lines / excess rows to the fixed capacity. Used to load a file.
+    ///
+    /// Anything that does not fit is dropped and [`Editor::is_lossy`] becomes
+    /// true; carriage returns are removed on purpose and do not count as loss.
     pub fn set_text(&mut self, data: &[u8]) {
         self.text = [[0; COLS]; ROWS];
         self.len = [0; ROWS];
+        self.lossy = false;
         let mut row = 0;
-        for &b in data {
+        for (i, &b) in data.iter().enumerate() {
             if b == b'\n' {
                 if row + 1 >= ROWS {
-                    break; // out of rows: drop the rest
+                    // Out of rows: the rest is dropped, unless it is only
+                    // trailing line breaks / carriage returns.
+                    if data[i..].iter().any(|&c| c != b'\n' && c != b'\r') {
+                        self.lossy = true;
+                    }
+                    break;
                 }
                 row += 1;
                 continue;
@@ -83,6 +103,8 @@ impl Editor {
             if l < COLS {
                 self.text[row][l] = b;
                 self.len[row] = l + 1;
+            } else {
+                self.lossy = true; // line longer than the grid
             }
         }
         self.rows = row + 1;
@@ -494,5 +516,66 @@ mod tests {
         assert_eq!(e.rows(), 2);
         assert_eq!(e.line(0), b"a");
         assert_eq!(e.line(1), b"b");
+    }
+
+    #[test]
+    fn set_text_that_fits_is_not_lossy() {
+        let mut e = Editor::new();
+        e.set_text(b"short\nlines\r\nonly\n");
+        assert!(!e.is_lossy());
+    }
+
+    #[test]
+    fn set_text_exactly_cols_wide_is_not_lossy() {
+        let mut e = Editor::new();
+        e.set_text(&[b'a'; COLS]);
+        assert!(!e.is_lossy());
+        assert_eq!(e.line(0).len(), COLS);
+    }
+
+    #[test]
+    fn set_text_with_a_line_over_cols_is_lossy() {
+        let mut e = Editor::new();
+        e.set_text(&[b'a'; COLS + 1]);
+        assert!(e.is_lossy());
+        assert_eq!(e.line(0).len(), COLS); // truncated, and we know it
+    }
+
+    #[test]
+    fn set_text_with_too_many_rows_is_lossy() {
+        let mut e = Editor::new();
+        let mut data = [b'x'; 2 * (ROWS + 1)]; // ROWS + 1 lines of "x\n"
+        for i in (1..data.len()).step_by(2) {
+            data[i] = b'\n';
+        }
+        e.set_text(&data);
+        assert!(e.is_lossy());
+        assert_eq!(e.rows(), ROWS);
+    }
+
+    #[test]
+    fn trailing_newlines_past_the_last_row_are_not_loss() {
+        let mut e = Editor::new();
+        let mut data = [b'\n'; ROWS + 5];
+        data[0] = b'a';
+        e.set_text(&data);
+        assert!(!e.is_lossy());
+    }
+
+    #[test]
+    fn lossy_flag_clears_when_a_fitting_file_is_loaded() {
+        let mut e = Editor::new();
+        e.set_text(&[b'a'; COLS + 10]);
+        assert!(e.is_lossy());
+        e.set_text(b"fits");
+        assert!(!e.is_lossy());
+    }
+
+    #[test]
+    fn real_seeded_readme_style_line_is_lossy() {
+        // The welcome text the OS used to seed was a single 113-byte line.
+        let mut e = Editor::new();
+        e.set_text(b"Bem-vindo ao OSjeff. Gerenciador: setas navegam, Del manda pra lixeira, Tab alterna arquivos/lixeira, Enter abre.");
+        assert!(e.is_lossy());
     }
 }
