@@ -507,18 +507,18 @@ impl Desktop {
     /// Render the resident WASM application into window `r`'s content area. The
     /// guest paints through the host drawing ABI; the engine translates and
     /// clips it to this box (see [`crate::wasm::draw_app`]).
-    pub(crate) fn draw_wasm(&self, c: &mut Canvas, r: Rect) {
-        // The app renders on its own worker thread into an offscreen surface; the
-        // compositor just copies the latest finished frame into the window.
-        let pad = 14;
-        let cx = r.x + pad;
-        let cy = r.y + TITLE_H + 12;
-        crate::wasm::blit_surface(c, cx, cy);
+    pub(crate) fn draw_wasm(&self, c: &mut Canvas, r: Rect, w: &WasmWin) {
+        // Each app renders on the `appd` thread into its own offscreen surface; the
+        // compositor just copies the latest finished frame into the window (or shows
+        // why the app is not running).
+        let cr = wasm_content(r);
+        crate::wasm::blit(w.id, c, cr.x, cr.y, cr.w, cr.h);
     }
 
     pub(crate) fn draw_start(&self, c: &mut Canvas) {
-        let (sx, sy) = start_origin(self.sw, self.sh);
-        let h = start_height();
+        let rows = self.start_rows();
+        let (sx, sy) = start_origin(self.sw, self.sh, rows);
+        let h = start_height(rows);
         // Shadow + panel.
         c.fill_round_rect_alpha(
             (sx + 5) as usize,
@@ -538,32 +538,65 @@ impl Desktop {
             theme::DOCK,
         );
 
-        let hovered = start_item_at(self.sw, self.sh, self.cursor_x, self.cursor_y);
+        let hovered = start_item_at(
+            self.sw,
+            self.sh,
+            rows,
+            self.start_scroll,
+            self.cursor_x,
+            self.cursor_y,
+        );
         let top = sy + START_PAD;
-        for (i, kind) in Kind::ALL.iter().enumerate() {
+        let max_chars = ((START_W - START_PAD * 2 - 44) as usize / font::cell_w(2)).max(4);
+        for i in 0..rows {
+            let n = self.start_scroll + i;
             let ry = top + i as i32 * START_ROW_H;
-            if hovered == Some(StartItem::App(*kind)) {
+            let (item, label): (StartItem, &str) = match Kind::ALL.get(n) {
+                Some(&k) => (StartItem::App(k), k.label()),
+                None => match self.apps.get(n - Kind::ALL.len()) {
+                    Some(a) => (StartItem::Wasm(n - Kind::ALL.len()), a.name.as_str()),
+                    None => continue,
+                },
+            };
+            if hovered == Some(item) {
                 start_row_highlight(c, sx, ry, theme::ACCENT);
             }
-            icons::draw(
-                c,
-                kind.icon(),
+            let (ix, iy) = (
                 (sx + START_PAD) as usize,
                 (ry + (START_ROW_H - 24) / 2) as usize,
-                24,
             );
+            match item {
+                StartItem::App(k) => icons::draw(c, k.icon(), ix, iy, 24),
+                StartItem::Wasm(j) => match self.apps.get(j).and_then(|a| a.icon.as_deref()) {
+                    Some(rgba) => c.draw_rgba(rgba, 24, 24, ix, iy),
+                    None => icons::draw(c, Icon::WasmApp, ix, iy, 24),
+                },
+                _ => {}
+            }
+            let shown = &label[..label.len().min(max_chars)];
             font::draw_text(
                 c,
                 (sx + START_PAD + 36) as usize,
                 (ry + (START_ROW_H - 14) / 2) as usize,
-                kind.label(),
+                shown,
                 theme::HEADER_TEXT,
                 2,
             );
         }
+        // Scroll bar when the list does not fit.
+        let total = self.start_total();
+        if total > rows {
+            let track_h = rows as i32 * START_ROW_H;
+            let thumb_h = (track_h * rows as i32 / total as i32).max(16);
+            let max_scroll = (total - rows) as i32;
+            let thumb_y = top + (track_h - thumb_h) * self.start_scroll as i32 / max_scroll.max(1);
+            let bx = (sx + START_W - 8) as usize;
+            c.fill_rect(bx, top as usize, 3, track_h as usize, theme::DOCK_EDGE);
+            c.fill_round_rect(bx, thumb_y as usize, 3, thumb_h as usize, 1, theme::ACCENT);
+        }
 
         // Divider, then power actions.
-        let pwr_top = top + Kind::ALL.len() as i32 * START_ROW_H + START_GAP;
+        let pwr_top = top + rows as i32 * START_ROW_H + START_GAP;
         c.fill_rect(
             (sx + START_PAD) as usize,
             (pwr_top - START_GAP / 2) as usize,
@@ -711,7 +744,13 @@ impl Desktop {
 
         // Rows that fit between the header and the thread block + footer.
         let threads = sched::thread_count();
-        let reserved = 6 + line_h + 2 + threads * line_h + 30;
+        let apps = crate::wasm::statuses();
+        let apps_h = if apps.is_empty() {
+            0
+        } else {
+            6 + line_h + 2 + apps.len() * line_h
+        };
+        let reserved = 6 + line_h + 2 + threads * line_h + 30 + apps_h;
         let list_h = (r.h.max(0) as usize).saturating_sub(ty - y + reserved);
         let visible = (list_h / line_h).max(1);
         let n = self.procs.len();
@@ -775,7 +814,30 @@ impl Desktop {
             ty += line_h;
         }
 
-        let footer = "UP/DN  ENTER:open  DEL:end";
+        // WASM apps: state, CPU over the last second (wall time of their slices) and memory.
+        if !apps.is_empty() {
+            ty += 6;
+            font::draw_text(c, tx, ty, "APPS         ST CPU%  MEM", theme::ACCENT_2, 2);
+            ty += line_h + 2;
+            for a in &apps {
+                if ty + line_h > footer_y {
+                    break;
+                }
+                let mut line = [b' '; 28];
+                let name = alloc::format!("{}#{}", a.app_id, a.id);
+                let nb = name.as_bytes();
+                let n = nb.len().min(12);
+                line[..n].copy_from_slice(&nb[..n]);
+                line[13..16].copy_from_slice(a.state.label().as_bytes());
+                write_uint(&mut line, 17, 3, a.cpu_pct as u32);
+                write_uint(&mut line, 22, 5, a.mem_kib);
+                line[27] = b'K';
+                font::draw_bytes(c, tx, ty, &line, theme::TEXT, 2);
+                ty += line_h;
+            }
+        }
+
+        let footer = "UP/DN ENTER:open DEL:end R:restart";
         font::draw_text(c, tx, footer_y, footer, theme::TEXT_MUTED, 2);
     }
 

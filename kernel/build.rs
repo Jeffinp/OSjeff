@@ -1,13 +1,15 @@
 //! Build script for the kernel's embedded WebAssembly programs.
 //!
-//! Two sources, both turned into binary `.wasm` the kernel embeds with
-//! `include_bytes!`:
+//! Everything is turned into binary `.wasm` the kernel embeds with `include_bytes!`:
 //!   * `demo.wasm` — a tiny console smoke-test, assembled from inline WAT on the
 //!     host (the `wat` crate), so the bare-metal kernel needs no text parser.
-//!   * `app.wasm`  — the windowed desktop app, a real Rust crate compiled to
-//!     `wasm32-unknown-unknown` (by default `../wasm-apps/snake`; see below for the C and DOOM variants). This is the
-//!     "compile source to wasm and equip the OS" model: a genuine compiled
-//!     language becomes a native OSjeff app, no foreign OS, no emulation.
+//!   * `apps/<name>.wasm` — the bundled app packages: real Rust crates compiled to
+//!     `wasm32-unknown-unknown` (`../wasm-apps/<name>`, each carrying its own
+//!     manifest section), installed into `/apps` on first boot. This is the
+//!     "compile source to wasm and equip the OS" model: a genuine compiled language
+//!     becomes a native OSjeff app, no foreign OS, no emulation.
+//!   * `app.wasm` — the optional legacy windowed app (DOOM, or the C demo when the
+//!     wasi-sdk is available; empty otherwise).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -31,12 +33,11 @@ fn main() {
     );
     emit_wat(&out, "demo.wasm", &console);
 
-    // 2) Windowed app (`app.wasm`). Selected by env:
-    //    - DOOM=1 + WASI_SDK_PATH → compile DOOM (doomgeneric) to wasm32-wasi and
+    // 2) The legacy windowed app (`app.wasm`), only for the opt-in builds:
+    //    - DOOM=1 + WASI_SDK_PATH -> compile DOOM (doomgeneric) to wasm32-wasi and
     //      embed the IWAD. The full "run open-source C software natively" path.
-    //    - WASI_SDK_PATH only      → a freestanding C demo (cdemo).
-    //    - neither                 → the `snake` game (Rust→wasm), the default
-    //                                that builds anywhere with the wasm32 target.
+    //    - WASI_SDK_PATH only      -> a freestanding C demo (cdemo).
+    //    - neither                 -> no legacy app (empty `app.wasm`).
     println!("cargo:rerun-if-env-changed=WASI_SDK_PATH");
     println!("cargo:rerun-if-env-changed=DOOM");
     let doom = std::env::var("DOOM").map(|v| v == "1").unwrap_or(false);
@@ -50,10 +51,41 @@ fn main() {
             write_empty_wad(&out);
         }
         _ => {
-            build_wasm_app(&out, "snake");
+            std::fs::write(out.join("app.wasm"), []).expect("write empty app.wasm");
             write_empty_wad(&out);
         }
     }
+
+    // 3) The bundled app packages (Rust -> wasm32, one workspace-detached crate
+    //    each under `wasm-apps/`), installed into `/apps` on first boot. A crate
+    //    that is not there is skipped, so the list can grow without breaking
+    //    older checkouts.
+    let apps_out = out.join("apps");
+    std::fs::create_dir_all(&apps_out).expect("create apps dir");
+    let mut bundled = String::new();
+    for name in BUNDLED_APPS {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("wasm-apps")
+            .join(name);
+        if !dir.join("Cargo.toml").exists() {
+            continue;
+        }
+        build_wasm_app(&out, name, &apps_out.join(format!("{name}.wasm")));
+        bundled.push_str(&format!(
+            "    include_bytes!(concat!(env!(\"OUT_DIR\"), \"/apps/{name}.wasm\")),\n"
+        ));
+    }
+    let generated = format!(
+        "/// Packages bundled in the image (see `build.rs`); installed into `/apps` on first boot.\n\
+         pub(crate) static BUNDLED: &[&[u8]] = &[\n{bundled}];\n\
+         /// The app the dock's WASM icon launches when there is no legacy build.\n\
+         pub(crate) const DEFAULT_APP: &str = \"snake\";\n"
+    );
+    std::fs::write(out.join("apps_gen.rs"), generated).expect("write apps_gen.rs");
+    // The SDK is a path dependency of the apps: rebuild when it changes.
+    println!("cargo:rerun-if-changed=../wasm-apps/sdk/src");
+    println!("cargo:rerun-if-changed=../wasm-apps/sdk/Cargo.toml");
 
     println!("cargo:rerun-if-changed=build.rs");
 }
@@ -64,11 +96,13 @@ fn emit_wat(out: &Path, name: &str, wat: &str) {
     std::fs::write(out.join(name), &wasm).unwrap_or_else(|e| panic!("write {name}: {e}"));
 }
 
+/// The Rust app crates under `wasm-apps/` that ship in the image.
+const BUNDLED_APPS: &[&str] = &["hello", "clock", "notes", "paint", "snake", "plasma"];
+
 /// Compile the workspace-detached `../wasm-apps/<crate>` to
-/// `wasm32-unknown-unknown` (release) and copy the resulting module to
-/// `out/app.wasm`. Uses a dedicated target dir so the nested build never
+/// `wasm32-unknown-unknown` (release) and copy the resulting module to `dest`. Uses a dedicated target dir so the nested build never
 /// contends with the outer one's lock.
-fn build_wasm_app(out: &Path, crate_name: &str) {
+fn build_wasm_app(out: &Path, crate_name: &str, dest: &Path) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let app_dir = root.join("..").join("wasm-apps").join(crate_name);
     let manifest = app_dir.join("Cargo.toml");
@@ -97,13 +131,9 @@ fn build_wasm_app(out: &Path, crate_name: &str) {
     let wasm = target_dir
         .join("wasm32-unknown-unknown/release")
         .join(format!("{crate_name}.wasm"));
-    std::fs::copy(&wasm, out.join("app.wasm"))
-        .unwrap_or_else(|e| panic!("copy {}: {e}", wasm.display()));
+    std::fs::copy(&wasm, dest).unwrap_or_else(|e| panic!("copy {}: {e}", wasm.display()));
 
-    println!(
-        "cargo:rerun-if-changed={}",
-        app_dir.join("src/lib.rs").display()
-    );
+    println!("cargo:rerun-if-changed={}", app_dir.join("src").display());
     println!("cargo:rerun-if-changed={}", manifest.display());
 }
 

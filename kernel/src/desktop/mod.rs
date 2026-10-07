@@ -75,10 +75,15 @@ fn flush_disk() {
 pub const CURSOR_W: i32 = 10;
 pub const CURSOR_H: i32 = 16;
 
+/// Most app rows the start panel shows at once (more scroll).
+pub(crate) const START_MAX_ROWS: usize = 11;
+
 /// An entry in the start panel.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StartItem {
     App(Kind),
+    /// An installed WASM app (index into the catalog).
+    Wasm(usize),
     Reboot,
     Shutdown,
 }
@@ -194,6 +199,16 @@ pub struct Desktop {
     cursor_y: i32,
     prev_left: bool,
     prev_right: bool,
+    /// Installed WASM apps (the start panel lists them after the system apps).
+    apps: Vec<AppEntry>,
+    /// First visible app row of the (scrollable) start panel.
+    start_scroll: usize,
+    /// The WASM window that owns the pressed mouse button.
+    wasm_grab: Option<WindowId>,
+    /// Last seen generation of app-side clipboard writes.
+    clip_gen: u64,
+    /// Last message of the Files "Apps" view (an install/remove error).
+    files_msg: Option<(String, u8)>,
 }
 
 impl Desktop {
@@ -260,7 +275,14 @@ impl Desktop {
             cursor_y: sh / 2,
             prev_left: false,
             prev_right: false,
+            apps: Vec::new(),
+            start_scroll: 0,
+            wasm_grab: None,
+            clip_gen: crate::wasm::clip_generation(),
+            files_msg: None,
         };
+        // Install the bundled apps into /apps (first boot) and build the launcher catalog.
+        desk.init_apps();
         // The terminal is open (and focused) at boot.
         desk.open_new(Kind::Terminal);
         desk
@@ -290,6 +312,9 @@ impl Desktop {
     /// Opens a new window of `kind` with a new process. `None` when the window
     /// table or the process table is full (nothing is created then).
     pub(crate) fn open_new(&mut self, kind: Kind) -> Option<WindowId> {
+        if kind == Kind::WasmApp {
+            return self.open_default_wasm();
+        }
         if self.wm.is_full() {
             return None;
         }
@@ -340,6 +365,9 @@ impl Desktop {
     /// Dock-click semantics: focus (restoring if minimized) the most recently
     /// used window of `kind`, or open one when there is none.
     pub(crate) fn launch(&mut self, kind: Kind) -> Option<WindowId> {
+        if kind == Kind::WasmApp {
+            return self.launch_default_wasm();
+        }
         if let Some(id) = self.mru_of_kind(kind) {
             self.wm.activate(id);
             return Some(id);
@@ -423,6 +451,10 @@ impl Desktop {
     }
 
     pub(crate) fn request_close(&mut self, id: WindowId) {
+        // A WASM app gets `on_close` (a chance to save) while the window animates away.
+        if let Some(h) = self.wasm_handle(id) {
+            crate::wasm::request_close(h);
+        }
         self.wm.request_close(id);
     }
 
@@ -456,6 +488,13 @@ impl Desktop {
             // Closing an app terminates its process (removed from the table),
             // matching how a desktop app behaves; dropping `w` frees its state.
             self.procs.kill(w.app.pid);
+            // The window is gone: the app's runtime (memory, descriptors) goes with it.
+            if let App::Wasm(ww) = &w.app.app {
+                crate::wasm::close(ww.id);
+                if self.wasm_grab == Some(w.id) {
+                    self.wasm_grab = None;
+                }
+            }
             if self.hover == Some(w.id) {
                 self.hover = None;
             }
@@ -564,8 +603,9 @@ impl Desktop {
             bounds = Some(Rect::new(m.x, m.y, MENU_W, h));
         }
         if self.start_open {
-            let (sx, sy) = start_origin(self.sw, self.sh);
-            let sr = Rect::new(sx, sy, START_W, start_height());
+            let rows = self.start_rows();
+            let (sx, sy) = start_origin(self.sw, self.sh, rows);
+            let sr = Rect::new(sx, sy, START_W, start_height(rows));
             bounds = Some(bounds.map_or(sr, |b| b.union(&sr)));
         }
         if let Some(sw) = &self.switcher {
@@ -620,16 +660,6 @@ impl Desktop {
                 .windows()
                 .iter()
                 .any(|w| w.shown() && (w.anim.is_some() || w.app.kind() == Kind::WasmApp))
-    }
-
-    /// True while the WASM app window exists — gates the app worker thread so it
-    /// runs (and burns CPU) only while its window is open (a minimized WASM
-    /// window keeps its app alive, like any other minimized window).
-    pub fn wasm_active(&self) -> bool {
-        self.wm
-            .windows()
-            .iter()
-            .any(|w| w.app.kind() == Kind::WasmApp && !w.is_closing())
     }
 
     /// Consume the "repaint everything" request (maximize, restore, ...).
@@ -762,6 +792,8 @@ mod files_ui;
 mod input;
 mod instance;
 mod render;
+mod wasmwin;
 mod widgets;
 pub(crate) use instance::*;
+pub(crate) use wasmwin::*;
 pub(crate) use widgets::*;

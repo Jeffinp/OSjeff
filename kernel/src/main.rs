@@ -320,15 +320,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         None => fetch::init_offline(),
     }
 
-    // Hand the framebuffer layout to the WASM app engine and spawn its worker
-    // thread, so a heavy app (DOOM loading its WAD, then running its game loop)
-    // renders off the compositor thread and never freezes the UI.
-    wasm::init(info);
+    // Hand the framebuffer layout to the WASM app manager and spawn `appd`, the
+    // thread that runs every app (round-robin), so a heavy app (DOOM loading its
+    // WAD, then running its game loop) renders off the compositor thread and never
+    // freezes the UI.
+    wasm::init(info, tsc_khz);
     x86_64::instructions::interrupts::without_interrupts(|| {
-        sched::spawn("wasmapp", wasm::worker);
+        sched::spawn("appd", wasm::worker);
     });
 
-    trace::mark("threads spawned (fetcher, wasmapp)");
+    trace::mark("threads spawned (fetcher, appd)");
 
     // Storage service: detect/mount/migrate OJFS v3 on the filesystem disk (the desktop
     // still runs on the v2 image; see storage.rs). Runs with the scheduler up, so the
@@ -426,8 +427,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             perf.second_tick();
         }
 
-        // Run the WASM app worker only while its window is open.
-        wasm::set_active(desk.wasm_active());
+        // Tell the app manager each WASM window's size / visibility; reap finished apps.
+        desk.wasm_sync();
 
         // A maximize / restore / vanished minimized window changes pixels well
         // outside the focused window: repaint (and upload) the whole screen once.

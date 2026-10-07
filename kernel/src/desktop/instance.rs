@@ -104,14 +104,14 @@ impl Kind {
         }
     }
 
-    /// May several windows of this kind be open at once? The task manager, the
-    /// browser (one NIC, one fetcher thread) and the WASM app (one worker
-    /// thread, one surface) are single-instance for now: launching them again
-    /// focuses the existing window.
+    /// May several windows of this kind be open at once? The task manager and the
+    /// browser (one NIC, one fetcher thread) are single-instance for now: launching
+    /// them again focuses the existing window. WASM apps are multi-instance: each
+    /// window is its own `AppManager` instance.
     pub(crate) const fn multi(self) -> bool {
         matches!(
             self,
-            Kind::Terminal | Kind::Editor | Kind::Calculator | Kind::Files
+            Kind::Terminal | Kind::Editor | Kind::Calculator | Kind::Files | Kind::WasmApp
         )
     }
 
@@ -141,10 +141,10 @@ impl Kind {
         }
     }
 
-    /// Whether the window can be resized / maximized. The WASM surface has a
-    /// fixed logical size (692x414), so its window keeps its size.
+    /// Whether the window can be resized / maximized (WASM windows decide per app,
+    /// from the manifest: see `Desktop::open_wasm_app`).
     pub(crate) const fn resizable(self) -> bool {
-        !matches!(self, Kind::WasmApp)
+        true
     }
 }
 
@@ -170,12 +170,20 @@ pub(crate) struct EditorState {
 }
 
 /// A file-manager window: selected row, view (0 = files, 1 = trash, 2/3 = disk
-/// panels) and the current directory slot.
+/// panels, 4 = installed apps) and the current directory slot.
 #[derive(Clone, Copy)]
 pub(crate) struct FilesState {
     pub sel: usize,
     pub view: u8,
     pub cwd: u8,
+}
+
+/// A WASM app window: the `AppManager` instance behind it and which package it is.
+pub(crate) struct WasmWin {
+    /// Handle in the manager (`0` = none).
+    pub id: crate::wasm::AppId,
+    /// Manifest id of the package (`snake`, `notes`, ...).
+    pub app_id: String,
 }
 
 /// Per-window app state.
@@ -185,7 +193,7 @@ pub(crate) enum App {
     TaskMgr,
     Calculator(Box<Calc>),
     Browser(Box<BrowserState>),
-    Wasm,
+    Wasm(Box<WasmWin>),
     Files(FilesState),
 }
 
@@ -209,7 +217,10 @@ impl App {
                 body: Vec::new(),
                 layout_w: 0,
             })),
-            Kind::WasmApp => App::Wasm,
+            Kind::WasmApp => App::Wasm(Box::new(WasmWin {
+                id: 0,
+                app_id: String::new(),
+            })),
             Kind::Files => App::Files(FilesState {
                 sel: 0,
                 view: 0,
@@ -225,7 +236,7 @@ impl App {
             App::TaskMgr => Kind::TaskMgr,
             App::Calculator(_) => Kind::Calculator,
             App::Browser(_) => Kind::Browser,
-            App::Wasm => Kind::WasmApp,
+            App::Wasm(_) => Kind::WasmApp,
             App::Files(_) => Kind::Files,
         }
     }
@@ -305,7 +316,7 @@ impl FilesState {
 
     /// Switch the view from a sidebar selection (0..=3).
     pub(crate) fn set_view(&mut self, v: u8) {
-        self.view = v.min(3);
+        self.view = v.min(4);
         self.sel = 0;
     }
 
@@ -321,7 +332,7 @@ impl FilesState {
 
     /// Cycle through the sidebar views (Files -> Trash -> boot -> FS -> ...).
     pub(crate) fn toggle_view(&mut self) {
-        self.view = (self.view + 1) % 4;
+        self.view = (self.view + 1) % 5;
         self.sel = 0;
     }
 

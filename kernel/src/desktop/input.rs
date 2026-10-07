@@ -60,13 +60,25 @@ impl Desktop {
             }
         }
 
+        // The open start panel owns the arrow keys (scrolling its app list) and Esc.
+        if self.start_open && matches!(key, Key::Up | Key::Down | Key::Home | Key::End | Key::Esc) {
+            match key {
+                Key::Up => self.scroll_start(-1),
+                Key::Down => self.scroll_start(1),
+                Key::Home => self.scroll_start(-1000),
+                Key::End => self.scroll_start(1000),
+                _ => self.start_open = false,
+            }
+            return true;
+        }
         let (Some(top), Some(kind)) =
             (self.focused(), self.focused().and_then(|f| self.kind_of(f)))
         else {
             return false;
         };
-        // Ctrl+C / Ctrl+V / Ctrl+S / Ctrl+N are intercepted before the app sees the key.
-        if self.keymap.ctrl() {
+        // Ctrl+C / Ctrl+V / Ctrl+S / Ctrl+N are intercepted before the app sees the key
+        // (a WASM app gets every chord itself).
+        if self.keymap.ctrl() && kind != Kind::WasmApp {
             match key {
                 Key::Char(b'c') | Key::Char(b'C') => {
                     self.copy_from_focused();
@@ -129,12 +141,16 @@ impl Desktop {
             // Forward keystrokes to the guest (printable bytes as-is, Enter as
             // LF, Esc as 0x1B so apps like DOOM get their menu key). A WASM app is
             // closed with the title-bar button, not Esc, so the guest keeps Esc.
-            Kind::WasmApp => match key {
-                Key::Char(b) => crate::wasm::on_key(b as i32),
-                Key::Enter => crate::wasm::on_key(10),
-                Key::Esc => crate::wasm::on_key(27),
-                _ => {}
-            },
+            Kind::WasmApp => {
+                if let Some(h) = self.wasm_handle(top) {
+                    // Hand the app the current clipboard (it may read it with `clip_get`).
+                    crate::wasm::clip_load(self.clipboard.get());
+                    let mods = self.keymap.shift() as i32
+                        | ((self.keymap.ctrl() as i32) << 1)
+                        | ((self.keymap.alt() as i32) << 2);
+                    crate::wasm::key(h, wasm_key_code(key), mods);
+                }
+            }
             Kind::Files => self.files_key(top, key),
         }
         true
@@ -143,6 +159,10 @@ impl Desktop {
     fn files_key(&mut self, id: WindowId, key: Key) {
         if key == Key::Esc {
             self.request_close(id);
+            return;
+        }
+        if self.files_mut(id).is_some_and(|f| f.view == 4) {
+            self.files_apps_key(id, key);
             return;
         }
         if matches!(key, Key::Enter | Key::Right) {
@@ -163,6 +183,56 @@ impl Desktop {
             Key::Delete => f.delete(),
             Key::Char(b'n') | Key::Char(b'N') => f.mkdir(),
             _ => {}
+        }
+    }
+
+    /// Keys of the Files "Apps" view: Enter runs (installing first when needed),
+    /// `I` installs, `Del` removes, arrows move, Tab switches view.
+    fn files_apps_key(&mut self, id: WindowId, key: Key) {
+        let rows = self.app_rows();
+        self.files_msg = None;
+        let Some(f) = self.files_mut(id) else {
+            return;
+        };
+        let sel = f.sel.min(rows.len().saturating_sub(1));
+        match key {
+            Key::Up => f.sel = sel.saturating_sub(1),
+            Key::Down => f.sel = (sel + 1).min(rows.len().saturating_sub(1)),
+            Key::Tab => f.toggle_view(),
+            Key::Left | Key::Backspace => f.set_view(0),
+            _ => {
+                let Some(row) = rows.get(sel) else {
+                    return;
+                };
+                let result = match key {
+                    Key::Enter | Key::Right => {
+                        if row.installed {
+                            self.launch_wasm_app(&row.id);
+                            Ok(())
+                        } else {
+                            self.install_bundled(&row.id).map(|()| {
+                                self.launch_wasm_app(&row.id);
+                            })
+                        }
+                    }
+                    Key::Char(b'i') | Key::Char(b'I') => {
+                        if row.installed {
+                            Err(String::from("ja instalado"))
+                        } else {
+                            self.install_bundled(&row.id)
+                        }
+                    }
+                    Key::Delete => {
+                        if row.installed {
+                            self.remove_app(&row.id)
+                        } else {
+                            Err(String::from("nao instalado"))
+                        }
+                    }
+                    _ => return,
+                };
+                self.files_msg = result.err().map(|e| (e, 0));
+            }
         }
     }
 
@@ -269,7 +339,7 @@ impl Desktop {
                 App::Editor(e) => e.editor.line(e.editor.cursor().1),
                 App::Calculator(c) => c.display(),
                 App::Browser(b) => b.browser.url(),
-                App::TaskMgr | App::Wasm | App::Files(_) => &[],
+                App::TaskMgr | App::Wasm(_) | App::Files(_) => &[],
             };
             n = text.len().min(clipboard::CAP);
             tmp[..n].copy_from_slice(&text[..n]);
@@ -320,7 +390,7 @@ impl Desktop {
                     }
                 }
             }
-            Some(App::TaskMgr | App::Wasm | App::Files(_)) | None => {}
+            Some(App::TaskMgr | App::Wasm(_) | App::Files(_)) | None => {}
         }
     }
 
@@ -344,6 +414,15 @@ impl Desktop {
                     && let Some(w) = self.window_of_pid(pid)
                 {
                     self.request_close(w);
+                }
+            }
+            // Restart the selected WASM app: a fresh instance from the same package.
+            Key::Char(b'r') | Key::Char(b'R') => {
+                if let Some(pid) = self.procs.selected_pid()
+                    && let Some(w) = self.window_of_pid(pid)
+                    && let Some(h) = self.wasm_handle(w)
+                {
+                    crate::wasm::restart(h);
                 }
             }
             Key::Esc => self.request_close(id),
@@ -426,12 +505,12 @@ impl Desktop {
             }
             Kind::Browser => self.browser_click(w, rect, cx, cy),
             Kind::WasmApp => {
-                // Translate the click into the guest's content-local
-                // coordinates (same origin as `draw_wasm`) and deliver it.
-                let pad = 14;
-                let lx = cx - (rect.x + pad);
-                let ly = cy - (rect.y + TITLE_H + 12);
-                crate::wasm::on_pointer(lx, ly, 1);
+                // The press is delivered by `wasm_pointer` (content-local coordinates);
+                // the window grabs the button so drags and the release reach it.
+                let c = wasm_content(rect);
+                if cx >= c.x && cy >= c.y && cx < c.x + c.w && cy < c.y + c.h {
+                    self.wasm_grab = Some(w);
+                }
             }
             Kind::Files => self.files_click(w, rect, cx, cy),
             Kind::Terminal | Kind::Editor | Kind::TaskMgr => {}
@@ -451,7 +530,7 @@ impl Desktop {
 
         // Right click opens a context menu at the cursor: the app menu on a dock
         // icon ("Nova janela"), the launcher elsewhere.
-        if right_pressed {
+        if right_pressed && self.wasm_pointer_target(cx, cy).is_none() {
             let kind = match self.dock_hit(cx, cy) {
                 Some(DockAction::Open(k)) => MenuKind::Dock(k),
                 _ => MenuKind::Desktop,
@@ -473,10 +552,31 @@ impl Desktop {
         if left_pressed {
             if self.start_open {
                 // Resolve a click on the open start panel (app / power / dismiss).
-                match start_item_at(self.sw, self.sh, cx, cy) {
+                let rows = self.start_rows();
+                let (psx, psy) = start_origin(self.sw, self.sh, rows);
+                let on_bar = cx >= psx + START_W - START_PAD
+                    && cx < psx + START_W
+                    && cy >= psy + START_PAD
+                    && cy < psy + START_PAD + rows as i32 * START_ROW_H;
+                if on_bar && self.start_max_scroll() > 0 {
+                    // the scroll strip: upper half scrolls up, lower half down
+                    let mid = psy + START_PAD + rows as i32 * START_ROW_H / 2;
+                    self.scroll_start(if cy < mid { -3 } else { 3 });
+                    return MouseResult {
+                        scene_dirty: true,
+                        cursor_moved,
+                    };
+                }
+                match start_item_at(self.sw, self.sh, rows, self.start_scroll, cx, cy) {
                     Some(StartItem::App(k)) => {
                         self.start_open = false;
                         self.launch(k);
+                    }
+                    Some(StartItem::Wasm(i)) => {
+                        self.start_open = false;
+                        if let Some(id) = self.apps.get(i).map(|a| a.id.clone()) {
+                            self.launch_wasm_app(&id);
+                        }
                     }
                     Some(StartItem::Reboot) => crate::power::reboot(),
                     Some(StartItem::Shutdown) => crate::power::shutdown(),
@@ -569,6 +669,7 @@ impl Desktop {
         // overlay's rectangle on `cursor_moved` (see the overlay path in the
         // main loop), so we deliberately do not set `scene` here.
 
+        self.wasm_pointer(left, right, cursor_moved);
         self.prev_left = left;
         self.prev_right = right;
         MouseResult {

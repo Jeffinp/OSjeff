@@ -281,7 +281,7 @@ impl Desktop {
             App::TaskMgr => self.draw_taskmgr(c, r),
             App::Calculator(k) => self.draw_calculator(c, r, k),
             App::Browser(b) => self.draw_browser(c, r, focused, b),
-            App::Wasm => self.draw_wasm(c, r),
+            App::Wasm(w) => self.draw_wasm(c, r, w),
             App::Files(f) => self.draw_files(c, r, f),
         }
     }

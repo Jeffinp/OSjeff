@@ -304,7 +304,13 @@ pub enum FilesHit {
 pub fn files_hit(rect: Rect, view: u8, px: i32, py: i32) -> Option<FilesHit> {
     let cy0 = rect.y + TITLE_H;
     if px < rect.x + FILES_SIDEBAR_W {
-        let zones = [(34, 64, 0u8), (66, 96, 1), (132, 162, 2), (164, 194, 3)];
+        let zones = [
+            (34, 64, 0u8),
+            (66, 96, 1),
+            (132, 162, 2),
+            (164, 194, 3),
+            (208, 238, 4),
+        ];
         return zones
             .iter()
             .find(|&&(a, b, _)| (cy0 + a..cy0 + b).contains(&py))
@@ -630,6 +636,9 @@ mod tests {
         assert_eq!(files_hit(r, 0, x, cy0 + 132), Some(FilesHit::View(2)));
         assert_eq!(files_hit(r, 0, x, cy0 + 164), Some(FilesHit::View(3)));
         assert_eq!(files_hit(r, 0, x, cy0 + 194), None);
+        assert_eq!(files_hit(r, 0, x, cy0 + 208), Some(FilesHit::View(4)));
+        assert_eq!(files_hit(r, 0, x, cy0 + 237), Some(FilesHit::View(4)));
+        assert_eq!(files_hit(r, 0, x, cy0 + 238), None);
         assert_eq!(files_hit(r, 0, x, cy0 + 10), None);
     }
 
@@ -645,6 +654,7 @@ mod tests {
         assert_eq!(files_hit(r, 0, x, list_y - 1), None); // header area
         assert_eq!(files_hit(r, 2, x, list_y), None); // disk view has no rows
         assert_eq!(files_hit(r, 3, x, list_y), None);
+        assert_eq!(files_hit(r, 4, x, list_y), None); // the Apps view has its own rows
     }
 
     #[test]

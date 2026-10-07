@@ -13,6 +13,7 @@ const SIDEBAR: Color = Color::rgb(0x18, 0x1D, 0x27);
 const FG: Color = Color::rgb(0xE6, 0xEA, 0xF2);
 const MUTED: Color = Color::rgb(0x86, 0x90, 0xA4);
 const SEP: Color = Color::rgb(0x2A, 0x31, 0x40);
+const ERRC: Color = Color::rgb(0xE0, 0x70, 0x70);
 
 /// Append `src` to `buf` at `off`, clamped to the buffer; returns the new offset.
 fn push(buf: &mut [u8], off: usize, src: &[u8]) -> usize {
@@ -103,12 +104,15 @@ impl Desktop {
         for it in &items[2..] {
             yy = self.sb_item(c, sx, yy, *it, st);
         }
+        yy += 12;
+        self.sb_item(c, sx, yy, (b"Apps", 4, 3), st);
 
         // ---- main pane ----
         let mx = r.x + SBW + 16;
         let mw = r.right() - 16 - mx;
         match st.view {
             0 | 1 => self.draw_file_list(c, r, mx, mw, st),
+            4 => self.draw_apps_list(c, r, mx, mw, st),
             v => self.draw_disk_panel(c, r, mx, (v - 2) as usize, st),
         }
     }
@@ -241,6 +245,106 @@ impl Desktop {
         }
 
         self.files_footer(c, r, mx, rows, st);
+    }
+
+    /// Main pane: the installed apps (and bundled packages not yet installed).
+    fn draw_apps_list(&self, c: &mut Canvas, r: Rect, mx: i32, mw: i32, st: &FilesState) {
+        let right = mx + mw;
+        let mut my = r.y + TITLE_H + 14;
+        font::draw_text(c, mx as usize, my as usize, "Apps", FG, 3);
+        my += 36;
+        font::draw_text(c, mx as usize, my as usize, "Nome", MUTED, 2);
+        let th = font::text_width("Estado", 2) as i32;
+        font::draw_text(c, (right - th) as usize, my as usize, "Estado", MUTED, 2);
+        my += 20;
+        c.fill_rect(mx as usize, my as usize, mw as usize, 1, SEP);
+        my += 8;
+        let rows = self.app_rows();
+        if rows.is_empty() {
+            font::draw_text(c, mx as usize, (my + 6) as usize, "(nenhum app)", MUTED, 2);
+        }
+        let sel_i = st.sel.min(rows.len().saturating_sub(1));
+        for (n, row) in rows.iter().enumerate() {
+            let ry = my + n as i32 * ROW;
+            if ry + ROW > r.bottom() - 34 {
+                break;
+            }
+            let sel = sel_i == n;
+            if sel {
+                c.fill_round_rect(
+                    (mx - 6) as usize,
+                    (ry - 1) as usize,
+                    (mw + 12) as usize,
+                    (ROW - 2) as usize,
+                    6,
+                    BLUE,
+                );
+            }
+            let tc = if sel { theme::WHITE } else { FG };
+            let icon = self
+                .apps
+                .iter()
+                .find(|a| a.id == row.id)
+                .and_then(|a| a.icon.as_deref());
+            match icon {
+                Some(rgba) => {
+                    c.draw_rgba(rgba, 24, 24, mx as usize, (ry + (ROW - 24) / 2) as usize)
+                }
+                None => glyph(
+                    c,
+                    3,
+                    mx,
+                    ry + (ROW - 18) / 2,
+                    18,
+                    if sel { theme::WHITE } else { MUTED },
+                ),
+            }
+            let name = &row.name.as_bytes()[..row.name.len().min(24)];
+            font::draw_bytes(
+                c,
+                (mx + 32) as usize,
+                (ry + (ROW - 14) / 2) as usize,
+                name,
+                tc,
+                2,
+            );
+            let status: &str = if row.installed {
+                "instalado"
+            } else {
+                "nao instalado"
+            };
+            let sw = font::text_width(status, 2) as i32;
+            let sc = if sel { theme::WHITE } else { MUTED };
+            font::draw_text(
+                c,
+                (right - sw) as usize,
+                (ry + (ROW - 14) / 2) as usize,
+                status,
+                sc,
+                2,
+            );
+        }
+        let by = r.bottom() - 26;
+        c.fill_rect(
+            (r.x + 1) as usize,
+            (by - 8) as usize,
+            (r.w - 2) as usize,
+            1,
+            SEP,
+        );
+        let hint = "Enter abre  I instala  Del remove";
+        let hw = font::text_width(hint, 2) as i32;
+        font::draw_text(
+            c,
+            (r.right() - 16 - hw) as usize,
+            by as usize,
+            hint,
+            MUTED,
+            2,
+        );
+        if let Some((msg, _)) = self.files_msg.as_ref() {
+            font::draw_text(c, mx as usize, by as usize, msg, ERRC, 2);
+        }
     }
 
     /// Main pane: a single disk's details (Finder's "Get Info" feel).

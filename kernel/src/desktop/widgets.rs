@@ -45,21 +45,36 @@ pub(crate) fn key_style(k: u8, pending: Option<u8>) -> (Color, Color) {
     }
 }
 
-pub(crate) fn start_height() -> i32 {
-    osjeff_core::layout::start_height(Kind::ALL.len())
+/// Height of the start panel showing `rows` app rows.
+pub(crate) fn start_height(rows: usize) -> i32 {
+    osjeff_core::layout::start_height(rows)
 }
 
 /// Top-left of the start panel, centered above the dock's system icon.
-pub(crate) fn start_origin(sw: i32, sh: i32) -> (i32, i32) {
-    osjeff_core::layout::start_origin(sw, sh, Kind::ALL.len())
+pub(crate) fn start_origin(sw: i32, sh: i32, rows: usize) -> (i32, i32) {
+    osjeff_core::layout::start_origin(sw, sh, rows)
 }
 
-/// The start-panel item under `(px, py)`, if any.
-pub(crate) fn start_item_at(sw: i32, sh: i32, px: i32, py: i32) -> Option<StartItem> {
+/// The start-panel item under `(px, py)`, if any. `rows` is the number of app rows
+/// shown and `scroll` the index of the first one.
+pub(crate) fn start_item_at(
+    sw: i32,
+    sh: i32,
+    rows: usize,
+    scroll: usize,
+    px: i32,
+    py: i32,
+) -> Option<StartItem> {
     use osjeff_core::layout::StartHit;
     Some(
-        match osjeff_core::layout::start_item_at(sw, sh, Kind::ALL.len(), px, py)? {
-            StartHit::App(i) => StartItem::App(Kind::ALL[i]),
+        match osjeff_core::layout::start_item_at(sw, sh, rows, px, py)? {
+            StartHit::App(i) => {
+                let n = scroll + i;
+                match Kind::ALL.get(n) {
+                    Some(&k) => StartItem::App(k),
+                    None => StartItem::Wasm(n - Kind::ALL.len()),
+                }
+            }
             StartHit::Reboot => StartItem::Reboot,
             StartHit::Shutdown => StartItem::Shutdown,
         },
