@@ -3,6 +3,19 @@
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
 tem releases versionadas; as seções são marcos na `master`.
 
+## 2026-10 — Expansão do sistema: integração (W15–W19)
+
+- Os quatro blocos (arquivos/VFS, editor e terminal, navegador completo, apps e sistema em disco) foram
+  integrados na mesma árvore; os pontos de contato foram reconciliados em commits próprios:
+  um único caminho da roda do mouse (`Desktop::handle_wheel`, `dz > 0` = para baixo; o decodificador
+  PS/2 do W17 ficou), um único mailbox do `fetcher` com três clientes (navegador, apps WASM e shell,
+  cada um com seu estado e o resultado só é retirado por quem postou), `DragMode::PageSelect` para a
+  seleção do navegador.
+- **Favoritos persistentes** em `/home/.bookmarks` (`SavedBookmarks`, texto `url<TAB>título`, leitor
+  total e limitado a 64 entradas). Prova em QEMU em dois boots (`w19-bookmark*.sh`).
+- **ABI dos apps:** `PageUp`/`PageDown` chegam aos apps WASM como `0x106`/`0x107` (`KEY_PAGE_UP/DOWN` no SDK).
+- Testes: 2331 no `osjeff_core`; cobertura de linhas 96,6%; 13 alvos de fuzz.
+
 ## 2026-10 — Editor e Terminal de verdade (W15b)
 
 - **Terminal:** o motor `osjeff_core::shell` (52 comandos, pipes, variáveis, scripts) com histórico

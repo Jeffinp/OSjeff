@@ -14,7 +14,11 @@ depois o que limita o que ele consegue fazer, depois polimento.
 | Scheduler | Estado "bloqueada" (`sched::block/wake/idle`), compositor de 83 → 250 iterações/s em idle, latência tecla→captura de ~11 ms → ~0,4 ms, CPU real no gerenciador de tarefas |
 | WebAssembly | *fuel* por chamada, limite de memória, término real do app, tetos nas host functions |
 | Desempenho | Tick do relógio 15,6 → 0,2 ms; quadro de tecla 26 → 13 ms; preenchimento 24 bpp 14 → 3 ciclos/px |
-| Qualidade | 423 testes (de 189); ~11,7 mil linhas de lógica no `osjeff_core` testadas no host; `unsafe` 100% documentado e imposto pelo lint; CI, `cargo deny`, fuzzing, harness de boot em QEMU |
+| Armazenamento | OJFS v3 (journal, COW, extents, CRC32, `fsck`, migração do v2), camada VFS única para o desktop, volume em RAM como alternativa, `FLUSH` no ATA |
+| Plataforma de apps | Manifesto, ABI v2, sandbox de arquivos (`/data/<id>`), instalação em `/apps`, cotas de *fuel* e memória, `net_http_get` pela rede real com lista de hosts por app, dados persistentes no disco, vista "Apps" no gerenciador de arquivos |
+| Sistema | Configurações persistentes (cor, papel de parede, teclado ABNT2, fuso, relógio), log em anel + `/var/log`, monitor de recursos, notificações |
+| Desktop | Gerenciador de arquivos v2 (copiar/mover com progresso, lixeira), visualizador de imagens, terminal com shell completo e rede, editor com Abrir/Salvar e confirmação ao fechar, roda do mouse |
+| Qualidade | 2331 testes (de 189), cobertura de linhas 96,6% no `osjeff_core`, 13 alvos de fuzz; `unsafe` 100% documentado e imposto pelo lint; CI, `cargo deny`, `cargo audit`, harness de boot em QEMU, cenários de interface em `tools/perf/scen` |
 
 ## Próximos passos, em ordem
 
@@ -33,9 +37,9 @@ embutidas com hash documentado, cadeia/nome/`CertificateVerify` verificados com
 `rustls-webpki`, SNTP para a hora, erro claro na página e "continuar mesmo assim" por
 origem e por sessão, `x509_parse` fuzzado (5 M de execuções sem crash). Detalhes e provas
 em [`design/tls-browser.md`](design/tls-browser.md). Ainda em aberto: revogação (CRL/OCSP),
-*pinning*, HSTS e, sem `RDRAND`, recusar em vez de usar o RNG fraco. O navegador (W17: imagens, formulários GET, favoritos, busca, zoom, roda do mouse, `osjeff://`) ganhou
-links clicáveis, histórico (Alt+←/→) e gzip/deflate; ainda não tem imagens, formulários nem
-favoritos.
+*pinning*, HSTS e, sem `RDRAND`, recusar em vez de usar o RNG fraco. O navegador ganhou links clicáveis, histórico (Alt+←/→), gzip/deflate, imagens PNG/BMP/PPM,
+formulários GET, favoritos persistentes, busca na página, zoom, seleção e roda do mouse (`osjeff://`);
+ainda não tem POST, `<select>`/`<textarea>`, JPEG/GIF nem reuso de conexão.
 *Aceite (cumprido):* servidor com certificado inválido falha e a barra só diz "Conexao
 segura" para cadeias válidas.
 

@@ -20,7 +20,7 @@ e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espa�
 endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
 o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
 
-- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2076 testes
+- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2331 testes
   passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
 - **Multitarefa preemptiva** a 250 Hz, com bloqueio. Cinco threads: `compositor`,
@@ -673,7 +673,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   arquivo pela metade; colisão vira `nome (2).ext`), Del (lixeira), Shift+Del (permanente, com
   confirmação), Restaurar, Esvaziar lixeira, Propriedades, menu de contexto (botão direito),
   F5 atualiza. Enter/duplo clique: pasta entra; `.png/.bmp/.ppm` abre o Visualizador;
-  `.wasm` chama `apps_hook::open_wasm` (por ora "Plataforma de apps indisponivel"); texto abre
+  `.wasm` é validado, instalado se for novo e executado (`Desktop::open_wasm_path`); texto abre
   o Editor (a janela que já mostra o arquivo é focada; senão uma nova; até 16 MiB). Toda mudança
   do disco recarrega todas as janelas do gerenciador (`Desktop::fs_changed`); desenhar nunca
   toca o disco. Fechar a janela no meio de uma cópia desfaz o arquivo parcial.
@@ -683,7 +683,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   torno do cursor, arrastar com o mouse (ou setas) para mover, `R` gira (Shift+R anti-horário),
   `H`/`V` espelham, ←/→ (e PageUp/PageDown) trocam de imagem da mesma pasta, `I` painel de
   informações, `S`/Ctrl+S salva como (extensão `.png`/`.bmp`/`.ppm` escolhe o formato), `W`
-  chama `apps_hook::set_wallpaper` (por ora só avisa). Transparência sobre fundo xadrez. Abaixo
+  usa a imagem como papel de parede (`Desktop::set_wallpaper_path`, que grava `/etc/osjeff.conf`). Transparência sobre fundo xadrez. Abaixo
   de 100 % a imagem é reduzida uma vez por mudança de zoom (filtro de caixa, em cache); a 100 %
   ou mais a amostragem é por vizinho mais próximo direto da origem. Lógica pura em
   `osjeff_core::viewer` (zoom, pan, caixa de ajuste, lista da pasta, texto de informações).

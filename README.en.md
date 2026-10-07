@@ -9,8 +9,8 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly--2026--10--05-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-2076%20passing-success?style=for-the-badge)
-![Fuzz](https://img.shields.io/badge/fuzz-3%20targets-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-2331%20passing-success?style=for-the-badge)
+![Fuzz](https://img.shields.io/badge/fuzz-13%20targets-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
 [🇧🇷 Português](README.md) · **🇺🇸 English**
@@ -73,10 +73,11 @@ variants (DOOM) and troubleshooting: [`docs/BUILDING.md`](docs/BUILDING.md) (Por
 | **Scheduler** | Timer-preemptive (context switch in the ISR, assembly), **ready/blocked** threads, yield via `int 0x81`, `hlt` without lost wakeups, **guard-page stacks**, **a failing thread dies alone**, real per-thread CPU | `sched.rs`, `switch.s` |
 | **Memory** | `GlobalAlloc` heap (free list with coalescing, spin lock with IRQs off), alignment math tested on the host | `allocator.rs`, `osjeff_core/src/heap.rs` |
 | **Graphics** | Damage-tracking compositor, double buffering, own 8×8 font, alpha shadows, animations; performance HUD | `fb.rs`, `desktop/` |
-| **Apps** | Terminal, Editor, Task manager, Calculator, File manager, Browser, WebAssembly app | `desktop/`, `osjeff_core` |
-| **Storage** | Own **OJFS** filesystem (48 files, folders, trash) over ATA PIO, persistent across boots | `osjeff_core/src/fs.rs`, `ata.rs` |
+| **Apps** | Terminal (shell with ~55 commands, pipes, scripts, scrollback, history, Tab completion, `ping`/`nslookup`/`curl`), Editor (find/replace, undo, 16 MiB files, Open/Save dialogs), File manager (copy/move with progress, trash, Apps), Image viewer, Browser, Task manager, Resource monitor, Log viewer, Settings, Calculator, WebAssembly apps | `desktop/`, `osjeff_core` |
+| **Storage** | **OJFS v3**: metadata journal + copy-on-write data, extents, CRC32, `fsck` at boot, automatic v2 migration, block cache, ATA with `FLUSH`; the whole desktop reaches the disk through one VFS layer (with a RAM volume when there is no v3 disk) | `osjeff_core/src/{fs3,vfs,blockcache}`, `ata.rs`, `storage.rs` |
+| **System** | Persistent settings (`/etc/osjeff.conf`: accent colour, wallpaper, ABNT2 keyboard, time zone, clock), ring-buffer kernel log (`/var/log`), resource monitor, notifications, apps installed in `/apps` with data in `/data/<id>` | `osjeff_core/src/{settings,klog,sysmon,notify}.rs`, `kernel/src/desktop/` |
 | **Network** | `virtio-net` and NE2000 (`Nic` trait), own ARP/IPv4/ICMP/DHCP (renews the lease, answers and sends `ping`), DNS with a cache and several servers, `smoltcp` for TCP, **TLS 1.3** (`embedded-tls`) | `nic.rs`, `virtio_net.rs`, `ne2000.rs`, `netd.rs`, `netstack.rs`, `osjeff_core/src/{net,lease,dns,icmp}.rs` |
-| **Browser** | HTML parser, CSS (cascade), layout, PNG/BMP/PPM images, GET forms, bookmarks and suggestions, find in page, zoom, redirects, resource limits, connection indicator; mouse wheel system-wide | `osjeff_core/src/{web,browser,redirect}` |
+| **Browser** | HTML parser, CSS (cascade), layout, PNG/BMP/PPM images, GET forms, bookmarks and suggestions, find in page, zoom, redirects, resource limits, connection indicator; mouse wheel system-wide | `osjeff_core/src/{web,browser,redirect}`; bookmarks persist in `/home/.bookmarks` |
 | **WebAssembly** | `wasmi` as the native app format: own ABI + a WASI subset, per-call *fuel*, 24 MiB memory cap, real app termination. Runs Snake; **DOOM** via `wasi-sdk` | `kernel/src/wasm/`, `wasm-apps/` |
 | **Devices** | PS/2 (keyboard, mouse), RTC, PCI, virtio-gpu (2D), ATA IDENTIFY | `ps2.rs`, `pci.rs`, `virtio*.rs` |
 
@@ -90,7 +91,7 @@ builds with `std` under test. The kernel only wires hardware to it.
 
 ```mermaid
 flowchart LR
-    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2076 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2331 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · documented unsafe<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>BIOS/UEFI image builder"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -100,8 +101,8 @@ flowchart LR
 
 | Verification | Status |
 |---|---|
-| Unit tests | **2076** in `osjeff_core`; 96% line coverage (raw, includes the test modules) |
-| Fuzzing | 3 targets (network, disk, HTML/CSS/HTTP); **9 bugs found and fixed**, each with a minimal input and a test |
+| Unit tests | **2331** in `osjeff_core`; 96.6% line coverage (raw, includes the test modules; measured with `cargo llvm-cov`) |
+| Fuzzing | 13 targets (network, OJFS v2/v3 disks, HTML/CSS/images/forms, shell, editor, X.509 certificates, app manifest and sandbox); every bug found is fixed with a minimal input and a regression test |
 | `unsafe` | **100%** of kernel blocks carry `// SAFETY:`, enforced by `clippy::undocumented_unsafe_blocks` |
 | QEMU boot | BIOS **and** UEFI on every kernel commit, desktop compared pixel by pixel to a baseline (`tools/verify-boot.sh`) |
 | Lint and format | `cargo lint-kernel`, `cargo lint-host`, `cargo fmt --check`, all `-D warnings` |
@@ -178,7 +179,7 @@ OSjeff/
 ├── osjeff_core/   # pure no_std logic, tested on the host (forbid(unsafe_code))
 ├── kernel/        # bare-metal x86_64-unknown-none: drivers, scheduler, compositor, wasm
 ├── os/            # builder: embeds the kernel and produces the BIOS/UEFI images
-├── fuzz/          # cargo-fuzz: net_parse, ojfs_parse, web_parse + regressions
+├── fuzz/          # cargo-fuzz: 13 targets (network, OJFS, web, shell, editor, X.509, apps) + regressions
 ├── bench/         # microbenchmarks (criterion), outside the workspace
 ├── wasm-apps/     # WebAssembly apps (snake default; plasma; cdemo; doom)
 ├── tools/         # run.sh, qemu-headless.sh, verify-boot.sh, perf harness
