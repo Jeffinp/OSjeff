@@ -50,11 +50,13 @@ pub mod sntp;
 pub mod terminal;
 #[cfg(test)]
 pub(crate) mod testutil;
+pub mod tlsverify;
 pub mod unixtime;
 pub mod web;
 pub mod window;
 pub mod winman;
 pub mod wm;
+pub mod x509;
 
 pub use anim::Anim;
 pub use browser::Browser;

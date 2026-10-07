@@ -1,0 +1,58 @@
+# Roots embedded in the browser's trust store, one Mozilla bundle file name per
+# line (see tools/gen-trust-store.sh). Lines starting with '#' are comments.
+# Source: Debian/Ubuntu `ca-certificates` (Mozilla NSS bundle).
+# Let's Encrypt
+ISRG_Root_X1.crt
+ISRG_Root_X2.crt
+# DigiCert
+DigiCert_Global_Root_G2.crt
+DigiCert_Global_Root_G3.crt
+DigiCert_Assured_ID_Root_G2.crt
+DigiCert_Assured_ID_Root_G3.crt
+DigiCert_Trusted_Root_G4.crt
+DigiCert_TLS_ECC_P384_Root_G5.crt
+DigiCert_TLS_RSA4096_Root_G5.crt
+# GlobalSign
+GlobalSign_Root_CA_-_R3.crt
+GlobalSign_Root_CA_-_R6.crt
+GlobalSign_Root_R46.crt
+GlobalSign_Root_E46.crt
+GlobalSign_ECC_Root_CA_-_R4.crt
+GlobalSign_ECC_Root_CA_-_R5.crt
+# Google Trust Services (GTS Root R2 is no longer in the Mozilla bundle)
+GTS_Root_R1.crt
+GTS_Root_R3.crt
+GTS_Root_R4.crt
+# Amazon
+Amazon_Root_CA_1.crt
+Amazon_Root_CA_2.crt
+Amazon_Root_CA_3.crt
+Amazon_Root_CA_4.crt
+# Sectigo / USERTrust / COMODO
+USERTrust_RSA_Certification_Authority.crt
+USERTrust_ECC_Certification_Authority.crt
+COMODO_RSA_Certification_Authority.crt
+COMODO_ECC_Certification_Authority.crt
+Sectigo_Public_Server_Authentication_Root_R46.crt
+Sectigo_Public_Server_Authentication_Root_E46.crt
+# Microsoft
+Microsoft_RSA_Root_Certificate_Authority_2017.crt
+Microsoft_ECC_Root_Certificate_Authority_2017.crt
+# GoDaddy / Starfield
+Go_Daddy_Root_Certificate_Authority_-_G2.crt
+Starfield_Root_Certificate_Authority_-_G2.crt
+Starfield_Services_Root_Certificate_Authority_-_G2.crt
+# Others commonly seen on the public web
+IdenTrust_Commercial_Root_CA_1.crt
+Entrust_Root_Certification_Authority.crt
+QuoVadis_Root_CA_2_G3.crt
+QuoVadis_Root_CA_3_G3.crt
+SSL.com_Root_Certification_Authority_RSA.crt
+SSL.com_Root_Certification_Authority_ECC.crt
+SSL.com_TLS_RSA_Root_CA_2022.crt
+SSL.com_TLS_ECC_Root_CA_2022.crt
+Certum_Trusted_Network_CA.crt
+HARICA_TLS_RSA_Root_CA_2021.crt
+HARICA_TLS_ECC_Root_CA_2021.crt
+T-TeleSec_GlobalRoot_Class_2.crt
+Telekom_Security_TLS_RSA_Root_2023.crt

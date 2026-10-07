@@ -7,3 +7,16 @@ publish = false
 description = "Pure, no_std OS logic (keymap, terminal, editor, window geometry). Host-testable."
 
 [lib]
+
+# Certificate-chain validation for HTTPS (`tlsverify`). Path building, name,
+# validity, basicConstraints/keyUsage/EKU, name constraints and path length come
+# from the reviewed `rustls-webpki`; the signature primitives it asks for are the
+# pure-Rust RustCrypto ones (no C, no asm, no SIMD: they build for the bare-metal
+# target). Versions of the webpki pair are pinned exactly. See docs/design/tls-browser.md.
+[dependencies]
+rustls-pki-types = { version = "=1.14.1", default-features = false, features = ["alloc"] }
+rustls-webpki = { version = "=0.103.13", default-features = false, features = ["alloc"] }
+p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa"] }
+p384 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+rsa = { version = "0.9", default-features = false, features = ["sha2"] }
+sha2 = { version = "0.10", default-features = false }
