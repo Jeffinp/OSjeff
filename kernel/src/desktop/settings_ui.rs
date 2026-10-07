@@ -295,11 +295,6 @@ impl Desktop {
         core::mem::take(&mut self.bg_dirty)
     }
 
-    /// Remember the network identity the boot obtained (the "Rede" page).
-    pub fn set_network(&mut self, nic: bool, cfg: osjeff_core::net::NetConfig) {
-        self.net = Some((nic, cfg));
-    }
-
     fn settings_wallpaper(&mut self, id: WindowId, choice: WallpaperChoice) {
         let mut s = crate::settings::get();
         if let WallpaperChoice::Image = choice {
@@ -818,23 +813,50 @@ impl Desktop {
         let mut y = p.y;
         self.heading(c, p, y, b"Rede (somente leitura)");
         y += 28;
-        match self.net {
-            Some((nic, cfg)) => {
-                kv_row(
-                    c,
-                    p,
-                    &mut y,
-                    b"Placa",
-                    if nic { b"NE2000 (ISA)" } else { b"nenhuma" },
-                );
-                let m = crate::ne2000::MAC.0;
-                let mut b = FixedBuf::<24>::new();
-                let _ = write!(
-                    b,
-                    "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-                    m[0], m[1], m[2], m[3], m[4], m[5]
-                );
-                kv_row(c, p, &mut y, b"MAC", if nic { b.as_bytes() } else { b"-" });
+        // Live view of the network owner (`netd`): the NIC, the link, the lease in
+        // force and the resolver list, refreshed every time the page is drawn.
+        let snap = crate::netd::stats();
+        let has_nic = snap.nic != osjeff_core::netstats::NicKind::None;
+        kv_row(
+            c,
+            p,
+            &mut y,
+            b"Placa",
+            if has_nic {
+                snap.nic.name().as_bytes()
+            } else {
+                b"nenhuma"
+            },
+        );
+        let m = crate::nic::mac();
+        let mut b = FixedBuf::<24>::new();
+        let _ = write!(
+            b,
+            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            m[0], m[1], m[2], m[3], m[4], m[5]
+        );
+        kv_row(
+            c,
+            p,
+            &mut y,
+            b"MAC",
+            if has_nic { b.as_bytes() } else { b"-" },
+        );
+        kv_row(
+            c,
+            p,
+            &mut y,
+            b"Link",
+            if !has_nic {
+                b"-"
+            } else if snap.link_up {
+                b"ativo"
+            } else {
+                b"sem sinal"
+            },
+        );
+        match snap.config {
+            Some(cfg) => {
                 let mut b = FixedBuf::<24>::new();
                 let _ = write!(b, "{}/{}", cfg.ip, cfg.prefix);
                 kv_row(c, p, &mut y, b"IP", b.as_bytes());
@@ -863,32 +885,29 @@ impl Desktop {
                     }
                 }
                 kv_row(c, p, &mut y, b"Gateway", b.as_bytes());
-                let mut b = FixedBuf::<24>::new();
-                match cfg.dns {
-                    Some(d) => {
-                        let _ = write!(b, "{d}");
+                let mut b = FixedBuf::<48>::new();
+                if cfg.dns.is_empty() {
+                    let _ = write!(b, "-");
+                }
+                for (i, d) in cfg.dns.as_slice().iter().enumerate() {
+                    if i > 0 {
+                        let _ = write!(b, ", ");
                     }
-                    None => {
-                        let _ = write!(b, "-");
-                    }
+                    let _ = write!(b, "{d}");
                 }
                 kv_row(c, p, &mut y, b"DNS", b.as_bytes());
-                let mut b = FixedBuf::<40>::new();
+                let mut b = FixedBuf::<48>::new();
                 let fallback = cfg == osjeff_core::net::NetConfig::STATIC_FALLBACK;
-                match (fallback, cfg.lease_secs) {
-                    (true, _) => {
-                        let _ = write!(b, "estatico (sem servidor DHCP)");
-                    }
-                    (false, Some(s)) => {
-                        let _ = write!(b, "DHCP, {} s", s);
-                    }
-                    (false, None) => {
-                        let _ = write!(b, "DHCP, sem expiracao");
-                    }
+                if fallback {
+                    let _ = write!(b, "estatico (sem servidor DHCP)");
+                } else if let Some(left) = snap.lease_remaining_ms {
+                    let _ = write!(b, "DHCP ({}), restam {} s", snap.dhcp_state, left / 1000);
+                } else {
+                    let _ = write!(b, "DHCP ({}), sem expiracao", snap.dhcp_state);
                 }
                 kv_row(c, p, &mut y, b"Lease", b.as_bytes());
             }
-            None => kv_row(c, p, &mut y, b"Placa", b"n/d"),
+            None => kv_row(c, p, &mut y, b"Endereco", b"sem endereco (procurando)"),
         }
         button(c, renew_btn(p), b"Renovar DHCP", Btn::Normal);
         text(

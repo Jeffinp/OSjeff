@@ -19,6 +19,23 @@ use osjeff_core::netstats::{NetStats, NicKind};
 /// The one interface's counters; readable from any thread (`STATS.snapshot`).
 pub static STATS: NetStats = NetStats::new();
 
+/// The MAC of the probed NIC (all zero until [`probe`] found one), packed into
+/// the low 48 bits so any thread can read it (the Settings "Rede" page does).
+static MAC_BITS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// MAC address of the NIC in use, or all zeroes when there is none.
+pub fn mac() -> [u8; 6] {
+    let v = MAC_BITS.load(core::sync::atomic::Ordering::Relaxed);
+    let b = v.to_be_bytes();
+    [b[2], b[3], b[4], b[5], b[6], b[7]]
+}
+
+fn remember_mac(m: Mac) {
+    let b = m.0;
+    let v = u64::from_be_bytes([0, 0, b[0], b[1], b[2], b[3], b[4], b[5]]);
+    MAC_BITS.store(v, core::sync::atomic::Ordering::Relaxed);
+}
+
 /// Why a frame was not sent.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TxError {
@@ -103,10 +120,12 @@ pub fn probe(phys_offset: Option<u64>) -> Option<Port> {
         && let Some(dev) = virtio_net::VirtioNet::probe(off)
     {
         serial_println!("net: using virtio-net, mac {}", MacFmt(dev.mac()));
+        remember_mac(dev.mac());
         return Some(Port::new(Box::new(dev)));
     }
     if let Some(dev) = ne2000::Ne2000::probe() {
         serial_println!("net: using ne2000, mac {}", MacFmt(dev.mac()));
+        remember_mac(dev.mac());
         return Some(Port::new(Box::new(dev)));
     }
     serial_println!("net: no network interface found");

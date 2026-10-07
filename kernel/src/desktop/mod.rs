@@ -191,7 +191,6 @@ pub struct Desktop {
     /// A toast appeared or was dismissed since the compositor last repainted them.
     toast_dirty: bool,
     /// Network identity the boot obtained (`nic present`, config), for the settings page.
-    net: Option<(bool, osjeff_core::net::NetConfig)>,
     /// The dynamic window table; every window owns an app instance.
     wm: WindowManager<Inst>,
     drag: Option<Drag>,
@@ -280,7 +279,6 @@ impl Desktop {
             toasts: osjeff_core::notify::Toasts::new(),
             toast_seen: crate::klog::seq(),
             toast_dirty: false,
-            net: None,
             wm: WindowManager::new(osjeff_core::winman::DEFAULT_MAX_WINDOWS),
             drag: None,
             menu: None,

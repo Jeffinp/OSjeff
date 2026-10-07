@@ -311,6 +311,8 @@ impl Desktop {
             pid,
             index,
             title: full_title,
+            cost: core::cell::Cell::new(0),
+            cost_pm: core::cell::Cell::new(0),
         };
         let spec = WindowSpec {
             rect,

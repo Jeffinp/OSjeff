@@ -592,7 +592,14 @@ impl Desktop {
             let thumb_y = top + (track_h - thumb_h) * self.start_scroll as i32 / max_scroll.max(1);
             let bx = (sx + START_W - 8) as usize;
             c.fill_rect(bx, top as usize, 3, track_h as usize, theme::DOCK_EDGE);
-            c.fill_round_rect(bx, thumb_y as usize, 3, thumb_h as usize, 1, theme::ACCENT);
+            c.fill_round_rect(
+                bx,
+                thumb_y as usize,
+                3,
+                thumb_h as usize,
+                1,
+                theme::accent(),
+            );
         }
 
         // Divider, then power actions.

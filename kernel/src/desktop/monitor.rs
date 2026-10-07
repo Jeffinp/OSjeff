@@ -255,7 +255,7 @@ impl App {
             App::Log(l) => size_of::<LogState>() + l.heap_bytes(),
             App::Monitor(m) => size_of::<MonitorState>() + m.heap_bytes(),
             App::Settings(s) => size_of::<SettingsState>() + s.heap_bytes(),
-            App::Files(_) | App::TaskMgr | App::Wasm => return None,
+            App::Files(_) | App::TaskMgr | App::Wasm(_) => return None,
         };
         Some(n)
     }

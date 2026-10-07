@@ -365,7 +365,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut desk = Desktop::new(info.width as i32, info.height as i32);
     trace::mark("Desktop::new (fs load from ATA) done");
     desk.load_settings();
-    desk.set_network(net_up, net_cfg);
 
     // Static layer painted once.
     {
@@ -474,7 +473,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             static_valid = false;
             scene_dirty = true;
         }
-
 
         // A maximize / restore / vanished minimized window changes pixels well
         // outside the focused window: repaint (and upload) the whole screen once.
