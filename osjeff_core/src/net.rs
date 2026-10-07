@@ -155,6 +155,46 @@ pub fn arp_announce(out: &mut [u8], mac: Mac, ip: Ipv4) -> usize {
     ETH_HDR + ARP_LEN
 }
 
+/// Build a broadcast ARP request: "who has `target_ip`? tell `ip`". Returns 42.
+pub fn arp_who_has(out: &mut [u8], mac: Mac, ip: Ipv4, target_ip: Ipv4) -> usize {
+    write_eth(out, Mac([0xff; 6]), mac, ETHERTYPE_ARP);
+    let a = &mut out[ETH_HDR..ETH_HDR + ARP_LEN];
+    a[0..2].copy_from_slice(&1u16.to_be_bytes());
+    a[2..4].copy_from_slice(&ETHERTYPE_IPV4.to_be_bytes());
+    a[4] = 6;
+    a[5] = 4;
+    a[6..8].copy_from_slice(&ARP_REQUEST.to_be_bytes());
+    a[8..14].copy_from_slice(&mac.0);
+    a[14..18].copy_from_slice(&ip.0);
+    a[18..24].copy_from_slice(&[0u8; 6]);
+    a[24..28].copy_from_slice(&target_ip.0);
+    ETH_HDR + ARP_LEN
+}
+
+/// If `frame` is an ARP reply addressed to `our_ip`, the `(ip, mac)` pair it
+/// announces (the sender). Anything else, including a reply whose sender
+/// address is not a usable unicast address, is `None`.
+pub fn parse_arp_reply(frame: &[u8], our_ip: Ipv4) -> Option<(Ipv4, Mac)> {
+    let (eth, p) = parse_eth(frame)?;
+    if eth.ethertype != ETHERTYPE_ARP || p.len() < ARP_LEN {
+        return None;
+    }
+    let htype = u16::from_be_bytes([p[0], p[1]]);
+    let ptype = u16::from_be_bytes([p[2], p[3]]);
+    if htype != 1 || ptype != ETHERTYPE_IPV4 || p[4] != 6 || p[5] != 4 {
+        return None;
+    }
+    if u16::from_be_bytes([p[6], p[7]]) != ARP_REPLY || p[24..28] != our_ip.0 {
+        return None;
+    }
+    let spa = Ipv4([p[14], p[15], p[16], p[17]]);
+    if !is_usable_unicast(spa) {
+        return None;
+    }
+    let sha = Mac([p[8], p[9], p[10], p[11], p[12], p[13]]);
+    Some((spa, sha))
+}
+
 /// Build an ICMP echo reply for a received echo request whose ICMP payload is
 /// `icmp_req` (type/code/checksum/id/seq/data), addressed back to `peer`.
 fn build_icmp_reply(
@@ -1440,6 +1480,31 @@ mod tests {
         let mut r = ack_with(&[T_ACK, SERVER, (1, &[255, 255, 0, 0])]);
         r.your_ip = Ipv4([192, 168, 77, 255]);
         assert!(NetConfig::from_ack(&r).is_ok());
+    }
+
+    #[test]
+    fn arp_request_and_reply_roundtrip() {
+        let mut buf = [0u8; 64];
+        let n = arp_who_has(&mut buf, OUR_MAC, OUR_IP, PEER_IP);
+        assert_eq!(n, 42);
+        assert_eq!(&buf[0..6], &[0xff; 6]);
+        assert_eq!(&buf[12..14], &ETHERTYPE_ARP.to_be_bytes());
+        // The responder of the *peer* would answer with a reply: build one with
+        // the existing builder and parse it back.
+        let mut reply = [0u8; 64];
+        let n = build_arp_reply(&mut reply, PEER_MAC, PEER_IP, OUR_MAC, OUR_IP).unwrap();
+        assert_eq!(
+            parse_arp_reply(&reply[..n], OUR_IP),
+            Some((PEER_IP, PEER_MAC))
+        );
+        // Not for us, or not a reply, or truncated.
+        assert_eq!(parse_arp_reply(&reply[..n], Ipv4([10, 0, 2, 99])), None);
+        assert_eq!(parse_arp_reply(&buf[..42], OUR_IP), None);
+        assert_eq!(parse_arp_reply(&reply[..30], OUR_IP), None);
+        // A reply claiming 0.0.0.0 is rejected.
+        let mut bad = reply;
+        bad[14 + 14..14 + 18].copy_from_slice(&[0; 4]);
+        assert_eq!(parse_arp_reply(&bad[..n], OUR_IP), None);
     }
 
     #[test]
