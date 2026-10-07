@@ -55,6 +55,7 @@ pub mod schedule;
 pub mod shell;
 pub mod sntp;
 pub mod sysif;
+pub mod sysmon;
 pub mod terminal;
 #[cfg(test)]
 pub(crate) mod testutil;
