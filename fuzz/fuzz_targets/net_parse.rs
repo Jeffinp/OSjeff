@@ -68,7 +68,8 @@ fn check_dhcp(frame: &[u8], mac: Mac) {
             assert!((1..=30).contains(&cfg.prefix), "prefix {}", cfg.prefix);
             assert!(cfg.ip.0[0] != 0 && cfg.ip.0[0] != 127 && cfg.ip.0[0] < 224);
             assert_ne!(cfg.gateway, Some(cfg.ip));
-            assert_ne!(cfg.dns, Some(cfg.ip));
+            assert!(!cfg.dns.as_slice().contains(&cfg.ip));
+            assert!(cfg.dns.len() <= net::MAX_DNS);
             assert_ne!(cfg.lease_secs, Some(0));
             // The boot-log form never panics either.
             let _ = format!("{cfg}");

@@ -33,6 +33,7 @@ pub mod inflate;
 pub mod input;
 pub mod keymap;
 pub mod layout;
+pub mod lease;
 pub mod net;
 pub mod paging;
 pub mod png;

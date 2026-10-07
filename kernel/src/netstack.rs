@@ -106,8 +106,10 @@ impl Net {
             tcp::SocketBuffer::new(vec![0u8; 8192]),
             tcp::SocketBuffer::new(vec![0u8; 8192]),
         );
+        // smoltcp's DNS socket holds a single server (feature default); the first one.
         let dns_servers: Vec<IpAddress> = cfg
             .dns
+            .first()
             .map(|d| IpAddress::Ipv4(d.0.into()))
             .into_iter()
             .collect();
