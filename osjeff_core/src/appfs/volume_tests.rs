@@ -602,3 +602,23 @@ fn root_dirs_error_codes_reach_the_abi() {
     assert_eq!(FsError::NoSpace.code(), ERR_NOSPC);
     assert_eq!(FsError::Perm.to_string(), "permission denied");
 }
+
+#[test]
+fn a_removed_bundled_app_stays_removed_across_boots() {
+    let mut v = volume(4);
+    let (a, b) = (package("alpha", ""), package("beta", ""));
+    let bundled: [&[u8]; 2] = [&a, &b];
+    // Boot 1: first-boot seeding.
+    {
+        let mut fs = VolumeFs::new(&mut v, NOW);
+        assert_eq!(appinstall::seed_once(&mut fs, &bundled), 2);
+        appinstall::remove(&mut fs, "alpha").unwrap();
+    }
+    // Boot 2 and 3: the removal sticks, nothing is reinstalled.
+    for _ in 0..2 {
+        v = remount(v);
+        let mut fs = VolumeFs::new(&mut v, NOW);
+        assert_eq!(appinstall::seed_once(&mut fs, &bundled), 0);
+        assert_eq!(appinstall::installed_ids(&mut fs).unwrap(), ["beta"]);
+    }
+}

@@ -234,9 +234,11 @@ pub fn load_catalog(fs: &mut dyn AppFs) -> Vec<CatalogEntry> {
     out
 }
 
-/// First-boot seeding: installs each bundled package that is not installed yet
-/// and never overwrites one that is (the user's copy wins). Returns how many
-/// were installed.
+/// Offers each bundled package that is not installed yet and never overwrites one
+/// that is (the user's copy wins). Returns how many were installed.
+///
+/// This is the stateless form (every call re-installs what was removed): use
+/// [`seed_once`] on a volume that persists.
 pub fn seed(fs: &mut dyn AppFs, bundled: &[&[u8]]) -> usize {
     let mut n = 0;
     for pkg in bundled {
@@ -245,6 +247,74 @@ pub fn seed(fs: &mut dyn AppFs, bundled: &[&[u8]]) -> usize {
         }
     }
     n
+}
+
+/// The ids already offered to this volume (one per line).
+const SEEDED: &str = "/apps/.seeded";
+/// Largest marker file read back (64 ids of up to 32 bytes, with room to spare).
+const SEEDED_MAX: usize = 4096;
+
+fn read_seeded(fs: &mut dyn AppFs) -> Vec<String> {
+    let mut buf = alloc::vec![0u8; SEEDED_MAX];
+    let n = fs.read_at(SEEDED, 0, &mut buf).unwrap_or(0);
+    let mut ids = Vec::new();
+    for line in buf[..n].split(|&b| b == b'\n') {
+        if let Ok(id) = core::str::from_utf8(line)
+            && valid_id(id)
+            && !ids.iter().any(|i| i == id)
+        {
+            ids.push(String::from(id));
+        }
+    }
+    ids
+}
+
+fn write_seeded(fs: &mut dyn AppFs, ids: &[String]) -> Result<(), FsError> {
+    let mut text = String::new();
+    for id in ids.iter().take(MAX_APPS * 4) {
+        text.push_str(id);
+        text.push('\n');
+    }
+    match fs.create(SEEDED) {
+        Ok(()) | Err(FsError::Exists) => {}
+        Err(e) => return Err(e),
+    }
+    fs.set_len(SEEDED, 0)?;
+    write_all(fs, SEEDED, text.as_bytes())
+}
+
+/// Seeding for a volume that **persists**: each bundled package is offered once,
+/// ever. A marker (`/apps/.seeded`, the ids already offered) keeps a package the
+/// user removed from coming back at the next boot, while a package that is new in
+/// this build of the OS (not in the marker) is still installed. A package that
+/// fails for a transient reason (no space) is not marked, so it is retried.
+/// Returns how many were installed now.
+pub fn seed_once(fs: &mut dyn AppFs, bundled: &[&[u8]]) -> usize {
+    if fs.mkdir_all(APPS_DIR).is_err() {
+        return 0;
+    }
+    let mut seen = read_seeded(fs);
+    let before = seen.len();
+    let mut installed = 0;
+    for pkg in bundled {
+        let Ok(m) = check(pkg) else { continue };
+        if seen.contains(&m.id) {
+            continue;
+        }
+        match install(fs, pkg) {
+            Ok(_) => {
+                installed += 1;
+                seen.push(m.id);
+            }
+            // Already there (the user installed it first): it counts as offered.
+            Err(InstallError::Duplicate) => seen.push(m.id),
+            Err(_) => {}
+        }
+    }
+    if seen.len() != before {
+        let _ = write_seeded(fs, &seen);
+    }
+    installed
 }
 
 #[cfg(test)]

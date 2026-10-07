@@ -277,3 +277,77 @@ fn error_messages() {
         assert!(!e.to_string().is_empty());
     }
 }
+
+#[test]
+fn seed_once_offers_each_package_exactly_once() {
+    let mut f = fs();
+    let (a, b) = (app("alpha", "Alpha"), app("beta", "Beta"));
+    let bundled: [&[u8]; 2] = [&a, &b];
+    assert_eq!(seed_once(&mut f, &bundled), 2);
+    assert_eq!(installed_ids(&mut f).unwrap(), ["alpha", "beta"]);
+    // A second boot installs nothing.
+    assert_eq!(seed_once(&mut f, &bundled), 0);
+    // The user removes one: it must NOT come back at the next boot.
+    remove(&mut f, "alpha").unwrap();
+    assert_eq!(seed_once(&mut f, &bundled), 0);
+    assert_eq!(installed_ids(&mut f).unwrap(), ["beta"]);
+    // The stateless seed would have resurrected it.
+    assert_eq!(seed(&mut f, &bundled), 1);
+}
+
+#[test]
+fn seed_once_installs_packages_that_are_new_in_a_later_build() {
+    let mut f = fs();
+    let (a, b) = (app("alpha", "Alpha"), app("beta", "Beta"));
+    assert_eq!(seed_once(&mut f, &[&a]), 1);
+    remove(&mut f, "alpha").unwrap();
+    // The OS was updated and now bundles `beta` too.
+    assert_eq!(seed_once(&mut f, &[&a, &b]), 1);
+    assert_eq!(installed_ids(&mut f).unwrap(), ["beta"]);
+}
+
+#[test]
+fn seed_once_counts_a_user_installed_package_as_offered() {
+    let mut f = fs();
+    let a = app("alpha", "Alpha");
+    install(&mut f, &a).unwrap();
+    assert_eq!(seed_once(&mut f, &[&a]), 0);
+    remove(&mut f, "alpha").unwrap();
+    assert_eq!(
+        seed_once(&mut f, &[&a]),
+        0,
+        "removal after that stays removed"
+    );
+}
+
+#[test]
+fn seed_once_retries_what_failed_and_ignores_a_bad_marker() {
+    // No room: nothing installed, nothing marked.
+    let mut tiny = MemFs::new(8);
+    let a = app("alpha", "Alpha");
+    assert_eq!(seed_once(&mut tiny, &[&a]), 0);
+    assert!(tiny.stat("/apps/.seeded").is_err());
+    // A marker full of junk (hostile ids, too long, binary) offers nothing it should not.
+    let mut f = fs();
+    f.mkdir_all("/apps").unwrap();
+    f.create("/apps/.seeded").unwrap();
+    f.write_at(
+        "/apps/.seeded",
+        0,
+        b"../../etc\n\xff\xfe\nALPHA\nbeta\nbeta\n",
+    )
+    .unwrap();
+    let b = app("beta", "Beta");
+    assert_eq!(seed_once(&mut f, &[&a, &b]), 1);
+    assert_eq!(installed_ids(&mut f).unwrap(), ["alpha"]);
+}
+
+#[test]
+fn the_seed_marker_is_not_an_app_and_survives_catalog_walks() {
+    let mut f = fs();
+    let a = app("alpha", "Alpha");
+    seed_once(&mut f, &[&a]);
+    assert_eq!(installed_ids(&mut f).unwrap(), ["alpha"]);
+    assert_eq!(load_catalog(&mut f).len(), 1);
+    assert_eq!(f.stat("/apps/.seeded").unwrap().kind, Kind::File);
+}
