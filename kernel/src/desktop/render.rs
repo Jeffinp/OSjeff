@@ -286,6 +286,7 @@ impl Desktop {
             App::Wasm(w) => self.draw_wasm(c, r, w),
             App::Files(f) => self.draw_files(c, r, f),
             App::Monitor(m) => self.draw_monitor(c, r, m),
+            App::Settings(s) => self.draw_settings(c, r, s),
             App::Log(l) => self.draw_log(c, r, l),
         }
         // What this window cost to draw (the monitor's per-app CPU figure).

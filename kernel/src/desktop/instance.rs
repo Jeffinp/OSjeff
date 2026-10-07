@@ -36,6 +36,7 @@ pub(crate) enum Kind {
     WasmApp,
     Files,
     Monitor,
+    Settings,
     LogViewer,
 }
 
@@ -45,7 +46,7 @@ pub(crate) enum Kind {
 pub(crate) const DOCK_APPS: usize = 7;
 
 impl Kind {
-    pub(crate) const ALL: [Kind; 9] = [
+    pub(crate) const ALL: [Kind; 10] = [
         Kind::Terminal,
         Kind::Editor,
         Kind::TaskMgr,
@@ -54,13 +55,17 @@ impl Kind {
         Kind::WasmApp,
         Kind::Files,
         Kind::Monitor,
+        Kind::Settings,
         Kind::LogViewer,
     ];
 
     /// Does the window's content change on its own every second (so the
     /// per-second tick must repaint it)?
     pub(crate) const fn is_live(self) -> bool {
-        matches!(self, Kind::TaskMgr | Kind::Monitor | Kind::LogViewer)
+        matches!(
+            self,
+            Kind::TaskMgr | Kind::Monitor | Kind::Settings | Kind::LogViewer
+        )
     }
 
     /// Does this app have a dock icon?
@@ -84,6 +89,7 @@ impl Kind {
             Kind::WasmApp => "wasmapp",
             Kind::Files => "files",
             Kind::Monitor => "monitor",
+            Kind::Settings => "settings",
             Kind::LogViewer => "syslog",
         }
     }
@@ -99,6 +105,7 @@ impl Kind {
             Kind::WasmApp => "WASM APP",
             Kind::Files => "ARQUIVOS",
             Kind::Monitor => "MONITOR DO SISTEMA",
+            Kind::Settings => "CONFIGURACOES",
             Kind::LogViewer => "LOG DO SISTEMA",
         }
     }
@@ -114,6 +121,7 @@ impl Kind {
             Kind::WasmApp => "WASM App",
             Kind::Files => "Arquivos",
             Kind::Monitor => "Monitor",
+            Kind::Settings => "Configuracoes",
             Kind::LogViewer => "Log do sistema",
         }
     }
@@ -128,6 +136,7 @@ impl Kind {
             Kind::WasmApp => Icon::WasmApp,
             Kind::Files => Icon::Files,
             Kind::Monitor => Icon::Monitor,
+            Kind::Settings => Icon::Settings,
             Kind::LogViewer => Icon::Log,
         }
     }
@@ -154,6 +163,7 @@ impl Kind {
             Kind::WasmApp => Rect::new(240, 130, 720, 470),
             Kind::Files => Rect::new(250, 120, 780, 520),
             Kind::Monitor => Rect::new(210, 90, 800, 560),
+            Kind::Settings => Rect::new(220, 84, 820, 560),
             Kind::LogViewer => Rect::new(180, 110, 860, 460),
         }
     }
@@ -169,6 +179,7 @@ impl Kind {
             Kind::WasmApp => (720, 470),
             Kind::Files => (440, 260),
             Kind::Monitor => (660, 420),
+            Kind::Settings => (700, 460),
             Kind::LogViewer => (520, 280),
         }
     }
@@ -228,6 +239,7 @@ pub(crate) enum App {
     Wasm(Box<WasmWin>),
     Files(FilesState),
     Monitor(Box<MonitorState>),
+    Settings(Box<SettingsState>),
     Log(Box<LogState>),
 }
 
@@ -261,6 +273,7 @@ impl App {
                 cwd: fs::ROOT,
             }),
             Kind::Monitor => App::Monitor(Box::new(MonitorState::new())),
+            Kind::Settings => App::Settings(Box::new(SettingsState::new())),
             Kind::LogViewer => App::Log(Box::new(LogState::new())),
         }
     }
@@ -275,6 +288,7 @@ impl App {
             App::Wasm(_) => Kind::WasmApp,
             App::Files(_) => Kind::Files,
             App::Monitor(_) => Kind::Monitor,
+            App::Settings(_) => Kind::Settings,
             App::Log(_) => Kind::LogViewer,
         }
     }

@@ -94,26 +94,9 @@ pub(crate) fn start_row_highlight(c: &mut Canvas, sx: i32, ry: i32, color: Color
 }
 
 pub fn paint_background(c: &mut Canvas) {
+    paint_wallpaper(c, &crate::settings::get());
     let w = c.width();
     let h = c.height();
-
-    // Indigo gradient backdrop.
-    for yy in 0..h {
-        let t = ((yy * 255) / h.max(1)) as u16;
-        c.fill_rect(0, yy, w, 1, theme::BG_TOP.lerp(theme::BG_BOTTOM, t));
-    }
-    // Two soft accent "mesh" blobs (teal top-left, violet bottom-right).
-    let blob = (w / 3).max(360);
-    c.fill_round_rect_alpha(0, 0, blob, blob, blob / 2, theme::GLOW_TEAL, 16);
-    c.fill_round_rect_alpha(
-        w - blob,
-        h - blob,
-        blob,
-        blob,
-        blob / 2,
-        theme::GLOW_VIOLET,
-        16,
-    );
 
     // Brand wordmark top-left.
     font::draw_text(c, 20, 18, "OSJEFF", theme::HEADER_TEXT, 2);
@@ -157,17 +140,106 @@ pub fn paint_background(c: &mut Canvas) {
     }
 }
 
+/// 24-bit `0xRRGGBB` to a framebuffer colour.
+fn rgb24(v: u32) -> Color {
+    Color::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+}
+
+/// The original wallpaper (preset 0): indigo gradient plus two soft glows.
+fn paint_indigo(c: &mut Canvas) {
+    let w = c.width();
+    let h = c.height();
+
+    // Indigo gradient backdrop.
+    for yy in 0..h {
+        let t = ((yy * 255) / h.max(1)) as u16;
+        c.fill_rect(0, yy, w, 1, theme::BG_TOP.lerp(theme::BG_BOTTOM, t));
+    }
+    // Two soft accent "mesh" blobs (teal top-left, violet bottom-right).
+    let blob = (w / 3).max(360);
+    c.fill_round_rect_alpha(0, 0, blob, blob, blob / 2, theme::GLOW_TEAL, 16);
+    c.fill_round_rect_alpha(
+        w - blob,
+        h - blob,
+        blob,
+        blob,
+        blob / 2,
+        theme::GLOW_VIOLET,
+        16,
+    );
+}
+
+/// Paint the wallpaper `s` selects: a preset or the user's image, falling back to
+/// the original look when the image cannot be used.
+fn paint_wallpaper(c: &mut Canvas, s: &osjeff_core::settings::Settings) {
+    use osjeff_core::settings::WallpaperChoice;
+    use osjeff_core::wallpaper::{PRESETS, Style};
+    match s.wallpaper {
+        WallpaperChoice::Image => {
+            if !paint_image(c, s.image_path()) {
+                paint_indigo(c);
+            }
+        }
+        WallpaperChoice::Preset(n) => {
+            let p = PRESETS.get(n as usize).unwrap_or(&PRESETS[0]);
+            let (w, h) = (c.width(), c.height());
+            match p.style {
+                Style::Indigo => paint_indigo(c),
+                Style::Solid => c.fill_rect(0, 0, w, h, rgb24(p.top)),
+                Style::Gradient => {
+                    for yy in 0..h {
+                        let t = ((yy * 255) / h.max(1)) as u32;
+                        let col = osjeff_core::wallpaper::lerp_rgb(p.top, p.bottom, t);
+                        c.fill_rect(0, yy, w, 1, rgb24(col));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Decode the image file at `path` (FS v2), cover the screen with it and paint
+/// it. Returns `false` (nothing painted) if it is missing or refused.
+fn paint_image(c: &mut Canvas, path: &[u8]) -> bool {
+    let (w, h) = (c.width(), c.height());
+    let Some(bytes) = read_path(path) else {
+        crate::klog!(Warn, "wallpaper: file not found, using the default");
+        return false;
+    };
+    let mut img = match osjeff_core::wallpaper::load(bytes, w, h) {
+        Ok(img) => img,
+        Err(e) => {
+            crate::klog!(Warn, "wallpaper: {e}, using the default");
+            return false;
+        }
+    };
+    // Transparent pixels show the default backdrop colour.
+    img.flatten(0xFF00_0000 | osjeff_core::wallpaper::PRESETS[0].top);
+    for y in 0..h {
+        for (x, &p) in img.row(y).iter().enumerate() {
+            c.put(x, y, rgb24(p));
+        }
+    }
+    crate::klog!(
+        Info,
+        "wallpaper: {} painted from the disk",
+        core::str::from_utf8(path).unwrap_or("?")
+    );
+    true
+}
+
 pub(crate) fn draw_clock(c: &mut Canvas, t: Time) {
     let w = c.width();
     let h = c.height();
-    let mut buf = [b'0'; 8];
-    two(&mut buf, 0, t.h);
-    buf[2] = b':';
-    two(&mut buf, 3, t.m);
-    buf[5] = b':';
-    two(&mut buf, 6, t.s);
-    // SAFETY: `buf` holds only ASCII digits (written by `two`) and ':', so it is valid UTF-8.
-    let clock = unsafe { core::str::from_utf8_unchecked(&buf) };
+    let mut buf = [0u8; osjeff_core::hw::rtc::CLOCK_LEN];
+    let t = osjeff_core::hw::rtc::Time {
+        h: t.h,
+        m: t.m,
+        s: t.s,
+    };
+    let n = osjeff_core::hw::rtc::format_clock(t, crate::settings::clock24(), &mut buf);
+    // `format_clock` writes only ASCII digits, ':', ' ', 'A', 'P' and 'M'.
+    let clock = core::str::from_utf8(&buf[..n]).unwrap_or("");
 
     // Pill in the bottom-right corner.
     let tw = font::text_width(clock, 2);

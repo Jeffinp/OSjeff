@@ -182,6 +182,10 @@ pub struct Desktop {
     procs: ProcessTable,
     /// Sampled system history for the resource monitor.
     sysmon: SysMon,
+    /// The wallpaper or accent changed: the compositor must repaint the cached background.
+    bg_dirty: bool,
+    /// Network identity the boot obtained (`nic present`, config), for the settings page.
+    net: Option<(bool, osjeff_core::net::NetConfig)>,
     /// The dynamic window table; every window owns an app instance.
     wm: WindowManager<Inst>,
     drag: Option<Drag>,
@@ -266,6 +270,8 @@ impl Desktop {
             keymap: Keymap::new(),
             procs,
             sysmon: SysMon::new(),
+            bg_dirty: false,
+            net: None,
             wm: WindowManager::new(osjeff_core::winman::DEFAULT_MAX_WINDOWS),
             drag: None,
             menu: None,
@@ -541,7 +547,8 @@ impl Desktop {
     /// a per-second tick can repaint just this region instead of the whole
     /// framebuffer. Mirrors the geometry in [`draw_clock`].
     pub fn clock_rect(&self) -> Rect {
-        let tw = font::text_width("00:00:00", 2) as i32;
+        let tw =
+            (osjeff_core::hw::rtc::clock_len(crate::settings::clock24()) * font::cell_w(2)) as i32;
         let pad = 14;
         let pw = tw + pad * 2;
         let ph = 34;
@@ -803,6 +810,7 @@ mod instance;
 mod logview;
 mod monitor;
 mod render;
+mod settings_ui;
 mod sysstore;
 mod ui;
 mod wasmwin;
@@ -811,6 +819,7 @@ pub(crate) use instance::*;
 pub(crate) use logview::LogState;
 pub use monitor::SysInputs;
 pub(crate) use monitor::{MonitorState, SysMon};
+pub(crate) use settings_ui::SettingsState;
 pub(crate) use sysstore::*;
 pub(crate) use wasmwin::*;
 pub(crate) use widgets::*;

@@ -32,6 +32,7 @@ mod ps2;
 mod rtc;
 mod sched;
 mod serial;
+mod settings;
 mod storage;
 mod sync;
 mod sysinfo;
@@ -357,15 +358,20 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     run_splash(&mut *framebuffer, &mut *back, info, n);
     trace::mark("splash end (artificial >= 5 s)");
 
+    // The desktop (and its filesystem, which holds the stored settings) comes first so
+    // the wallpaper and accent can honour them; with no settings file the defaults
+    // paint exactly what the desktop always looked like.
+    let mut desk = Desktop::new(info.width as i32, info.height as i32);
+    trace::mark("Desktop::new (fs load from ATA) done");
+    desk.load_settings();
+    desk.set_network(net_up, net_cfg);
+
     // Static layer painted once.
     {
-        let mut c = Canvas::new(bg, info);
+        let mut c = Canvas::new(&mut *bg, info);
         desktop::paint_background(&mut c);
     }
     trace::mark("wallpaper painted");
-
-    let mut desk = Desktop::new(info.width as i32, info.height as i32);
-    trace::mark("Desktop::new (fs load from ATA) done");
     let mut last_sec = 0xFFu8; // force first render
     let mut prev_cursor = desk.cursor();
     // Seed from the live tick count, NOT 0: the splash ran for ~5 s with the
@@ -456,6 +462,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
         // Tell the app manager each WASM window's size / visibility; reap finished apps.
         desk.wasm_sync();
+
+        // The wallpaper or accent changed: repaint the cached background and
+        // recompose everything (the settings app also asked for a full repaint).
+        if desk.take_bg_repaint() {
+            let mut c = Canvas::new(&mut *bg, info);
+            desktop::paint_background(&mut c);
+            static_valid = false;
+            scene_dirty = true;
+        }
+
 
         // A maximize / restore / vanished minimized window changes pixels well
         // outside the focused window: repaint (and upload) the whole screen once.

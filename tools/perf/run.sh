@@ -9,13 +9,14 @@
 # <outdir>/screen.png and quit.
 # Env: QEMU_MEM (default 128M, 512M for uefi), QEMU_EXTRA (e.g. "-icount shift=0"),
 # FS_SIZE (filesystem disk size, default 64M; 64K gives the old OJFS v2-only disk).
+# FS_IMG (a filesystem disk image to boot with instead of a blank one, to test persistence).
 set -u
 img=$1; mode=$2; out=$3; secs=$4; scen=${5:-}
 rm -rf "$out"; mkdir -p "$out"
 # Unix socket paths are limited to 107 bytes, so keep the monitor socket short.
 export MON_SOCK=$(mktemp -u /tmp/osj-mon.XXXXXX)
 echo "$MON_SOCK" > "$out/mon.path"
-truncate -s "${FS_SIZE:-64M}" "$out/fs.img"  # sparse 64 MiB (OJFS v3 needs >= 1 MiB)
+if [ -n "${FS_IMG:-}" ]; then cp "$FS_IMG" "$out/fs.img"; else truncate -s "${FS_SIZE:-64M}" "$out/fs.img"; fi  # sparse 64 MiB (OJFS v3 needs >= 1 MiB)
 mem=${QEMU_MEM:-128M}; [ "$mode" = uefi ] && mem=${QEMU_MEM:-512M}
 args=(-m "$mem" -display none -no-reboot -no-shutdown
   -serial "file:$out/serial.log"

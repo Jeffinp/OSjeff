@@ -15,6 +15,12 @@ pub fn accent() -> Color {
     Color::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
 
+/// Change the accent (`0xRRGGBB`). Callers repaint the wallpaper (the dock icons
+/// are baked into it) and the windows.
+pub fn set_accent(rgb: u32) {
+    ACCENT_RGB.store(rgb & 0xFF_FFFF, Ordering::Relaxed);
+}
+
 // Wallpaper / backdrop.
 pub const BG_TOP: Color = Color::rgb(0x0B, 0x0F, 0x1C);
 pub const BG_BOTTOM: Color = Color::rgb(0x16, 0x1C, 0x30);

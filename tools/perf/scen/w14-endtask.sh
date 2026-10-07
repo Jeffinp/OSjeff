@@ -4,7 +4,7 @@
 source "$(dirname "$0")/../lib.sh"
 wait_first_frame
 sleep 2
-START_APPS=9
+START_APPS=10
 start_row() { # index -> click the start-panel row of app `index`
   local sy=$(( DOCKY - 20 - 12 - (20 + (START_APPS + 2) * 38 + 12) ))
   goto 451 $(( sy + 10 + 38 * $1 + 19 ))

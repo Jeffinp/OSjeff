@@ -16,6 +16,7 @@ pub enum Icon {
     WasmApp,
     Files,
     Monitor,
+    Settings,
     Log,
     Power,
 }
@@ -31,6 +32,7 @@ pub fn draw(c: &mut Canvas, icon: Icon, x: usize, y: usize, size: usize) {
         Icon::WasmApp => wasm_app(c, x, y, size),
         Icon::Files => files(c, x, y, size),
         Icon::Monitor => monitor(c, x, y, size),
+        Icon::Settings => settings(c, x, y, size),
         Icon::Log => log(c, x, y, size),
         Icon::Power => power(c, x, y, size),
     }
@@ -70,6 +72,56 @@ fn monitor(c: &mut Canvas, x: usize, y: usize, size: usize) {
             );
         }
     }
+}
+
+/// Settings: a dark tile with a gear (a disc with eight teeth and a hub hole).
+fn settings(c: &mut Canvas, x: usize, y: usize, size: usize) {
+    let tile = Color::rgb(0x14, 0x1B, 0x2E);
+    c.fill_round_rect(x, y, size, size, size / 5, tile);
+    let (cx, cy) = ((x + size / 2) as isize, (y + size / 2) as isize);
+    let r = (size / 4).max(3) as isize;
+    let t = (size / 6).max(2) as isize;
+    let gear = Color::rgb(0xC9, 0xD3, 0xE8);
+    // Eight teeth: the four axes and the four diagonals.
+    let reach = r + t / 2;
+    let diag = reach * 7 / 10;
+    let spots: [(isize, isize); 8] = [
+        (reach, 0),
+        (-reach, 0),
+        (0, reach),
+        (0, -reach),
+        (diag, diag),
+        (-diag, diag),
+        (diag, -diag),
+        (-diag, -diag),
+    ];
+    for (dx, dy) in spots {
+        c.fill_round_rect(
+            (cx + dx - t / 2) as usize,
+            (cy + dy - t / 2) as usize,
+            t as usize,
+            t as usize,
+            1,
+            gear,
+        );
+    }
+    c.fill_round_rect(
+        (cx - r) as usize,
+        (cy - r) as usize,
+        (2 * r) as usize,
+        (2 * r) as usize,
+        r as usize,
+        gear,
+    );
+    let hub = (r / 2).max(2);
+    c.fill_round_rect(
+        (cx - hub) as usize,
+        (cy - hub) as usize,
+        (2 * hub) as usize,
+        (2 * hub) as usize,
+        hub as usize,
+        theme::accent(),
+    );
 }
 
 /// System log: a dark tile with colour-coded text lines (info, warning, error).

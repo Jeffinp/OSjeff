@@ -71,6 +71,17 @@ impl Desktop {
             }
             return true;
         }
+        // An ABNT2 accent followed by a letter it cannot combine with types both.
+        let mut changed = self.dispatch_key(key, time);
+        while let Some(k) = self.keymap.take_pending() {
+            changed |= self.dispatch_key(k, time);
+        }
+        changed
+    }
+
+    /// Deliver one logical key to the focused app (after the Alt+Tab handling):
+    /// Ctrl shortcuts first, then the app's own key handler.
+    fn dispatch_key(&mut self, key: Key, time: Time) -> bool {
         let (Some(top), Some(kind)) =
             (self.focused(), self.focused().and_then(|f| self.kind_of(f)))
         else {
@@ -153,6 +164,7 @@ impl Desktop {
             }
             Kind::Files => self.files_key(top, key),
             Kind::Monitor => self.monitor_key(top, key),
+            Kind::Settings => self.settings_key(top, key),
             Kind::LogViewer => self.log_key(top, key),
         }
         true
@@ -341,7 +353,12 @@ impl Desktop {
                 App::Editor(e) => e.editor.line(e.editor.cursor().1),
                 App::Calculator(c) => c.display(),
                 App::Browser(b) => b.browser.url(),
-                App::TaskMgr | App::Wasm(_) | App::Files(_) | App::Monitor(_) | App::Log(_) => &[],
+                App::TaskMgr
+                | App::Wasm(_)
+                | App::Files(_)
+                | App::Monitor(_)
+                | App::Settings(_)
+                | App::Log(_) => &[],
             };
             n = text.len().min(clipboard::CAP);
             tmp[..n].copy_from_slice(&text[..n]);
@@ -392,7 +409,14 @@ impl Desktop {
                     }
                 }
             }
-            Some(App::TaskMgr | App::Wasm(_) | App::Files(_) | App::Monitor(_) | App::Log(_))
+            Some(
+                App::TaskMgr
+                | App::Wasm(_)
+                | App::Files(_)
+                | App::Monitor(_)
+                | App::Settings(_)
+                | App::Log(_),
+            )
             | None => {}
         }
     }
@@ -517,6 +541,7 @@ impl Desktop {
             }
             Kind::Files => self.files_click(w, rect, cx, cy),
             Kind::Monitor => self.monitor_click(w, rect, cx, cy),
+            Kind::Settings => self.settings_click(w, rect, cx, cy),
             Kind::LogViewer => self.log_click(w, rect, cx, cy),
             Kind::Terminal | Kind::Editor | Kind::TaskMgr => {}
         }
