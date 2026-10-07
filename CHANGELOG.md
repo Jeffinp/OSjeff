@@ -3,6 +3,28 @@
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
 tem releases versionadas; as seções são marcos na `master`.
 
+## 2026-10 — Window manager dinâmico
+
+O desktop deixou de ter 7 janelas fixas (uma por app) e passou a gerenciar qualquer
+número de janelas, cada uma com a instância de app e o processo próprios
+([`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §7).
+
+- `osjeff_core::winman`: tabela dinâmica (`WindowManager`, limite 32), `WindowId` forte,
+  z-order, foco, abrir/fechar/minimizar/maximizar/restaurar, cascata, mover e
+  redimensionar por borda/canto com tamanho mínimo, seletor Alt+Tab em ordem de uso
+  recente, duplo clique e assinatura da cena que cobre a geometria. 54 testes novos (423 para 477).
+- Vários Terminais, Editores, Gerenciadores de arquivos e Calculadoras ao mesmo tempo,
+  cada um com seu processo (`shell`, `shell 2`...). Fechar encerra instância e processo;
+  `DEL` no Task Manager fecha de fato a janela. `ProcessTable` passou de 8 para 48 entradas.
+- Botões minimizar/maximizar (aparecem com o ponteiro sobre a janela, então o desktop
+  parado fica idêntico), duplo clique na barra maximiza, redimensionar por qualquer
+  borda, ponto no dock para janelas minimizadas, dock foca em vez de abrir outra janela,
+  `Ctrl+N` e "Nova janela" (botão direito no dock) abrem outra instância, Alt+Tab.
+- Terminal e Editor usam a maior escala inteira que cabe na janela; Task Manager rola;
+  o navegador diagrama a página de novo ao redimensionar.
+- Ferramentas: cenários `tools/perf/scen/w8-*.sh` e `tools/perf/w8-heap.sh` (soak de
+  abrir/fechar com a ocupação exata do heap em builds `perf-trace`).
+
 ## 2026-10 — Auditoria e endurecimento
 
 Auditoria completa de desempenho, segurança e boas práticas

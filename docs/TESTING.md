@@ -178,6 +178,7 @@ QEMU sem aceleração **não** representa hardware real. Compare proporções.
 | HUD do desktop (canto superior direito) | ms/frame, fps, draws/s, heap, threads |
 | `cargo build --release -p os --features perf-trace` | estatísticas por segundo na serial (`[trace]`): custo por etapa de render, ISR, alocações, latência de entrada |
 | `tools/perf/run.sh`, `ab.sh`, `cmp.sh` | cenários scriptados (mouse/teclas pelo monitor do QEMU), A/B intercalado, `-icount` para razões estáveis |
+| `tools/perf/scen/w8-*.sh`, `w8-heap.sh` | window manager: várias instâncias (`w8-multi`), maximizar/minimizar/Alt+Tab/redimensionar (`w8-wm`), 30+ janelas (`w8-stress`), soak de abrir/fechar 100x com a ocupação exata do heap (`w8-soak` + `w8-heap.sh`, build `perf-trace`) |
 | `cd bench && cargo bench` | microbenchmarks no host (criterion), crate fora do workspace |
 
 Os marcos de boot (`[trace] boot + N ms`) saem na serial em qualquer build.

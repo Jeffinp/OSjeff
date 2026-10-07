@@ -517,9 +517,14 @@ flowchart TD
   janela dinâmica neste quadro com o do anterior; `STATIC` é restaurado só ali e só o
   retângulo sobe à VRAM, então o custo por quadro acompanha a área do dano, não o número
   de janelas. **O custo O(tela) existe no início**: `AnimRebuild` roda quando a assinatura
-  da cena muda (`wm::scene_signature`, FNV-1a sobre visibilidade, animação, z-order e
-  janela arrastada) ou a cena fica suja. O app WASM mantém o laço nesse caminho enquanto
-  sua janela está visível (`has_animation`), pois pede quadro novo a cada tick.
+  da cena muda (`WindowManager::signature`, FNV-1a sobre id, retângulo, visibilidade,
+  animação e maximização de cada janela em z-order, mais a janela arrastada) ou a cena fica
+  suja. O retângulo da janela que está sendo arrastada ou redimensionada **fica fora** da
+  assinatura: ela é dinâmica (desenhada por cima da camada em cache a cada quadro, só no
+  dano antigo+novo), então mover ou redimensionar continua no caminho barato. Maximizar,
+  restaurar, minimizar-que-termina e fechar um overlay "assentam" com um repaint completo
+  (`Settle`). O app WASM mantém o laço nesse caminho enquanto sua janela está visível
+  (`has_animation`), pois pede quadro novo a cada tick.
 - **Fade sobre o conteúdo real:** `draw_animating` guarda o fundo em `SCRATCH`, desenha a
   janela e mistura de volta com o alfa da animação. Janelas cujo retângulo não cabe em
   `SCRATCH` (navegador, gerenciador de arquivos e, em 32 bpp, o app WASM) abrem e fecham
@@ -550,56 +555,152 @@ ganchos somem); saem como linhas `[trace]` na serial, lidas por `tools/perf/`.
 
 ## 7. Apps e window manager
 
-### 7.1 Janelas
+### 7.1 Janelas e instâncias
 
-Sete janelas, cada uma com a lógica no core e o desenho no kernel (`desktop/apps.rs`,
-`files_ui.rs`): Terminal (`terminal`), Editor (`editor`), Gerenciador de tarefas
-(`process`), Calculadora (`calc`), Navegador (`browser`, `web`), App WASM (thread
-`wasmapp`) e Gerenciador de arquivos (`fs`). Todas rodam na thread do compositor, exceto
-a rede do navegador (`fetcher`) e o app WASM. `Desktop` guarda 7 `Win` (retângulo,
-visível, tipo, animação, pid) e `order`, o z-order de trás para frente. Foco,
-`bring_to_front`, `topmost_at` e `window_of_pid` vivem em `osjeff_core::wm`; geometria de
-dock, menu, painel iniciar, teclado da calculadora e hit-test do gerenciador de arquivos
-em `osjeff_core::layout`.
+O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_core::winman`
+(testada no host); o kernel só guarda uma instância de app por janela e desenha.
 
-- **Dock** de 8 posições: o ícone do sistema (abre o **painel iniciar**: os 7 apps mais
-  Reiniciar e Desligar) e um por app. **Menu de contexto** no botão direito (7 apps).
-- **Abrir** um app fechado cria uma entrada de processo (pid novo); **fechar** roda a
-  animação e remove a entrada. `kernel` e `compositor` são `ProcKind::System`.
+- **`WindowManager<A>`** é uma tabela `Vec` de janelas em z-order (a última é a do topo),
+  com no máximo `DEFAULT_MAX_WINDOWS = 32` (configurável em `WindowManager::new`). Cada
+  `Window<A>` tem `WindowId` forte (monótono, nunca reutilizado), `rect`, `restore`
+  (retângulo antes de maximizar), `minimized`, `maximized`, `anim`, tamanho mínimo,
+  `resizable` e o app `A`. Operações: `open`, `request_close`, `minimize`, `activate`
+  (restaura, cancela fechamento e levanta), `raise`, `maximize`/`unmaximize`,
+  `move_to`, `resize` (por borda/canto, com tamanho mínimo e limites de tela),
+  `topmost_at`, `focused`, `switch_list` (ordem de uso recente para o Alt+Tab),
+  `step` (anima e devolve as janelas cujo fechamento terminou, já removidas) e
+  `signature`. Fechar e minimizar reutilizam `Anim::close`; o que o término da animação
+  faz (destruir ou esconder) é o campo `leaving`.
+- **Instâncias.** `Desktop` guarda `WindowManager<Inst>`; `Inst` = `App` (enum com o
+  estado próprio: `Terminal`, `Editor`, `TaskMgr`, `Calculator`, `Browser`, `Wasm`,
+  `Files`; os estados grandes vão em `Box`, criados ao abrir e liberados ao destruir),
+  `pid`, número da instância e título. Vários Terminais, Editores, Gerenciadores de
+  arquivos e Calculadoras podem coexistir, cada um com **processo próprio** na
+  `ProcessTable` (`shell`, `shell 2`, `shell 3`... o menor número livre). Fechar a janela
+  encerra instância e processo; no Task Manager, `DEL` fecha de fato a janela da
+  instância. Navegador, app WASM e Task Manager seguem **únicos** (uma NIC e uma thread
+  de busca, uma thread WASM e uma superfície): lançá-los de novo foca a janela existente,
+  mas passam pelo mesmo mecanismo. O app WASM tem tamanho fixo (superfície de 692x414) e
+  não maximiza; minimizá-lo o mantém vivo.
+- **Geometria** (`osjeff_core::window`, `layout`): botões da barra de título (fechar,
+  maximizar/restaurar, minimizar, nessa ordem da direita), faixa de redimensionar de 5 px
+  em volta da janela (cantos de 14 px), `Rect::resized`, `layout::work_area` (a tela menos
+  a faixa do HUD no topo, margem lateral e o dock) e `winman::cascade_rect` (novas
+  instâncias descem 28 px por índice, com volta a cada 8).
+- **Dock e menus.** O ícone do dock **foca** (ou restaura) a janela mais recente do app;
+  só abre outra quando não há nenhuma. Janelas minimizadas aparecem como um ponto sob o
+  ícone. **Nova instância:** `Ctrl+N` na janela focada (Terminal, Editor, Arquivos,
+  Calculadora; Navegador apenas foca) ou botão direito no ícone do dock, "Nova janela".
+  Painel iniciar e menu de contexto da área de trabalho usam a mesma regra de foco.
+- **Mouse.** Botões minimizar/maximizar **aparecem quando o ponteiro está sobre a janela**
+  (a janela em repouso fica idêntica à de antes do WM); duplo clique na barra de título
+  alterna maximizar (`ClickTracker`, 500 ms); arrastar a barra move (não com a janela
+  maximizada); arrastar qualquer borda ou canto redimensiona.
+- **Teclado.** `Alt+Tab` / `Alt+Shift+Tab` abrem o seletor (`Switcher`) em ordem de uso
+  recente, mostrando também as minimizadas; soltar o Alt confirma, Esc cancela. O
+  `Keymap` passou a rastrear Alt (`0x38`, esquerdo e estendido).
 - **Reiniciar/Desligar** (`power.rs`): 8042 (`0x64 <- 0xFE`) e `0xCF9`; desligar usa as
   portas `0x604`, `0xB004` e `0x4004` (QEMU, Bochs, cloud-hypervisor). Sem ACPI: em
   hardware real pode acabar em `hlt` **[NV]**.
 - **Clipboard** (`osjeff_core::clipboard`, 256 B): Ctrl+C copia a linha de entrada do
   terminal, a linha atual do editor, o visor da calculadora ou a URL; Ctrl+V cola
-  reenviando as teclas à janela focada. Ctrl+S salva o editor.
+  reenviando as teclas à janela focada. Ctrl+S salva o editor focado.
 
 ### 7.2 O "processo" do Task Manager
 
-`ProcessTable` tem no máximo 8 entradas (pid, nome, estado, ticks): um **modelo de UI**,
-sem ligação com threads. A tabela de cima ("PID NAME ST UP") mostra esse modelo; a de
-baixo ("KERNEL THREADS CPU") mostra as threads reais com os ticks **executados** (§4.5), ou
-`DEAD` para uma thread morta (§3.4).
-`DEL` numa linha só fecha a janela; para o app WASM, fechá-la (`set_active(false)`) faz o
-worker descartar o app de verdade (§10.4).
+`ProcessTable` guarda até `MAX_PROC = 48` entradas (pid, nome, estado, ticks; cresce sob
+demanda): um **modelo de UI**, sem ligação com threads, mas agora **um processo por
+instância de janela** (mais `kernel` e `compositor`, do tipo `System`). A tabela de cima
+("PID NAME ST UP") mostra esse modelo e rola para manter a seleção visível; a de baixo
+("KERNEL THREADS CPU") mostra as threads reais com os ticks **executados** (§4.5), ou `DEAD`
+para uma thread morta (§3.4). `DEL` numa linha de app fecha a janela daquela instância e
+o processo some quando a animação termina; `Enter` foca (restaura) a janela do processo.
+Para o app WASM, fechá-la (`wasm::set_active(false)`) faz o worker descartar o app de
+verdade (§10.4).
 
 ### 7.3 Apps
 
-- **Terminal:** grade 40x14, entrada de até 32 bytes; `HELP`, `CLS`, `TIME`, `VER`, `ECHO`,
-  `EDIT`, `CALC`, `PS`, `LS`, `CAT`, `SAVE`, `LOAD`, `RM`, `REBOOT`, `SHUTDOWN` (e aliases).
-  Sem diretório corrente: `SAVE`, `LOAD`, `CAT` e `RM` só agem na raiz, e `RM` apaga de vez.
-- **Editor:** grade fixa de 44x18. Um arquivo que não cabe na grade (linha com mais de 44
-  colunas ou mais de 18 linhas) é carregado truncado, mas o buffer fica marcado
+Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da janela.
+
+- **Terminal:** grade lógica 40x14 (+ linha de comando de até 32 bytes); `HELP`, `CLS`,
+  `TIME`, `VER`, `ECHO`, `EDIT`, `CALC`, `PS`, `LS`, `CAT`, `SAVE`, `LOAD`, `RM`, `REBOOT`,
+  `SHUTDOWN` (e aliases). Sem diretório corrente: `SAVE`, `LOAD`, `CAT` e `RM` só agem na
+  raiz, e `RM` apaga de vez. A saída vai para o terminal que emitiu o comando. `SAVE nome`
+  grava o editor usado mais recentemente (ou avisa que não há editor); `LOAD nome` abre
+  o arquivo num editor novo (ou foca o que já o mostra).
+- **Editor:** grade lógica fixa de 44x18. Um arquivo que não cabe na grade (linha com mais
+  de 44 colunas ou mais de 18 linhas) é carregado truncado, mas o buffer fica marcado
   (`Editor::is_lossy`), a barra de status mostra `TRUNC` e `fs_save_in` **recusa salvar**
   ("not saved: file is larger than the editor window"), para não destruir o resto. O
-  `leiame.txt` semeado no primeiro boot foi reescrito para caber.
+  `leiame.txt` semeado no primeiro boot foi reescrito para caber. Cada janela tem seu
+  buffer, arquivo e pasta de origem (`EditorState`): Ctrl+S regrava naquela pasta.
+- **Terminal e Editor em janelas de outro tamanho** (grade lógica fixa): o texto é desenhado
+  na **maior escala inteira de 2 a 4** em que a grade inteira cabe (`layout::fit_scale`),
+  ancorado no canto superior esquerdo, sem distorção; maximizada, a letra fica maior. Em
+  janela menor que a grade em escala 2, o terminal mostra as linhas mais novas (cortando as
+  largas e mostrando o fim da linha de entrada) e o editor rola para manter o cursor à
+  vista; nada é desenhado fora da janela. A barra de status do editor e o rodapé do Task
+  Manager ficam presos à borda inferior.
 - **Calculadora:** quatro operações, entrada de até 16 caracteres, formatador decimal sem
-  intrínsecos de `f64` do `std`.
+  intrínsecos de `f64` do `std`. As teclas se esticam com a janela (`calc_layout`).
 - **Gerenciador de arquivos:** vistas Arquivos, Lixeira e painéis dos dois discos IDE
-  (`IDENTIFY`). Opera **por slot e por pasta**: abrir um arquivo guarda a pasta de origem
-  (`editor_dir`) e Ctrl+S regrava naquela pasta, não num homônimo da raiz; se a pasta foi
-  para a lixeira, `fs::live_dir` cai para a raiz. Teclas: setas, Enter (abre, ou restaura
-  na Lixeira), Backspace sobe, Tab troca a vista, Delete (lixeira ou definitivo), `N`.
-- **Navegador e App WASM:** §9 e §10.
+  (`IDENTIFY`); cada janela tem a sua (`FilesState`: seleção, vista, pasta). Opera **por
+  slot e por pasta**: abrir um arquivo (Enter) abre ou foca um editor, guardando a pasta de
+  origem; se a pasta foi para a lixeira, `fs::live_dir` cai para a raiz. Teclas: setas,
+  Enter (abre, ou restaura na Lixeira), Backspace sobe, Tab troca a vista, Delete (lixeira
+  ou definitivo), `N`. A lista e o rodapé acompanham o tamanho da janela.
+- **Navegador:** a barra de endereço e a área de conteúdo seguem a janela, e a página é
+  **diagramada de novo** para a nova largura ao terminar de redimensionar (o corpo HTML
+  fica guardado na instância). Fechar a janela descarta página e estado.
+- **App WASM:** §10.
+
+### 7.4 Como registrar um app novo
+
+1. `desktop/instance.rs`: nova variante em `Kind` (metadados `const`: título, nome de
+   processo, rótulo, ícone, `default_rect`, `min_size`, `multi`, `resizable`) e em `App`
+   (estado por janela, criado em `App::new`).
+2. `desktop/render.rs` (`draw_window`) e `apps.rs`: desenhar dentro do `Rect` da janela
+   (nunca fora dele); `input.rs`: teclas (`handle_key`) e cliques (`click_window`).
+3. Dock: `layout::DOCK_COUNT` e a lista de ícones em `widgets::paint_background`.
+
+Foco, z-order, minimizar/maximizar/redimensionar, Alt+Tab, processo (`nome`, `nome 2`...),
+ponto de minimizada, menu "Nova janela" e o encerramento ao fechar não pedem nenhuma mudança.
+
+### 7.5 Provas e custo de quadro
+
+Cenários em `tools/perf/scen/w8-*.sh` (QEMU BIOS e UEFI), saída em `docs/img/wm-*.png`:
+
+| Imagem | O que prova |
+|---|---|
+| `wm-instances.png` | 3 terminais (cada um com seu `echo`) e 2 editores com textos diferentes, cada instância com o seu estado |
+| `wm-taskmgr.png` | processos `shell`, `shell 2`, `shell 3`, `editor`, `editor 2`; `DEL` em `shell 3` fecha a janela |
+| `wm-maximized.png` | editor maximizado: texto na escala 3, barra de status presa à borda |
+| `wm-minimized.png` | terminal minimizado: ponto sob o ícone do dock |
+| `wm-alttab.png` | seletor Alt+Tab em ordem de uso recente |
+| `wm-many.png` | 32 janelas (31 terminais + Task Manager, o teto da tabela) sem pânico |
+
+- **Vazamento:** `scen/w8-soak.sh` abre e fecha editor e calculadora 100 vezes cada (400
+  trocas de quadro); em build `perf-trace` a ocupação exata do heap
+  (`tools/perf/w8-heap.sh`) ficou entre 291 544 e 292 560 bytes em BIOS e UEFI, e igual no
+  fim e no começo (`last - first = 0`).
+- **Custo de quadro** (UEFI, QEMU/TCG sem KVM, `perf-trace`, 2 execuções intercaladas por
+  build, `tools/perf/ab.sh`; mediana do tempo por quadro): ocioso, arrastar e abrir/fechar
+  não regrediram além do ruído do emulador.
+
+| Caminho | antes | depois |
+|---|---|---|
+| ocioso, tique do relógio (`ClockLocal`) | 253 µs | 227 µs |
+| arrastar: quadro de dano (`AnimDamage`) | 28,0 ms | 18,7 ms |
+| arrastar: só o cursor | 42 µs | 34 µs |
+| arrastar: `Steady` / `Settle` | 7,5 / 16,7 ms | 6,0 / 11,5 ms |
+| abrir/fechar a calculadora: `AnimDamage` / `AnimRebuild` | 14,9 / 31,9 ms | 17,5 / 33,8 ms |
+| abrir/fechar: `Settle` | 10,2 ms | 11,7 ms |
+| CPU ocupada, ocioso / abrir-fechar | 0,57 % / 5,75 % | 0,60 % / 5,83 % |
+
+  Redimensionar uma janela custa o mesmo que arrastá-la (quadro de dano, ~13 ms para um
+  terminal grande); maximizar/restaurar "assenta" com um repaint completo (~24 ms), e
+  entrar/sair de uma janela com o ponteiro (botões de minimizar/maximizar) repinta só a
+  janela (~7 a 12 ms).
 
 ## 8. Armazenamento (OJFS)
 
