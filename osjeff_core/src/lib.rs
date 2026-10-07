@@ -46,9 +46,11 @@ pub mod redirect;
 pub mod rng;
 pub mod schedule;
 pub mod shell;
+pub mod sntp;
 pub mod terminal;
 #[cfg(test)]
 pub(crate) mod testutil;
+pub mod unixtime;
 pub mod web;
 pub mod window;
 pub mod winman;
