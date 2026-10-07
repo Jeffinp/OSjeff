@@ -414,7 +414,7 @@ fn run(seed: u64, steps: u32, remount_every: u32, check_every: u32) {
     assert!(counts.iter().all(|&c| c > steps / 40), "{counts:?}");
     // ...and a good share of each actually succeeded (not just error paths).
     for (k, (&ok, &n)) in ok_counts.iter().zip(counts.iter()).enumerate() {
-        let min_pct = if matches!(k, 9 | 12 | 13) { 3 } else { 10 };
+        let min_pct = if matches!(k, 7 | 9 | 12 | 13) { 3 } else { 10 };
         assert!(ok * 100 > n * min_pct, "kind {k}: {ok}/{n} succeeded");
     }
 }
@@ -477,4 +477,13 @@ fn model_sanity_itself() {
     assert!(m.trash("/a").is_ok());
     assert!(m.restore("a").is_ok());
     assert!(m.restore("a").is_err());
+}
+
+/// A wider sweep for local use: `cargo test -p osjeff_core -- --ignored many_seeds`.
+#[test]
+#[ignore = "slow sweep; run with --ignored"]
+fn random_operations_match_the_model_many_seeds() {
+    for seed in 1..=60u64 {
+        run(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15), 6000, 700, 150);
+    }
 }

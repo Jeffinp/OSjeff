@@ -161,14 +161,17 @@ fn check_survivor(disk: RamDisk, failed: usize, snaps: &[Snap], ctx: &str) {
 }
 
 fn exhaustive(mode: CrashMode, stride: u64) {
-    let ops = sequence();
+    exhaustive_ops(&sequence(), mode, stride);
+}
+
+fn exhaustive_ops(ops: &[Op], mode: CrashMode, stride: u64) {
     let base = base_image(1);
-    let snaps = oracle(&base, &ops);
-    let total = count_events(&base, &ops, mode);
-    assert!(total > 500, "suspiciously few events: {total}");
+    let snaps = oracle(&base, ops);
+    let total = count_events(&base, ops, mode);
+    assert!(total > 100, "suspiciously few events: {total}");
     let mut k = 0;
     while k <= total {
-        let (disk, failed) = run_until_cut(&base, &ops, mode, k);
+        let (disk, failed) = run_until_cut(&base, ops, mode, k);
         check_survivor(
             disk,
             failed,
@@ -477,4 +480,54 @@ fn hostile_journal_record_cannot_overwrite_the_superblock() {
     assert!(matches!(Fs3::mount(disk.clone()), Err(FsError::Corrupt(_))));
     // The superblock is untouched.
     assert_eq!(disk.as_bytes()[base_byte + 4], b'O');
+}
+
+/// A pseudo-random operation sequence over a small namespace.
+fn random_sequence(seed: u64, len: usize) -> Vec<Op> {
+    const DIRS: [&str; 3] = ["/d", "/d/e", "/f"];
+    const FILES: [&str; 6] = ["/d/a", "/d/e/b", "/f/c", "/g", "/d/h", "/f/i"];
+    let mut rng = Rng(seed);
+    let mut ops = alloc::vec![Op::Mkdir("/d"), Op::Mkdir("/d/e"), Op::Mkdir("/f")];
+    for _ in 0..len {
+        let file = FILES[rng.below(6) as usize];
+        let other = FILES[rng.below(6) as usize];
+        let size = [10usize, 700, 4096, 4097, 9000, 14_000][rng.below(6) as usize];
+        ops.push(match rng.below(11) {
+            0 => Op::Mkdir(DIRS[rng.below(3) as usize]),
+            1..=3 => Op::Write(file, rng.bytes(size)),
+            4 => Op::WriteAt(file, rng.below(9000), rng.bytes(size / 2 + 1)),
+            5 => Op::Append(file, rng.bytes(size)),
+            6 => Op::Truncate(file, rng.below(12_000)),
+            7 => Op::Rename(file, other),
+            8 => Op::Remove(file),
+            9 => Op::Trash(file),
+            _ => Op::Restore(["a", "b", "c", "g", "h", "i"][rng.below(6) as usize]),
+        });
+    }
+    ops
+}
+
+#[test]
+fn random_sequences_survive_a_power_cut_at_every_event() {
+    for seed in 1..=4u64 {
+        // Operations that fail on a healthy disk (missing parent, name taken,
+        // ...) are part of the mix, but the oracle must succeed for every op
+        // it counts: keep only the ones that do.
+        let base = base_image(1);
+        let mut fs = Fs3::mount(RamDisk::from_bytes(base)).unwrap();
+        let mut ops = Vec::new();
+        for (i, op) in random_sequence(seed * 7919, 80).into_iter().enumerate() {
+            if ops.len() < 22 && apply(&mut fs, &op, 10 + ops.len() as u64).is_ok() {
+                ops.push(op);
+            }
+            let _ = i;
+        }
+        assert!(
+            ops.len() >= 8,
+            "seed {seed}: only {} ops succeeded",
+            ops.len()
+        );
+        exhaustive_ops(&ops, CrashMode::InOrder, 2);
+        exhaustive_ops(&ops, CrashMode::Lossy(seed), 5);
+    }
 }
