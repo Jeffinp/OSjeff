@@ -20,19 +20,13 @@ pub(crate) use osjeff_core::{
     Terminal, Time,
 };
 
+// Dock / menu / start-panel / keypad geometry lives in `osjeff_core::layout`.
+use osjeff_core::layout::{
+    CALC_KEYS, DOCK_MARGIN, MENU_ITEM_H, MENU_PAD, MENU_W, START_GAP, START_PAD, START_ROW_H,
+    START_W,
+};
+
 const SLIDE_PX: f32 = 28.0;
-
-// Floating dock geometry.
-const DOCK_ICON: i32 = 40;
-const DOCK_GAP: i32 = 14;
-const DOCK_PAD: i32 = 12;
-const DOCK_COUNT: i32 = 8; // brand + terminal + editor + taskmgr + calculator + browser + wasm + files
-const DOCK_MARGIN: i32 = 16; // gap from screen bottom
-
-// Calculator keypad: the input byte for each cell (0x08 = backspace). Duplicate
-// cells (`0` spanning two columns, `=` spanning two rows) map to the same byte;
-// the draw code merges them visually.
-const CALC_KEYS: [[u8; 4]; 5] = [*b"C\x08/*", *b"789-", *b"456+", *b"123=", *b"00.="];
 
 // Scratch buffer to snapshot the area behind an animating window (largest
 // window + margin). Lets fades composite over real content, not the wallpaper.
@@ -82,10 +76,6 @@ const WIN_COUNT: usize = 7;
 pub const CURSOR_W: i32 = 10;
 pub const CURSOR_H: i32 = 16;
 
-// Right-click context menu geometry.
-const MENU_W: i32 = 220;
-const MENU_ITEM_H: i32 = 32;
-const MENU_PAD: i32 = 6;
 const MENU_ITEMS: [(&str, usize); 7] = [
     ("Terminal", TERM),
     ("Editor", EDIT),
@@ -97,10 +87,6 @@ const MENU_ITEMS: [(&str, usize); 7] = [
 ];
 
 // Start panel (system icon → all apps + power).
-const START_W: i32 = 240;
-const START_ROW_H: i32 = 38;
-const START_PAD: i32 = 10;
-const START_GAP: i32 = 12; // divider gap before the power rows
 const START_APPS: [(&str, usize); 7] = [
     ("Terminal", TERM),
     ("Editor", EDIT),
@@ -448,30 +434,21 @@ impl Desktop {
     }
 
     pub(crate) fn clamp_menu(&self, x: i32, y: i32) -> (i32, i32) {
-        let h = MENU_PAD * 2 + MENU_ITEMS.len() as i32 * MENU_ITEM_H;
-        let mx = x.min(self.sw - MENU_W).max(0);
-        let my = y.min(self.sh - h).max(0);
-        (mx, my)
+        osjeff_core::layout::clamp_menu(self.sw, self.sh, x, y, MENU_ITEMS.len())
     }
 
     pub(crate) fn dock_hit(&self, px: i32, py: i32) -> Option<DockAction> {
-        let (_, icons) = dock_layout(self.sw, self.sh);
-        for (i, r) in icons.iter().enumerate() {
-            if r.contains(px, py) {
-                return match i {
-                    0 => Some(DockAction::Start), // system icon → start panel
-                    1 => Some(DockAction::Open(TERM)),
-                    2 => Some(DockAction::Open(EDIT)),
-                    3 => Some(DockAction::Open(TASK)),
-                    4 => Some(DockAction::Open(CALC)),
-                    5 => Some(DockAction::Open(BROWSER)),
-                    6 => Some(DockAction::Open(WASM)),
-                    7 => Some(DockAction::Open(FILES)),
-                    _ => None,
-                };
-            }
+        match osjeff_core::layout::dock_slot_at(self.sw, self.sh, px, py)? {
+            0 => Some(DockAction::Start), // system icon → start panel
+            1 => Some(DockAction::Open(TERM)),
+            2 => Some(DockAction::Open(EDIT)),
+            3 => Some(DockAction::Open(TASK)),
+            4 => Some(DockAction::Open(CALC)),
+            5 => Some(DockAction::Open(BROWSER)),
+            6 => Some(DockAction::Open(WASM)),
+            7 => Some(DockAction::Open(FILES)),
+            _ => None,
         }
-        None
     }
 
     /// True while a transient overlay (menu / start panel) is shown.
@@ -548,7 +525,7 @@ impl Desktop {
     pub fn overlay_bounds(&self) -> Rect {
         let mut bounds: Option<Rect> = None;
         if let Some((mx, my)) = self.menu {
-            let h = MENU_PAD * 2 + MENU_ITEMS.len() as i32 * MENU_ITEM_H;
+            let h = osjeff_core::layout::menu_height(MENU_ITEMS.len());
             bounds = Some(Rect::new(mx, my, MENU_W, h));
         }
         if self.start_open {

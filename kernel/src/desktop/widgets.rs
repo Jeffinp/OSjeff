@@ -3,121 +3,13 @@
 
 use super::*;
 
+pub(crate) use osjeff_core::layout::{
+    BrowserChrome, browser_home_layout, calc_button_at, calc_layout, dock_layout,
+};
+
 /// Index of the context-menu item under `(px, py)`, if any.
 pub(crate) fn menu_item_at(mx: i32, my: i32, px: i32, py: i32) -> Option<usize> {
-    if px < mx + MENU_PAD || px >= mx + MENU_W - MENU_PAD {
-        return None;
-    }
-    let rel = py - (my + MENU_PAD);
-    if rel < 0 {
-        return None;
-    }
-    let i = (rel / MENU_ITEM_H) as usize;
-    (i < MENU_ITEMS.len()).then_some(i)
-}
-
-/// The floating dock panel rect and its `DOCK_COUNT` icon slots.
-pub(crate) fn dock_layout(sw: i32, sh: i32) -> (Rect, [Rect; DOCK_COUNT as usize]) {
-    let inner = DOCK_COUNT * DOCK_ICON + (DOCK_COUNT - 1) * DOCK_GAP;
-    let dock_w = inner + DOCK_PAD * 2;
-    let dock_h = DOCK_ICON + DOCK_PAD * 2;
-    let dock_x = sw / 2 - dock_w / 2;
-    let dock_y = sh - dock_h - DOCK_MARGIN;
-    let dock = Rect::new(dock_x, dock_y, dock_w, dock_h);
-
-    let mut icons = [Rect::new(0, 0, DOCK_ICON, DOCK_ICON); DOCK_COUNT as usize];
-    let mut x = dock_x + DOCK_PAD;
-    for slot in icons.iter_mut() {
-        *slot = Rect::new(x, dock_y + DOCK_PAD, DOCK_ICON, DOCK_ICON);
-        x += DOCK_ICON + DOCK_GAP;
-    }
-    (dock, icons)
-}
-
-/// Keypad geometry for a calculator window: grid origin, cell size and gap.
-/// Shared by drawing and hit-testing so they always agree.
-pub(crate) fn calc_layout(r: Rect) -> (i32, i32, i32, i32, i32) {
-    let pad = 14;
-    let gap = 8;
-    let disp_h = 48;
-    let gx = r.x + pad;
-    let gy = r.y + TITLE_H + 12 + disp_h + 12;
-    let grid_w = r.w - pad * 2;
-    let grid_h = r.bottom() - gy - pad;
-    let cw = (grid_w - gap * 3) / 4;
-    let ch = (grid_h - gap * 4) / 5;
-    (gx, gy, cw, ch, gap)
-}
-
-/// The keypad byte under `(px, py)` in calculator window `r`, if any. Spanning
-/// buttons map through their duplicate cells in [`CALC_KEYS`].
-pub(crate) fn calc_button_at(r: Rect, px: i32, py: i32) -> Option<u8> {
-    let (gx, gy, cw, ch, gap) = calc_layout(r);
-    if cw <= 0 || ch <= 0 {
-        return None;
-    }
-    for (row, keys) in CALC_KEYS.iter().enumerate() {
-        for (col, &k) in keys.iter().enumerate() {
-            let bx = gx + col as i32 * (cw + gap);
-            let by = gy + row as i32 * (ch + gap);
-            if px >= bx && px < bx + cw && py >= by && py < by + ch {
-                return Some(k);
-            }
-        }
-    }
-    None
-}
-
-/// Browser chrome geometry, shared by drawing and hit-testing so the toolbar
-/// buttons, address bar and content area always agree.
-pub(crate) struct BrowserChrome {
-    pub home: Rect,
-    pub reload: Rect,
-    pub go: Rect,
-    pub bar: Rect,
-    pub content: Rect,
-}
-
-impl BrowserChrome {
-    pub(crate) fn of(r: Rect) -> Self {
-        let pad = 14;
-        let btn = 36;
-        let gap = 8;
-        let ty = r.y + TITLE_H + 12;
-        let home = Rect::new(r.x + pad, ty, btn, btn);
-        let reload = Rect::new(home.right() + gap, ty, btn, btn);
-        let go = Rect::new(r.right() - pad - btn, ty, btn, btn);
-        let bar_x = reload.right() + gap;
-        let bar = Rect::new(bar_x, ty, (go.x - gap - bar_x).max(60), btn);
-        let cy = ty + btn + 16;
-        let content = Rect::new(r.x + pad, cy, r.w - pad * 2, (r.bottom() - 14 - cy).max(0));
-        Self {
-            home,
-            reload,
-            go,
-            bar,
-            content,
-        }
-    }
-}
-
-/// Start-page layout: the brand logo rect and the four shortcut-tile rects,
-/// centered in the content box.
-pub(crate) fn browser_home_layout(content: Rect) -> (Rect, [Rect; 4]) {
-    let cx = content.x + content.w / 2;
-    let logo_sz = 84;
-    let logo = Rect::new(cx - logo_sz / 2, content.y + 30, logo_sz, logo_sz);
-    let tile_w = 150;
-    let tile_h = 96;
-    let gap = 18;
-    let total = 4 * tile_w + 3 * gap;
-    let sx = cx - total / 2;
-    let ty = logo.bottom() + 108;
-    let mut tiles = [Rect::new(0, 0, 0, 0); 4];
-    for (i, t) in tiles.iter_mut().enumerate() {
-        *t = Rect::new(sx + i as i32 * (tile_w + gap), ty, tile_w, tile_h);
-    }
-    (logo, tiles)
+    osjeff_core::layout::menu_item_at(mx, my, px, py, MENU_ITEMS.len())
 }
 
 /// Label bytes for a keypad cell (`<` for the backspace sentinel).
@@ -147,39 +39,24 @@ pub(crate) fn key_style(k: u8, pending: Option<u8>) -> (Color, Color) {
 }
 
 pub(crate) fn start_height() -> i32 {
-    START_PAD * 2 + (START_APPS.len() as i32 + 2) * START_ROW_H + START_GAP
+    osjeff_core::layout::start_height(START_APPS.len())
 }
 
 /// Top-left of the start panel, centered above the dock's system icon.
 pub(crate) fn start_origin(sw: i32, sh: i32) -> (i32, i32) {
-    let (_dock, icons) = dock_layout(sw, sh);
-    let brand = icons[0];
-    let x = (brand.x + DOCK_ICON / 2 - START_W / 2).clamp(8, (sw - START_W - 8).max(8));
-    let y = brand.y - start_height() - 12;
-    (x, y)
+    osjeff_core::layout::start_origin(sw, sh, START_APPS.len())
 }
 
 /// The start-panel item under `(px, py)`, if any.
 pub(crate) fn start_item_at(sw: i32, sh: i32, px: i32, py: i32) -> Option<StartItem> {
-    let (sx, sy) = start_origin(sw, sh);
-    if px < sx + START_PAD || px >= sx + START_W - START_PAD {
-        return None;
-    }
-    let top = sy + START_PAD;
-    for (i, (_label, win)) in START_APPS.iter().enumerate() {
-        let ry = top + i as i32 * START_ROW_H;
-        if py >= ry && py < ry + START_ROW_H {
-            return Some(StartItem::App(*win));
-        }
-    }
-    let pwr_top = top + START_APPS.len() as i32 * START_ROW_H + START_GAP;
-    for (i, item) in [StartItem::Reboot, StartItem::Shutdown].iter().enumerate() {
-        let ry = pwr_top + i as i32 * START_ROW_H;
-        if py >= ry && py < ry + START_ROW_H {
-            return Some(*item);
-        }
-    }
-    None
+    use osjeff_core::layout::StartHit;
+    Some(
+        match osjeff_core::layout::start_item_at(sw, sh, START_APPS.len(), px, py)? {
+            StartHit::App(i) => StartItem::App(START_APPS[i].1),
+            StartHit::Reboot => StartItem::Reboot,
+            StartHit::Shutdown => StartItem::Shutdown,
+        },
+    )
 }
 
 pub(crate) fn start_row_highlight(c: &mut Canvas, sx: i32, ry: i32, color: Color) {

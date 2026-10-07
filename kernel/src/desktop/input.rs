@@ -110,29 +110,11 @@ impl Desktop {
     /// (sidebar width 176, rows 30px high). Sidebar items switch the view; clicks
     /// in the main list select a row.
     pub(crate) fn files_click(&mut self, rect: Rect, px: i32, py: i32) {
-        let cy0 = rect.y + TITLE_H;
-        if px < rect.x + 176 {
-            let view = if (cy0 + 34..cy0 + 64).contains(&py) {
-                Some(0)
-            } else if (cy0 + 66..cy0 + 96).contains(&py) {
-                Some(1)
-            } else if (cy0 + 132..cy0 + 162).contains(&py) {
-                Some(2)
-            } else if (cy0 + 164..cy0 + 194).contains(&py) {
-                Some(3)
-            } else {
-                None
-            };
-            if let Some(v) = view {
-                self.files_set_view(v);
-            }
-            return;
-        }
-        if self.files_view <= 1 {
-            let list_y = cy0 + 78;
-            if py >= list_y {
-                self.files_select_at(((py - list_y) / 30).max(0) as usize);
-            }
+        use osjeff_core::layout::{FilesHit, files_hit};
+        match files_hit(rect, self.files_view, px, py) {
+            Some(FilesHit::View(v)) => self.files_set_view(v),
+            Some(FilesHit::Row(i)) => self.files_select_at(i),
+            None => {}
         }
     }
 

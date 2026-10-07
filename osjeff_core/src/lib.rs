@@ -22,6 +22,7 @@ pub mod fs;
 pub mod heap;
 pub mod hw;
 pub mod keymap;
+pub mod layout;
 pub mod net;
 pub mod process;
 pub mod redirect;
