@@ -109,14 +109,20 @@ pub extern "C" fn worker() -> ! {
     }
 }
 
-/// Resolve a URL and fetch it (HTTP or HTTPS), following up to 5 redirects.
-/// Returns the final raw HTTP response, or `None` on failure.
+/// Resolve a URL and fetch it (HTTP or HTTPS), following up to
+/// [`osjeff_core::redirect::MAX_REDIRECTS`] redirects. Returns the final raw
+/// HTTP response, or `None` on failure. Redirect policy (scheme kept,
+/// https -> http refused, loops, bad `Location` values) lives in
+/// `osjeff_core::redirect`.
 fn fetch_url(net: &mut netstack::Net, url: &[u8]) -> Option<Vec<u8>> {
     use osjeff_core::browser::{header_value, parse_url, status_code};
+    use osjeff_core::redirect::Redirects;
     let mut cur: Vec<u8> = url.to_vec();
+    let mut chain: Option<Redirects> = None;
 
-    for _hop in 0..5 {
+    loop {
         let u = parse_url(&cur)?;
+        let chain = chain.get_or_insert_with(|| Redirects::new(&u));
         let (Ok(host), Ok(path)) = (
             core::str::from_utf8(u.host()),
             core::str::from_utf8(u.path()),
@@ -141,36 +147,20 @@ fn fetch_url(net: &mut netstack::Net, url: &[u8]) -> Option<Vec<u8>> {
         if matches!(code, 301 | 302 | 303 | 307 | 308)
             && let Some(loc) = header_value(&r, b"location")
         {
-            cur = resolve_redirect(host, loc);
-            serial_println!("fetch: {} redirect", code);
-            continue;
+            match chain.follow(&u, loc) {
+                Ok(next) => {
+                    cur = next;
+                    serial_println!("fetch: {} redirect", code);
+                    continue;
+                }
+                Err(e) => {
+                    serial_println!("fetch: {} redirect refused: {:?}", code, e);
+                    return None;
+                }
+            }
         }
 
         serial_println!("fetch: {} bytes (status {})", r.len(), code);
         return Some(r);
     }
-    serial_println!("fetch: too many redirects");
-    None
-}
-
-/// Build an absolute URL from a redirect `Location` value relative to `host`.
-fn resolve_redirect(host: &str, loc: &[u8]) -> Vec<u8> {
-    let ci = |p: &[u8]| loc.len() >= p.len() && loc[..p.len()].eq_ignore_ascii_case(p);
-    let mut out = Vec::new();
-    if ci(b"http://") || ci(b"https://") {
-        out.extend_from_slice(loc);
-    } else if loc.starts_with(b"//") {
-        out.extend_from_slice(b"https:");
-        out.extend_from_slice(loc);
-    } else if loc.starts_with(b"/") {
-        out.extend_from_slice(b"https://");
-        out.extend_from_slice(host.as_bytes());
-        out.extend_from_slice(loc);
-    } else {
-        out.extend_from_slice(b"https://");
-        out.extend_from_slice(host.as_bytes());
-        out.push(b'/');
-        out.extend_from_slice(loc);
-    }
-    out
 }
