@@ -227,3 +227,33 @@ Método: QEMU/TCG sem KVM, mediana de 3 execuções, comparação por proporçã
 **Achados incidentais (BAIXA):** a faixa de sombra do HUD escurece a cada refresh; o menu de contexto deixa "fantasma"; o comentário do splash diz "≥ 5 s" mas ele dura 4–5 s.
 
 **Infraestrutura entregue:** `kernel/src/trace.rs` (marcos de boot na serial, estatísticas opcionais com `--features perf-trace`), `tools/perf/` (harness de cenários, A/B) e `bench/` (criterion, crate fora do workspace). Ver `5acff24` e `6587db6`.
+
+---
+
+## I. Antes e depois (medido nesta sessão)
+
+QEMU/TCG sem KVM: valores de desempenho são proporções, não hardware real.
+
+| Métrica | Antes | Depois |
+|---|---|---|
+| Build do `master` | **não compilava** (nightly sem data + x86_64 0.15.4 + bootloader 0.11.15) | compila; nightly fixado em `nightly-2026-10-05` |
+| Testes em `osjeff_core` | 189 (README dizia 152) | **201** (+12 de regressão) |
+| Cobertura real de linhas (`cargo llvm-cov`, bruta) | 92,33% (README dizia ~98%) | **93,25%** (~88% só produção; branches 74%) |
+| Blocos `unsafe` sem `// SAFETY:` (clippy) | 100 | **0** (lint `warn` ligado; CI usa `-D warnings`) |
+| `static mut` | 0 (mas 23 `RacyCell`, mesmo padrão) | 0 (idem) |
+| Crashes de fuzzing encontrados / corrigidos | — | **9 / 9** (8 achados pelo fuzzer, 1 por leitura, todos com teste de regressão; 3 alvos de 10–25 min, 0 crashes na árvore corrigida) |
+| Falhas silenciosas (panic, #PF/#GP/#DF/#UD, OOM) | `hlt` mudo | mensagem na serial com vetor/RIP/RSP/CR2 |
+| Estouro da pilha do compositor | triple fault (reset mudo) | `#DF` reportado na pilha IST, sem reset (BIOS e UEFI) |
+| Disco após erro de leitura no boot | formatado e sobrescrito | intocado (hash idêntico, falha injetada) |
+| `cargo run -p os -- uefi` | panic no bootloader (128M) | boota (256M) |
+| `lint-kernel` / `lint-host` | **falham** | passam |
+| `cargo audit` | 4 avisos (spin yanked, anyhow unsound, 2 unmaintained) | 1 (`bincode`, sem correção; só build) |
+| Tempo de boot até o desktop (QEMU) | ≈ 8,3 s (splash 4–5 s + firmware/bootloader ≈ 3,7 s; init do kernel ≈ 0,18 s) | igual (splash e init não foram alterados) |
+| Custo do tick do relógio (BIOS / UEFI) | 15,6 ms / 15,3 ms | **0,21 ms / 0,22 ms** |
+| Quadro de tecla no terminal (BIOS / UEFI) | 26,2 ms / 26,5 ms | **13,4 ms / 16,1 ms** |
+| Preenchimento de retângulo em 24 bpp | 14 ciclos/px | **3 ciclos/px** |
+| Tamanho da imagem (BIOS / UEFI) | 4 686 848 B / 4 259 840 B | igual (o builder alinha a imagem) |
+| Aparência do desktop | — | idêntica (AE = 0 fora de HUD e relógio, BIOS e UEFI, em todos os commits de kernel) |
+| CI | nenhum | `.github/workflows/ci.yml` (não foi executado no GitHub nesta sessão; cada comando rodou localmente) |
+
+**Ficou de fora, e por quê:** ver seção E (o que não vale a pena agora) e, entre os itens abertos da seção C, os mais relevantes são: scheduler com estado bloqueado (patch pronto sem A/B), K3 (gerenciador de arquivos), limites de recurso do WASM e do `http_get`, aviso de HTTPS não verificado, guard pages de pilha, e buffers dimensionados pelo framebuffer. Todos mudam comportamento visível ou exigem decisão sua, ou precisam de medição que não coube na sessão.
