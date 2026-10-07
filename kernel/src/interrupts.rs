@@ -35,6 +35,17 @@ const KEYBOARD_VECTOR: u8 = 33; // IRQ1
 const MOUSE_VECTOR: u8 = 44; // IRQ12 (slave PIC)
 /// Software interrupt a blocking thread raises (`int 0x81`) to hand over the CPU.
 pub const YIELD_VECTOR: u8 = 0x81;
+const SPURIOUS_MASTER_VECTOR: u8 = 39; // IRQ7 (master PIC)
+const SPURIOUS_SLAVE_VECTOR: u8 = 47; // IRQ15 (slave PIC)
+
+/// OCW3: make the next read of the command port return the In-Service Register.
+const PIC_READ_ISR: u8 = 0x0B;
+/// OCW3: make the next read of the command port return the Interrupt Request
+/// Register (the power-on default).
+const PIC_READ_IRR: u8 = 0x0A;
+
+/// Spurious IRQ7 / IRQ15 seen so far (index 0 = master, 1 = slave).
+pub static SPURIOUS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
 static IDT: RacyCell<InterruptDescriptorTable> = RacyCell::new(InterruptDescriptorTable::new());
 
@@ -57,12 +68,34 @@ pub fn init() {
         idt.invalid_opcode.set_handler_fn(invalid_opcode);
         idt.segment_not_present.set_handler_fn(segment_not_present);
         idt.stack_segment_fault.set_handler_fn(stack_segment_fault);
+        // The remaining architectural exceptions have no recovery path either; give each a
+        // handler that reports and halts instead of letting it escalate to #DF.
+        idt.debug.set_handler_fn(debug_exception);
+        idt.non_maskable_interrupt.set_handler_fn(nmi);
+        idt.overflow.set_handler_fn(overflow);
+        idt.bound_range_exceeded.set_handler_fn(bound_range);
+        idt.device_not_available
+            .set_handler_fn(device_not_available);
+        idt.invalid_tss.set_handler_fn(invalid_tss);
+        idt.x87_floating_point.set_handler_fn(x87_floating_point);
+        idt.alignment_check.set_handler_fn(alignment_check);
+        idt.machine_check.set_handler_fn(machine_check);
+        idt.simd_floating_point.set_handler_fn(simd_floating_point);
+        idt.virtualization.set_handler_fn(virtualization);
+        idt.cp_protection_exception.set_handler_fn(cp_protection);
+        idt.hv_injection_exception.set_handler_fn(hv_injection);
+        idt.vmm_communication_exception
+            .set_handler_fn(vmm_communication);
+        idt.security_exception.set_handler_fn(security_exception);
         // The timer uses a naked ISR that performs a full preemptive context
         // switch, so it's installed by raw address instead of `set_handler_fn`.
         idt[TIMER_VECTOR].set_handler_addr(VirtAddr::from_ptr(timer_isr as *const ()));
         idt[YIELD_VECTOR].set_handler_addr(VirtAddr::from_ptr(yield_isr as *const ()));
         idt[KEYBOARD_VECTOR].set_handler_fn(keyboard);
         idt[MOUSE_VECTOR].set_handler_fn(mouse);
+        // Spurious IRQ7/IRQ15 (an IRQ line that dropped before the PIC was acknowledged).
+        idt[SPURIOUS_MASTER_VECTOR].set_handler_fn(spurious_master);
+        idt[SPURIOUS_SLAVE_VECTOR].set_handler_fn(spurious_slave);
         // `load` needs `&'static self`; the table lives in a `static`, so a
         // reference derived from its raw pointer is genuinely `'static`.
         (*IDT.get()).load();
@@ -258,6 +291,108 @@ extern "x86-interrupt" fn segment_not_present(f: InterruptStackFrame, code: u64)
 
 extern "x86-interrupt" fn stack_segment_fault(f: InterruptStackFrame, code: u64) {
     fatal("#SS stack segment fault", &f, Some(code))
+}
+
+// ---- remaining exceptions: report and halt ----
+
+extern "x86-interrupt" fn debug_exception(f: InterruptStackFrame) {
+    fatal("#DB debug exception", &f, None)
+}
+
+extern "x86-interrupt" fn nmi(f: InterruptStackFrame) {
+    fatal("NMI non-maskable interrupt", &f, None)
+}
+
+extern "x86-interrupt" fn overflow(f: InterruptStackFrame) {
+    fatal("#OF overflow", &f, None)
+}
+
+extern "x86-interrupt" fn bound_range(f: InterruptStackFrame) {
+    fatal("#BR bound range exceeded", &f, None)
+}
+
+extern "x86-interrupt" fn device_not_available(f: InterruptStackFrame) {
+    fatal("#NM device not available", &f, None)
+}
+
+extern "x86-interrupt" fn invalid_tss(f: InterruptStackFrame, code: u64) {
+    fatal("#TS invalid TSS", &f, Some(code))
+}
+
+extern "x86-interrupt" fn x87_floating_point(f: InterruptStackFrame) {
+    fatal("#MF x87 floating-point exception", &f, None)
+}
+
+extern "x86-interrupt" fn alignment_check(f: InterruptStackFrame, code: u64) {
+    fatal("#AC alignment check", &f, Some(code))
+}
+
+extern "x86-interrupt" fn machine_check(f: InterruptStackFrame) -> ! {
+    fatal("#MC machine check", &f, None)
+}
+
+extern "x86-interrupt" fn simd_floating_point(f: InterruptStackFrame) {
+    fatal("#XM SIMD floating-point exception", &f, None)
+}
+
+extern "x86-interrupt" fn virtualization(f: InterruptStackFrame) {
+    fatal("#VE virtualization exception", &f, None)
+}
+
+extern "x86-interrupt" fn cp_protection(f: InterruptStackFrame, code: u64) {
+    fatal("#CP control protection", &f, Some(code))
+}
+
+extern "x86-interrupt" fn hv_injection(f: InterruptStackFrame) {
+    fatal("#HV hypervisor injection exception", &f, None)
+}
+
+extern "x86-interrupt" fn vmm_communication(f: InterruptStackFrame, code: u64) {
+    fatal("#VC VMM communication exception", &f, Some(code))
+}
+
+extern "x86-interrupt" fn security_exception(f: InterruptStackFrame, code: u64) {
+    fatal("#SX security exception", &f, Some(code))
+}
+
+// ---- spurious PIC interrupts ----
+
+/// Log the first few spurious IRQs (a flood would slow the ISR down on COM1).
+fn note_spurious(slot: usize, irq: u8) {
+    let n = SPURIOUS[slot].fetch_add(1, Ordering::Relaxed) + 1;
+    if n <= 4 {
+        crate::serial_println!("spurious IRQ{irq} ignored (count {n})");
+    }
+}
+
+/// IRQ7. The master PIC raises it as a "spurious" vector when an interrupt
+/// request vanished before acknowledgement; then bit 7 of the In-Service
+/// Register is clear and the handler must return **without** an EOI (an EOI
+/// would retire a real in-service IRQ of lower priority). If bit 7 is set it is
+/// a genuine IRQ7 and needs the EOI.
+extern "x86-interrupt" fn spurious_master(_f: InterruptStackFrame) {
+    outb(PIC1_CMD, PIC_READ_ISR);
+    let isr = inb(PIC1_CMD);
+    outb(PIC1_CMD, PIC_READ_IRR);
+    if isr & 0x80 != 0 {
+        outb(PIC1_CMD, PIC_EOI);
+    } else {
+        note_spurious(0, 7);
+    }
+}
+
+/// IRQ15 (slave PIC). A spurious one must not be acknowledged on the slave,
+/// but the master did take the cascade interrupt (IRQ2), so it still gets an EOI.
+extern "x86-interrupt" fn spurious_slave(_f: InterruptStackFrame) {
+    outb(PIC2_CMD, PIC_READ_ISR);
+    let isr = inb(PIC2_CMD);
+    outb(PIC2_CMD, PIC_READ_IRR);
+    if isr & 0x80 != 0 {
+        outb(PIC2_CMD, PIC_EOI);
+    } else {
+        note_spurious(1, 15);
+    }
+    outb(PIC1_CMD, PIC_EOI);
 }
 
 // ---- 8259 PIC ----
