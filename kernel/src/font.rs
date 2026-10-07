@@ -104,8 +104,88 @@ fn glyph(c: u8) -> [u8; 8] {
         b'~' => [0,0,0b01101000,0b10010000,0,0,0,0],
         b'^' => [0b00100000,0b01010000,0b10001000,0,0,0,0,0],
         b'$' => [0b00100000,0b01111000,0b10100000,0b01110000,0b00101000,0b11110000,0b00100000,0],
-        _ => [0,0,0,0,0,0,0,0],
+        _ => latin1(c),
     }
+}
+
+/// Accent marks for the Latin-1 letters below.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    Acute,
+    Grave,
+    Circumflex,
+    Tilde,
+    Diaeresis,
+    Cedilla,
+}
+
+/// Latin-1 letters used by the ABNT2 keyboard (ç, á, ã, ê, ü, ñ ...), built from
+/// the ASCII glyphs so the font stays one table: a lowercase base keeps its
+/// rows and gets the accent in the two free rows above it (an `i` swaps its dot
+/// for the accent); an uppercase base moves down one row (its cell has a free
+/// bottom row) to make room for a one-row accent; a cedilla hangs in the free
+/// bottom row. Unknown bytes stay blank.
+#[rustfmt::skip]
+fn latin1(c: u8) -> [u8; 8] {
+    use Mark::*;
+    let (base, mark) = match c {
+        0xE0 => (b'a', Grave),      0xE1 => (b'a', Acute),      0xE2 => (b'a', Circumflex),
+        0xE3 => (b'a', Tilde),      0xE4 => (b'a', Diaeresis),
+        0xE8 => (b'e', Grave),      0xE9 => (b'e', Acute),      0xEA => (b'e', Circumflex),
+        0xEB => (b'e', Diaeresis),
+        0xEC => (b'i', Grave),      0xED => (b'i', Acute),      0xEE => (b'i', Circumflex),
+        0xEF => (b'i', Diaeresis),
+        0xF2 => (b'o', Grave),      0xF3 => (b'o', Acute),      0xF4 => (b'o', Circumflex),
+        0xF5 => (b'o', Tilde),      0xF6 => (b'o', Diaeresis),
+        0xF9 => (b'u', Grave),      0xFA => (b'u', Acute),      0xFB => (b'u', Circumflex),
+        0xFC => (b'u', Diaeresis),
+        0xF1 => (b'n', Tilde),      0xE7 => (b'c', Cedilla),
+        0xC0 => (b'A', Grave),      0xC1 => (b'A', Acute),      0xC2 => (b'A', Circumflex),
+        0xC3 => (b'A', Tilde),      0xC4 => (b'A', Diaeresis),
+        0xC8 => (b'E', Grave),      0xC9 => (b'E', Acute),      0xCA => (b'E', Circumflex),
+        0xCB => (b'E', Diaeresis),
+        0xCC => (b'I', Grave),      0xCD => (b'I', Acute),      0xCE => (b'I', Circumflex),
+        0xCF => (b'I', Diaeresis),
+        0xD2 => (b'O', Grave),      0xD3 => (b'O', Acute),      0xD4 => (b'O', Circumflex),
+        0xD5 => (b'O', Tilde),      0xD6 => (b'O', Diaeresis),
+        0xD9 => (b'U', Grave),      0xDA => (b'U', Acute),      0xDB => (b'U', Circumflex),
+        0xDC => (b'U', Diaeresis),
+        0xD1 => (b'N', Tilde),      0xC7 => (b'C', Cedilla),
+        // The accents on their own (what a dead key plus space types).
+        0xB4 => return [0b00010000, 0b00100000, 0, 0, 0, 0, 0, 0],
+        0xA8 => return [0b01010000, 0, 0, 0, 0, 0, 0, 0],
+        _ => return [0; 8],
+    };
+    let mut g = glyph(base);
+    if mark == Cedilla {
+        g[7] = 0b00110000;
+        return g;
+    }
+    if base.is_ascii_uppercase() {
+        // Shift down one row, one-row accent on top.
+        for i in (1..8).rev() {
+            g[i] = g[i - 1];
+        }
+        g[0] = match mark {
+            Acute => 0b00010000,
+            Grave => 0b01000000,
+            Circumflex => 0b00100000,
+            Tilde => 0b01101000,
+            _ => 0b01010000,
+        };
+    } else {
+        // Two free rows above a lowercase letter (an `i` loses its dot).
+        let (r0, r1) = match mark {
+            Acute => (0b00010000, 0b00100000),
+            Grave => (0b01000000, 0b00100000),
+            Circumflex => (0b00100000, 0b01010000),
+            Tilde => (0b01101000, 0b10010000),
+            _ => (0b01010000, 0),
+        };
+        g[0] = r0;
+        g[1] = r1;
+    }
+    g
 }
 
 /// Draws a single character. `scale` enlarges each font pixel into a square block.
