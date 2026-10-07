@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Implementado em `osjeff_core`** (biblioteca pura); a camada de armazenamento do kernel (`ata.rs` `AtaDisk`, `storage.rs`) monta o v3 no boot; a adaptação do desktop/terminal/editor é a onda seguinte |
+| Status | **Implementado em `osjeff_core`** (biblioteca pura); a camada de armazenamento do kernel (`ata.rs` `AtaDisk`, `storage.rs`) monta o v3 no boot e o desktop (gerenciador de arquivos, visualizador, editor, terminal) usa o v3 pela camada VFS (§9.1); o shell v2 e o editor v2 são a onda seguinte |
 | Módulos | `osjeff_core::blockdev`, `osjeff_core::blockcache`, `osjeff_core::fs3` |
 | Substitui | `osjeff_core::fs` (OJFS v2, `OJF2`), que continua intacto e é lido na migração |
 | Restrições | `no_std` + `alloc`, `forbid(unsafe_code)`, sem dependências (CRC32 próprio) |
@@ -426,10 +426,9 @@ inclui as barreiras de flush). `sync()` só força uma barreira extra no disposi
 
 ## 9. Integração no kernel
 
-**Feito** (`kernel/src/ata.rs`, `kernel/src/storage.rs`): itens 1 a 3 abaixo. O
-desktop ainda usa o v2; os consumidores migram depois via `storage::with_fs`. Detalhes de
-comportamento no kernel: um disco em branco grande recebe o v3 **e** o v2 (o
-`Desktop::new` formata o v2 como antes); `Unknown` nunca é escrito pelo `storage`; se o
+**Feito** (`kernel/src/ata.rs`, `kernel/src/storage.rs`): itens 1 a 3 abaixo, e a migração do
+desktop (§9.1). Detalhes de comportamento no kernel: um disco em branco grande recebe só o
+v3 (a área v2 fica em branco, nada a lê); `Unknown` nunca é escrito pelo `storage`; se o
 v3 foi perdido (os dois superblocos) mas a imagem v2 ainda existe, o boot **refaz a
 migração a partir do v2** (o `detect` devolve `V2`), o que descarta o que só existia no v3.
 
@@ -445,6 +444,31 @@ Plano original:
    `mount`); `TooSmall`: seguir no v2; `Blank`: `Fs3::format`; `Unknown`: não escrever.
 3. O disco de 64 KiB do `run.ps1` precisa crescer para ≥ 1 MiB (recomendado 64 MiB) para
    migrar; com 64 KiB a migração devolve `TooSmall` e o v2 segue funcionando.
+
+### 9.1 Integração do desktop (`desktop/vfs.rs`, `osjeff_core::vfs`)
+
+O desktop não toca mais o v2 (`disk()`, `PERSIST`, `flush_disk`, `fs::*` e
+`ata::read_image/write_image` foram removidos). Todos os consumidores usam **uma** API de
+caminhos absolutos, `desktop::vfs`, cuja lógica vive em `osjeff_core::vfs` (testada sobre
+`RamDisk`): o trait object-safe `Backend` (implementado para todo `Fs3<D>`), `VfsError`
+(mapeia `FsError`, mensagens em português), `unique_name` (`a (2).txt`), `move_to` (um
+`rename`: instantâneo para qualquer tamanho), `CopyJob` (cópia recursiva em passos limitados:
+`plan` escolhe os nomes de destino, `step(budget)` copia no máximo `budget` bytes, `abort`
+apaga só o arquivo pela metade; o volume está consistente a cada passo, então um `kill -9`
+no meio de uma cópia grande deixa um `fsck` limpo e, no máximo, um arquivo parcial) e
+`seed_welcome` (a única semente de boas-vindas, chamada pelo `storage` e pelo fallback).
+
+* **Volume:** `storage::state() == V3` → `storage::with_fs`. Qualquer outro estado → um
+  `Fs3<RamDisk>` de 4 MiB no primeiro uso, com aviso (log + barra de status): `TooSmall`
+  com um v2 legível **importa** o v2 para a RAM (`migrate_v2` sobre o `RamDisk`, o disco não
+  é escrito); sem disco/`Unknown`/`Failed` nasce com a semente. `Unknown` nunca é escrito.
+* **Erros:** E/S que falha vira `VfsError::Io` mostrado na janela; `Poisoned` também.
+* **Gerenciador de arquivos:** `osjeff_core::fileman` (`FileView`, ordenação natural,
+  seleção, migalhas, histórico, `Layout` com hit-testing, formatação de data/tamanho,
+  `TextInput`, `PathClip`) e o visualizador `osjeff_core::viewer`.
+* **Ferramenta de host:** `cargo run -p osjeff_core --example fs3_inject -- <disco.img>
+  <arquivo> <destino>` (também `--mkdir`, `--files N dir`, `--ls dir`) formata/abre o v3 de
+  uma imagem e copia arquivos para ela (ver `docs/TESTING.md`).
 
 ## 10. Limites
 

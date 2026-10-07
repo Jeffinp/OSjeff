@@ -635,7 +635,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
 - **Terminal:** grade lógica 40x14 (+ linha de comando de até 32 bytes); `HELP`, `CLS`,
   `TIME`, `VER`, `ECHO`, `EDIT`, `CALC`, `PS`, `LS`, `CAT`, `SAVE`, `LOAD`, `RM`, `REBOOT`,
   `SHUTDOWN` (e aliases). Sem diretório corrente: `SAVE`, `LOAD`, `CAT` e `RM` só agem na
-  raiz, e `RM` apaga de vez. A saída vai para o terminal que emitiu o comando. `SAVE nome`
+  raiz, e `RM` manda para a lixeira (restaurável no gerenciador). A saída vai para o terminal que emitiu o comando. `SAVE nome`
   grava o editor usado mais recentemente (ou avisa que não há editor); `LOAD nome` abre
   o arquivo num editor novo (ou foca o que já o mostra).
 - **Editor:** grade lógica fixa de 44x18. Um arquivo que não cabe na grade (linha com mais
@@ -643,7 +643,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   (`Editor::is_lossy`), a barra de status mostra `TRUNC` e `fs_save_in` **recusa salvar**
   ("not saved: file is larger than the editor window"), para não destruir o resto. O
   `leiame.txt` semeado no primeiro boot foi reescrito para caber. Cada janela tem seu
-  buffer, arquivo e pasta de origem (`EditorState`): Ctrl+S regrava naquela pasta.
+  buffer e caminho absoluto (`EditorState::path`): Ctrl+S regrava naquele arquivo.
 - **Terminal e Editor em janelas de outro tamanho** (grade lógica fixa): o texto é desenhado
   na **maior escala inteira de 2 a 4** em que a grade inteira cabe (`layout::fit_scale`),
   ancorado no canto superior esquerdo, sem distorção; maximizada, a letra fica maior. Em
@@ -653,12 +653,37 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   Manager ficam presos à borda inferior.
 - **Calculadora:** quatro operações, entrada de até 16 caracteres, formatador decimal sem
   intrínsecos de `f64` do `std`. As teclas se esticam com a janela (`calc_layout`).
-- **Gerenciador de arquivos:** vistas Arquivos, Lixeira e painéis dos dois discos IDE
-  (`IDENTIFY`); cada janela tem a sua (`FilesState`: seleção, vista, pasta). Opera **por
-  slot e por pasta**: abrir um arquivo (Enter) abre ou foca um editor, guardando a pasta de
-  origem; se a pasta foi para a lixeira, `fs::live_dir` cai para a raiz. Teclas: setas,
-  Enter (abre, ou restaura na Lixeira), Backspace sobe, Tab troca a vista, Delete (lixeira
-  ou definitivo), `N`. A lista e o rodapé acompanham o tamanho da janela.
+- **Gerenciador de arquivos (v2):** navegação por **caminho** sobre o OJFS v3, uma
+  janela independente por instância (`FilesState`, que embrulha o `osjeff_core::fileman::FileView`).
+  Barra de endereço com migalhas clicáveis, voltar/avançar/subir (botões, Ctrl+←/→/↑,
+  Backspace), barra lateral (Raiz, Documentos, Lixeira, disco com barra de uso por `statfs`),
+  colunas Nome/Tamanho/Modificado (clique no cabeçalho ordena; pastas sempre primeiro; ordem
+  natural: `f2` antes de `f10`), seleção múltipla (Shift/Ctrl+clique, Shift+setas, Ctrl+A),
+  rolagem (roda, PageUp/PageDown, barra) com até 20 000 linhas, nomes UTF-8 de até 255 bytes
+  (desenhados dobrados para ASCII: a fonte 5x7 não tem acentos). Operações: `F` novo arquivo,
+  `N` nova pasta, F2 renomear (campo de nome em linha), Ctrl+C/X/V (área de transferência de
+  **caminhos** compartilhada entre janelas: recortar+colar é um `rename`, instantâneo; copiar
+  vira um `CopyJob` que avança 128 KiB por quadro com barra de progresso, Esc cancela e apaga o
+  arquivo pela metade; colisão vira `nome (2).ext`), Del (lixeira), Shift+Del (permanente, com
+  confirmação), Restaurar, Esvaziar lixeira, Propriedades, menu de contexto (botão direito),
+  F5 atualiza. Enter/duplo clique: pasta entra; `.png/.bmp/.ppm` abre o Visualizador;
+  `.wasm` chama `apps_hook::open_wasm` (por ora "Plataforma de apps indisponivel"); texto abre
+  o Editor atual (arquivo maior que a grade: avisa "truncado, somente leitura"). Toda mudança
+  do disco recarrega todas as janelas do gerenciador (`Desktop::fs_changed`); desenhar nunca
+  toca o disco. Fechar a janela no meio de uma cópia desfaz o arquivo parcial.
+- **Visualizador de imagens (`Kind::Viewer`):** multi-instância, redimensionável. Abre
+  PNG/BMP/PPM por `image::decode` (limite de 16 Mpx embutido; arquivo corrompido mostra a
+  mensagem na janela). Ajusta à janela (`0`), tamanho real (`1`), `+`/`-`/roda de zoom em
+  torno do cursor, arrastar com o mouse (ou setas) para mover, `R` gira (Shift+R anti-horário),
+  `H`/`V` espelham, ←/→ (e PageUp/PageDown) trocam de imagem da mesma pasta, `I` painel de
+  informações, `S`/Ctrl+S salva como (extensão `.png`/`.bmp`/`.ppm` escolhe o formato), `W`
+  chama `apps_hook::set_wallpaper` (por ora só avisa). Transparência sobre fundo xadrez. Abaixo
+  de 100 % a imagem é reduzida uma vez por mudança de zoom (filtro de caixa, em cache); a 100 %
+  ou mais a amostragem é por vizinho mais próximo direto da origem. Lógica pura em
+  `osjeff_core::viewer` (zoom, pan, caixa de ajuste, lista da pasta, texto de informações).
+  Está no Painel Iniciar e no menu do desktop; o **dock padrão não mudou**. Capturas:
+  `docs/img/files-list.png`, `files-copy-progress.png`, `files-trash-confirm.png`,
+  `viewer-photo.png`, `viewer-transparency.png`, `viewer-error.png`.
 - **Navegador:** a barra de endereço e a área de conteúdo seguem a janela, e a página é
   **diagramada de novo** para a nova largura ao terminar de redimensionar (o corpo HTML
   fica guardado na instância). Fechar a janela descarta página e estado.
@@ -683,6 +708,9 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
 3. Dock: `layout::DOCK_COUNT` e a lista de ícones em `widgets::paint_background`. Só os
    primeiros `DOCK_APPS` (`instance.rs`) de `Kind::ALL` têm ícone; os demais aparecem apenas
    no Painel Iniciar e no menu de contexto.
+3. Dock (opcional): `layout::DOCK_COUNT` e a lista de ícones em `widgets::paint_background`. Um
+   `Kind` além dos slots do dock (o Visualizador) aparece só no Painel Iniciar e no menu do
+   desktop; `draw_dock_dots` ignora quem não tem ícone.
 
 Foco, z-order, minimizar/maximizar/redimensionar, Alt+Tab, processo (`nome`, `nome 2`...),
 ponto de minimizada, menu "Nova janela" e o encerramento ao fechar não pedem nenhuma mudança.
@@ -783,13 +811,29 @@ para uma transferência longa não congelar o compositor. As portas ATA ficam at
 `YieldMutex` (sync.rs: espera cedendo a CPU, e que uma thread pode segurar durante E/S).
 `storage.rs` monta o v3 no boot (`storage::init`, antes do desktop): v3 existente →
 `mount` + `fsck`; imagem v2 → `migrate_v2` + `mount`; disco em branco ≥ 1 MiB →
-`format` + arquivos de boas-vindas (o desktop segue formatando o v2 por conta própria);
+`format` + arquivos de boas-vindas (`vfs::seed_welcome`, a única cópia da semente; a área v2 fica em branco);
 disco < 1 MiB (o de 64 KiB antigo) → `TooSmall`, segue no v2; `OJF3` com CRC ruim ou
-conteúdo desconhecido → **não escreve nada**. API para os consumidores futuros:
-`storage::with_fs(|fs| ...)`, `is_v3()`, `state()` e `now()` (segundos Unix em UTC, do
-RTC). **O desktop, o terminal e o editor ainda usam o v2 em RAM**: até migrarem, o v3 é
-um instantâneo feito na migração e a imagem v2 (setores 0..98, nunca tocados pelo v3)
-continua sendo a fonte da verdade da interface.
+conteúdo desconhecido → **não escreve nada**. API: `storage::with_fs(|fs| ...)`, `is_v3()`, `state()` e `now()` (segundos Unix em UTC, do
+RTC). **O desktop não usa mais o v2** (`disk()`, `PERSIST`, `ata::read_image/write_image`
+foram removidos): tudo passa pela camada VFS abaixo.
+
+### 8.3 A camada VFS do desktop (`desktop/vfs.rs`, `osjeff_core::vfs`)
+
+Um único caminho para arquivos: gerenciador, visualizador, editor e comandos do terminal.
+A lógica (caminhos, validação de nomes, `unique_name`, `move_to`, `CopyJob`, `tree_size`,
+erros tipados com mensagem em português) é `osjeff_core::vfs` sobre o trait `Backend`
+(implementado para qualquer `Fs3<D>`), testada no host com `RamDisk`. O kernel só decide
+**qual volume**: `storage::state() == V3` → o disco ATA montado; qualquer outro estado
+(disco de 64 KiB, sem disco, desconhecido, falha) → um `Fs3<RamDisk>` de 4 MiB criado no
+primeiro uso, com o aviso "arquivos só na memória" (log serial e barra de status do
+gerenciador, "Memoria (RAM)" na barra lateral). Num disco pequeno com v2 legível o v2 é
+**importado** para o volume de RAM (`migrate_v2`); senão ele nasce com os arquivos de
+boas-vindas. O disco nunca é escrito nesse caminho (e um `Unknown` jamais). Falha de E/S é
+um `VfsError` mostrado ao usuário, nunca um pânico. A API (documentada no topo do arquivo):
+`read_file`, `read_range`, `write_file`, `append`, `list`, `stat`, `exists`, `statfs`,
+`mkdir`, `new_file`, `new_folder`, `rename`, `rename_path`, `remove` (lixeira), `purge`,
+`trash_list`, `restore`, `trash_purge`, `empty_trash`, `move_to`, `copy_plan`/`copy_step`/
+`copy_abort`, `copy` e `generation`.
 
 ## 9. Rede e navegador
 

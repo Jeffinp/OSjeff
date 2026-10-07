@@ -139,6 +139,42 @@ cargo run --release -p osjeff_core --example ojfs3_bench   # MiB/s e setores por
 `Cargo.toml` raiz): as varreduras de queda de energia rodam em segundos em vez de minutos.
 O kernel e os perfis `dev`/`release` não mudam.
 
+### Injetar arquivos num disco v3 (host)
+
+`osjeff_core/examples/fs3_inject.rs` abre (ou formata, se estiver em branco, ou migra, se for
+v2) a imagem do disco do sistema de arquivos e copia arquivos para ela, para testar o desktop
+com dados grandes sem digitá-los:
+
+```bash
+truncate -s 64M fs.img
+cargo run --release -p osjeff_core --example fs3_inject -- fs.img foto.png /Imagens/foto.png
+cargo run --release -p osjeff_core --example fs3_inject -- fs.img --files 2000 /many   # 2000 arquivos
+cargo run --release -p osjeff_core --example fs3_inject -- fs.img --ls /
+KEEP_FS=1 tools/qemu-headless.sh bios out 25      # usa o <out>/fs.img existente
+```
+
+Cria as pastas que faltam, recusa uma imagem com conteúdo desconhecido (nunca reformata) e
+copia em blocos de 1 MiB (arquivos maiores que o limite de 64 MiB de `read_file` também
+entram). Teste de ponta a ponta do gerenciador: copiar/mover/renomear/apagar/restaurar um
+arquivo de 3 MB, reiniciar com `KEEP_FS=1` e conferir que tudo persistiu e que o log do
+`storage` diz `fsck clean`.
+
+Cenários do gerenciador de arquivos e do visualizador (`tools/perf/scen/w15a-*.sh`; precisam de
+um disco preparado com o `fs3_inject`: `/big.bin` de 3 MB, `/Imagens/{foto.png,foto.bmp,foto.ppm,
+transparente.png,corrompida.png,pequena.png}` e `--files 2000 /many`):
+
+| Cenário | O que faz |
+|---|---|
+| `w15a-viewer.sh` | abre o Arquivos, entra em `/Imagens`, abre a imagem corrompida (erro na janela), BMP, zoom, 100 %, girar, painel de informações, PNG, PPM, PNG transparente |
+| `w15a-files-ops.sh` | copia o arquivo de 3 MB entre pastas (barra de progresso), renomeia (F2), recorta/cola, apaga para a lixeira, restaura, exclusão permanente com confirmação |
+| `w15a-many.sh` | abre a pasta de 2000 arquivos e rola (PageUp/PageDown/setas/Home/End); com `perf-trace`, os tempos de quadro saem no serial (medido: quadro estável 14 a 31 ms no TCG) |
+| `w15a-soak.sh` | 100x abre/fecha o Arquivos e 100x abre/fecha o Visualizador; `tools/perf/w8-heap.sh <serial.log>` mede a deriva do heap (medido: +1544 B em 200 ciclos) |
+
+Persistência: depois do cenário, `fs3_inject <disco.img> --ls /` lista o que ficou, e um novo
+boot com o mesmo disco monta com `fsck clean`. Queda de energia no meio de uma cópia grande
+(`kill -9` do QEMU): o próximo boot monta limpo; o arquivo copiado pela metade fica no disco
+(menor que o original) e nada mais é afetado.
+
 ## 3. Boot em QEMU
 
 Sem tela e sem KVM (TCG), BIOS e UEFI:

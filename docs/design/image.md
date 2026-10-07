@@ -2,7 +2,8 @@
 
 Bibliotecas puras em `osjeff_core` (`no_std` + `alloc`, `forbid(unsafe_code)`,
 sem dependências novas, testadas no host) que servem de base para o visualizador
-de imagens, ícones e wallpapers. O kernel não foi alterado.
+de imagens, ícones e wallpapers. O visualizador de imagens do desktop (`Kind::Viewer`,
+`kernel/src/desktop/viewer.rs`, lógica em `osjeff_core::viewer`) usa `image::decode`/`encode`.
 
 ```
 inflate (DEFLATE + zlib + CRC-32/Adler-32)     deflate (codificador: stored / LZ77 + Huffman fixo)

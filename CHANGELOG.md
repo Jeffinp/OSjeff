@@ -3,6 +3,26 @@
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
 tem releases versionadas; as seções são marcos na `master`.
 
+## 2026-10 — Desktop sobre o OJFS v3: gerenciador de arquivos e visualizador de imagens
+
+- **VFS do desktop** (`desktop/vfs.rs` + `osjeff_core::vfs`): uma API de caminhos absolutos
+  para gerenciador, visualizador, editor e terminal, sobre o OJFS v3 montado (`storage`).
+  Disco pequeno/sem disco/desconhecido: volume de 4 MiB na RAM com aviso (v2 de um disco de
+  64 KiB é importado). O v2 saiu do desktop (`disk()`, `PERSIST`, `ata::read_image/write_image`);
+  a semente de boas-vindas existe num lugar só (`vfs::seed_welcome`).
+- **Gerenciador de arquivos v2:** caminhos, migalhas, histórico, barra lateral com uso do disco,
+  colunas ordenáveis, seleção múltipla, novo arquivo/pasta, renomear (F2), copiar/recortar/colar
+  entre janelas, lixeira (excluir, restaurar, esvaziar), exclusão permanente com confirmação,
+  propriedades, menu de contexto, 20 000 linhas, nomes UTF-8 de 255 bytes, cópias grandes em
+  passos por quadro com barra de progresso e cancelamento. Corrige o texto claro sobre fundo claro.
+- **Visualizador de imagens** (`Kind::Viewer`, no Painel Iniciar; o dock não mudou): PNG/BMP/PPM,
+  ajustar/zoom/roda/arrastar/girar/espelhar, próxima/anterior da pasta, informações, fundo xadrez
+  para transparência, salvar como PNG/BMP/PPM. Arquivo corrompido vira mensagem na janela.
+- **Mouse com roda** (protocolo IntelliMouse do PS/2, negociado no boot) e teclas F2/F5/PageUp/PageDown.
+- **Pontos de extensão:** `desktop::apps_hook::{open_wasm, set_wallpaper}` (as frentes de apps WASM e
+  de Configurações ligam depois).
+- Ferramenta de host `fs3_inject` (injeta arquivos numa imagem v3). Testes: 1546 -> 1680 (+134).
+
 ## 2026-10 — Rede gerenciável
 
 - **NIC:** trait `Nic` e `Port` (dono exclusivo, com contadores); drivers `virtio-net`

@@ -15,8 +15,9 @@ use osjeff_core::viewer as vw;
 
 /// Height of the bottom status bar.
 const STATUS_H: i32 = 24;
-/// Largest file the viewer reads (the decoder bounds the pixels on its own).
-const MAX_FILE: u64 = 48 * 1024 * 1024;
+/// Largest file the viewer reads (the decoder bounds the pixels on its own; the kernel
+/// heap is 64 MiB, so the file and the decoded pixels must both fit).
+const MAX_FILE: u64 = 24 * 1024 * 1024;
 
 const BG: Color = Color::rgb(0x1B, 0x1F, 0x27);
 const BAR: Color = Color::rgb(0x12, 0x16, 0x22);
