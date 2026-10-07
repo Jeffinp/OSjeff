@@ -379,12 +379,12 @@ fn trim_ascii(mut s: &[u8]) -> &[u8] {
     s
 }
 
-/// The clean HTML body of a raw HTTP response: headers stripped, the chunk
-/// framing removed if the response is `Transfer-Encoding: chunked`, and
-/// `Content-Encoding: gzip` / `deflate` decompressed (bounded by
-/// [`crate::gzip::MAX_DECODED_BYTES`]). A body that cannot be decoded becomes a
-/// short explanatory page instead of garbage.
-pub fn page_body(resp: &[u8]) -> alloc::vec::Vec<u8> {
+/// The payload of a raw HTTP response: headers stripped, the chunk framing removed
+/// if the response is `Transfer-Encoding: chunked`, and `Content-Encoding: gzip` /
+/// `deflate` decompressed (bounded by [`crate::gzip::MAX_DECODED_BYTES`]). An
+/// encoding that cannot be decoded is an error (the page view shows a message, an
+/// app gets a failure: neither gets garbage).
+pub fn body_bytes(resp: &[u8]) -> Result<alloc::vec::Vec<u8>, crate::gzip::EncodingError> {
     let body = http_body(resp);
     let chunked = header_value(resp, b"transfer-encoding")
         .map(|v| v.eq_ignore_ascii_case(b"chunked"))
@@ -394,20 +394,30 @@ pub fn page_body(resp: &[u8]) -> alloc::vec::Vec<u8> {
     } else {
         body.to_vec()
     };
-    let enc = header_value(resp, b"content-encoding")
-        .map(crate::gzip::Encoding::parse)
-        .unwrap_or(crate::gzip::Encoding::Identity);
+    let enc = content_encoding(resp);
     if enc == crate::gzip::Encoding::Identity {
-        return raw;
+        return Ok(raw);
     }
-    match crate::gzip::decode_body(enc, &raw) {
+    crate::gzip::decode_body(enc, &raw)
+}
+
+fn content_encoding(resp: &[u8]) -> crate::gzip::Encoding {
+    header_value(resp, b"content-encoding")
+        .map(crate::gzip::Encoding::parse)
+        .unwrap_or(crate::gzip::Encoding::Identity)
+}
+
+/// The clean HTML body of a raw HTTP response ([`body_bytes`]); a body that cannot
+/// be decoded becomes a short explanatory page instead of garbage.
+pub fn page_body(resp: &[u8]) -> alloc::vec::Vec<u8> {
+    match body_bytes(resp) {
         Ok(v) => v,
         Err(e) => {
             let msg: &[u8] = match e {
                 crate::gzip::EncodingError::TooLarge => {
                     b"<p>Pagina descompactada grande demais (limite de 1 MiB).</p>"
                 }
-                _ if enc == crate::gzip::Encoding::Unsupported => {
+                _ if content_encoding(resp) == crate::gzip::Encoding::Unsupported => {
                     b"<p>Codificacao de conteudo nao suportada.</p>"
                 }
                 _ => b"<p>Falha ao descompactar a pagina (dados corrompidos ou cortados).</p>",

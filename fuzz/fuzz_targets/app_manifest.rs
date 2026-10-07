@@ -14,7 +14,10 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::appmanifest::{self, MAX_FDS, MAX_FUEL_FRAME, MAX_MEM_MIB, Manifest};
+use osjeff_core::appmanifest::{
+    self, MAX_FDS, MAX_FUEL_FRAME, MAX_MEM_MIB, MAX_NET_HOSTS, MAX_NET_HOSTS_LEN, Manifest,
+};
+use osjeff_core::appnet;
 use osjeff_core::wasmsec;
 
 const MIN: &[u8] = b"id=fz\nname=Fz\nversion=1.0.0\n";
@@ -52,6 +55,17 @@ fn check(m: &Manifest) {
     // `parse` already refused anything above the ceilings, so nothing is clamped.
     assert_eq!(q.mem_bytes, (m.mem_mib as usize) << 20);
     assert_eq!(q.fuel_frame, m.fuel_frame);
+    // `net_hosts`: a bounded list of public names, only with the network permission,
+    // and the allow-list never admits what the destination filter refuses.
+    assert!(m.net_hosts.len() <= MAX_NET_HOSTS);
+    assert!(m.net_hosts.is_empty() || m.net.allows_http());
+    let total: usize = m.net_hosts.iter().map(|h| h.len() + 1).sum();
+    assert!(total <= MAX_NET_HOSTS_LEN + 1);
+    for e in &m.net_hosts {
+        let base = e.strip_prefix("*.").unwrap_or(e);
+        assert!(appnet::host_allowed(base), "{e}");
+        assert!(appnet::host_permitted(std::slice::from_ref(e), base) == (base == e));
+    }
 }
 
 fuzz_target!(|data: &[u8]| {

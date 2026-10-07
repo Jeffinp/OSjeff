@@ -16,6 +16,7 @@ use crate::image::{self, Image};
 use crate::png;
 use crate::wasmsec::{self, WasmError};
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::fmt;
 
 /// Name of the custom section holding the manifest text.
@@ -27,6 +28,10 @@ pub const MAX_MANIFEST_BYTES: usize = 4096;
 pub const MAX_MANIFEST_LINES: usize = 64;
 pub const MAX_ICON_BYTES: usize = 64 * 1024;
 pub const MAX_ICON_DIM: u32 = 64;
+
+/// Most entries of `net_hosts`, and its longest value.
+pub const MAX_NET_HOSTS: usize = 8;
+pub const MAX_NET_HOSTS_LEN: usize = 256;
 
 pub const MAX_ID_LEN: usize = 32;
 pub const MAX_NAME_LEN: usize = 24;
@@ -116,6 +121,11 @@ pub struct Manifest {
     pub fs: FsPerm,
     pub net: NetPerm,
     pub clipboard: ClipPerm,
+    /// `net_hosts=`: the only destinations `net_http_get` may reach (`example.com`
+    /// exactly, or `*.example.com` for any subdomain); empty means any public host
+    /// the destination filter ([`crate::appnet`]) lets through. Only with `net=http`
+    /// or `tcp`.
+    pub net_hosts: Vec<String>,
     pub mem_mib: u32,
     pub fuel_frame: u64,
     pub disk_kib: u32,
@@ -232,6 +242,38 @@ fn parse_version(v: &str) -> Result<Version, ManifestError> {
     })
 }
 
+/// `net_hosts=a.example.com,*.cdn.example.org`: 1..=[`MAX_NET_HOSTS`] distinct,
+/// lower-case entries, each a public host name by the destination filter (so
+/// `localhost`, single labels and IP literals in private ranges are refused here
+/// too), optionally with a leading `*.` for subdomains.
+fn parse_net_hosts(v: &str) -> Result<Vec<String>, ManifestError> {
+    const KEY: &str = "net_hosts";
+    if v.is_empty() || v.len() > MAX_NET_HOSTS_LEN {
+        return Err(ManifestError::BadValue(KEY));
+    }
+    let mut out: Vec<String> = Vec::new();
+    for entry in v.split(',') {
+        let base = entry.strip_prefix("*.").unwrap_or(entry);
+        let canonical = base.bytes().all(|c| !c.is_ascii_uppercase());
+        // `host_allowed` is the destination filter: a name an app could never reach is
+        // not worth listing. Wildcards need a registrable-looking base (a dot).
+        if !canonical
+            || !crate::appnet::host_allowed(base)
+            || (base != entry && !base.contains('.'))
+        {
+            return Err(ManifestError::BadValue(KEY));
+        }
+        if out.iter().any(|e| e == entry) {
+            return Err(ManifestError::BadValue(KEY));
+        }
+        if out.len() == MAX_NET_HOSTS {
+            return Err(ManifestError::OverLimit(KEY));
+        }
+        out.push(String::from(entry));
+    }
+    Ok(out)
+}
+
 fn key_is_syntactic(k: &str) -> bool {
     !k.is_empty()
         && k.len() <= 32
@@ -263,6 +305,7 @@ impl Manifest {
         let mut fs = None;
         let mut net = None;
         let mut clipboard = None;
+        let mut net_hosts: Option<Vec<String>> = None;
         let mut mem_mib = None;
         let mut fuel_frame = None;
         let mut disk_kib = None;
@@ -331,6 +374,7 @@ impl Manifest {
                     };
                     set_once!(net, "net", p);
                 }
+                "net_hosts" => set_once!(net_hosts, "net_hosts", parse_net_hosts(val)?),
                 "clipboard" => {
                     let p = match val {
                         "none" => ClipPerm::None,
@@ -409,6 +453,12 @@ impl Manifest {
         let name = name.ok_or(ManifestError::Missing("name"))?;
         let version = version.ok_or(ManifestError::Missing("version"))?;
         let fs = fs.unwrap_or(FsPerm::None);
+        let net = net.unwrap_or(NetPerm::None);
+        let net_hosts = net_hosts.unwrap_or_default();
+        if !net_hosts.is_empty() && !net.allows_http() {
+            // An allow-list for a permission the app does not have is a mistake.
+            return Err(ManifestError::BadValue("net_hosts"));
+        }
         let win_w = win_w.unwrap_or(DEFAULT_WIN_W);
         let win_h = win_h.unwrap_or(DEFAULT_WIN_H);
         let win_min_w = win_min_w.unwrap_or(win_w.min(200));
@@ -434,7 +484,8 @@ impl Manifest {
             version,
             abi: abi.unwrap_or(Abi::V2),
             fs,
-            net: net.unwrap_or(NetPerm::None),
+            net,
+            net_hosts,
             clipboard: clipboard.unwrap_or(ClipPerm::None),
             mem_mib: mem_mib.unwrap_or(DEFAULT_MEM_MIB),
             fuel_frame: fuel_frame.unwrap_or(DEFAULT_FUEL_FRAME),
@@ -463,6 +514,7 @@ impl Manifest {
             abi: Abi::V1,
             fs: FsPerm::None,
             net: NetPerm::None,
+            net_hosts: Vec::new(),
             clipboard: ClipPerm::None,
             mem_mib: MAX_MEM_MIB,
             fuel_frame: MAX_FUEL_FRAME,

@@ -13,7 +13,10 @@
 //! QEMU gateway (`10.0.2.2`) and the LAN are therefore out of reach of apps.
 //! The kernel must repeat the address check on the *resolved* IP.
 
+use crate::appabi::{ERR_INVAL, ERR_NET, ERR_PERM};
+use crate::appmanifest::NetPerm;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 pub const MAX_URL: usize = 512;
 /// Largest response body handed to the guest.
@@ -188,6 +191,74 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
     let head = s.get(..prefix.len())?;
     head.eq_ignore_ascii_case(prefix)
         .then(|| &s[prefix.len()..])
+}
+
+/// Does the app's `net_hosts` allow `host` (lower-case, as [`Url::host`])? An empty
+/// list allows every host the destination filter accepted; otherwise `host` must
+/// equal an entry or, for a `*.d` entry, be a subdomain of `d` (`d` itself is not
+/// covered: list it too). Used on the request URL and again on every redirect hop.
+pub fn host_permitted(net_hosts: &[String], host: &str) -> bool {
+    if net_hosts.is_empty() {
+        return true;
+    }
+    net_hosts.iter().any(|e| match e.strip_prefix("*.") {
+        Some(base) => host
+            .strip_suffix(base)
+            .is_some_and(|head| head.len() > 1 && head.ends_with('.')),
+        None => e == host,
+    })
+}
+
+/// May an app with permission `perm` and allow-list `hosts` fetch `url`? On success
+/// the parsed URL (the destination filter and the allow-list both passed); on
+/// failure the ABI error code to hand to the guest: `ERR_PERM` for no network
+/// permission or a host outside `net_hosts`, `ERR_INVAL` for an oversized URL,
+/// `ERR_NET` for anything else the filter refuses. Called for the request and,
+/// with the redirect target, for every hop.
+pub fn authorize(perm: NetPerm, hosts: &[String], url: &[u8]) -> Result<Url, i32> {
+    if !perm.allows_http() {
+        return Err(ERR_PERM);
+    }
+    let u = parse_url(url).map_err(|e| match e {
+        NetError::TooLong => ERR_INVAL,
+        _ => ERR_NET,
+    })?;
+    if !host_permitted(hosts, &u.host) {
+        return Err(ERR_PERM);
+    }
+    Ok(u)
+}
+
+/// Why a response is not handed to the app.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResponseError {
+    /// Not an HTTP response (no status line).
+    Malformed,
+    /// A status other than 2xx (the app only sees successful bodies).
+    Status(u16),
+    /// The body uses an encoding that could not be decoded.
+    Encoding,
+}
+
+impl ResponseError {
+    /// The ABI code for the guest.
+    pub fn code(self) -> i32 {
+        ERR_NET
+    }
+}
+
+/// The body an app receives for the raw HTTP `response`: decoded (chunked, gzip,
+/// deflate) and cut to `cap` bytes; the flag says it was cut. Only a 2xx status
+/// yields a body.
+pub fn app_response(response: &[u8], cap: usize) -> Result<(Vec<u8>, bool), ResponseError> {
+    let status = crate::browser::status_code(response).ok_or(ResponseError::Malformed)?;
+    if !(200..300).contains(&status) {
+        return Err(ResponseError::Status(status));
+    }
+    let mut body = crate::browser::body_bytes(response).map_err(|_| ResponseError::Encoding)?;
+    let cut = body.len() > cap;
+    body.truncate(cap);
+    Ok((body, cut))
 }
 
 /// One request at a time, at most one per [`MIN_INTERVAL_MS`].
