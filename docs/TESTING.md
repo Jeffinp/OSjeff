@@ -83,6 +83,21 @@ Resultado da auditoria (10 minutos por alvo, em paralelo, QEMU não envolvido):
 
 `web_parse` ainda ganhava cobertura no fim: rode por horas antes de confiar nele.
 
+Alvos do editor v2 e do shell (10 minutos cada, rodando em paralelo, corpus vazio no
+início, nenhum crash; cobertura de regiões/linhas por `cargo fuzz coverage` sobre o
+corpus final):
+
+| Alvo | Execuções | execs/s | Cobertura libFuzzer (arestas) | Cobertura do código-alvo |
+|---|---|---|---|---|
+| `shell_parse` | 570 mil | 950 | 6382 | `parse.rs` 96% das linhas, `line.rs` 93%, `glob.rs` 88%, `fs.rs` (MemFs) 87%, `exec.rs` 77%, `builtins.rs` 65% |
+| `editor_ops` | 1,62 M | 2690 | 2095 | `editor2` regiões: `view.rs` 97%, `keys.rs` 95%, `buffer.rs` 92%, `mod.rs` 90%, `search.rs` 84%, `undo.rs` 72% |
+
+O primeiro `editor_ops` achou um erro **da harness** (assumia que refazer tudo devolvia o
+texto final mesmo com refazeres pendentes de operações `Undo` anteriores), corrigido na
+harness: não houve bug na biblioteca. Os trechos que o fuzz não alcança (limite de
+memória do desfazer, comandos que dependem de `SysInfo` real) são cobertos pelos testes
+unitários.
+
 ## 3. Boot em QEMU
 
 Sem tela e sem KVM (TCG), BIOS e UEFI:
