@@ -7,6 +7,16 @@ pub const VIRTIO_VENDOR: u16 = 0x1AF4;
 pub const VIRTIO_GPU_MODERN: u16 = 0x1050; // 0x1040 + virtio device type 16 (GPU)
 pub const VIRTIO_GPU_LEGACY: u16 = 0x1010;
 
+/// virtio-net device ids: transitional (also what QEMU's default `virtio-net-pci`
+/// reports) and modern (0x1040 + device type 1).
+pub const VIRTIO_NET_LEGACY: u16 = 0x1000;
+pub const VIRTIO_NET_MODERN: u16 = 0x1041;
+
+/// `true` for a modern or transitional virtio-net `vendor:device` pair.
+pub fn is_virtio_net(vendor: u16, device: u16) -> bool {
+    vendor == VIRTIO_VENDOR && (device == VIRTIO_NET_MODERN || device == VIRTIO_NET_LEGACY)
+}
+
 /// `true` for a modern or transitional virtio-gpu `vendor:device` pair.
 pub fn is_virtio_gpu(vendor: u16, device: u16) -> bool {
     vendor == VIRTIO_VENDOR && (device == VIRTIO_GPU_MODERN || device == VIRTIO_GPU_LEGACY)
@@ -192,6 +202,10 @@ mod tests {
         assert!(is_virtio_gpu(0x1AF4, 0x1010));
         assert!(!is_virtio_gpu(0x1AF4, 0x1000)); // virtio-net transitional
         assert!(!is_virtio_gpu(0x8086, 0x1050)); // wrong vendor
+        assert!(is_virtio_net(0x1AF4, 0x1000));
+        assert!(is_virtio_net(0x1AF4, 0x1041));
+        assert!(!is_virtio_net(0x1AF4, 0x1050)); // virtio-gpu
+        assert!(!is_virtio_net(0x10EC, 0x1000)); // wrong vendor
     }
 
     #[test]

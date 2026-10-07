@@ -193,6 +193,36 @@ pub fn negotiate<C: CommonCfg>(c: &C) -> bool {
     s & S_FEATURES_OK != 0 && s & S_FAILED == 0
 }
 
+/// `VIRTIO_F_VERSION_1`: bit 32, i.e. bit 0 of the high feature word.
+pub const F_VERSION_1_HI: u32 = 1;
+
+/// Like [`negotiate`], but a driver that needs device-specific features asks for
+/// the low-word bits in `want_lo` and gets back the subset the device offers
+/// (`Some(accepted_lo)`). `VIRTIO_F_VERSION_1` is mandatory here: a device that
+/// does not offer it (a legacy-only device) is refused (`None`) after marking the
+/// handshake FAILED, so the caller does not drive it with the modern layout.
+/// `None` as well when the device rejects the final feature set.
+pub fn negotiate_features<C: CommonCfg>(c: &C, want_lo: u32) -> Option<u32> {
+    c.set_status(0); // reset
+    let _ = c.status(); // read back to flush the reset
+    c.set_status(S_ACK);
+    c.set_status(S_ACK | S_DRIVER);
+
+    let lo = c.device_features(0);
+    let hi = c.device_features(1);
+    if hi & F_VERSION_1_HI == 0 {
+        c.set_status(S_ACK | S_DRIVER | S_FAILED);
+        return None;
+    }
+    let accepted = lo & want_lo;
+    c.set_driver_features(0, accepted);
+    c.set_driver_features(1, F_VERSION_1_HI);
+
+    c.set_status(S_ACK | S_DRIVER | S_FEATURES_OK);
+    let s = c.status();
+    (s & S_FEATURES_OK != 0 && s & S_FAILED == 0).then_some(accepted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,5 +529,75 @@ mod tests {
             fn set_driver_features(&self, _: u32, _: u32) {}
         }
         assert!(!negotiate(&Failing(Cell::new(0))));
+    }
+
+    /// Mock device with chosen feature words that records the accepted ones.
+    struct Feat {
+        lo: u32,
+        hi: u32,
+        status: Cell<u8>,
+        drv: RefCell<[u32; 2]>,
+        reject: bool,
+    }
+
+    impl Feat {
+        fn new(lo: u32, hi: u32, reject: bool) -> Self {
+            Self {
+                lo,
+                hi,
+                status: Cell::new(0),
+                drv: RefCell::new([0; 2]),
+                reject,
+            }
+        }
+    }
+
+    impl CommonCfg for Feat {
+        fn status(&self) -> u8 {
+            self.status.get()
+        }
+        fn set_status(&self, s: u8) {
+            let s = if self.reject { s & !S_FEATURES_OK } else { s };
+            self.status.set(s);
+        }
+        fn device_features(&self, sel: u32) -> u32 {
+            if sel == 0 { self.lo } else { self.hi }
+        }
+        fn set_driver_features(&self, sel: u32, v: u32) {
+            self.drv.borrow_mut()[sel as usize & 1] = v;
+        }
+    }
+
+    #[test]
+    fn negotiate_features_accepts_the_wanted_subset_and_version_1() {
+        // Device offers MAC, STATUS, CSUM, GSO...: we take only what we asked for.
+        let d = Feat::new(0xFFFF_FFFF, 1, false);
+        assert_eq!(
+            negotiate_features(&d, (1 << 5) | (1 << 16)),
+            Some((1 << 5) | (1 << 16))
+        );
+        assert_eq!(*d.drv.borrow(), [(1 << 5) | (1 << 16), F_VERSION_1_HI]);
+        assert_eq!(d.status(), S_ACK | S_DRIVER | S_FEATURES_OK);
+        // A device lacking MAC: we do not claim it.
+        let d = Feat::new(1 << 16, 1, false);
+        assert_eq!(negotiate_features(&d, (1 << 5) | (1 << 16)), Some(1 << 16));
+        // Asking for nothing is allowed (what `negotiate` does).
+        let d = Feat::new(0xFFFF_FFFF, 1, false);
+        assert_eq!(negotiate_features(&d, 0), Some(0));
+        assert_eq!(*d.drv.borrow(), [0, F_VERSION_1_HI]);
+    }
+
+    #[test]
+    fn negotiate_features_refuses_a_device_without_version_1() {
+        let d = Feat::new(0xFFFF_FFFF, 0, false);
+        assert_eq!(negotiate_features(&d, 0xFF), None);
+        assert!(d.status() & S_FAILED != 0, "handshake marked FAILED");
+        assert_eq!(d.status() & S_DRIVER_OK, 0);
+    }
+
+    #[test]
+    fn negotiate_features_fails_when_features_ok_is_cleared() {
+        let d = Feat::new(0xFF, 1, true);
+        assert_eq!(negotiate_features(&d, 0xFF), None);
     }
 }
