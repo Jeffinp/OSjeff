@@ -1273,6 +1273,38 @@ mod tests {
         assert_eq!(format!("{c}"), "10.0.2.15/24 gw none dns none");
     }
 
+    /// The responder answers for the address the lease handed out, and only
+    /// that one: neither the SLIRP default nor anything else.
+    #[test]
+    fn responder_answers_for_the_leased_ip_only() {
+        let cfg = NetConfig::from_ack(&ack_with(&[T_ACK, SERVER, MASK24])).unwrap();
+        assert_eq!(cfg.ip, LEASE_IP);
+        let mut out = [0u8; 128];
+
+        // ARP who-has <lease ip> -> reply carrying the lease ip.
+        let n = respond(&arp_request(cfg.ip), OUR_MAC, cfg.ip, &mut out).unwrap();
+        assert_eq!(n, ETH_HDR + ARP_LEN);
+        assert_eq!(&out[ETH_HDR + 14..ETH_HDR + 18], &LEASE_IP.0); // sender proto
+        // ARP who-has the old fixed address -> silence.
+        assert_eq!(
+            respond(&arp_request(OUR_IP), OUR_MAC, cfg.ip, &mut out),
+            None
+        );
+
+        // Ping to the lease ip -> echo reply from the lease ip; ping to the
+        // fixed address -> silence.
+        let n = respond(&icmp_echo(cfg.ip, b"hi"), OUR_MAC, cfg.ip, &mut out).unwrap();
+        let ip = &out[ETH_HDR..ETH_HDR + IPV4_HDR];
+        assert_eq!(checksum(ip), 0);
+        assert_eq!(&ip[12..16], &LEASE_IP.0);
+        assert_eq!(out[ETH_HDR + IPV4_HDR], ICMP_ECHO_REPLY);
+        assert_eq!(n, ETH_HDR + IPV4_HDR + ICMP_HDR + 2);
+        assert_eq!(
+            respond(&icmp_echo(OUR_IP, b"hi"), OUR_MAC, cfg.ip, &mut out),
+            None
+        );
+    }
+
     #[test]
     fn parse_ipv4_accepts_dotted_quads() {
         assert_eq!(parse_ipv4(b"192.168.77.2"), Some(Ipv4([192, 168, 77, 2])));

@@ -39,12 +39,40 @@ fn run_frame(frame: &[u8], mac: Mac) {
 
     // DHCP parser: also try with the MAC the frame claims in chaddr, so the
     // `chaddr == our_mac` gate does not hide the option loop.
-    let _ = net::parse_dhcp(frame, mac);
+    check_dhcp(frame, mac);
     let dhcp_off = 14 + 20 + 8;
     if frame.len() >= dhcp_off + 34 {
         let mut m = [0u8; 6];
         m.copy_from_slice(&frame[dhcp_off + 28..dhcp_off + 34]);
-        let _ = net::parse_dhcp(frame, Mac(m));
+        check_dhcp(frame, Mac(m));
+    }
+}
+
+/// Parse a DHCP reply and, whatever it carries, try to turn it into a
+/// `NetConfig`: never a panic, and an accepted config satisfies the contract
+/// the stack relies on (prefix 1..=30, usable address, no self-gateway).
+fn check_dhcp(frame: &[u8], mac: Mac) {
+    let Some(reply) = net::parse_dhcp(frame, mac) else {
+        return;
+    };
+    // Same reply as an ACK, so the option handling is reached whatever the
+    // message type the fuzzer picked.
+    for r in [
+        reply,
+        net::DhcpReply {
+            msg_type: net::DHCP_ACK,
+            ..reply
+        },
+    ] {
+        if let Ok(cfg) = net::NetConfig::from_ack(&r) {
+            assert!((1..=30).contains(&cfg.prefix), "prefix {}", cfg.prefix);
+            assert!(cfg.ip.0[0] != 0 && cfg.ip.0[0] != 127 && cfg.ip.0[0] < 224);
+            assert_ne!(cfg.gateway, Some(cfg.ip));
+            assert_ne!(cfg.dns, Some(cfg.ip));
+            assert_ne!(cfg.lease_secs, Some(0));
+            // The boot-log form never panics either.
+            let _ = format!("{cfg}");
+        }
     }
 }
 
@@ -104,6 +132,12 @@ fuzz_target!(|data: &[u8]| {
 
     // Builders with a sufficiently large buffer must never panic, whatever the
     // identity / xid / addresses.
+    // IPv4 literal parser (hostnames typed in the browser) must be total, and
+    // anything it accepts must print back to the same bytes.
+    if let Some(a) = net::parse_ipv4(rest) {
+        assert_eq!(format!("{a}").as_bytes(), rest);
+    }
+
     let byte = |i: usize| rest.get(i).copied().unwrap_or(0);
     let mac = Mac([byte(0), byte(1), byte(2), byte(3), byte(4), byte(5)]);
     let ip = Ipv4([byte(6), byte(7), byte(8), byte(9)]);
