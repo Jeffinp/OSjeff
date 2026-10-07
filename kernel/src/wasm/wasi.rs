@@ -19,6 +19,12 @@ const FT_CHAR: u8 = 2;
 const FT_DIR: u8 = 3;
 const FT_REG: u8 = 4;
 
+/// Most iovecs one `fd_write`/`fd_read` may carry. wasi-libc uses 1-3; the cap
+/// bounds the host-side loop (which the guest's fuel meter cannot see).
+const MAX_IOVS: i32 = 16;
+/// Most bytes one `random_get` may ask for (libc asks for a few dozen).
+const MAX_RANDOM: i32 = 64 * 1024;
+
 const PREOPEN_FD: i32 = 3; // the single preopened dir "/"
 const WAD_FD: i32 = 5; // the fd we hand back for the IWAD
 
@@ -67,10 +73,13 @@ fn is_wad_path(c: &C, m: Memory, ptr: i32, len: i32) -> bool {
 // ---- file ops backing the IWAD ----
 
 fn fd_write(mut c: C, fd: i32, iovs: i32, n: i32, nwritten: i32) -> i32 {
+    if !(0..=MAX_IOVS).contains(&n) {
+        return INVAL;
+    }
     let Some(m) = mem(&c) else { return BADF };
     let mut total = 0u32;
     for i in 0..n {
-        let base = iovs + i * 8;
+        let base = iovs.wrapping_add(i * 8);
         let p = ru32(&c, m, base) as i32;
         let l = ru32(&c, m, base + 4);
         total = total.wrapping_add(l);
@@ -92,11 +101,14 @@ fn fd_read(mut c: C, fd: i32, iovs: i32, n: i32, nread: i32) -> i32 {
     if fd != c.data().wad_fd {
         return BADF;
     }
+    if !(0..=MAX_IOVS).contains(&n) {
+        return INVAL;
+    }
     let Some(m) = mem(&c) else { return BADF };
     let mut pos = c.data().wad_pos;
     let mut total = 0u32;
     for i in 0..n {
-        let base = iovs + i * 8;
+        let base = iovs.wrapping_add(i * 8);
         let p = ru32(&c, m, base) as i32;
         let l = ru32(&c, m, base + 4) as usize;
         let avail = WAD.len().saturating_sub(pos);
@@ -221,18 +233,30 @@ fn clock_time_get(mut c: C, _id: i32, _prec: i64, out: i32) -> i32 {
 }
 
 fn random_get(mut c: C, buf: i32, len: i32) -> i32 {
+    if !(0..=MAX_RANDOM).contains(&len) {
+        return INVAL;
+    }
     let Some(m) = mem(&c) else { return BADF };
     let mut x = c.data().rng;
     if x == 0 {
         x = (crate::interrupts::ticks() as u32) | 1;
     }
-    let mut i = 0;
-    while i < len {
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        wr(&mut c, m, buf + i, &[x as u8]);
-        i += 1;
+    // Fill in 256-byte chunks (one guest-memory write each, not one per byte).
+    let mut chunk = [0u8; 256];
+    let mut done = 0i32;
+    while done < len {
+        let take = (len - done).min(256) as usize;
+        for b in &mut chunk[..take] {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            *b = x as u8;
+        }
+        if !wr(&mut c, m, buf.wrapping_add(done), &chunk[..take]) {
+            c.data_mut().rng = x;
+            return INVAL;
+        }
+        done += take as i32;
     }
     c.data_mut().rng = x;
     OK
@@ -350,9 +374,11 @@ pub(super) fn install(linker: &mut Linker<HostState>) -> Result<(), &'static str
                           _nf: i32,
                           _np: i32,
                           _nl: i32| OK);
-    // proc_exit: log and return; the guest is exiting (only on a fatal I_Error).
-    link!("proc_exit", |_c: C, code: i32| {
+    // proc_exit: the guest asked to terminate. Unwind out of it with an exit-status
+    // error (it never resumes); the app worker sees it and ends the app.
+    link!("proc_exit", |_c: C, code: i32| -> Result<(), wasmi::Error> {
         crate::serial_println!("wasi: proc_exit({})", code);
+        Err(wasmi::Error::i32_exit(code))
     });
 
     // Not WASI: clang lowers C `system()` to an `env.system` import. We have no
