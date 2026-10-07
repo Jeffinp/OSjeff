@@ -5,7 +5,7 @@
 //!   * `demo.wasm` — a tiny console smoke-test, assembled from inline WAT on the
 //!     host (the `wat` crate), so the bare-metal kernel needs no text parser.
 //!   * `app.wasm`  — the windowed desktop app, a real Rust crate compiled to
-//!     `wasm32-unknown-unknown` (see `../wasm-apps/plasma`). This is the
+//!     `wasm32-unknown-unknown` (by default `../wasm-apps/snake`; see below for the C and DOOM variants). This is the
 //!     "compile source to wasm and equip the OS" model: a genuine compiled
 //!     language becomes a native OSjeff app, no foreign OS, no emulation.
 

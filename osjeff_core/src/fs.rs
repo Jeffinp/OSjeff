@@ -21,7 +21,7 @@ pub const ROOT: u8 = 0xFF;
 
 /// Maximum number of files. Bumped from 16 → 48 (the record size is unchanged,
 /// so older images stay readable; the extra slots were zero/unused tail). The
-/// resulting image (~49 KiB → 98 sectors) still fits a single ATA transfer.
+/// resulting image (~49 KiB → 99 sectors) still fits a single ATA transfer.
 pub const MAX_FILES: usize = 48;
 /// Maximum file-name length in bytes.
 pub const MAX_NAME: usize = 16;

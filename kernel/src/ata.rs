@@ -2,7 +2,7 @@
 //!
 //! Targets the **secondary IDE channel master** (ports `0x170`/`0x376`), kept
 //! separate from the boot disk on the primary channel. Polled (no IRQ/DMA),
-//! which is plenty for flushing a ~17 KiB filesystem image. Every wait is
+//! which is plenty for flushing a ~49 KiB (99-sector) filesystem image. Every wait is
 //! bounded: a missing or wedged drive returns `false` instead of hanging, so the
 //! caller can fall back to a RAM-only filesystem.
 
