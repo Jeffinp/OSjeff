@@ -205,6 +205,52 @@ impl DateTime {
     }
 }
 
+/// A field of [`DateTime`] the clock editor steps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Field {
+    Day,
+    Month,
+    Year,
+    Hour,
+    Minute,
+    Second,
+}
+
+/// Wrap `v` into `lo..=hi` (so stepping past the end comes back at the start).
+fn wrap_range(v: i32, lo: i32, hi: i32) -> i32 {
+    lo + (v - lo).rem_euclid(hi - lo + 1)
+}
+
+impl DateTime {
+    /// Step one field by `delta` (positive or negative), wrapping inside the
+    /// field's range, then pull the day back into the month if the new month
+    /// or year is shorter (31 Jan + 1 month = 28/29 Feb). The result is always
+    /// valid when `self` was.
+    pub fn step(&self, f: Field, delta: i32) -> DateTime {
+        let mut d = *self;
+        match f {
+            Field::Year => {
+                d.date.y = wrap_range(
+                    d.date.y as i32 + delta,
+                    Self::MIN_YEAR as i32,
+                    Self::MAX_YEAR as i32,
+                ) as u16
+            }
+            Field::Month => d.date.m = wrap_range(d.date.m as i32 + delta, 1, 12) as u8,
+            Field::Day => {
+                let dim = days_in_month(d.date.y, d.date.m).max(1) as i32;
+                d.date.d = wrap_range(d.date.d as i32 + delta, 1, dim) as u8;
+            }
+            Field::Hour => d.time.h = wrap_range(d.time.h as i32 + delta, 0, 23) as u8,
+            Field::Minute => d.time.m = wrap_range(d.time.m as i32 + delta, 0, 59) as u8,
+            Field::Second => d.time.s = wrap_range(d.time.s as i32 + delta, 0, 59) as u8,
+        }
+        let dim = days_in_month(d.date.y, d.date.m).max(1);
+        d.date.d = d.date.d.clamp(1, dim);
+        d
+    }
+}
+
 /// Time-zone offsets are minutes east of UTC, within UTC-12:00..=UTC+14:00.
 pub const TZ_MIN: i32 = -12 * 60;
 pub const TZ_MAX: i32 = 14 * 60;
@@ -313,6 +359,19 @@ pub fn encode_datetime(dt: &DateTime, regb: u8) -> RawRtc {
         month: to_reg(dt.date.m, regb),
         year: to_reg((dt.date.y % 100) as u8, regb),
         century: to_reg((dt.date.y / 100) as u8, regb),
+    }
+}
+
+/// `t` moved by `minutes` within the day (wrapping past midnight either way).
+/// The hot per-frame clock read uses this instead of the full [`DateTime`]
+/// conversion: it only needs the time of day.
+pub fn shift_time_of_day(t: Time, minutes: i32) -> Time {
+    let secs = t.h as i32 * 3600 + t.m as i32 * 60 + t.s as i32 + minutes * 60;
+    let secs = secs.rem_euclid(86_400);
+    Time {
+        h: (secs / 3600) as u8,
+        m: (secs / 60 % 60) as u8,
+        s: (secs % 60) as u8,
     }
 }
 
@@ -703,6 +762,74 @@ mod tests {
                 assert!((1..=31).contains(&d.date.d));
                 assert!(d.time.h < 24);
             }
+        }
+    }
+
+    #[test]
+    fn time_of_day_shift_wraps_and_matches_whole_hours() {
+        let t = Time { h: 1, m: 15, s: 30 };
+        assert_eq!(shift_time_of_day(t, 0), t);
+        assert_eq!(
+            shift_time_of_day(t, -180),
+            Time {
+                h: 22,
+                m: 15,
+                s: 30
+            }
+        );
+        assert_eq!(shift_time_of_day(t, 330), Time { h: 6, m: 45, s: 30 });
+        assert_eq!(shift_time_of_day(t, -75), Time { h: 0, m: 0, s: 30 });
+        assert_eq!(
+            shift_time_of_day(t, 24 * 60 * 3 + 5),
+            Time { h: 1, m: 20, s: 30 }
+        );
+        // Same hour result as the whole-hour shift `decode` has always done.
+        for tz in [-12, -3, 0, 5, 14] {
+            for h in 0..24u8 {
+                let a = decode(7, 9, h, BIN24, tz);
+                let b = shift_time_of_day(decode(7, 9, h, BIN24, 0), tz * 60);
+                assert_eq!(a, b, "h={h} tz={tz}");
+            }
+        }
+    }
+
+    #[test]
+    fn stepping_fields_wraps_and_keeps_the_date_valid() {
+        let d = dt(2024, 1, 31, 23, 59, 59);
+        assert_eq!(d.step(Field::Month, 1), dt(2024, 2, 29, 23, 59, 59));
+        assert_eq!(dt(2023, 1, 31, 0, 0, 0).step(Field::Month, 1).date.d, 28);
+        assert_eq!(d.step(Field::Month, -1), dt(2024, 12, 31, 23, 59, 59));
+        assert_eq!(d.step(Field::Day, 1), dt(2024, 1, 1, 23, 59, 59));
+        assert_eq!(dt(2024, 3, 1, 0, 0, 0).step(Field::Day, -1).date.d, 31);
+        assert_eq!(d.step(Field::Hour, 1).time.h, 0);
+        assert_eq!(d.step(Field::Minute, 1).time.m, 0);
+        assert_eq!(d.step(Field::Second, 1).time.s, 0);
+        assert_eq!(d.step(Field::Second, -60), d);
+        // Leap day, then the year goes to a non-leap one.
+        let leap = dt(2024, 2, 29, 0, 0, 0);
+        assert_eq!(leap.step(Field::Year, 1), dt(2025, 2, 28, 0, 0, 0));
+        assert_eq!(dt(2099, 6, 1, 0, 0, 0).step(Field::Year, 1).date.y, 1970);
+        assert_eq!(dt(1970, 6, 1, 0, 0, 0).step(Field::Year, -1).date.y, 2099);
+    }
+
+    #[test]
+    fn stepping_never_leaves_the_valid_range() {
+        let mut d = dt(2024, 1, 31, 12, 30, 30);
+        let fields = [
+            Field::Day,
+            Field::Month,
+            Field::Year,
+            Field::Hour,
+            Field::Minute,
+            Field::Second,
+        ];
+        let mut seed = 12345u32;
+        for _ in 0..5000 {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let f = fields[(seed >> 16) as usize % fields.len()];
+            let delta = (seed >> 8) as i32 % 70 - 35;
+            d = d.step(f, delta);
+            assert!(d.is_valid(), "{d:?}");
         }
     }
 
