@@ -22,6 +22,10 @@ pub struct RacyCell<T>(UnsafeCell<T>);
 
 // Safe in this kernel: see module-level soundness contract (single-core +
 // interrupt-flag serialization). Access still requires `unsafe`.
+// SAFETY: a promise, not a proof: single core, and each cell's users are serialized by
+// convention (boot before IRQs, ISR with IF=0, single owner thread, or an atomic state
+// machine; see docs/audit/01-memoria-unsafe.md section 3.2).
+// NOTE: not guaranteed by the type: there is no `T: Send` bound and nothing stops a third accessor.
 unsafe impl<T> Sync for RacyCell<T> {}
 
 impl<T> RacyCell<T> {

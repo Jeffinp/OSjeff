@@ -113,6 +113,9 @@ pub fn poll() -> Option<Event> {
 }
 
 fn decode_keyboard(data: u8) -> Option<Event> {
+    // SAFETY: DECODER is only used by `decode_keyboard`/`decode_mouse`, reached solely through
+    // `poll()` on the compositor thread (ISRs only fill the ring); calls are sequential, so this
+    // `&mut` is unique.
     let d = unsafe { &mut *DECODER.get() };
     if data == 0xE0 {
         d.key_extended = true;
@@ -128,6 +131,7 @@ fn decode_keyboard(data: u8) -> Option<Event> {
 }
 
 fn decode_mouse(data: u8) -> Option<Event> {
+    // SAFETY: same as in `decode_keyboard`: compositor thread only, sequential calls.
     let d = unsafe { &mut *DECODER.get() };
     match d.mouse_cycle {
         0 => {

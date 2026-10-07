@@ -40,6 +40,8 @@ impl FxArea {
     /// garbage (a bad MXCSR reserved bit would `#GP` on restore).
     fn seeded() -> Box<FxArea> {
         let mut area = Box::new(FxArea([0u8; 512]));
+        // SAFETY: `area` is a live 512-byte `FxArea`, align(16) as `fxsave` requires (the heap honours
+        // the alignment); `fxsave` writes only those bytes (no `nomem` in the options).
         unsafe {
             core::arch::asm!(
                 "fxsave [{}]", in(reg) area.0.as_mut_ptr(),
@@ -95,6 +97,8 @@ pub fn init() {
         stack: Vec::new().into_boxed_slice(),
         fpu: FxArea::seeded(),
     };
+    // SAFETY: runs on the boot thread before `interrupts::init()` enables IF (see `kernel_main`),
+    // and the timer ISR is the only other user of SCHED, so nothing accesses it concurrently.
     unsafe {
         *SCHED.get() = Some(Scheduler {
             threads: vec![boot],
@@ -125,6 +129,9 @@ pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
     let mut p = thread_rsp;
     let mut push = |val: u64| {
         p -= 8;
+        // SAFETY: `p` lies inside `stack` (20 words below `thread_rsp`, above the canary, in a block
+        // we own) and is 8-aligned (`thread_rsp` is 8 mod 16, steps of 8). The new thread is not on
+        // the scheduler list yet, so nobody else reads this memory.
         unsafe { (p as *mut u64).write(val) };
     };
     push(ss); // SS
@@ -149,6 +156,10 @@ pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
 /// thread that just ran, advance round-robin, and return the next thread's
 /// `rsp`. Touches only scheduler state (no allocation, no other locks).
 pub extern "C" fn switch_current(rsp: u64) -> u64 {
+    // SAFETY: runs inside the timer ISR with IF=0, so it is neither re-entered nor preempted.
+    // Other users run with IF=0 (`spawn`, via `without_interrupts`) or only read fields the ISR
+    // leaves alone (`thread_count`/`thread_name`).
+    // NOTE: those readers' shared refs can overlap this `&mut` (not guaranteed by the type).
     let s = match unsafe { (*SCHED.get()).as_mut() } {
         Some(s) => s,
         None => return rsp,
@@ -172,6 +183,8 @@ pub extern "C" fn switch_current(rsp: u64) -> u64 {
     // use: the path from ISR entry to here (GP-reg pushes, integer scheduler
     // glue) touches no SSE register, so the interrupted thread's xmm/MXCSR are
     // still live here and captured intact.
+    // SAFETY: `fpu_ptr()` is the 16-aligned 512-byte `FxArea` owned by thread `cur` (threads are
+    // never removed, so it is never freed); `fxsave` writes only that area.
     unsafe {
         core::arch::asm!(
             "fxsave [{}]", in(reg) s.threads[cur].fpu_ptr(),
@@ -194,6 +207,8 @@ pub extern "C" fn switch_current(rsp: u64) -> u64 {
 
     // Load the incoming thread's x87/SSE state. Nothing below uses xmm before
     // the ISR `iretq`s into that thread, so its registers resume correctly.
+    // SAFETY: same area guarantees for `next`. Its contents were written by `FxArea::seeded` or a
+    // previous `fxsave`, so MXCSR has no reserved bits set and `fxrstor` cannot #GP.
     unsafe {
         core::arch::asm!(
             "fxrstor [{}]", in(reg) s.threads[next].fpu_ptr(),
@@ -212,10 +227,14 @@ pub fn current() -> usize {
 }
 
 pub fn thread_count() -> usize {
+    // SAFETY: read-only, compositor thread. `threads` is only resized by `spawn` (IF=0), and the
+    // ISR changes `current`/`rsp`/fpu contents, not the length.
+    // NOTE: this shared ref can overlap the ISR's `&mut` (not guaranteed by the type).
     unsafe { (*SCHED.get()).as_ref() }.map_or(0, |s| s.threads.len())
 }
 
 pub fn thread_name(i: usize) -> &'static str {
+    // SAFETY: as in `thread_count` (`name` is never changed after `spawn`).
     unsafe { (*SCHED.get()).as_ref() }
         .and_then(|s| s.threads.get(i))
         .map_or("", |t| t.name)
@@ -230,5 +249,9 @@ pub fn thread_ticks(i: usize) -> u64 {
 }
 
 fn scheduler() -> &'static mut Scheduler {
+    // SAFETY: only called from `spawn`, which every caller runs with IF=0 (`without_interrupts` in
+    // `kernel_main`), so the timer ISR cannot touch SCHED meanwhile.
+    // NOTE: not guaranteed by the type: safe fn returning `&'static mut`, and `spawn`'s IF=0
+    // precondition is not enforced (docs/audit/01-memoria-unsafe.md #6).
     unsafe { (*SCHED.get()).as_mut().expect("scheduler not initialized") }
 }

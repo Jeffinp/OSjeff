@@ -110,6 +110,8 @@ const HUD_H: i32 = 60;
 
 fn text(c: &mut Canvas, x: usize, y: usize, bytes: &[u8], color: Color) {
     // The buffer is always ASCII we built ourselves.
+    // SAFETY: `bytes` is a prefix of `line`, built only from ASCII literals and decimal digits
+    // (`put`/`put_u32`/`put_ms`); truncation cannot split a multi-byte char, so it is valid UTF-8.
     let s = unsafe { core::str::from_utf8_unchecked(bytes) };
     font::draw_text(c, x, y, s, color, 2);
 }

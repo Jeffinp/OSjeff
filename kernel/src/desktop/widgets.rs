@@ -267,6 +267,7 @@ pub(crate) fn draw_clock(c: &mut Canvas, t: Time) {
     two(&mut buf, 3, t.m);
     buf[5] = b':';
     two(&mut buf, 6, t.s);
+    // SAFETY: `buf` holds only ASCII digits (written by `two`) and ':', so it is valid UTF-8.
     let clock = unsafe { core::str::from_utf8_unchecked(&buf) };
 
     // Pill in the bottom-right corner.
@@ -288,6 +289,9 @@ pub(crate) fn two(buf: &mut [u8], idx: usize, val: u8) {
 
 /// Mutable view of the window-compositing scratch buffer.
 pub(crate) fn scratch_slice() -> &'static mut [u8] {
+    // SAFETY: SCRATCH is `SCRATCH_BYTES` long; the only caller is `draw_animating` (compositor
+    // thread), one use at a time.
+    // NOTE: not guaranteed by the type: safe fn returning `&'static mut`; a second caller would alias.
     unsafe { core::slice::from_raw_parts_mut(SCRATCH.get() as *mut u8, SCRATCH_BYTES) }
 }
 

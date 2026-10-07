@@ -307,6 +307,10 @@ fn build_app() -> Option<App> {
 /// The resident app, built lazily on first access. `None` if it fails to load.
 /// SAFETY: single-threaded desktop context (compositor thread only).
 fn app_mut() -> Option<&'static mut App> {
+    // SAFETY: APP is only reached through `app_mut`, called only by the `wasmapp` worker thread (the
+    // compositor never uses it), and no reference outlives a loop iteration, so the `&mut` is unique.
+    // NOTE: the doc above ("compositor thread only") is stale; not guaranteed by the type (safe fn
+    // returning `&'static mut`).
     let slot = unsafe { &mut *APP.get() };
     if slot.is_none() {
         *slot = build_app();
@@ -360,6 +364,8 @@ static EV_TAIL: AtomicUsize = AtomicUsize::new(0); // consumer (worker)
 
 /// Capture the framebuffer layout (call once at boot, before spawning [`worker`]).
 pub fn init(info: FrameBufferInfo) {
+    // SAFETY: called once, before `wasmapp` is spawned (`kernel_main`), so the worker cannot read
+    // FB_INFO yet.
     unsafe {
         *FB_INFO.get() = Some(info);
     }
@@ -376,6 +382,9 @@ fn push_ev(ev: Ev) {
     if next == EV_TAIL.load(Ordering::Acquire) {
         return; // queue full — drop the event
     }
+    // SAFETY: SPSC queue and this is its only producer (compositor input path). Slot `h` is not
+    // readable by the consumer until EV_HEAD is published below, and `next != EV_TAIL` keeps it
+    // off the slot being read.
     unsafe {
         (*EVENTS.get())[h] = ev;
     }
@@ -409,6 +418,8 @@ fn drain_input(app: &mut App) {
         if t == EV_HEAD.load(Ordering::Acquire) {
             break;
         }
+        // SAFETY: SPSC consumer (worker only): `t != EV_HEAD` (Acquire) means the producer already wrote
+        // slot `t` and will not reuse it until EV_TAIL advances.
         let ev = unsafe { (*EVENTS.get())[t] };
         EV_TAIL.store((t + 1) % EV_CAP, Ordering::Release);
         match ev.kind {
@@ -433,6 +444,7 @@ fn drain_input(app: &mut App) {
 /// The offscreen framebuffer layout: content-box sized, same pixel format as the
 /// real screen so the compositor can copy rows verbatim.
 fn surface_info() -> Option<FrameBufferInfo> {
+    // SAFETY: FB_INFO is written once in `init`, before this thread is spawned, and only read after.
     let mut oi = unsafe { *FB_INFO.get() }?;
     oi.width = WASM_SW;
     oi.height = WASM_SH;
@@ -455,6 +467,10 @@ pub extern "C" fn worker() -> ! {
         };
         let back = 1 - FRONT.load(Ordering::Relaxed);
         {
+            // SAFETY: the worker is the only writer of SURFACE[back] (the buffer not published as FRONT); the
+            // raw pointer kept in HostState is disabled (`info = None`) once the frame is done.
+            // NOTE: not prevented: if the compositor is preempted inside `blit_surface` while the worker flips
+            // FRONT, the worker rewrites the buffer being copied (torn frame; formally a data race).
             let buf = unsafe { &mut (*SURFACE.get())[back] };
             let st = app.store.data_mut();
             st.fb = buf.as_mut_ptr();
@@ -507,6 +523,8 @@ pub fn blit_surface(c: &mut Canvas, cx: i32, cy: i32) {
     let stride = info.stride;
     let (sw, sh) = (info.width as i32, info.height as i32);
     let front = FRONT.load(Ordering::Acquire);
+    // SAFETY: shared read of the published `front` buffer; the worker writes the other one.
+    // NOTE: the roles can swap while we copy (see `worker`): torn frame, not excluded by the type.
     let src = unsafe { &(*SURFACE.get())[front] };
     let dst = c.buffer_mut();
     for y in 0..WASM_SH as i32 {

@@ -117,12 +117,21 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     framebuffer.buffer_mut()[..n].fill(0);
     trace::mark("framebuffer cleared");
 
+    // SAFETY: BACK/BG/STATIC are three distinct statics, each viewed once here (`kernel_main` runs
+    // once, on the boot thread) with `n <= MAX_BYTES`, their size; afterwards only the compositor
+    // loop uses them, so each `&mut [u8]` is unique.
     let back: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(BACK.get() as *mut u8, n) };
+    // SAFETY: as for `back` (BG is a separate static).
     let bg: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(BG.get() as *mut u8, n) };
+    // SAFETY: as for `back` (STATIC is a separate static).
     let static_buf: &mut [u8] =
         unsafe { core::slice::from_raw_parts_mut(STATIC.get() as *mut u8, n) };
 
     // Initialize the kernel heap so `alloc` works, then smoke-test it.
+    // SAFETY: HEAP is a dedicated 64 MiB static, valid and writable, used for nothing else; this
+    // runs once, on the boot thread, before the first allocation.
+    // NOTE: HEAP's type has align 1; the 8-byte alignment `init` needs comes from linker placement
+    // and is only `debug_assert!`ed.
     unsafe {
         ALLOCATOR.init(HEAP.get() as usize, HEAP_SIZE);
     }
@@ -912,6 +921,7 @@ fn heap_smoke_test() {
 
 fn halt() -> ! {
     loop {
+        // SAFETY: `hlt` is legal in ring 0 and touches no memory; it only parks the CPU.
         unsafe { core::arch::asm!("hlt", options(nomem, nostack, preserves_flags)) };
     }
 }

@@ -178,6 +178,8 @@ impl<'a> Canvas<'a> {
             for y in y0..y_end {
                 let o = (y * stride + x0) * 4;
                 let row = &mut self.buf[o..o + count * 4];
+                // SAFETY: every initialized `[u8]` is valid as `[u32]` (no invalid bit patterns); `align_to_mut`
+                // itself returns the unaligned prefix/suffix, so alignment is handled.
                 let (pre, mid, suf) = unsafe { row.align_to_mut::<u32>() };
                 if pre.is_empty() && suf.is_empty() {
                     mid.fill(packed);

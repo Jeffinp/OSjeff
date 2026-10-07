@@ -25,6 +25,8 @@ pub fn shutdown() -> ! {
 
 fn halt() -> ! {
     loop {
+        // SAFETY: `hlt` is legal in ring 0 and touches no memory; it only parks the CPU until an
+        // interrupt, then the loop repeats.
         unsafe { core::arch::asm!("hlt", options(nomem, nostack, preserves_flags)) };
     }
 }

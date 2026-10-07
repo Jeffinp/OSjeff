@@ -113,6 +113,7 @@ pub fn init() -> bool {
     w(RCR, 0x04); // accept broadcast (unicast matches PAR)
     w(CR, CR_START | CR_RD_ABORT); // start
 
+    // SAFETY: `init` runs once at boot, before any thread is spawned, so nothing else touches NEXT.
     unsafe { *NEXT.get() = RX_START + 1 };
     true
 }
@@ -140,6 +141,11 @@ pub fn poll(buf: &mut [u8]) -> Option<usize> {
     let curr = r(CURR);
     w(CR, CR_START | CR_RD_ABORT);
 
+    // SAFETY: NEXT is only used by `init`/`poll`, never by an ISR. `poll` runs on the compositor
+    // (at boot, then in the main loop only while `fetch::is_idle()`) or on the fetcher via
+    // netstack (while a fetch is RUNNING); the fetch state machine keeps them mutually exclusive.
+    // NOTE: not guaranteed by the type, and the doc on NEXT ("main loop only") is stale: the
+    // fetcher thread also calls `poll`.
     let next = unsafe { *NEXT.get() };
     if next == curr {
         return None; // ring empty
@@ -152,6 +158,7 @@ pub fn poll(buf: &mut [u8]) -> Option<usize> {
 
     // Sanity-check the length; on garbage, drop the whole ring to resync.
     if !(4..=1518 + 4).contains(&total) || !(RX_START..=RX_STOP).contains(&next_page) {
+        // SAFETY: same single-NIC-owner exclusivity as the read of NEXT above.
         unsafe { *NEXT.get() = curr };
         let bnry = if curr == RX_START {
             RX_STOP - 1
@@ -167,6 +174,7 @@ pub fn poll(buf: &mut [u8]) -> Option<usize> {
     dma_read(((next as u16) << 8) + 4, &mut buf[..n]);
 
     // Advance the read pointer and the hardware boundary.
+    // SAFETY: same single-NIC-owner exclusivity as the read of NEXT above.
     unsafe { *NEXT.get() = next_page };
     let bnry = if next_page == RX_START {
         RX_STOP - 1

@@ -231,8 +231,12 @@ impl Net {
 
         // 16 KiB record buffers (one TLS frame). Kept in static memory so they
         // never land on the kernel stack.
+        // SAFETY: TLS_RX is used only here, and `https_get` runs only on the fetcher thread, one call at
+        // a time (`&mut self`), so this is the only live reference; `TLS_REC` is the array length. It
+        // dies with `tls` before this fn returns.
         let rx_rec: &mut [u8] =
             unsafe { core::slice::from_raw_parts_mut(TLS_RX.get() as *mut u8, TLS_REC) };
+        // SAFETY: as for TLS_RX above (TLS_TX is a distinct static, used only here).
         let tx_rec: &mut [u8] =
             unsafe { core::slice::from_raw_parts_mut(TLS_TX.get() as *mut u8, TLS_REC) };
 

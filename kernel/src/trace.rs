@@ -57,6 +57,9 @@ fn print_mark(name: &str, tsc: u64, first: u64, prev: u64, khz: u64) {
 pub fn mark(name: &'static str) {
     let now = io::rdtsc();
     // Single-threaded use: the compositor/boot thread only.
+    // SAFETY: MARKS is only touched by `mark`/`calibrated`, both called from `kernel_main`
+    // (compositor/boot thread), never from an ISR or another thread, and no other `&mut Marks`
+    // is live while this one is, so the reference is unique.
     let m = unsafe { &mut *MARKS.get() };
     if m.n >= MAX_MARKS {
         return;
@@ -75,6 +78,7 @@ pub fn mark(name: &'static str) {
 /// Also reports how long the VM had been running when the kernel started
 /// (TSC counts from reset, so `tsc[0]` is the firmware + bootloader time).
 pub fn calibrated(khz: u64) {
+    // SAFETY: as in `mark`: compositor/boot thread only, no other `&mut Marks` live.
     let m = unsafe { &mut *MARKS.get() };
     m.khz = khz.max(1);
     if m.n == 0 {
@@ -233,6 +237,10 @@ pub fn prim(p: Prim, t0: u64) {
 
 #[inline(always)]
 fn stats() -> &'static mut Stats {
+    // SAFETY: STATS is only used by the compositor-thread hooks in this file (ISRs and the
+    // other threads use the atomics above) and no caller holds two `stats()` refs at once.
+    // NOTE: not guaranteed by the type (safe fn returning `&'static mut`); it relies on every
+    // caller being the compositor thread (docs/audit/01-memoria-unsafe.md #6).
     unsafe { &mut *STATS.get() }
 }
 
@@ -348,7 +356,12 @@ pub fn input_irq() {
 #[inline(always)]
 pub fn timer_sample(rsp: u64, cur_slot: usize) {
     if ON {
+        // SAFETY: `rsp` is the block of 15 GPRs pushed by `timer_isr`, so `rsp + 15*8` is the RIP
+        // slot of the CPU-pushed interrupt frame of the interrupted context: mapped, 8-aligned, read-only.
         let rip = unsafe { *((rsp + 15 * 8) as *const u64) };
+        // SAFETY: `rip` is the interrupted instruction pointer; the kernel is ring 0 only, so it is
+        // kernel text and the byte before it is mapped and readable.
+        // NOTE: not checked: assumes `rip` is not the very first byte of the mapped text.
         let idle = unsafe { *((rip - 1) as *const u8) } == 0xF4;
         if idle {
             TICK_IDLE.fetch_add(1, Relaxed);
@@ -551,23 +564,28 @@ pub fn bench_alloc(khz: u64) {
     let mut ptrs: Vec<*mut u8> = Vec::with_capacity(4000);
     let t0 = io::rdtsc();
     for _ in 0..1000 {
+        // SAFETY: `small` has non-zero size and a power-of-two align, as `alloc` requires.
+        // NOTE: the result is not null-checked; harmless at boot with an almost empty 64 MiB heap.
         ptrs.push(unsafe { alloc(small) });
     }
     let a_clean = avg(io::rdtsc() - t0, 1000);
     let t0 = io::rdtsc();
     for p in ptrs.drain(..) {
+        // SAFETY: `p` came from `alloc(small)` above and is freed once (drained), with the same layout.
         unsafe { dealloc(p, small) };
     }
     let f_clean = avg(io::rdtsc() - t0, 1000);
 
     // 2. fragment: 4000 small blocks, free every other one => 2000 holes.
     for _ in 0..4000 {
+        // SAFETY: `small` has non-zero size and a power-of-two align (see the first loop).
         ptrs.push(unsafe { alloc(small) });
     }
     let t0 = io::rdtsc();
     let mut kept: Vec<*mut u8> = Vec::with_capacity(2000);
     for (i, p) in ptrs.drain(..).enumerate() {
         if i % 2 == 0 {
+            // SAFETY: `p` came from `alloc(small)` (drained from `ptrs`) and is freed once, same layout.
             unsafe { dealloc(p, small) };
         } else {
             kept.push(p);
@@ -578,15 +596,18 @@ pub fn bench_alloc(khz: u64) {
     let mut bigs: Vec<*mut u8> = Vec::with_capacity(100);
     let t0 = io::rdtsc();
     for _ in 0..100 {
+        // SAFETY: `big` has non-zero size and a power-of-two align.
         bigs.push(unsafe { alloc(big) });
     }
     let a_frag = avg(io::rdtsc() - t0, 100);
     let t0 = io::rdtsc();
     for p in bigs.drain(..) {
+        // SAFETY: `p` came from `alloc(big)` (drained from `bigs`) and is freed once, same layout.
         unsafe { dealloc(p, big) };
     }
     let f_big = avg(io::rdtsc() - t0, 100);
     for p in kept.drain(..) {
+        // SAFETY: `p` is a `small` block kept from the loop above; freed once, same layout.
         unsafe { dealloc(p, small) };
     }
     crate::serial_println!(

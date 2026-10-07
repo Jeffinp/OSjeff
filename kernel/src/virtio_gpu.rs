@@ -70,6 +70,10 @@ impl GpuDevice {
     ) -> Option<GpuDevice> {
         let common_addr =
             virtio::bar_base(gpu, caps.common.bar) + phys_offset + caps.common.offset as u64;
+        // SAFETY: `common_addr` is BAR base + `phys_offset` + capability offset, i.e. the common-cfg
+        // window reached through the bootloader's linear physical mapping (as in `virt_to_phys`).
+        // NOTE: not validated: BAR index and offset come from the device's PCI capability and are not
+        // range-checked (docs/audit/01-memoria-unsafe.md finding 9).
         let common = unsafe { Common::new(common_addr) };
 
         if !virtio::negotiate(&common) {
@@ -117,7 +121,11 @@ impl GpuDevice {
     // ---- ring accessors (volatile; the device reads/writes these too) ----
 
     fn write_desc(&self, i: usize, addr: u64, len: u32, flags: u16, next: u16) {
+        // SAFETY: `queue_virt` is the 4 KiB page-aligned QUEUE_MEM; callers pass `i < 2`, so
+        // `DESC_OFF + i*16` is inside the 256-byte descriptor table.
         let d = unsafe { self.queue_virt.add(DESC_OFF + i * 16) };
+        // SAFETY: `d` is 16-aligned and the 16-byte descriptor fits in the page; volatile because
+        // the device DMA-reads it.
         unsafe {
             core::ptr::write_volatile(d as *mut u64, addr);
             core::ptr::write_volatile(d.add(8) as *mut u32, len);
@@ -127,15 +135,21 @@ impl GpuDevice {
     }
 
     fn avail_set(&self, slot: u16, desc: u16) {
+        // SAFETY: `slot < qsize <= QSIZE`, so `AVAIL_OFF + 4 + slot*2` stays inside QUEUE_MEM.
         let p = unsafe { self.queue_virt.add(AVAIL_OFF + 4 + (slot as usize) * 2) };
+        // SAFETY: `p` is a 2-aligned slot of the avail ring inside QUEUE_MEM; volatile (device reads it).
         unsafe { core::ptr::write_volatile(p as *mut u16, desc) };
     }
     fn avail_publish(&self, idx: u16) {
+        // SAFETY: `AVAIL_OFF + 2` (avail.idx) is inside QUEUE_MEM.
         let p = unsafe { self.queue_virt.add(AVAIL_OFF + 2) };
+        // SAFETY: `p` is the 2-aligned avail.idx inside QUEUE_MEM; volatile (device reads it).
         unsafe { core::ptr::write_volatile(p as *mut u16, idx) };
     }
     fn used_idx(&self) -> u16 {
+        // SAFETY: `USED_OFF + 2` (used.idx) is inside QUEUE_MEM.
         let p = unsafe { self.queue_virt.add(USED_OFF + 2) };
+        // SAFETY: `p` is the 2-aligned used.idx inside QUEUE_MEM; volatile (the device writes it).
         unsafe { core::ptr::read_volatile(p as *const u16) }
     }
 
@@ -143,6 +157,8 @@ impl GpuDevice {
     /// `resp_len`-byte response. Returns the response's leading u32 (its type),
     /// or `None` on timeout. The response bytes live at `CMD_MEM[RESP_OFF..]`.
     fn submit(&mut self, req: &[u8], resp_len: u32) -> Option<u32> {
+        // SAFETY: `cmd_virt` is the 4 KiB CMD_MEM page; `req` is a caller stack array (<= 56 bytes, far
+        // below RESP_OFF = 2048), so it fits and cannot overlap the static page.
         unsafe {
             core::ptr::copy_nonoverlapping(req.as_ptr(), self.cmd_virt, req.len());
         }
@@ -157,13 +173,19 @@ impl GpuDevice {
         compiler_fence(Ordering::SeqCst);
 
         // Notify the device that queue 0 has a new buffer.
+        // SAFETY: `notify_addr` is the queue-0 doorbell (notify BAR + offset + queue_notify_off * mul)
+        // through the linear map; a 16-bit volatile MMIO write.
+        // NOTE: not range-checked against the BAR (docs/audit/01-memoria-unsafe.md finding 9).
         unsafe { core::ptr::write_volatile(self.notify_addr as *mut u16, 0) };
 
         // Poll the used ring (bounded).
         for _ in 0..50_000_000u64 {
             if self.used_idx() != self.last_used {
                 self.last_used = self.used_idx();
+                // SAFETY: `RESP_OFF` (2048) is inside the CMD_MEM page.
                 let resp = unsafe { self.cmd_virt.add(RESP_OFF) };
+                // SAFETY: 4-aligned read inside CMD_MEM; `used.idx` advanced, so the device has written the
+                // response (x86 TSO + volatile).
                 return Some(unsafe { core::ptr::read_volatile(resp as *const u32) });
             }
             core::hint::spin_loop();
@@ -182,8 +204,12 @@ impl GpuDevice {
             return None;
         }
         // Response: 24-byte header, then display[0] = { rect{x,y,w,h u32}, ... }.
+        // SAFETY: as in `submit`: `RESP_OFF` is inside CMD_MEM.
         let resp = unsafe { self.cmd_virt.add(RESP_OFF) };
+        // SAFETY: offset 32 of the response (inside the 408 bytes), 4-aligned, written by the device
+        // (the response type was OK_DISPLAY_INFO).
         let w = unsafe { core::ptr::read_volatile(resp.add(24 + 8) as *const u32) };
+        // SAFETY: offset 36 of the response, same bounds/alignment as the read above.
         let h = unsafe { core::ptr::read_volatile(resp.add(24 + 12) as *const u32) };
         Some((w, h))
     }

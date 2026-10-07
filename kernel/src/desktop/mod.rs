@@ -48,6 +48,10 @@ const DISK_BYTES: usize = fs::IMAGE_SIZE.div_ceil(512) * 512;
 static DISK: RacyCell<[u8; DISK_BYTES]> = RacyCell::new([0; DISK_BYTES]);
 
 fn disk() -> &'static mut [u8] {
+    // SAFETY: DISK is `DISK_BYTES` long and only accessed from the compositor thread (Desktop,
+    // files UI, terminal), so the slice is valid.
+    // NOTE: not guaranteed by the type: safe fn returning `&'static mut`; `files_rows`/`files_slot`
+    // hold one while `files_cwd` calls `disk()` again (read-only aliasing, docs/audit/01 #6).
     unsafe { core::slice::from_raw_parts_mut(DISK.get() as *mut u8, DISK_BYTES) }
 }
 

@@ -19,6 +19,9 @@ pub struct SpinLock<T> {
 
 // Safe: access is serialized by the lock; the kernel is single-core and our
 // ISRs never allocate, so there is no re-entrancy.
+// SAFETY: `data` is only reachable through a `SpinGuard`, which exists only while `locked`
+// is held (CAS Acquire / store Release). `lock` also clears IF, and the kernel is
+// single-core with ISRs that never allocate, so there is no re-entrancy.
 unsafe impl<T: Send> Sync for SpinLock<T> {}
 
 impl<T> SpinLock<T> {
@@ -56,12 +59,15 @@ pub struct SpinGuard<'a, T> {
 impl<T> core::ops::Deref for SpinGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &T {
+        // SAFETY: the guard proves `locked` is held (and IF was cleared by `lock`), so no other
+        // reference to `data` exists; the pointer comes from a live `UnsafeCell`.
         unsafe { &*self.lock.data.get() }
     }
 }
 
 impl<T> core::ops::DerefMut for SpinGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
+        // SAFETY: as in `deref`; `&mut self` makes this the only access through the guard.
         unsafe { &mut *self.lock.data.get() }
     }
 }
@@ -115,7 +121,12 @@ impl LinkedListAllocator {
     /// # Safety
     /// `start..start+size` must be valid, unused, writable memory that lives for
     /// the rest of the program.
+    ///
+    /// The start must also be 8-byte aligned and `size >= 16` (a free node); that is only
+    /// `debug_assert!`ed in `add_free_region`.
     pub unsafe fn init(&mut self, start: usize, size: usize) {
+        // SAFETY: forwards this fn's contract (valid, unused, writable, 'static memory), plus the
+        // alignment/size note above.
         unsafe { self.add_free_region(start, size) };
     }
 
@@ -123,10 +134,19 @@ impl LinkedListAllocator {
     /// with any physically adjacent neighbours. Without coalescing, repeated
     /// alloc/free of mixed sizes would fragment the heap permanently — large
     /// requests would fail even with plenty of (scattered) free memory.
+    ///
+    /// # Safety
+    /// `addr..addr + size` must be free memory owned by the allocator (from `init`, the unused
+    /// tail of a region just unlinked by `find_region`, or a block being freed), 8-aligned,
+    /// `size >= 16`, not on the list, and the caller must have exclusive access to `self`.
     unsafe fn add_free_region(&mut self, addr: usize, size: usize) {
         debug_assert_eq!(osjeff_core::heap::align_up(addr, node_align()), addr);
         debug_assert!(size >= node_size());
 
+        // SAFETY: by this fn's contract `addr..addr+size` is free, aligned and unlinked, so the node
+        // write is in bounds; `prev` is `self.head` or a node already on the list (free memory the
+        // allocator owns). `&mut self` (behind the SpinLock) excludes concurrent access.
+        // NOTE: the `&'static mut` links vs the raw `node_ptr`/`prev` re-borrows are not Miri-checked.
         unsafe {
             let node_ptr = addr as *mut FreeNode;
             node_ptr.write(FreeNode::new(size));
@@ -155,7 +175,12 @@ impl LinkedListAllocator {
     }
 
     /// If `node` ends exactly where its successor begins, absorb the successor.
+    ///
+    /// # Safety
+    /// `node` must point to a valid `FreeNode` on the list, with no other live reference to it.
     unsafe fn merge_with_next(node: *mut FreeNode) {
+        // SAFETY: `node` is `prev` or `node_ptr` from `add_free_region`: a valid list node, and the
+        // caller's `&mut self` rules out other live references to it.
         let n = unsafe { &mut *node };
         let adjacent = match n.next.as_deref() {
             Some(next) => regions_adjacent(n.start_addr(), n.size, next.start_addr()),
@@ -202,6 +227,9 @@ impl LinkedListAllocator {
                 let alloc_end = alloc_start + size;
                 let excess = region.end_addr() - alloc_end;
                 if excess > 0 {
+                    // SAFETY: `find_region` unlinked the whole region, so `alloc_end..region_end` is free and
+                    // unaliased; it is 8-aligned (start and size are multiples of node_align) and `fit_region`
+                    // guarantees `excess >= node_size` when `excess > 0`.
                     unsafe { self.add_free_region(alloc_end, excess) };
                 }
                 alloc_start as *mut u8
@@ -213,6 +241,9 @@ impl LinkedListAllocator {
     fn dealloc(&mut self, ptr: *mut u8, layout: Layout) {
         let (size, _align) =
             adjust_request(layout.size(), layout.align(), node_size(), node_align());
+        // SAFETY: private, only called from `GlobalAlloc::dealloc`, whose contract says `ptr`/`layout`
+        // match a live `alloc`, so `ptr..ptr+size` (same `adjust_request` size) is unused and 8-aligned.
+        // NOTE: not validated here; a wrong layout would corrupt the free list (std contract).
         unsafe { self.add_free_region(ptr as usize, size) };
     }
 
@@ -246,6 +277,8 @@ impl LockedHeap {
     /// # Safety
     /// See [`LinkedListAllocator::init`].
     pub unsafe fn init(&self, start: usize, size: usize) {
+        // SAFETY: the caller's contract (see `LinkedListAllocator::init`) is forwarded unchanged;
+        // the lock gives exclusive access to the allocator.
         unsafe { self.0.lock().init(start, size) };
     }
 
@@ -255,6 +288,10 @@ impl LockedHeap {
     }
 }
 
+// SAFETY: `alloc` returns null or a block of at least `layout.size()` bytes aligned to at
+// least `layout.align()` (adjust_request/fit_region), carved from a region unlinked from the
+// free list, so live blocks never overlap; `dealloc` relinks it. State is behind the SpinLock.
+// NOTE: `dealloc` does not validate `layout` (the standard GlobalAlloc contract).
 unsafe impl GlobalAlloc for LockedHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         if crate::trace::ON {

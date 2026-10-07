@@ -36,6 +36,10 @@ const MOUSE_VECTOR: u8 = 44; // IRQ12 (slave PIC)
 static IDT: RacyCell<InterruptDescriptorTable> = RacyCell::new(InterruptDescriptorTable::new());
 
 pub fn init() {
+    // SAFETY: boot-only: called once from `kernel_main` with IF still clear (`enable()` is below),
+    // so IDT is not accessed concurrently, and nothing touches it after `load`. `set_stack_index`
+    // needs a valid IST slot: `gdt::init` (run earlier) put one in the TSS. `set_handler_addr`
+    // needs a real ISR: `timer_isr` saves/restores all GPRs and ends in `iretq`.
     unsafe {
         let idt = &mut *IDT.get();
         idt.breakpoint.set_handler_fn(breakpoint);
@@ -76,6 +80,10 @@ struct InputRing {
 
 // Safe: ISRs run with interrupts disabled (no producer re-entrancy) and the
 // main loop is the only consumer; head/tail use acquire/release ordering.
+// SAFETY: SPSC. The only producer is `ring_push`, called from the keyboard/mouse ISRs (IF=0,
+// so on one core they never nest); the only consumer is `read_input`, called by the compositor
+// via `ps2::poll`. A slot is written before `tail` is published (Release) and read after it is
+// seen (Acquire); the full check keeps the producer off the consumer's slot.
 unsafe impl Sync for InputRing {}
 
 static RING: InputRing = InputRing {
@@ -90,6 +98,9 @@ fn ring_push(value: u16) {
     if next == RING.head.load(Ordering::Acquire) {
         return; // full: drop the byte
     }
+    // SAFETY: `tail < RING_CAP` (stored values are reduced mod RING_CAP) and slot `tail` is not
+    // the consumer's (`next != head` was checked); only the ISR (IF=0) writes, and the Release
+    // store below publishes it.
     unsafe { (*RING.buf.get())[tail] = value };
     RING.tail.store(next, Ordering::Release);
 }
@@ -105,6 +116,8 @@ pub fn read_input() -> Option<u16> {
     if head == RING.tail.load(Ordering::Acquire) {
         return None;
     }
+    // SAFETY: `head < RING_CAP`; `head != tail` (Acquire) means the producer already published
+    // this slot and will not reuse it until `head` advances; single consumer (compositor).
     let value = unsafe { (*RING.buf.get())[head] };
     RING.head.store((head + 1) % RING_CAP, Ordering::Release);
     Some(value)

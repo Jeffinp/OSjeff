@@ -33,6 +33,8 @@ static RESULT: RacyCell<Option<Vec<u8>>> = RacyCell::new(None);
 
 /// Hand the network stack to the fetcher (call once, before spawning [`worker`]).
 pub fn init(net: netstack::Net) {
+    // SAFETY: called once from `kernel_main` before the fetcher is spawned, so no other thread can
+    // touch NET yet.
     unsafe {
         *NET.get() = Some(net);
     }
@@ -50,6 +52,8 @@ pub fn try_post(url: &[u8]) -> bool {
         return false;
     }
     let n = url.len().min(URL_CAP);
+    // SAFETY: only the compositor posts, and only in IDLE (checked above), when the worker does not
+    // touch REQ_URL/REQ_LEN; the Release store of REQUESTED below publishes them.
     unsafe {
         let buf = &mut *REQ_URL.get();
         buf[..n].copy_from_slice(&url[..n]);
@@ -65,6 +69,8 @@ pub fn take_result() -> Option<Option<Vec<u8>>> {
     if STATE.load(Ordering::Acquire) != DONE {
         return None;
     }
+    // SAFETY: STATE == DONE (Acquire) means the worker finished writing RESULT and will not touch it
+    // until the compositor sets IDLE, which happens after this take (compositor is the only caller).
     let r = unsafe { (*RESULT.get()).take() };
     STATE.store(IDLE, Ordering::Release);
     Some(r)
@@ -76,15 +82,23 @@ pub extern "C" fn worker() -> ! {
     loop {
         if STATE.load(Ordering::Acquire) == REQUESTED {
             STATE.store(RUNNING, Ordering::Relaxed);
+            // SAFETY: STATE == REQUESTED (Acquire) pairs with `try_post`'s Release, so REQ_URL/REQ_LEN are
+            // complete; the compositor will not rewrite them until DONE -> IDLE.
             let url = unsafe {
                 let n = *REQ_LEN.get();
                 let buf = &*REQ_URL.get();
                 buf[..n].to_vec()
             };
+            // SAFETY: NET is set once, before this thread exists (`fetch::init`), and used only by this
+            // worker, one request at a time, so the `&mut` is unique.
+            // NOTE: the NIC underneath is shared with the compositor's ARP responder; exclusion comes from
+            // `STATE`/`is_idle()`, not from the type.
             let result = match unsafe { (*NET.get()).as_mut() } {
                 Some(net) => fetch_url(net, &url),
                 None => None,
             };
+            // SAFETY: STATE is RUNNING here; the compositor only touches RESULT after seeing DONE, which is
+            // stored (Release) right after this write.
             unsafe {
                 *RESULT.get() = result;
             }
