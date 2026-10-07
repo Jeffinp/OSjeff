@@ -307,7 +307,7 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
             Err(e) => return Ok(e),
         };
         let st = v2(&mut c)?;
-        let r = appfs_backend::with(|fs| st.sandbox.open(fs, &path, flags as u32));
+        let r = appfs_backend::try_with(|fs| st.sandbox.open(fs, &path, flags as u32));
         let code = res(r);
         report_escapes(st);
         charge(&mut c, 200)?;
@@ -331,7 +331,7 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
         let Some(v) = st.v2.as_deref_mut() else {
             return Err(fault("sem ABI v2"));
         };
-        let out = appfs_backend::with(|fs| v.sandbox.read(fs, fd, &mut data[r]));
+        let out = appfs_backend::try_with(|fs| v.sandbox.read(fs, fd, &mut data[r]));
         let code = res(out.map(|n| n as i32));
         charge(&mut c, 100 + want as u64 / 64)?;
         Ok(code)
@@ -350,7 +350,7 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
         let Some(v) = st.v2.as_deref_mut() else {
             return Err(fault("sem ABI v2"));
         };
-        let out = appfs_backend::with(|fs| v.sandbox.write(fs, fd, &data[r]));
+        let out = appfs_backend::try_with(|fs| v.sandbox.write(fs, fd, &data[r]));
         let code = res(out.map(|n| n as i32));
         charge(&mut c, 100 + want as u64 / 64)?;
         Ok(code)
@@ -361,7 +361,7 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
                         whence: i32|
      -> R<i64> {
         let st = v2(&mut c)?;
-        let r = appfs_backend::with(|fs| st.sandbox.seek(fs, fd, off, whence));
+        let r = appfs_backend::try_with(|fs| st.sandbox.seek(fs, fd, off, whence));
         Ok(match r {
             Ok(p) => p as i64,
             Err(e) => e.code() as i64,
@@ -378,7 +378,7 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
         };
         range(&c, out, 16)?; // validate before doing the work
         let st = v2(&mut c)?;
-        let r = appfs_backend::with(|fs| st.sandbox.stat(fs, &path));
+        let r = appfs_backend::try_with(|fs| st.sandbox.stat(fs, &path));
         report_escapes(st);
         match r {
             Ok(s) => {
@@ -410,7 +410,7 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
             return Ok(ERR_INVAL);
         }
         let st = v2(&mut c)?;
-        let r = appfs_backend::with(|fs| st.sandbox.read_dir(fs, &path, index as usize));
+        let r = appfs_backend::try_with(|fs| st.sandbox.read_dir(fs, &path, index as usize));
         report_escapes(st);
         match r {
             Ok(Some(e)) => {
@@ -449,7 +449,7 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
             Err(e) => return Ok(e),
         };
         let st = v2(&mut c)?;
-        let r = appfs_backend::with(|fs| st.sandbox.rename(fs, &from, &to));
+        let r = appfs_backend::try_with(|fs| st.sandbox.rename(fs, &from, &to));
         report_escapes(st);
         Ok(res(r.map(|()| 0)))
     });
@@ -529,7 +529,7 @@ fn path_op(
         Err(e) => return Ok(e),
     };
     let st = v2(c)?;
-    let r = appfs_backend::with(|fs| f(&mut st.sandbox, fs, &path));
+    let r = appfs_backend::try_with(|fs| f(&mut st.sandbox, fs, &path));
     report_escapes(st);
     Ok(res(r.map(|()| 0)))
 }

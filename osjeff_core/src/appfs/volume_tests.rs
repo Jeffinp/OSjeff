@@ -622,3 +622,36 @@ fn a_removed_bundled_app_stays_removed_across_boots() {
         assert_eq!(appinstall::installed_ids(&mut fs).unwrap(), ["beta"]);
     }
 }
+
+#[test]
+fn mutated_flags_only_calls_that_may_change_the_volume() {
+    let mut v = volume(4);
+    let mut fs = VolumeFs::new(&mut v, NOW);
+    assert!(!fs.mutated());
+    fs.stat("/").unwrap();
+    assert_eq!(fs.stat("/data/x"), Err(FsError::NotFound));
+    assert_eq!(fs.read_dir("/data", 0), Err(FsError::NotFound));
+    assert_eq!(fs.tree_size("/data"), Err(FsError::NotFound));
+    assert_eq!(
+        fs.read_at("/data/x", 0, &mut [0u8; 4]),
+        Err(FsError::NotFound)
+    );
+    assert!(!fs.mutated(), "reads and failed lookups change nothing");
+    fs.mkdir_all("/data/x").unwrap();
+    assert!(fs.mutated());
+    for op in 0..5 {
+        let mut v2 = volume(4);
+        let mut f2 = VolumeFs::new(&mut v2, NOW);
+        f2.mkdir_all("/data/d").unwrap();
+        f2.create("/data/d/f").unwrap();
+        let mut g = VolumeFs::new(&mut v2, NOW);
+        match op {
+            0 => drop(g.write_at("/data/d/f", 0, b"x")),
+            1 => drop(g.set_len("/data/d/f", 1)),
+            2 => drop(g.remove("/data/d/f")),
+            3 => drop(g.rename("/data/d/f", "/data/d/g")),
+            _ => drop(g.create("/data/d/h")),
+        }
+        assert!(g.mutated(), "op {op}");
+    }
+}

@@ -59,14 +59,15 @@ impl Desktop {
 
     /// First-boot seeding of the bundled packages, then the catalog.
     pub(crate) fn init_apps(&mut self) {
-        let n = appfs_backend::with(|fs| appinstall::seed(fs, wasm::BUNDLED));
+        // Once per volume: a bundled app the user removed does not come back at the next boot.
+        let n = appfs_backend::with(|fs| appinstall::seed_once(fs, wasm::BUNDLED)).unwrap_or(0);
         serial_println!("apps: {} bundled packages installed into /apps", n);
         self.refresh_catalog();
     }
 
     /// Rebuild the launcher catalog from `/apps`.
     pub(crate) fn refresh_catalog(&mut self) {
-        let cat = appfs_backend::with(|fs| appinstall::load_catalog(fs));
+        let cat = appfs_backend::with(|fs| appinstall::load_catalog(fs)).unwrap_or_default();
         self.apps = cat
             .into_iter()
             .map(|c| AppEntry {
@@ -121,9 +122,10 @@ impl Desktop {
                 return;
             }
         };
-        let installed = appfs_backend::with(|fs| appinstall::is_installed(fs, &manifest.id));
+        let installed =
+            appfs_backend::with(|fs| appinstall::is_installed(fs, &manifest.id)).unwrap_or(false);
         if !installed {
-            match appfs_backend::with(|fs| appinstall::install(fs, &bytes)) {
+            match appfs_backend::try_with(|fs| appinstall::install(fs, &bytes)) {
                 Ok(m) => serial_println!("apps: installed `{}` {} from a file", m.id, m.version),
                 Err(e) => {
                     serial_println!("apps: install refused: {}", e);
@@ -142,7 +144,7 @@ impl Desktop {
             .iter()
             .find(|p| appinstall::check(p).is_ok_and(|m| m.id == id))
             .ok_or_else(|| String::from("pacote nao encontrado"))?;
-        let r = appfs_backend::with(|fs| appinstall::install(fs, pkg));
+        let r = appfs_backend::try_with(|fs| appinstall::install(fs, pkg));
         match r {
             Ok(m) => serial_println!("apps: installed `{}` {}", m.id, m.version),
             Err(e) => {
@@ -157,7 +159,7 @@ impl Desktop {
     #[allow(dead_code)] // returns with the file manager's Apps view
     /// Remove an installed app (Files, `Del`). Its open windows keep running until closed.
     pub(crate) fn remove_app(&mut self, id: &str) -> Result<(), String> {
-        let r = appfs_backend::with(|fs| appinstall::remove(fs, id));
+        let r = appfs_backend::try_with(|fs| appinstall::remove(fs, id));
         match r {
             Ok(()) => serial_println!("apps: removed `{}`", id),
             Err(e) => return Err(alloc::format!("{e}")),
@@ -223,7 +225,7 @@ impl Desktop {
     /// Open installed app `app_id` in a new window.
     pub(crate) fn open_wasm_app(&mut self, app_id: &str) -> Option<WindowId> {
         let manifest = self.apps.iter().find(|e| e.id == app_id)?.manifest.clone();
-        let bytes = match appfs_backend::with(|fs| appinstall::read_package(fs, app_id)) {
+        let bytes = match appfs_backend::try_with(|fs| appinstall::read_package(fs, app_id)) {
             Ok(b) => b,
             Err(e) => {
                 serial_println!("apps: cannot read `{}`: {}", app_id, e);
@@ -345,6 +347,7 @@ impl Desktop {
     /// adopt guest-set titles, free finished instances and mirror the clipboard.
     pub fn wasm_sync(&mut self) {
         wasm::reap();
+        self.poll_fs_changes();
         let mut titles: Vec<(WindowId, String)> = Vec::new();
         for w in self.wm.windows() {
             if let App::Wasm(ww) = &w.app.app {

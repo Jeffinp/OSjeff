@@ -39,12 +39,24 @@ const MAX_WALK: usize = 100_000;
 pub struct VolumeFs<'a> {
     be: &'a mut dyn Backend,
     now: u64,
+    mutated: bool,
 }
 
 impl<'a> VolumeFs<'a> {
     /// Adapter over `be`; `now` is the Unix time written into the timestamps.
     pub fn new(be: &'a mut dyn Backend, now: u64) -> VolumeFs<'a> {
-        VolumeFs { be, now }
+        VolumeFs {
+            be,
+            now,
+            mutated: false,
+        }
+    }
+
+    /// Whether any call so far may have changed the volume (a write, a resize, a
+    /// create, a remove, a rename): the kernel bumps the desktop's "files changed"
+    /// counter on it, so open file-manager windows can refresh.
+    pub fn mutated(&self) -> bool {
+        self.mutated
     }
 }
 
@@ -136,6 +148,7 @@ impl AppFs for VolumeFs<'_> {
                 Kind::Dir => Err(FsError::IsDir),
             };
         }
+        self.mutated = true;
         self.be.write_at(bp, off, data, self.now).map_err(map)?;
         Ok(data.len())
     }
@@ -145,16 +158,19 @@ impl AppFs for VolumeFs<'_> {
         if len > MAX_FILE {
             return Err(FsError::NoSpace);
         }
+        self.mutated = true;
         self.be.truncate(p, len, self.now).map_err(map)
     }
 
     fn create(&mut self, p: &str) -> Result<(), FsError> {
         let p = check(p)?;
+        self.mutated = true;
         self.be.create(p, self.now).map_err(map)
     }
 
     fn mkdir(&mut self, p: &str) -> Result<(), FsError> {
         let p = check(p)?;
+        self.mutated = true;
         self.be.mkdir(p, self.now).map_err(map)
     }
 
@@ -168,6 +184,7 @@ impl AppFs for VolumeFs<'_> {
             return Err(FsError::NotEmpty);
         }
         // A file or an empty folder: `remove_all` deletes exactly that.
+        self.mutated = true;
         self.be.remove_all(bp).map_err(map)
     }
 
@@ -183,6 +200,7 @@ impl AppFs for VolumeFs<'_> {
         if within(to, from) {
             return Err(FsError::Invalid); // into its own subtree
         }
+        self.mutated = true;
         self.be.rename(f, t, self.now).map_err(map)
     }
 

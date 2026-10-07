@@ -48,6 +48,23 @@ impl Desktop {
         for id in ids {
             self.files_refresh(id);
         }
+        self.fs_gen = vfs::generation();
+    }
+
+    /// Once per frame: when something other than the desktop itself changed the
+    /// volume (an app writing through the app filesystem), reload the file
+    /// managers, at most every 100 ms so a chatty app cannot make them thrash.
+    pub(crate) fn poll_fs_changes(&mut self) {
+        let g = vfs::generation();
+        if g == self.fs_gen {
+            return;
+        }
+        let now = crate::interrupts::ticks();
+        if now.saturating_sub(self.fs_gen_tick) < 25 {
+            return;
+        }
+        self.fs_gen_tick = now;
+        self.fs_changed();
     }
 
     fn files_rect(&self, id: WindowId) -> Option<Rect> {

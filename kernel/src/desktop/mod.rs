@@ -193,6 +193,9 @@ pub struct Desktop {
     wasm_grab: Option<WindowId>,
     /// Last seen generation of app-side clipboard writes.
     clip_gen: u64,
+    /// `vfs::generation()` the file managers last loaded, and the tick of that check.
+    fs_gen: u32,
+    fs_gen_tick: u64,
 }
 
 impl Desktop {
@@ -236,6 +239,8 @@ impl Desktop {
             start_scroll: 0,
             wasm_grab: None,
             clip_gen: crate::wasm::clip_generation(),
+            fs_gen: vfs::generation(),
+            fs_gen_tick: 0,
         };
         // Install the bundled apps into /apps (first boot) and build the launcher catalog.
         desk.init_apps();
@@ -955,7 +960,7 @@ mod sysstore;
 mod term;
 mod toasts_ui;
 mod ui;
-mod vfs;
+pub(crate) mod vfs;
 mod viewer;
 mod wasmwin;
 mod widgets;

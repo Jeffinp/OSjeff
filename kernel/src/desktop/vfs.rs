@@ -107,6 +107,12 @@ fn touched() {
     GENERATION.fetch_add(1, Ordering::Relaxed);
 }
 
+/// Record that something outside this module (an app writing through the app
+/// filesystem) changed the volume, so views that poll [`generation`] reload.
+pub fn touch() {
+    touched();
+}
+
 fn now() -> u64 {
     storage::now()
 }
