@@ -14,6 +14,7 @@
 extern crate alloc;
 
 pub mod anim;
+pub mod blockcache;
 pub mod blockdev;
 pub mod browser;
 pub mod calc;
