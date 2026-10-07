@@ -11,6 +11,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use embedded_tls::blocking::*;
 use osjeff_core::browser::{MAX_RESPONSE_BYTES, append_capped};
+use osjeff_core::rng::WeakMixer;
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
 use smoltcp::socket::{dns, tcp};
@@ -105,6 +106,10 @@ impl Net {
         let mut sockets = SocketSet::new(vec![]);
         let tcp = sockets.add(tcp_sock);
         let dns = sockets.add(dns_sock);
+
+        // Probe the TLS random source now so the serial log records which
+        // generator (RDRAND or the weak fallback) this machine will use.
+        let _ = TlsRng::new();
 
         Net {
             iface,
@@ -265,7 +270,7 @@ impl Net {
         let mut tls: TlsConnection<Stream, Aes128GcmSha256> =
             TlsConnection::new(stream, rx_rec, tx_rec);
 
-        let rng = Rdtsc::new();
+        let rng = TlsRng::new();
         if let Err(e) = tls.open(TlsContext::new(
             &config,
             UnsecureProvider::new::<Aes128GcmSha256>(rng),
@@ -412,41 +417,105 @@ impl embedded_io::Write for Stream<'_> {
     }
 }
 
-/// TSC-seeded xorshift RNG. Implements the `rand_core` traits embedded-tls
-/// needs for key generation.
+/// Random source for the TLS handshake (ephemeral key share, client random).
 ///
-/// WARNING: this is NOT a cryptographically secure RNG — it is seeded from the
-/// cycle counter with no entropy pool. It is acceptable only for this demo's
-/// "reach the search engine" goal, never for protecting real secrets.
-struct Rdtsc {
-    state: u64,
+/// * With `RDRAND` (`CPUID.01H:ECX[30]`) every word comes from the hardware
+///   generator, retried up to [`osjeff_core::rng::RDRAND_RETRIES`] times.
+/// * Without it (or if the hardware keeps failing) it falls back to
+///   [`WeakMixer`]: a hash of TSC / timer ticks / RTC. That is best effort and
+///   NOT cryptographically secure; the first use is announced on the serial
+///   console as `RNG: weak fallback`.
+///
+/// LIMITATION: `embedded-tls` bounds its provider's RNG by `CryptoRng`, so the
+/// fallback path has to implement that marker trait too even though it does
+/// not deserve it. The type system cannot separate the two here; the serial
+/// message and the browser's "Conexao nao verificada" label (the server is
+/// never authenticated anyway) are the honest signals. Replace the fallback by
+/// refusing TLS if this ever carries real secrets.
+struct TlsRng {
+    hw: bool,
+    weak: WeakMixer,
+    warned: bool,
 }
 
-impl Rdtsc {
+impl TlsRng {
     fn new() -> Self {
-        Self {
-            state: io::rdtsc() | 1,
+        let mut hw = osjeff_core::rng::has_rdrand(cpuid_01h_ecx());
+        // Advertised is not the same as working: draw one word to prove it.
+        let hw_dead = hw && osjeff_core::rng::retry_hw(rdrand64).is_none();
+        if hw_dead {
+            hw = false;
         }
+        // Noise: cycle counter + PIT tick count. (The CMOS RTC is deliberately
+        // not read: its index/data port pair is shared with the compositor's
+        // clock and a context switch between the two accesses would corrupt it.)
+        let weak = WeakMixer::new(&[io::rdtsc(), interrupts::ticks()]);
+        let mut rng = Self {
+            hw,
+            weak,
+            warned: false,
+        };
+        if hw {
+            crate::serial_println!("RNG: RDRAND");
+        } else if hw_dead {
+            rng.warn_weak("RDRAND advertised but failed");
+        } else {
+            rng.warn_weak("RDRAND not available");
+        }
+        rng
+    }
+
+    fn warn_weak(&mut self, why: &str) {
+        if !self.warned {
+            self.warned = true;
+            crate::serial_println!("RNG: weak fallback ({})", why);
+        }
+    }
+
+    fn next_word(&mut self) -> u64 {
+        if self.hw {
+            if let Some(v) = osjeff_core::rng::retry_hw(rdrand64) {
+                return v;
+            }
+            self.warn_weak("RDRAND failed");
+        }
+        self.weak.next(io::rdtsc())
     }
 }
 
-impl rand_core::RngCore for Rdtsc {
+/// `CPUID.01H:ECX`.
+fn cpuid_01h_ecx() -> u32 {
+    // CPUID leaf 1 exists on every x86_64 CPU and has no side effects.
+    core::arch::x86_64::__cpuid(1).ecx
+}
+
+/// One `RDRAND` attempt: `Some` on success, `None` if the hardware was not
+/// ready (carry flag clear). Only call after CPUID reported RDRAND.
+fn rdrand64() -> Option<u64> {
+    #[target_feature(enable = "rdrand")]
+    fn step() -> Option<u64> {
+        let mut v = 0u64;
+        // (Safe to call here: the `rdrand` target feature is enabled on `step`.)
+        let ok = core::arch::x86_64::_rdrand64_step(&mut v);
+        (ok == 1).then_some(v)
+    }
+    // SAFETY: only reached when CPUID.01H:ECX[30] is set (`TlsRng::hw`), so the
+    // instruction exists on this CPU.
+    unsafe { step() }
+}
+
+impl rand_core::RngCore for TlsRng {
     fn next_u32(&mut self) -> u32 {
         self.next_u64() as u32
     }
 
     fn next_u64(&mut self) -> u64 {
-        let mut x = self.state ^ io::rdtsc();
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        self.state = x;
-        x
+        self.next_word()
     }
 
     fn fill_bytes(&mut self, dst: &mut [u8]) {
         for chunk in dst.chunks_mut(8) {
-            let v = self.next_u64().to_le_bytes();
+            let v = self.next_word().to_le_bytes();
             chunk.copy_from_slice(&v[..chunk.len()]);
         }
     }
@@ -457,4 +526,5 @@ impl rand_core::RngCore for Rdtsc {
     }
 }
 
-impl rand_core::CryptoRng for Rdtsc {}
+// Required by `embedded-tls` (see the LIMITATION note on `TlsRng`).
+impl rand_core::CryptoRng for TlsRng {}

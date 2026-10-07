@@ -24,6 +24,7 @@ pub mod keymap;
 pub mod net;
 pub mod process;
 pub mod redirect;
+pub mod rng;
 pub mod terminal;
 pub mod web;
 pub mod window;
