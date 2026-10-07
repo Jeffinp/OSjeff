@@ -24,7 +24,6 @@ mod logo;
 mod ne2000;
 mod netd;
 mod netstack;
-mod netstats;
 mod nic;
 mod notify;
 mod pci;
@@ -318,7 +317,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // around the port. The result is handed to the `fetcher` thread, which is from then on the only
     // party that can touch the hardware (DHCP renewal, ARP/ping and fetches all run there).
     let netd = port.map(netd::Netd::boot);
-    netstats::set_nic_present(netd.is_some());
     trace::mark("dhcp done");
     // Capture the RTC (UTC) once, before any other thread can touch the CMOS
     // ports: it is the local clock that SNTP then corrects for TLS date checks.

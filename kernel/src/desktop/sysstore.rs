@@ -77,12 +77,19 @@ impl DiskUsage for VfsUsage {
     }
 }
 
-/// The NIC byte counters (`crate::netstats`); `None` when there is no NIC.
+/// The NIC byte counters, from the network owner's statistics (`netd::stats`: every
+/// driver, NE2000 and virtio-net alike, feeds them); `None` when there is no NIC.
 pub(crate) struct KernelNetStats;
 
 impl NetStats for KernelNetStats {
     fn counters(&self) -> Option<NetCounters> {
-        crate::netstats::counters()
+        let s = crate::netd::stats();
+        (s.nic != osjeff_core::netstats::NicKind::None).then_some(NetCounters {
+            rx_bytes: s.rx_bytes,
+            tx_bytes: s.tx_bytes,
+            rx_frames: s.rx_packets,
+            tx_frames: s.tx_packets,
+        })
     }
 }
 
