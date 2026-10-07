@@ -211,6 +211,19 @@ impl Settings {
     }
 }
 
+/// The volume path a stored wallpaper path means: the settings file and the
+/// settings page accept a bare name (`papel.png`, what the old flat file system
+/// used), the volume wants an absolute one (`/papel.png`). An absolute path is
+/// returned unchanged.
+pub fn absolute_path(p: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(p.len() + 1);
+    if p.first() != Some(&b'/') {
+        out.push(b'/');
+    }
+    out.extend_from_slice(p);
+    out
+}
+
 fn valid_path(p: &[u8]) -> bool {
     !p.is_empty()
         && p.len() <= PATH_CAP
@@ -433,5 +446,18 @@ mod tests {
             }
         }
         walk(0, &mut buf, alphabet);
+    }
+
+    #[test]
+    fn stored_wallpaper_paths_become_absolute_volume_paths() {
+        assert_eq!(absolute_path(b"papel.png"), b"/papel.png");
+        assert_eq!(absolute_path(b"fotos/praia.png"), b"/fotos/praia.png");
+        assert_eq!(absolute_path(b"/Imagens/a.png"), b"/Imagens/a.png");
+        // Whatever the settings file holds, the result is a single leading slash
+        // followed by the stored text: nothing is resolved or removed here (the
+        // volume rejects `.`/`..` components itself).
+        let mut s = Settings::new();
+        assert!(s.set_image_path(b"a/b.png"));
+        assert_eq!(absolute_path(s.image_path()), b"/a/b.png");
     }
 }
