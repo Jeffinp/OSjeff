@@ -347,7 +347,10 @@ impl Net {
                     (data.len(), ())
                 });
             }
-            if truncated || !s.is_active() {
+            // Done when the cap is hit or the peer closed and everything it sent was
+            // read (CloseWait still counts as `is_active`, so that alone would wait for
+            // the whole timeout after the server's FIN).
+            if truncated || (!s.may_recv() && !s.can_recv()) {
                 timed_out = false;
                 break;
             }

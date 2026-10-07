@@ -7,7 +7,8 @@
 #
 # Environment: MODE (bios|uefi, default bios), QEMU_NIC / QEMU_NETDEV / QEMU_MEM as
 # in qemu-headless.sh, BOOT_WAIT (default 12 s before the first click), CLICK_AFTER
-# "x,y" (a second click inside the page after the load, e.g. a button), CLICK_WAIT.
+# "x,y" (a second click inside the page after the load, e.g. a button), CLICK_WAIT,
+# KEY_AFTER (a QEMU key name such as alt-left, sent after the click) and KEY_WAIT.
 # Writes <outdir>/<shot_name>.png (default page.png), serial.log, and
 # <outdir>/boot.png (desktop before opening the browser).
 set -euo pipefail
@@ -71,6 +72,11 @@ if [ -n "${CLICK_AFTER:-}" ]; then
   click
   sleep "${CLICK_WAIT:-20}"
   shot_to "${shot}-after"
+fi
+if [ -n "${KEY_AFTER:-}" ]; then
+  mon "sendkey $KEY_AFTER"
+  sleep "${KEY_WAIT:-10}"
+  shot_to "${shot}-key"
 fi
 mon "quit" || true
 wait "$hpid" 2>/dev/null || true

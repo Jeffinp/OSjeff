@@ -590,6 +590,42 @@ pub struct Browser {
     truncated: bool,
     fail_reason: FailReason,
     insecure: InsecureHosts,
+    history: History,
+}
+
+/// Pages kept in the in-memory history (the oldest is dropped when full).
+pub const MAX_HISTORY: usize = 64;
+
+/// Back/forward list: absolute URLs, the cursor on the page being shown. Never
+/// persisted (a store behind a trait comes with the persistent filesystem).
+#[derive(Default)]
+struct History {
+    urls: alloc::vec::Vec<alloc::vec::Vec<u8>>,
+    /// Index of the current entry (meaningful when `urls` is not empty).
+    cur: usize,
+    /// The next successful load comes from back/forward: do not record it.
+    replay: bool,
+}
+
+impl History {
+    /// Record a finished navigation to `url`: drops the forward entries, ignores
+    /// a reload of the same page and honors a pending back/forward replay.
+    fn record(&mut self, url: &[u8]) {
+        if core::mem::take(&mut self.replay) {
+            return;
+        }
+        if self.urls.get(self.cur).is_some_and(|u| u == url) {
+            return;
+        }
+        if !self.urls.is_empty() {
+            self.urls.truncate(self.cur + 1);
+        }
+        if self.urls.len() == MAX_HISTORY {
+            self.urls.remove(0);
+        }
+        self.urls.push(url.to_vec());
+        self.cur = self.urls.len() - 1;
+    }
 }
 
 /// Most origins the user can allow to continue past a certificate error in one
@@ -667,6 +703,7 @@ impl Browser {
             truncated: false,
             fail_reason: FailReason::Network,
             insecure: InsecureHosts::new(),
+            history: History::default(),
         };
         b.set_url(b"");
         b
@@ -851,6 +888,65 @@ impl Browser {
     pub fn loaded(&mut self) {
         self.status = Status::Done;
         self.home = false;
+        let url = self.nav[..self.nav_len].to_vec();
+        self.history.record(&url);
+    }
+
+    /// True when there is an earlier page in the history.
+    pub fn can_back(&self) -> bool {
+        self.history.cur > 0 && !self.history.urls.is_empty()
+    }
+
+    /// True when there is a later page in the history.
+    pub fn can_forward(&self) -> bool {
+        self.history.cur + 1 < self.history.urls.len()
+    }
+
+    /// Number of pages in the history.
+    pub fn history_len(&self) -> usize {
+        self.history.urls.len()
+    }
+
+    /// Go to the previous page of the history (no-op at the start).
+    pub fn back(&mut self) {
+        if self.can_back() {
+            self.history.cur -= 1;
+            self.replay_current();
+        }
+    }
+
+    /// Go to the next page of the history (no-op at the end).
+    pub fn forward(&mut self) {
+        if self.can_forward() {
+            self.history.cur += 1;
+            self.replay_current();
+        }
+    }
+
+    fn replay_current(&mut self) {
+        let url = self.history.urls[self.history.cur].clone();
+        self.set_url(&url);
+        self.submit();
+        // `submit` normalizes the address; the stored URL is already absolute.
+        self.history.replay = true;
+    }
+
+    /// The user clicked a link whose `href` is `href` on the current page:
+    /// resolve it against the page URL (relative, absolute and protocol-relative
+    /// forms; `javascript:`, `data:` and an https -> http downgrade are refused)
+    /// and navigate there. Returns `false` when the link was refused.
+    pub fn open_link(&mut self, href: &[u8]) -> bool {
+        let Some(base) = parse_url(self.nav_url()) else {
+            return false;
+        };
+        match crate::redirect::resolve_redirect(&base, href) {
+            Ok(target) => {
+                self.set_url(&target);
+                self.submit();
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     /// Like [`Browser::loaded`], recording how the page actually arrived: `conn`
@@ -909,6 +1005,7 @@ impl Browser {
 
     /// Mark the current fetch as failed for a specific reason.
     pub fn fail_with(&mut self, reason: FailReason) {
+        self.history.replay = false;
         self.status = Status::Error;
         self.fail_reason = reason;
         self.truncated = false;
@@ -1419,5 +1516,105 @@ mod tests {
         // identity is a no-op
         let resp = b"HTTP/1.1 200 OK\r\nContent-Encoding: identity\r\n\r\n<p>x</p>";
         assert_eq!(page_body(resp), b"<p>x</p>");
+    }
+
+    fn load(b: &mut Browser, url: &[u8]) {
+        b.open(url);
+        assert!(b.take_request().is_some());
+        b.loaded_with(Conn::Verified, false);
+    }
+
+    #[test]
+    fn history_back_forward_and_truncation() {
+        let mut b = Browser::new();
+        assert!(!b.can_back() && !b.can_forward());
+        load(&mut b, b"https://a.example/");
+        load(&mut b, b"https://b.example/");
+        load(&mut b, b"https://c.example/");
+        assert_eq!(b.history_len(), 3);
+        assert!(b.can_back() && !b.can_forward());
+        b.back();
+        assert_eq!(b.take_request(), Some(&b"https://b.example/"[..]));
+        b.loaded_with(Conn::Verified, false);
+        assert_eq!(b.history_len(), 3, "back does not add an entry");
+        assert!(b.can_back() && b.can_forward());
+        b.back();
+        assert_eq!(b.take_request(), Some(&b"https://a.example/"[..]));
+        b.loaded_with(Conn::Verified, false);
+        assert!(!b.can_back());
+        b.back(); // no-op at the start
+        assert!(b.take_request().is_none());
+        b.forward();
+        assert_eq!(b.take_request(), Some(&b"https://b.example/"[..]));
+        b.loaded_with(Conn::Verified, false);
+        // A new navigation from the middle drops the forward entries.
+        load(&mut b, b"https://d.example/");
+        assert_eq!(b.history_len(), 3);
+        assert!(!b.can_forward());
+        assert_eq!(b.url(), b"https://d.example/");
+    }
+
+    #[test]
+    fn reload_does_not_duplicate_history() {
+        let mut b = Browser::new();
+        load(&mut b, b"https://a.example/");
+        b.reload();
+        let _ = b.take_request();
+        b.loaded_with(Conn::Verified, false);
+        assert_eq!(b.history_len(), 1);
+    }
+
+    #[test]
+    fn history_is_bounded() {
+        let mut b = Browser::new();
+        for i in 0..MAX_HISTORY + 10 {
+            let u = alloc::format!("https://h{i}.example/");
+            load(&mut b, u.as_bytes());
+        }
+        assert_eq!(b.history_len(), MAX_HISTORY);
+        b.back();
+        let want = alloc::format!("https://h{}.example/", MAX_HISTORY + 8);
+        assert_eq!(b.take_request(), Some(want.as_bytes()));
+    }
+
+    #[test]
+    fn failed_load_is_not_recorded() {
+        let mut b = Browser::new();
+        load(&mut b, b"https://a.example/");
+        b.open(b"https://broken.example/");
+        let _ = b.take_request();
+        b.fail_with(FailReason::Dns);
+        assert_eq!(b.history_len(), 1);
+    }
+
+    #[test]
+    fn open_link_resolves_relative_absolute_and_refuses_unsafe() {
+        let mut b = Browser::new();
+        load(&mut b, b"https://site.example/dir/page.html");
+        assert!(b.open_link(b"other.html"));
+        assert_eq!(
+            b.take_request(),
+            Some(&b"https://site.example/dir/other.html"[..])
+        );
+        b.loaded_with(Conn::Verified, false);
+        assert!(b.open_link(b"/root.html"));
+        assert_eq!(
+            b.take_request(),
+            Some(&b"https://site.example/root.html"[..])
+        );
+        b.loaded_with(Conn::Verified, false);
+        assert!(b.open_link(b"https://elsewhere.example/x"));
+        assert_eq!(b.take_request(), Some(&b"https://elsewhere.example/x"[..]));
+        b.loaded_with(Conn::Verified, false);
+        for bad in [
+            &b"javascript:alert(1)"[..],
+            b"data:text/html,x",
+            b"http://plain.example/",
+            b"",
+            b"a b",
+        ] {
+            assert!(!b.open_link(bad), "{bad:?}");
+        }
+        assert!(b.take_request().is_none());
     }
 }

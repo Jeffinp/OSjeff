@@ -36,6 +36,36 @@ pub enum Cmd {
 pub struct Page {
     pub cmds: Vec<Cmd>,
     pub height: i32,
+    /// `href` of every `<a href>` on the page (at most [`MAX_LINKS`]).
+    pub links: Vec<String>,
+    /// Clickable boxes of link text, in page coordinates (same space as `cmds`).
+    pub hits: Vec<LinkHit>,
+}
+
+/// Most links recorded per page (the rest still render, they are just not clickable).
+pub const MAX_LINKS: usize = 2000;
+
+/// The box of one word of link text and the link it belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinkHit {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    /// Index into [`Page::links`].
+    pub link: usize,
+}
+
+impl Page {
+    /// The `href` of the link under page coordinates `(x, y)`, if any.
+    pub fn link_at(&self, x: i32, y: i32) -> Option<&str> {
+        self.hits
+            .iter()
+            .rev()
+            .find(|h| x >= h.x && x < h.x + h.w && y >= h.y && y < h.y + h.h)
+            .and_then(|h| self.links.get(h.link))
+            .map(String::as_str)
+    }
 }
 
 /// Font metrics of the bitmap font: pixels per character cell and per text line
@@ -53,10 +83,14 @@ struct Word {
     color: Rgb,
     scale: u8,
     bold: bool,
+    /// Index into the page's link table when inside `<a href>`.
+    link: Option<usize>,
 }
 
 struct Painter {
     cmds: Vec<Cmd>,
+    links: Vec<String>,
+    hits: Vec<LinkHit>,
 }
 
 /// Render an HTML document to a display list laid out for `viewport_w` pixels.
@@ -66,7 +100,11 @@ pub fn render(html: &[u8], viewport_w: i32) -> Page {
     sheet.rules.extend(parse_css(&css).rules);
 
     let root = Computed::root();
-    let mut painter = Painter { cmds: Vec::new() };
+    let mut painter = Painter {
+        cmds: Vec::new(),
+        links: Vec::new(),
+        hits: Vec::new(),
+    };
     let pad = 12;
     let y = layout_children(
         &dom,
@@ -80,6 +118,8 @@ pub fn render(html: &[u8], viewport_w: i32) -> Page {
     Page {
         cmds: painter.cmds,
         height: y + pad,
+        links: painter.links,
+        hits: painter.hits,
     }
 }
 
@@ -98,12 +138,12 @@ fn layout_children(
     let mut inline: Vec<Word> = Vec::new();
     for node in nodes {
         match node {
-            Node::Text(t) => push_words(&mut inline, t, parent),
+            Node::Text(t) => push_words(&mut inline, t, parent, None),
             Node::Element(el) => {
                 let c = compute(el, sheet, parent);
                 match c.display {
                     Disp::None => {}
-                    Disp::Inline => collect_inline(el, sheet, &c, &mut inline),
+                    Disp::Inline => collect_inline(el, sheet, &c, &mut inline, &mut p.links, None),
                     Disp::Block | Disp::ListItem => {
                         y = flush_inline(&mut inline, x, y, width, parent.align, p);
                         y = layout_block(el, &c, sheet, x, y, width, p);
@@ -163,31 +203,48 @@ fn layout_block(
     y + c.margin
 }
 
-/// Recursively gather a word stream from an inline element subtree.
-fn collect_inline(el: &Element, sheet: &Stylesheet, parent: &Computed, out: &mut Vec<Word>) {
+/// Recursively gather a word stream from an inline element subtree. `<a href>`
+/// registers its target in `links` and tags every word below it.
+fn collect_inline(
+    el: &Element,
+    sheet: &Stylesheet,
+    parent: &Computed,
+    out: &mut Vec<Word>,
+    links: &mut Vec<String>,
+    link: Option<usize>,
+) {
     if el.tag == "br" {
         out.push(Word {
             text: "\n".into(),
             color: parent.color,
             scale: parent.scale,
             bold: parent.bold,
+            link: None,
         });
         return;
     }
+    let mut link = link;
+    if el.tag == "a"
+        && let Some(href) = el.attrs.get("href")
+        && links.len() < MAX_LINKS
+    {
+        link = Some(links.len());
+        links.push(href.clone());
+    }
     for node in &el.children {
         match node {
-            Node::Text(t) => push_words(out, t, parent),
+            Node::Text(t) => push_words(out, t, parent, link),
             Node::Element(child) => {
                 let c = compute(child, sheet, parent);
                 if c.display != Disp::None {
-                    collect_inline(child, sheet, &c, out);
+                    collect_inline(child, sheet, &c, out, links, link);
                 }
             }
         }
     }
 }
 
-fn push_words(out: &mut Vec<Word>, text: &str, c: &Computed) {
+fn push_words(out: &mut Vec<Word>, text: &str, c: &Computed, link: Option<usize>) {
     for w in text.split(' ') {
         if w.is_empty() {
             continue;
@@ -197,6 +254,7 @@ fn push_words(out: &mut Vec<Word>, text: &str, c: &Computed) {
             color: c.color,
             scale: c.scale,
             bold: c.bold,
+            link,
         });
     }
 }
@@ -230,6 +288,15 @@ fn flush_inline(
             lx += (width - *line_w) / 2;
         }
         for w in line.iter() {
+            if let Some(link) = w.link {
+                p.hits.push(LinkHit {
+                    x: lx,
+                    y: *y,
+                    w: char_w(w.scale) * w.text.chars().count() as i32,
+                    h: line_h(w.scale),
+                    link,
+                });
+            }
             p.cmds.push(Cmd::Text {
                 x: lx,
                 y: *y,
@@ -366,5 +433,46 @@ mod layout_tests {
         let page = render(b"<p>see <a href=x>this link</a> ok</p>", 600);
         let link_blue = page.cmds.iter().any(|c| matches!(c, Cmd::Text { text, color, .. } if text == "link" && *color == Rgb(0x15,0x65,0xC0)));
         assert!(link_blue);
+    }
+
+    #[test]
+    fn links_are_recorded_with_hit_boxes() {
+        let page = render(
+            b"<p>go <a href='/x'>to x</a> or <a href=y>there</a></p>",
+            600,
+        );
+        assert_eq!(page.links, ["/x", "y"]);
+        // "to", "x", "there": one box per word of link text.
+        assert_eq!(page.hits.len(), 3);
+        let first = page.hits[0];
+        assert_eq!(page.link_at(first.x + 1, first.y + 1), Some("/x"));
+        let last = page.hits[2];
+        assert_eq!(
+            page.link_at(last.x + last.w - 1, last.y + last.h - 1),
+            Some("y")
+        );
+        // Plain text is not a link; neither is outside every box.
+        assert_eq!(page.link_at(0, 0), None);
+        assert_eq!(page.link_at(first.x, first.y + first.h), None);
+    }
+
+    #[test]
+    fn nested_inline_inside_a_link_stays_clickable() {
+        let page = render(b"<a href='/n'>plain <b>bold</b></a> after", 600);
+        assert_eq!(page.links, ["/n"]);
+        assert_eq!(page.hits.len(), 2);
+        assert!(page.hits.iter().all(|h| page.links[h.link] == "/n"));
+    }
+
+    #[test]
+    fn anchor_without_href_is_not_a_link_and_links_are_capped() {
+        let page = render(b"<a name=top>x</a><a>y</a>", 600);
+        assert!(page.links.is_empty() && page.hits.is_empty());
+        let mut html = String::new();
+        for i in 0..(MAX_LINKS + 50) {
+            html.push_str(&alloc::format!("<a href=/{i}>l</a> "));
+        }
+        let page = render(html.as_bytes(), 600);
+        assert!(page.links.len() <= MAX_LINKS);
     }
 }

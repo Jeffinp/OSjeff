@@ -17,7 +17,7 @@ mod style;
 
 pub use css::{Decl, MAX_RULES, MAX_SELECTORS, Rule, Selector, Specificity, Stylesheet, parse_css};
 pub use dom::{Element, MAX_DEPTH, MAX_NODES, Node, parse_html};
-pub use layout::{Cmd, Page, render};
+pub use layout::{Cmd, LinkHit, MAX_LINKS, Page, render};
 
 // ---- colors ----
 

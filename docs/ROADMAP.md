@@ -33,8 +33,9 @@ embutidas com hash documentado, cadeia/nome/`CertificateVerify` verificados com
 `rustls-webpki`, SNTP para a hora, erro claro na página e "continuar mesmo assim" por
 origem e por sessão, `x509_parse` fuzzado (5 M de execuções sem crash). Detalhes e provas
 em [`design/tls-browser.md`](design/tls-browser.md). Ainda em aberto: revogação (CRL/OCSP),
-*pinning*, HSTS e, sem `RDRAND`, recusar em vez de usar o RNG fraco. O navegador ainda não
-tem links clicáveis, histórico, imagens nem formulários.
+*pinning*, HSTS e, sem `RDRAND`, recusar em vez de usar o RNG fraco. O navegador ganhou
+links clicáveis, histórico (Alt+←/→) e gzip/deflate; ainda não tem imagens, formulários nem
+favoritos.
 *Aceite (cumprido):* servidor com certificado inválido falha e a barra só diz "Conexao
 segura" para cadeias válidas.
 

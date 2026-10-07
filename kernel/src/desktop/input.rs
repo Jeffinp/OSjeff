@@ -40,6 +40,21 @@ impl Desktop {
                     return true;
                 }
                 Key::Esc if self.switcher.take().is_some() => return true,
+                // Alt+Left / Alt+Right: back / forward in the focused browser.
+                Key::Left | Key::Right => {
+                    if let Some(f) = self.focused()
+                        && self.kind_of(f) == Some(Kind::Browser)
+                        && let Some(b) = self.browser_state_mut(f)
+                    {
+                        if key == Key::Left {
+                            b.browser.back();
+                        } else {
+                            b.browser.forward();
+                        }
+                        return true;
+                    }
+                    return self.switcher.is_some();
+                }
                 // Other Alt+key chords belong to no app: do not type them.
                 _ => return self.switcher.is_some(),
             }
@@ -169,6 +184,14 @@ impl Desktop {
         {
             // The explicit, per-origin, per-session "continue anyway".
             b.browser.continue_insecure();
+        } else if !b.browser.is_home()
+            && ch.content.contains(px, py)
+            && let Some(page) = &b.page
+            && let Some(href) = page.link_at(px - ch.content.x, py - ch.content.y + b.scroll)
+        {
+            // A click on link text: resolve it against the page and navigate.
+            let href = href.as_bytes().to_vec();
+            b.browser.open_link(&href);
         } else if b.browser.is_home() {
             let (_logo, tiles) = browser_home_layout(ch.content);
             for (i, t) in tiles.iter().enumerate() {

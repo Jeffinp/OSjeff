@@ -1,8 +1,8 @@
 # HTTPS verificado e navegador (W16)
 
-Estado: **certificado verificado, hora confirmada por SNTP, gzip/deflate**. Links
-clicáveis, histórico, imagens, formulários e rolagem do navegador **não** foram feitos
-nesta frente (ver "O que ficou de fora").
+Estado: **certificado verificado, hora confirmada por SNTP, gzip/deflate, links
+clicáveis e histórico (Alt+←/Alt+→)**. Imagens, formulários, favoritos e a barra de
+sugestões **não** foram feitos nesta frente (ver "O que ficou de fora").
 
 ## 1. Modelo de confiança
 
@@ -134,6 +134,20 @@ guarda o host (comparação sem diferenciar maiúsculas) numa lista em memória,
 `fetcher` pula a validação **só para esse host**, em todos os saltos da navegação. A página
 fica marcada "Certificado invalido". Nada é gravado em disco.
 
+## 5.1 Navegador
+
+- **Links.** O motor `web` registra cada `<a href>` (até 2000 por página) em `Page::links` e uma
+  caixa por palavra de texto do link em `Page::hits`; `Page::link_at(x, y)` devolve o `href`.
+  O clique na janela converte para coordenadas da página (com a rolagem) e chama
+  `Browser::open_link`, que resolve o `href` contra a URL da página com
+  `redirect::resolve_redirect` (relativo, absoluto e `//host`; `javascript:`, `data:` e o
+  rebaixamento https para http são recusados).
+- **Histórico.** `Browser` guarda até 64 URLs absolutas em memória (nada em disco), com cursor:
+  carregar uma página nova apaga o "avançar", recarregar a mesma não duplica, uma falha não
+  entra. Alt+← e Alt+→ voltam e avançam na janela do navegador em foco.
+- **gzip/deflate** (`osjeff_core::gzip`): cabeçalho completo do gzip, CRC-32 e tamanho
+  conferidos, `deflate` com ou sem envoltório zlib, limite de 1 MiB descompactado.
+
 ## 6. Provas (QEMU)
 
 Neste ambiente de testes todo HTTPS de saída passa por um gateway que **reassina** os
@@ -159,6 +173,7 @@ de `tools/gen-tls-proof-pki.py`, o guest alcança o host em `10.0.2.2:porta`).
 | RTC em 2025, sem servidor de hora | `FAILED (ainda nao valido)` e "Hora do sistema nao confirmada" | `docs/img/browser-cert-clock.png` |
 | RTC em 2020, SNTP no gateway | `sntp: offset 200419735139 ms ... time now 2026-10-07 ... (confirmed)`, cadeia verificada | |
 | RTC em 2020, sem SNTP | `FAILED (hora do sistema incorreta)` | |
+| página local com links, `Content-Encoding: gzip` e `chunked` (servidor Python) | `fetch: GET .../gz.html`, 308 bytes gzip descompactados; clique no link; Alt+← volta ao índice | `docs/img/browser-links.png`, `browser-gzip.png`, `browser-back.png` |
 
 Custo, medido no QEMU (TCG, ne2k, SLIRP) contra a árvore anterior (`d3b7166`,
 `UnsecureProvider`):
@@ -176,10 +191,12 @@ idêntico à baseline (`tools/verify-boot.sh`: 0 pixels, BIOS e UEFI).
 
 ## 7. O que ficou de fora
 
-- **Navegador**: links clicáveis, voltar/avançar e histórico, favoritos, formulários GET,
-  `<img>` (PNG/BMP/PPM), rolagem por teclado/roda/barra além do que já existia. A base
-  existe (decodificadores de imagem, `redirect` para URLs relativas, `inflate`), mas o motor
-  `web` ainda não emite regiões de link/imagem/campo no `Page`.
+- **Navegador**: `<img>` (PNG/BMP/PPM, com caixa de `alt` para o resto), formulários GET,
+  favoritos (`BookmarkStore`), sugestões do histórico na barra, botões de voltar/avançar na
+  barra de ferramentas (hoje só Alt+←/Alt+→), cursor "mão", roda do mouse e
+  PageUp/PageDown/Home/End (as setas e a barra de rolagem já existiam). A base existe
+  (decodificadores de imagem, `inflate`); falta o motor `web` emitir imagens e campos no
+  `Page` e um segundo pedido por recurso (cada imagem abriria um handshake novo).
 - Revogação (CRL/OCSP), *pinning*, HSTS, Certificate Transparency.
 - Sem `RDRAND` o RNG do handshake continua sendo o fallback fraco (o servidor é
   autenticado, mas a confidencialidade da sessão não é garantida nessa CPU).
