@@ -28,6 +28,8 @@ pub const TEXT_MUTED: Color = Color::rgb(0x5B, 0x64, 0x7A);
 
 // Status / controls.
 pub const CLOSE: Color = Color::rgb(0xFF, 0x5C, 0x5C);
+pub const MINIMIZE: Color = Color::rgb(0xFF, 0xC1, 0x4D);
+pub const MAXIMIZE: Color = ACCENT;
 pub const SHADOW: Color = Color::rgb(0, 0, 0);
 pub const WHITE: Color = Color::rgb(0xFF, 0xFF, 0xFF);
 

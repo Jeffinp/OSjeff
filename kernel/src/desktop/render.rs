@@ -10,38 +10,73 @@ impl Desktop {
     /// [`render_anim_frame`] instead.
     pub fn render(&self, back: &mut [u8], info: bootloader_api::info::FrameBufferInfo, time: Time) {
         let mut c = Canvas::new(back, info);
-        for i in 0..WIN_COUNT {
-            let w = self.order[i];
-            if !self.windows[w].visible {
+        self.draw_dock_dots(&mut c);
+        let focused = self.focused();
+        for w in self.wm.windows() {
+            if !w.shown() {
                 continue;
             }
-            let focused = self.focused() == Some(w);
+            let is_focus = focused == Some(w.id);
             let rect = self.window_box(w);
-            match self.windows[w].anim {
-                Some(_) => self.draw_animating(&mut c, w, rect, focused),
-                None => self.draw_window(&mut c, w, rect, focused, self.drag.is_none()),
+            match w.anim {
+                Some(_) => self.draw_animating(&mut c, w, rect, is_focus),
+                None => {
+                    let shadow = self.drag.is_none() && !w.maximized;
+                    self.draw_window(&mut c, w, rect, is_focus, shadow);
+                }
             }
         }
         draw_clock(&mut c, time);
         self.draw_overlay(&mut c);
     }
 
-    /// Draws the transient overlays (right-click menu + start panel) on top of
-    /// the composed scene. Separated so the compositor can repaint only their
-    /// region on a hover change instead of recomposing the whole desktop.
+    /// Draws the transient overlays (context menu, start panel, Alt+Tab switcher)
+    /// on top of the composed scene. Separated so the compositor can repaint only
+    /// their region on a hover change instead of recomposing the whole desktop.
     pub fn draw_overlay(&self, c: &mut Canvas) {
-        if let Some((mx, my)) = self.menu {
-            self.draw_menu(c, mx, my);
+        if let Some(m) = self.menu {
+            self.draw_menu(c, m);
         }
         if self.start_open {
             self.draw_start(c);
+        }
+        if let Some(sw) = &self.switcher {
+            self.draw_switcher(c, sw);
+        }
+    }
+
+    /// A dot under the dock icon of every app that has a minimized window, so a
+    /// hidden window can be found (and restored by clicking the icon). Drawn
+    /// before the windows: the dock is part of the desktop background.
+    fn draw_dock_dots(&self, c: &mut Canvas) {
+        if !self.wm.windows().iter().any(|w| w.minimized) {
+            return;
+        }
+        let (_, icons) = dock_layout(self.sw, self.sh);
+        for kind in Kind::ALL {
+            if self
+                .wm
+                .windows()
+                .iter()
+                .any(|w| w.minimized && w.app.kind() == kind)
+            {
+                let r = icons[kind.index() + 1];
+                c.fill_round_rect(
+                    (r.x + r.w / 2 - 3) as usize,
+                    (r.bottom() + 4) as usize,
+                    6,
+                    6,
+                    3,
+                    theme::ACCENT,
+                );
+            }
         }
     }
 
     /// Draws an animating window: snapshot the backdrop, draw the window (no
     /// shadow), then fade toward the snapshot so lower windows show through.
-    pub(crate) fn draw_animating(&self, c: &mut Canvas, w: usize, rect: Rect, focused: bool) {
-        let alpha = match self.windows[w].anim {
+    pub(crate) fn draw_animating(&self, c: &mut Canvas, w: &Win, rect: Rect, focused: bool) {
+        let alpha = match w.anim {
             Some(a) => (a.alpha() * 256.0) as u16,
             None => return,
         };
@@ -59,15 +94,11 @@ impl Desktop {
     }
 
     /// Compact signature of the *static* scene (which windows are visible /
-    /// animating, their z-order and the drag target). When it changes, the
-    /// cached static layer must be rebuilt. See [`osjeff_core::wm::scene_signature`].
+    /// animating, their z-order, geometry and the drag target). When it changes,
+    /// the cached static layer must be rebuilt. See
+    /// [`osjeff_core::winman::WindowManager::signature`].
     pub fn anim_signature(&self) -> u64 {
-        osjeff_core::wm::scene_signature(
-            &self.order,
-            |w| self.windows[w].visible,
-            |w| self.windows[w].anim.is_some(),
-            self.drag.as_ref().map(|d| d.win),
-        )
+        self.wm.signature(self.drag.as_ref().map(|d| d.win))
     }
 
     /// Composes the static layer (non-animating windows + clock) into `buf`,
@@ -79,11 +110,11 @@ impl Desktop {
         time: Time,
     ) {
         let mut c = Canvas::new(buf, info);
-        for i in 0..WIN_COUNT {
-            let w = self.order[i];
-            if self.windows[w].visible && !self.is_dynamic(w) {
-                let focused = self.focused() == Some(w);
-                self.draw_window(&mut c, w, self.windows[w].rect, focused, true);
+        self.draw_dock_dots(&mut c);
+        let focused = self.focused();
+        for w in self.wm.windows() {
+            if w.shown() && !self.is_dynamic(w) {
+                self.draw_window(&mut c, w, w.rect, focused == Some(w.id), !w.maximized);
             }
         }
         draw_clock(&mut c, time);
@@ -100,13 +131,13 @@ impl Desktop {
         prev_damage: Rect,
     ) -> Rect {
         let (sw, sh) = (info.width as i32, info.height as i32);
+        let wins = self.wm.windows();
 
         // Damage = last frame's region + every animating window's box now.
         let mut damage = prev_damage;
-        let mut lowest_anim_z = WIN_COUNT;
-        for i in 0..WIN_COUNT {
-            let w = self.order[i];
-            if self.windows[w].visible && self.is_dynamic(w) {
+        let mut lowest_anim_z = wins.len();
+        for (i, w) in wins.iter().enumerate() {
+            if w.shown() && self.is_dynamic(w) {
                 damage = damage.union(&self.window_box(w));
                 lowest_anim_z = lowest_anim_z.min(i);
             }
@@ -122,16 +153,16 @@ impl Desktop {
         // Draw the animating windows on top.
         {
             let mut c = Canvas::new(back, info);
-            for i in 0..WIN_COUNT {
-                let w = self.order[i];
-                if self.windows[w].visible && self.is_dynamic(w) {
-                    let focused = self.focused() == Some(w);
-                    if self.windows[w].anim.is_some() {
-                        self.draw_animating(&mut c, w, self.window_box(w), focused);
+            let focused = self.focused();
+            for w in wins {
+                if w.shown() && self.is_dynamic(w) {
+                    let is_focus = focused == Some(w.id);
+                    if w.anim.is_some() {
+                        self.draw_animating(&mut c, w, self.window_box(w), is_focus);
                     } else {
                         // Dragged window: opaque, no shadow (matches the steady
                         // drag look and keeps the damage rect tight to the body).
-                        self.draw_window(&mut c, w, self.window_box(w), focused, false);
+                        self.draw_window(&mut c, w, self.window_box(w), is_focus, false);
                     }
                 }
             }
@@ -139,11 +170,10 @@ impl Desktop {
 
         // Re-assert any static window that sits above an animating one (so the
         // animating window doesn't paint over a window that is in front of it).
-        for i in (lowest_anim_z + 1)..WIN_COUNT {
-            let w = self.order[i];
-            if self.windows[w].visible
+        for w in wins.iter().skip(lowest_anim_z + 1) {
+            if w.shown()
                 && !self.is_dynamic(w)
-                && let Some(clip) = self.windows[w].rect.intersection(&damage)
+                && let Some(clip) = w.rect.intersection(&damage)
             {
                 copy_region(back, static_buf, info, clip);
             }
@@ -161,7 +191,7 @@ impl Desktop {
     pub(crate) fn draw_window(
         &self,
         c: &mut Canvas,
-        win: usize,
+        win: &Win,
         r: Rect,
         focused: bool,
         shadow: bool,
@@ -215,13 +245,15 @@ impl Desktop {
         };
         c.fill_round_rect(x + radius, y, w - radius * 2, 3, 1, accent);
 
-        // App indicator dot + title.
+        // App indicator dot + title (clipped before the title-bar buttons).
         c.fill_round_rect(x + 12, y + 11, 8, 8, 4, accent);
-        font::draw_text(
+        let title = win.app.title.as_bytes();
+        let room = (r.min_rect().x - (r.x + 28) - 6).max(0) as usize / font::cell_w(2);
+        font::draw_bytes(
             c,
             x + 28,
             y + 8,
-            self.windows[win].title,
+            &title[..title.len().min(room)],
             theme::HEADER_TEXT,
             2,
         );
@@ -237,15 +269,74 @@ impl Desktop {
             cbs / 2,
             theme::CLOSE,
         );
+        // Minimize / maximize appear (with glyphs on all three) while the pointer
+        // is over the window, so an idle desktop keeps its calm title bars.
+        if self.hover == Some(win.id) {
+            self.draw_title_buttons(c, win, r);
+        }
 
-        match self.windows[win].kind {
-            Kind::Terminal => self.draw_terminal(c, x, y, focused),
-            Kind::Editor => self.draw_editor(c, x, y, focused),
-            Kind::TaskMgr => self.draw_taskmgr(c, x, y),
-            Kind::Calculator => self.draw_calculator(c, r, focused),
-            Kind::Browser => self.draw_browser(c, r, focused),
-            Kind::WasmApp => self.draw_wasm(c, r),
-            Kind::Files => self.draw_files(c, r),
+        match &win.app.app {
+            App::Terminal(t) => self.draw_terminal(c, r, t, focused),
+            App::Editor(e) => self.draw_editor(c, r, e, focused),
+            App::TaskMgr => self.draw_taskmgr(c, r),
+            App::Calculator(k) => self.draw_calculator(c, r, k),
+            App::Browser(b) => self.draw_browser(c, r, focused, b),
+            App::Wasm => self.draw_wasm(c, r),
+            App::Files(f) => self.draw_files(c, r, f),
+        }
+    }
+
+    /// Minimize and maximize / restore buttons plus the glyphs on all three.
+    fn draw_title_buttons(&self, c: &mut Canvas, win: &Win, r: Rect) {
+        let dark = theme::HEADER;
+        let circle = |c: &mut Canvas, b: Rect, color: Color| {
+            c.fill_round_rect(
+                b.x.max(0) as usize,
+                b.y.max(0) as usize,
+                b.w as usize,
+                b.w as usize,
+                b.w as usize / 2,
+                color,
+            );
+        };
+        let center = |b: Rect| (b.x + b.w / 2, b.y + b.h / 2);
+        let rect = |c: &mut Canvas, x: i32, y: i32, w: i32, h: i32, col: Color| {
+            c.fill_rect(
+                x.max(0) as usize,
+                y.max(0) as usize,
+                w as usize,
+                h as usize,
+                col,
+            );
+        };
+
+        // Minimize: a dash.
+        let mn = r.min_rect();
+        circle(c, mn, theme::MINIMIZE);
+        let (cx, cy) = center(mn);
+        rect(c, cx - 4, cy + 1, 8, 2, dark);
+
+        // Maximize (a square) or, when maximized, restore (two squares).
+        if win.resizable {
+            let mx = r.max_rect();
+            circle(c, mx, theme::MAXIMIZE);
+            let (cx, cy) = center(mx);
+            if win.maximized {
+                rect(c, cx - 2, cy - 5, 7, 7, dark);
+                rect(c, cx - 1, cy - 4, 5, 5, theme::MAXIMIZE);
+                rect(c, cx - 5, cy - 2, 7, 7, dark);
+                rect(c, cx - 4, cy - 1, 5, 5, theme::MAXIMIZE);
+            } else {
+                rect(c, cx - 4, cy - 4, 8, 8, dark);
+                rect(c, cx - 3, cy - 3, 6, 6, theme::MAXIMIZE);
+            }
+        }
+
+        // Close: a cross.
+        let (cx, cy) = center(r.close_rect());
+        for i in 0..7 {
+            rect(c, cx - 3 + i, cy - 3 + i, 2, 2, dark);
+            rect(c, cx + 2 - i, cy - 3 + i, 2, 2, dark);
         }
     }
 }

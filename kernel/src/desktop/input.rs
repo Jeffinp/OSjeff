@@ -1,18 +1,56 @@
-//! `Desktop` methods: input. Split out of the former monolithic desktop.rs.
+//! `Desktop` methods: input. Keyboard routing to the focused window's app,
+//! global shortcuts (Ctrl+C/V/S/N, Alt+Tab), mouse hit-testing, window drag /
+//! resize / maximize / minimize and the dock and context menus.
 
 use super::*;
 
 impl Desktop {
-    // ---- input ----
+    // ---- keyboard ----
 
     pub fn handle_key(&mut self, scan: u8, extended: bool, pressed: bool, time: Time) -> bool {
-        let Some(key) = self.keymap.process(scan, extended, pressed) else {
+        let alt_before = self.keymap.alt();
+        let key = self.keymap.process(scan, extended, pressed);
+        let alt_now = self.keymap.alt();
+
+        // Alt released: commit the Alt+Tab selection (restoring a minimized
+        // window), or just drop a stale switcher.
+        if alt_before
+            && !alt_now
+            && let Some(sw) = self.switcher.take()
+        {
+            self.wm.activate(sw.selected());
+            return true;
+        }
+        let Some(key) = key else {
             return false;
         };
-        let Some(top) = self.focused() else {
+        if !alt_now {
+            self.switcher = None;
+        }
+
+        if alt_now {
+            // Alt+Tab / Alt+Shift+Tab opens the switcher, repeats advance it.
+            match key {
+                Key::Tab => {
+                    let back = self.keymap.shift();
+                    match self.switcher.as_mut() {
+                        Some(s) => s.advance(back),
+                        None => self.switcher = Switcher::start(self.wm.switch_list(), back),
+                    }
+                    return true;
+                }
+                Key::Esc if self.switcher.take().is_some() => return true,
+                // Other Alt+key chords belong to no app: do not type them.
+                _ => return self.switcher.is_some(),
+            }
+        }
+
+        let (Some(top), Some(kind)) =
+            (self.focused(), self.focused().and_then(|f| self.kind_of(f)))
+        else {
             return false;
         };
-        // Ctrl+C / Ctrl+V / Ctrl+S are intercepted before the app sees the key.
+        // Ctrl+C / Ctrl+V / Ctrl+S / Ctrl+N are intercepted before the app sees the key.
         if self.keymap.ctrl() {
             match key {
                 Key::Char(b'c') | Key::Char(b'C') => {
@@ -27,37 +65,50 @@ impl Desktop {
                     self.save_editor_file();
                     return true;
                 }
+                // Ctrl+N: another window of the focused app (single-instance
+                // apps only re-focus; the WASM guest and the task manager keep
+                // the key).
+                Key::Char(b'n') | Key::Char(b'N')
+                    if !matches!(kind, Kind::WasmApp | Kind::TaskMgr) =>
+                {
+                    self.new_window(kind);
+                    return true;
+                }
                 _ => {}
             }
         }
-        match self.windows[top].kind {
+        match kind {
             Kind::Terminal => {
-                let action = self.term.on_key(key, time);
-                self.handle_terminal_action(action);
+                let action = self
+                    .term_mut(top)
+                    .map_or(Action::None, |t| t.on_key(key, time));
+                self.handle_terminal_action(top, action);
             }
             Kind::Editor => {
                 if key == Key::Esc {
-                    self.request_close(EDIT);
-                } else {
-                    self.editor.on_key(key);
+                    self.request_close(top);
+                } else if let Some(e) = self.editor_mut(top) {
+                    e.editor.on_key(key);
                 }
             }
-            Kind::TaskMgr => self.task_key(key),
+            Kind::TaskMgr => self.task_key(top, key),
             Kind::Calculator => match key {
-                Key::Char(b) => self.calc.input(b),
-                Key::Enter => self.calc.input(b'='),
-                Key::Backspace => self.calc.backspace(),
-                Key::Esc => self.request_close(CALC),
+                Key::Char(b) => self.calc_input(top, b),
+                Key::Enter => self.calc_input(top, b'='),
+                Key::Backspace => self.calc_input(top, 0x08),
+                Key::Esc => self.request_close(top),
                 _ => {}
             },
             Kind::Browser => match key {
-                Key::Esc => self.request_close(BROWSER),
+                Key::Esc => self.request_close(top),
                 // Arrows scroll the rendered page (a pixel at a time feels slow,
                 // so step by a few lines).
-                Key::Up => self.scroll_page(-48),
-                Key::Down => self.scroll_page(48),
+                Key::Up => self.scroll_page(top, -48),
+                Key::Down => self.scroll_page(top, 48),
                 _ => {
-                    self.browser.on_key(key);
+                    if let Some(b) = self.browser_state_mut(top) {
+                        b.browser.on_key(key);
+                    }
                 }
             },
             // Forward keystrokes to the guest (printable bytes as-is, Enter as
@@ -69,36 +120,55 @@ impl Desktop {
                 Key::Esc => crate::wasm::on_key(27),
                 _ => {}
             },
-            Kind::Files => match key {
-                Key::Esc => self.request_close(FILES),
-                Key::Up => self.files_move(-1),
-                Key::Down => self.files_move(1),
-                Key::Left | Key::Backspace => self.files_up(),
-                Key::Enter | Key::Right => self.files_primary(),
-                Key::Tab => self.files_toggle_view(),
-                Key::Delete => self.files_delete(),
-                Key::Char(b'n') | Key::Char(b'N') => self.files_mkdir(),
-                _ => {}
-            },
+            Kind::Files => self.files_key(top, key),
         }
         true
     }
 
-    /// Resolve a click inside the browser window: toolbar buttons (home /
+    fn files_key(&mut self, id: WindowId, key: Key) {
+        if key == Key::Esc {
+            self.request_close(id);
+            return;
+        }
+        if matches!(key, Key::Enter | Key::Right) {
+            let slot = self.files_mut(id).and_then(|f| f.primary());
+            if let Some(slot) = slot {
+                self.fs_load_slot(slot);
+            }
+            return;
+        }
+        let Some(f) = self.files_mut(id) else {
+            return;
+        };
+        match key {
+            Key::Up => f.move_sel(-1),
+            Key::Down => f.move_sel(1),
+            Key::Left | Key::Backspace => f.up(),
+            Key::Tab => f.toggle_view(),
+            Key::Delete => f.delete(),
+            Key::Char(b'n') | Key::Char(b'N') => f.mkdir(),
+            _ => {}
+        }
+    }
+
+    /// Resolve a click inside browser window `id`: toolbar buttons (home /
     /// reload / search) or, on the start page, the shortcut tiles.
-    pub(crate) fn browser_click(&mut self, rect: Rect, px: i32, py: i32) {
+    pub(crate) fn browser_click(&mut self, id: WindowId, rect: Rect, px: i32, py: i32) {
         let ch = BrowserChrome::of(rect);
+        let Some(b) = self.browser_state_mut(id) else {
+            return;
+        };
         if ch.home.contains(px, py) {
-            self.browser.go_home();
+            b.browser.go_home();
         } else if ch.reload.contains(px, py) {
-            self.browser.reload();
+            b.browser.reload();
         } else if ch.go.contains(px, py) {
-            self.browser.submit();
-        } else if self.browser.is_home() {
+            b.browser.submit();
+        } else if b.browser.is_home() {
             let (_logo, tiles) = browser_home_layout(ch.content);
             for (i, t) in tiles.iter().enumerate() {
                 if t.contains(px, py) {
-                    self.browser
+                    b.browser
                         .open(osjeff_core::browser::QUICK_LINKS[i].1.as_bytes());
                     break;
                 }
@@ -106,46 +176,57 @@ impl Desktop {
         }
     }
 
-    /// Resolve a click in the file manager. Geometry mirrors `files_ui::draw_files`
-    /// (sidebar width 176, rows 30px high). Sidebar items switch the view; clicks
-    /// in the main list select a row.
-    pub(crate) fn files_click(&mut self, rect: Rect, px: i32, py: i32) {
+    /// Resolve a click in file-manager window `id`. Geometry mirrors
+    /// `files_ui::draw_files` (sidebar width 176, rows 30px high). Sidebar items
+    /// switch the view; clicks in the main list select a row.
+    pub(crate) fn files_click(&mut self, id: WindowId, rect: Rect, px: i32, py: i32) {
         use osjeff_core::layout::{FilesHit, files_hit};
-        match files_hit(rect, self.files_view, px, py) {
-            Some(FilesHit::View(v)) => self.files_set_view(v),
-            Some(FilesHit::Row(i)) => self.files_select_at(i),
+        let Some(f) = self.files_mut(id) else {
+            return;
+        };
+        match files_hit(rect, f.view, px, py) {
+            Some(FilesHit::View(v)) => f.set_view(v),
+            Some(FilesHit::Row(i)) => f.select_at(i),
             None => {}
         }
     }
 
-    pub(crate) fn calc_input(&mut self, k: u8) {
-        if k == 0x08 {
-            self.calc.backspace();
-        } else {
-            self.calc.input(k);
+    pub(crate) fn calc_input(&mut self, id: WindowId, k: u8) {
+        if let Some(c) = self.calc_mut(id) {
+            if k == 0x08 {
+                c.backspace();
+            } else {
+                c.input(k);
+            }
         }
     }
 
-    // ---- filesystem ----
+    // ---- terminal actions ----
 
-    pub(crate) fn handle_terminal_action(&mut self, action: Action) {
+    pub(crate) fn handle_terminal_action(&mut self, id: WindowId, action: Action) {
         match action {
-            Action::OpenEditor => self.open(EDIT),
-            Action::OpenTasks => self.open(TASK),
-            Action::OpenCalc => self.open(CALC),
+            Action::OpenEditor => {
+                self.launch(Kind::Editor);
+            }
+            Action::OpenTasks => {
+                self.launch(Kind::TaskMgr);
+            }
+            Action::OpenCalc => {
+                self.launch(Kind::Calculator);
+            }
             Action::Reboot => crate::power::reboot(),
             Action::Shutdown => crate::power::shutdown(),
-            Action::List => self.fs_list(),
-            Action::Save(f) => self.fs_save(f),
-            Action::Load(f) => self.fs_load(f),
-            Action::Cat(f) => self.fs_cat(f),
-            Action::Remove(f) => self.fs_remove(f),
+            Action::List => self.fs_list(id),
+            Action::Save(f) => self.fs_save(id, f),
+            Action::Load(f) => self.fs_load(id, f),
+            Action::Cat(f) => self.fs_cat(id, f),
+            Action::Remove(f) => self.fs_remove(id, f),
             Action::None => {}
         }
     }
 
     /// Copy the focused app's current text (terminal input line / editor current
-    /// line / calculator display) into the shared clipboard.
+    /// line / calculator display / browser URL) into the shared clipboard.
     pub(crate) fn copy_from_focused(&mut self) {
         let Some(top) = self.focused() else {
             return;
@@ -153,14 +234,14 @@ impl Desktop {
         // Snapshot to a local buffer so the immutable borrow of the app ends
         // before mutably borrowing the clipboard.
         let mut tmp = [0u8; clipboard::CAP];
-        let n;
-        {
-            let text: &[u8] = match self.windows[top].kind {
-                Kind::Terminal => self.term.input(),
-                Kind::Editor => self.editor.line(self.editor.cursor().1),
-                Kind::Calculator => self.calc.display(),
-                Kind::Browser => self.browser.url(),
-                Kind::TaskMgr | Kind::WasmApp | Kind::Files => &[],
+        let mut n = 0;
+        if let Some(w) = self.wm.get(top) {
+            let text: &[u8] = match &w.app.app {
+                App::Terminal(t) => t.input(),
+                App::Editor(e) => e.editor.line(e.editor.cursor().1),
+                App::Calculator(c) => c.display(),
+                App::Browser(b) => b.browser.url(),
+                App::TaskMgr | App::Wasm | App::Files(_) => &[],
             };
             n = text.len().min(clipboard::CAP);
             tmp[..n].copy_from_slice(&text[..n]);
@@ -182,40 +263,40 @@ impl Desktop {
         tmp[..n].copy_from_slice(self.clipboard.get());
         let data = &tmp[..n];
 
-        match self.windows[top].kind {
-            Kind::Terminal => {
+        match self.app_mut(top) {
+            Some(App::Terminal(t)) => {
                 for &b in data {
                     if b != b'\n' && b != b'\r' {
-                        let _ = self.term.on_key(Key::Char(b), time);
+                        let _ = t.on_key(Key::Char(b), time);
                     }
                 }
             }
-            Kind::Editor => {
+            Some(App::Editor(e)) => {
                 for &b in data {
                     if b == b'\n' {
-                        self.editor.on_key(Key::Enter);
+                        e.editor.on_key(Key::Enter);
                     } else if b != b'\r' {
-                        self.editor.on_key(Key::Char(b));
+                        e.editor.on_key(Key::Char(b));
                     }
                 }
             }
-            Kind::Calculator => {
+            Some(App::Calculator(c)) => {
                 for &b in data {
-                    self.calc.input(b);
+                    c.input(b);
                 }
             }
-            Kind::Browser => {
-                for &b in data {
-                    if b != b'\n' && b != b'\r' {
-                        self.browser.on_key(Key::Char(b));
+            Some(App::Browser(b)) => {
+                for &ch in data {
+                    if ch != b'\n' && ch != b'\r' {
+                        b.browser.on_key(Key::Char(ch));
                     }
                 }
             }
-            Kind::TaskMgr | Kind::WasmApp | Kind::Files => {}
+            Some(App::TaskMgr | App::Wasm | App::Files(_)) | None => {}
         }
     }
 
-    pub(crate) fn task_key(&mut self, key: Key) {
+    pub(crate) fn task_key(&mut self, id: WindowId, key: Key) {
         match key {
             Key::Up => self.procs.select_prev(),
             Key::Down => self.procs.select_next(),
@@ -223,9 +304,11 @@ impl Desktop {
                 if let Some(pid) = self.procs.selected_pid()
                     && let Some(w) = self.window_of_pid(pid)
                 {
-                    self.open(w);
+                    self.wm.activate(w);
                 }
             }
+            // End the selected process: really close the window of that
+            // instance (its process goes with it when the animation ends).
             Key::Delete => {
                 if let Some(pid) = self.procs.selected_pid()
                     && let Some(p) = self.procs.get(pid)
@@ -235,8 +318,95 @@ impl Desktop {
                     self.request_close(w);
                 }
             }
-            Key::Esc => self.request_close(TASK),
+            Key::Esc => self.request_close(id),
             _ => {}
+        }
+    }
+
+    // ---- mouse ----
+
+    /// Maximize / restore window `id` and make the next frame repaint the whole
+    /// screen (the window and everything it uncovers change).
+    pub(crate) fn toggle_maximize(&mut self, id: WindowId) {
+        let work = self.work_area();
+        if self.wm.toggle_maximize(id, work) {
+            self.force_full = true;
+            self.relayout_browser(id);
+        }
+    }
+
+    /// A left press on window `w` at `(cx, cy)`: title-bar buttons, resize
+    /// border, title (drag / double-click maximize) or app content.
+    fn click_window(&mut self, w: WindowId, cx: i32, cy: i32) {
+        let Some(win) = self.wm.get(w) else {
+            return;
+        };
+        let (rect, resizable, maximized) = (win.rect, win.resizable, win.maximized);
+        let kind = win.app.kind();
+        if rect.on_close(cx, cy) {
+            self.request_close(w);
+            self.drag = None;
+            return;
+        }
+        if rect.on_min(cx, cy) {
+            self.wm.minimize(w);
+            self.drag = None;
+            self.clicks.reset();
+            return;
+        }
+        if resizable && rect.on_max(cx, cy) {
+            self.toggle_maximize(w);
+            self.clicks.reset();
+            return;
+        }
+        self.wm.raise(w);
+        if resizable
+            && !maximized
+            && let Some(edge) = rect.resize_edge_at(cx, cy)
+        {
+            self.drag = Some(Drag {
+                win: w,
+                mode: DragMode::Resize {
+                    edge,
+                    start: rect,
+                    ox: cx,
+                    oy: cy,
+                },
+            });
+            return;
+        }
+        if rect.on_title(cx, cy) {
+            let double = self.clicks.press(crate::interrupts::ticks(), cx, cy, w);
+            if double && resizable {
+                self.toggle_maximize(w);
+            } else if !maximized {
+                self.drag = Some(Drag {
+                    win: w,
+                    mode: DragMode::Move {
+                        grab_dx: cx - rect.x,
+                        grab_dy: cy - rect.y,
+                    },
+                });
+            }
+            return;
+        }
+        match kind {
+            Kind::Calculator => {
+                if let Some(k) = calc_button_at(rect, cx, cy) {
+                    self.calc_input(w, k);
+                }
+            }
+            Kind::Browser => self.browser_click(w, rect, cx, cy),
+            Kind::WasmApp => {
+                // Translate the click into the guest's content-local
+                // coordinates (same origin as `draw_wasm`) and deliver it.
+                let pad = 14;
+                let lx = cx - (rect.x + pad);
+                let ly = cy - (rect.y + TITLE_H + 12);
+                crate::wasm::on_pointer(lx, ly, 1);
+            }
+            Kind::Files => self.files_click(w, rect, cx, cy),
+            Kind::Terminal | Kind::Editor | Kind::TaskMgr => {}
         }
     }
 
@@ -251,9 +421,15 @@ impl Desktop {
         let right_pressed = right && !self.prev_right;
         let released = !left && self.prev_left;
 
-        // Right click opens the context menu at the cursor.
+        // Right click opens a context menu at the cursor: the app menu on a dock
+        // icon ("Nova janela"), the launcher elsewhere.
         if right_pressed {
-            self.menu = Some(self.clamp_menu(cx, cy));
+            let kind = match self.dock_hit(cx, cy) {
+                Some(DockAction::Open(k)) => MenuKind::Dock(k),
+                _ => MenuKind::Desktop,
+            };
+            let (mx, my) = self.clamp_menu(cx, cy, kind.len());
+            self.menu = Some(MenuState { x: mx, y: my, kind });
             scene = true;
         }
 
@@ -261,75 +437,70 @@ impl Desktop {
             if self.start_open {
                 // Resolve a click on the open start panel (app / power / dismiss).
                 match start_item_at(self.sw, self.sh, cx, cy) {
-                    Some(StartItem::App(w)) => {
+                    Some(StartItem::App(k)) => {
                         self.start_open = false;
-                        self.open(w);
+                        self.launch(k);
                     }
                     Some(StartItem::Reboot) => crate::power::reboot(),
                     Some(StartItem::Shutdown) => crate::power::shutdown(),
                     None => self.start_open = false,
                 }
                 scene = true;
-            } else if let Some((mx, my)) = self.menu {
+            } else if let Some(m) = self.menu {
                 // A click while the menu is open selects an item or dismisses it.
-                if let Some(i) = menu_item_at(mx, my, cx, cy) {
-                    self.open(MENU_ITEMS[i].1);
+                if let Some(i) = menu_item_at(m.x, m.y, cx, cy, m.kind.len())
+                    && let Some((_, _, action)) = m.kind.entry(i)
+                {
+                    match action {
+                        MenuAction::Launch(k) => {
+                            self.launch(k);
+                        }
+                        MenuAction::NewWindow(k) => {
+                            self.new_window(k);
+                        }
+                    }
                 }
                 self.menu = None;
                 scene = true;
             } else if let Some(w) = self.topmost_at(cx, cy) {
-                let rect = self.windows[w].rect;
-                if rect.on_close(cx, cy) {
-                    self.request_close(w);
-                    self.drag = None;
-                } else {
-                    self.bring_to_front(w);
-                    if rect.on_title(cx, cy) {
-                        self.drag = Some(Drag {
-                            win: w,
-                            grab_dx: cx - rect.x,
-                            grab_dy: cy - rect.y,
-                        });
-                    } else if self.windows[w].kind == Kind::Calculator
-                        && let Some(k) = calc_button_at(rect, cx, cy)
-                    {
-                        self.calc_input(k);
-                    } else if self.windows[w].kind == Kind::Browser {
-                        self.browser_click(rect, cx, cy);
-                    } else if self.windows[w].kind == Kind::WasmApp {
-                        // Translate the click into the guest's content-local
-                        // coordinates (same origin as `draw_wasm`) and deliver it.
-                        let pad = 14;
-                        let lx = cx - (rect.x + pad);
-                        let ly = cy - (rect.y + TITLE_H + 12);
-                        crate::wasm::on_pointer(lx, ly, 1);
-                    } else if self.windows[w].kind == Kind::Files {
-                        self.files_click(rect, cx, cy);
-                    }
-                }
+                self.click_window(w, cx, cy);
                 scene = true;
             } else if let Some(action) = self.dock_hit(cx, cy) {
                 match action {
                     DockAction::Start => self.start_open = !self.start_open,
-                    DockAction::Open(app) => self.open(app),
+                    // Focus (or restore) the app's window; open one if none.
+                    DockAction::Open(k) => {
+                        self.launch(k);
+                    }
                 }
                 scene = true;
             }
         }
 
-        if released {
-            self.drag = None;
+        if released && let Some(d) = self.drag.take() {
+            // A resized browser lays its page out again for the new width.
+            if matches!(d.mode, DragMode::Resize { .. }) {
+                self.relayout_browser(d.win);
+            }
         }
 
         if let Some(d) = &self.drag {
             if left {
-                let w = d.win;
-                let mut r = self.windows[w].rect;
-                r.x = cx - d.grab_dx;
-                r.y = cy - d.grab_dy;
-                let (x, y) = r.clamped_pos(self.sw, self.sh);
-                self.windows[w].rect.x = x;
-                self.windows[w].rect.y = y;
+                let (w, mode) = (d.win, d.mode);
+                let (sw, sh) = (self.sw, self.sh);
+                match mode {
+                    DragMode::Move { grab_dx, grab_dy } => {
+                        self.wm.move_to(w, cx - grab_dx, cy - grab_dy, sw, sh);
+                    }
+                    DragMode::Resize {
+                        edge,
+                        start,
+                        ox,
+                        oy,
+                    } => {
+                        self.wm.resize(w, edge, start, (cx - ox, cy - oy), (sw, sh));
+                    }
+                }
                 // NOT scene_dirty: a drag is driven by the per-frame damage path
                 // (keyed on `cursor_moved`), which repaints only the window's
                 // old+new rect. Marking the whole scene dirty would force a full
@@ -338,6 +509,21 @@ impl Desktop {
                 // (see `is_dynamic`), so moving it never touches the others.
             } else {
                 self.drag = None;
+            }
+        }
+
+        // Hover: the window under the cursor shows its minimize / maximize
+        // buttons. Only an enter / leave changes pixels; skipped while dragging.
+        if self.drag.is_none() {
+            let hov = self.topmost_at(cx, cy);
+            if hov != self.hover {
+                for id in [self.hover, hov].into_iter().flatten() {
+                    if let Some(r) = self.wm.get(id).map(|w| self.window_box(w)) {
+                        self.mark_dirty(r);
+                    }
+                }
+                self.hover = hov;
+                scene = true;
             }
         }
 

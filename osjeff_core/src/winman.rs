@@ -405,8 +405,10 @@ impl<A> WindowManager<A> {
     /// Compact hash of the *static* scene: for every window (back to front)
     /// its id, rect, flags and whether it animates, plus the drag target. When
     /// it changes the compositor rebuilds its cached static layer. Unlike the
-    /// fixed-slot [`crate::wm::scene_signature`] it covers geometry, so move,
-    /// resize and maximize invalidate the cache too.
+    /// fixed-slot [`crate::wm::scene_signature`] it covers geometry, so a
+    /// maximize or a finished move/resize invalidates the cache; the rect of
+    /// the `drag` window itself is left out so dragging stays on the cheap
+    /// damage path.
     pub fn signature(&self, drag: Option<WindowId>) -> u64 {
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         let mut feed = |v: u32| {
@@ -417,8 +419,12 @@ impl<A> WindowManager<A> {
         };
         for w in &self.wins {
             feed(w.id.raw());
-            for v in [w.rect.x, w.rect.y, w.rect.w, w.rect.h] {
-                feed(v as u32);
+            // The window being dragged / resized is drawn on top of the cached
+            // layer every frame, so its moving rect must not invalidate it.
+            if drag != Some(w.id) {
+                for v in [w.rect.x, w.rect.y, w.rect.w, w.rect.h] {
+                    feed(v as u32);
+                }
             }
             feed(
                 (w.shown() as u32)
@@ -965,6 +971,23 @@ mod tests {
 
         m.request_close(c); // animation
         assert_ne!(maxed, sig(&m, None));
+    }
+
+    #[test]
+    fn dragging_a_window_does_not_change_the_signature() {
+        let (mut m, [a, b, _c]) = table();
+        settle(&mut m);
+        let before = sig(&m, Some(a));
+        m.move_to(a, 300, 200, 1280, 720);
+        assert_eq!(before, sig(&m, Some(a)));
+        let start = m.get(a).unwrap().rect;
+        m.resize(a, ResizeEdge::SE, start, (40, 40), (1280, 720));
+        assert_eq!(before, sig(&m, Some(a)));
+        // Moving a *different* window while `a` is dragged does change it.
+        m.move_to(b, 400, 300, 1280, 720);
+        assert_ne!(before, sig(&m, Some(a)));
+        // And once the drag ends the new rect is part of the signature.
+        assert_ne!(sig(&m, None), sig(&m, Some(a)));
     }
 
     #[test]

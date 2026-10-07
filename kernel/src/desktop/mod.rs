@@ -2,8 +2,9 @@
 //! and a process table surfaced through a Task Manager app.
 //!
 //! All non-trivial logic (terminal, editor, keymap, window geometry, easing,
-//! process table) lives in `osjeff_core` and is unit-tested. This module is
-//! hardware-facing glue: pixels, z-order, animation stepping, dispatch.
+//! process table, the dynamic window table) lives in `osjeff_core` and is
+//! unit-tested. This module is hardware-facing glue: pixels, animation
+//! stepping, dispatch, and one [`instance::App`] state per window.
 
 pub(crate) use crate::fb::{Canvas, Color};
 pub(crate) use crate::font;
@@ -12,12 +13,15 @@ pub(crate) use crate::logo;
 pub(crate) use crate::sched;
 pub(crate) use crate::sync::RacyCell;
 pub(crate) use crate::theme;
+pub(crate) use alloc::string::String;
+pub(crate) use alloc::vec::Vec;
 pub(crate) use osjeff_core::clipboard::{self, Clipboard};
 pub(crate) use osjeff_core::fs;
-pub(crate) use osjeff_core::window::TITLE_H;
+pub(crate) use osjeff_core::window::{ResizeEdge, TITLE_H, WindowId};
+pub(crate) use osjeff_core::winman::{ClickTracker, Switcher, WindowManager, WindowSpec};
 pub(crate) use osjeff_core::{
-    Action, Anim, Calc, Editor, FileName, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect,
-    Terminal, Time,
+    Action, Calc, Editor, FileName, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Terminal,
+    Time,
 };
 
 // Dock / menu / start-panel / keypad geometry lives in `osjeff_core::layout`.
@@ -27,6 +31,10 @@ use osjeff_core::layout::{
 };
 
 const SLIDE_PX: f32 = 28.0;
+
+/// Longest gap between the two presses of a double click, in timer ticks
+/// (250 Hz): 500 ms.
+const DOUBLE_CLICK_TICKS: u64 = 125;
 
 // Scratch buffer to snapshot the area behind an animating window (largest
 // window + margin). Lets fades composite over real content, not the wallpaper.
@@ -44,8 +52,8 @@ static DISK: RacyCell<[u8; DISK_BYTES]> = RacyCell::new([0; DISK_BYTES]);
 fn disk() -> &'static mut [u8] {
     // SAFETY: DISK is `DISK_BYTES` long and only accessed from the compositor thread (Desktop,
     // files UI, terminal), so the slice is valid.
-    // NOTE: not guaranteed by the type: safe fn returning `&'static mut`; `files_rows`/`files_slot`
-    // hold one while `files_cwd` calls `disk()` again (read-only aliasing, docs/audit/01 #6).
+    // NOTE: not guaranteed by the type: safe fn returning `&'static mut`; `FilesState::rows`/`slot`
+    // hold one while `cwd` calls `disk()` again (read-only aliasing, docs/audit/01 #6).
     unsafe { core::slice::from_raw_parts_mut(DISK.get() as *mut u8, DISK_BYTES) }
 }
 
@@ -63,44 +71,14 @@ fn flush_disk() {
     }
 }
 
-const TERM: usize = 0;
-const EDIT: usize = 1;
-const TASK: usize = 2;
-const CALC: usize = 3;
-const BROWSER: usize = 4;
-const WASM: usize = 5;
-const FILES: usize = 6;
-const WIN_COUNT: usize = 7;
-
 /// Cursor sprite bounding box (used by the dirty-rect overlay path).
 pub const CURSOR_W: i32 = 10;
 pub const CURSOR_H: i32 = 16;
 
-const MENU_ITEMS: [(&str, usize); 7] = [
-    ("Terminal", TERM),
-    ("Editor", EDIT),
-    ("Task Manager", TASK),
-    ("Calculator", CALC),
-    ("Navegador", BROWSER),
-    ("WASM App", WASM),
-    ("Arquivos", FILES),
-];
-
-// Start panel (system icon → all apps + power).
-const START_APPS: [(&str, usize); 7] = [
-    ("Terminal", TERM),
-    ("Editor", EDIT),
-    ("Task Manager", TASK),
-    ("Calculator", CALC),
-    ("Navegador", BROWSER),
-    ("WASM App", WASM),
-    ("Arquivos", FILES),
-];
-
 /// An entry in the start panel.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StartItem {
-    App(usize),
+    App(Kind),
     Reboot,
     Shutdown,
 }
@@ -108,7 +86,7 @@ pub(crate) enum StartItem {
 /// What a dock icon click triggers.
 pub(crate) enum DockAction {
     Start,
-    Open(usize),
+    Open(Kind),
 }
 
 /// What changed after a mouse packet, so the caller can pick the cheap
@@ -118,68 +96,100 @@ pub struct MouseResult {
     pub cursor_moved: bool,
 }
 
+/// Which context menu is open.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Terminal,
-    Editor,
-    TaskMgr,
-    Calculator,
-    Browser,
-    WasmApp,
-    Files,
+pub(crate) enum MenuKind {
+    /// Right click on the desktop: every app.
+    Desktop,
+    /// Right click on a dock icon: that app's window actions.
+    Dock(Kind),
 }
 
-struct Win {
-    rect: Rect,
-    visible: bool,
-    kind: Kind,
-    title: &'static str,
-    proc_name: &'static [u8],
-    anim: Option<Anim>,
-    pid: u16, // 0 = no live process (app closed)
+/// What choosing a context-menu entry does.
+#[derive(Clone, Copy)]
+pub(crate) enum MenuAction {
+    /// Focus the app's window, opening one if there is none.
+    Launch(Kind),
+    /// Open one more window of the app.
+    NewWindow(Kind),
 }
 
-impl Win {
-    /// A window accepts focus/clicks only when shown and not animating out.
-    pub(crate) fn active(&self) -> bool {
-        self.visible && !matches!(self.anim, Some(a) if a.is_closing())
+impl MenuKind {
+    pub(crate) fn len(self) -> usize {
+        match self {
+            MenuKind::Desktop => Kind::ALL.len(),
+            MenuKind::Dock(_) => 1,
+        }
+    }
+
+    /// Label, icon and action of entry `i`.
+    pub(crate) fn entry(self, i: usize) -> Option<(&'static str, Kind, MenuAction)> {
+        match self {
+            MenuKind::Desktop => Kind::ALL
+                .get(i)
+                .map(|&k| (k.label(), k, MenuAction::Launch(k))),
+            MenuKind::Dock(k) if i == 0 => Some(if k.multi() {
+                ("Nova janela", k, MenuAction::NewWindow(k))
+            } else {
+                ("Abrir", k, MenuAction::Launch(k))
+            }),
+            MenuKind::Dock(_) => None,
+        }
     }
 }
 
-struct Drag {
-    win: usize,
-    grab_dx: i32,
-    grab_dy: i32,
+/// An open context menu: top-left corner and kind.
+#[derive(Clone, Copy)]
+pub(crate) struct MenuState {
+    pub x: i32,
+    pub y: i32,
+    pub kind: MenuKind,
+}
+
+/// A pointer drag in progress.
+#[derive(Clone, Copy)]
+pub(crate) enum DragMode {
+    /// Moving the window: offset of the grab point inside it.
+    Move { grab_dx: i32, grab_dy: i32 },
+    /// Resizing from `edge`; `start` is the window rect and `(ox, oy)` the
+    /// pointer position when the drag began.
+    Resize {
+        edge: ResizeEdge,
+        start: Rect,
+        ox: i32,
+        oy: i32,
+    },
+}
+
+pub(crate) struct Drag {
+    pub win: WindowId,
+    pub mode: DragMode,
 }
 
 pub struct Desktop {
     sw: i32,
     sh: i32,
-    term: Terminal,
-    editor: Editor,
-    calc: Calc,
-    browser: osjeff_core::Browser,
-    // Rendered web page (display list from the `web` engine) + its pixel scroll.
-    web_page: Option<osjeff_core::web::Page>,
-    page_scroll: i32,
-    // File manager: selected row, view (0 = files, 1 = trash), and a one-time
-    // snapshot of the two IDE disks (boot + filesystem) for its disk panel.
-    files_sel: usize,
-    files_view: u8,
-    files_cwd: u8, // current directory slot (fs::ROOT at the top level)
+    // One snapshot of the two IDE disks (boot + filesystem) for the file
+    // manager's disk panels.
     disks: [Option<crate::ata::DiskInfo>; 2],
     clipboard: Clipboard,
     keymap: Keymap,
     procs: ProcessTable,
-    windows: [Win; WIN_COUNT],
-    order: [usize; WIN_COUNT], // back -> front
+    /// The dynamic window table; every window owns an app instance.
+    wm: WindowManager<Inst>,
     drag: Option<Drag>,
-    menu: Option<(i32, i32)>,
+    menu: Option<MenuState>,
     start_open: bool,
-    editor_file: FileName,
-    /// Directory slot holding `editor_file` (`fs::ROOT` at the top level), so Ctrl+S
-    /// rewrites the file that was opened rather than a same-named one in the root.
-    editor_dir: u8,
+    /// The Alt+Tab switcher while Alt is held.
+    switcher: Option<Switcher>,
+    /// Window under the cursor (its title-bar buttons are shown).
+    hover: Option<WindowId>,
+    clicks: ClickTracker,
+    /// Set by operations that change pixels outside the focused window (maximize,
+    /// restore, ...); makes the next steady frame upload the whole screen.
+    force_full: bool,
+    /// Region to upload on the next steady frame besides the focused window.
+    extra_dirty: Rect,
     cursor_x: i32,
     cursor_y: i32,
     prev_left: bool,
@@ -193,9 +203,6 @@ impl Desktop {
         let mut procs = ProcessTable::new();
         procs.spawn(b"kernel", ProcKind::System, ProcState::Running);
         procs.spawn(b"compositor", ProcKind::System, ProcState::Running);
-        let shell_pid = procs
-            .spawn(b"shell", ProcKind::App, ProcState::Running)
-            .unwrap();
 
         // Load the filesystem from disk. If no disk responds or it holds no
         // valid filesystem (blank / first boot), format and persist a fresh one.
@@ -230,84 +237,9 @@ impl Desktop {
             flush_disk();
         }
 
-        let windows = [
-            Win {
-                rect: Rect::new(70, 80, 512, 320),
-                visible: true,
-                kind: Kind::Terminal,
-                title: "OSJEFF SHELL",
-                proc_name: b"shell",
-                anim: Some(Anim::open()),
-                pid: shell_pid,
-            },
-            Win {
-                rect: Rect::new(610, 110, 560, 350),
-                visible: false,
-                kind: Kind::Editor,
-                title: "OSJEFF EDIT",
-                proc_name: b"editor",
-                anim: None,
-                pid: 0,
-            },
-            Win {
-                rect: Rect::new(360, 200, 392, 300),
-                visible: false,
-                kind: Kind::TaskMgr,
-                title: "TASK MANAGER",
-                proc_name: b"taskmgr",
-                anim: None,
-                pid: 0,
-            },
-            Win {
-                rect: Rect::new(470, 150, 300, 420),
-                visible: false,
-                kind: Kind::Calculator,
-                title: "CALCULATOR",
-                proc_name: b"calc",
-                anim: None,
-                pid: 0,
-            },
-            Win {
-                rect: Rect::new(150, 60, 916, 560),
-                visible: false,
-                kind: Kind::Browser,
-                title: "NAVEGADOR",
-                proc_name: b"browser",
-                anim: None,
-                pid: 0,
-            },
-            Win {
-                rect: Rect::new(240, 130, 720, 470),
-                visible: false,
-                kind: Kind::WasmApp,
-                title: "WASM APP",
-                proc_name: b"wasmapp",
-                anim: None,
-                pid: 0,
-            },
-            Win {
-                rect: Rect::new(250, 120, 780, 520),
-                visible: false,
-                kind: Kind::Files,
-                title: "ARQUIVOS",
-                proc_name: b"files",
-                anim: None,
-                pid: 0,
-            },
-        ];
-
-        Self {
+        let mut desk = Self {
             sw,
             sh,
-            term: Terminal::new(),
-            editor: Editor::new(),
-            calc: Calc::new(),
-            browser: osjeff_core::Browser::new(),
-            web_page: None,
-            page_scroll: 0,
-            files_sel: 0,
-            files_view: 0,
-            files_cwd: fs::ROOT,
             disks: [
                 crate::ata::identify(0x1F0, 0x3F6, false),
                 crate::ata::identify(0x170, 0x376, false),
@@ -315,76 +247,203 @@ impl Desktop {
             clipboard: Clipboard::new(),
             keymap: Keymap::new(),
             procs,
-            windows,
-            order: [FILES, WASM, BROWSER, TASK, CALC, EDIT, TERM], // terminal focused
+            wm: WindowManager::new(osjeff_core::winman::DEFAULT_MAX_WINDOWS),
             drag: None,
             menu: None,
             start_open: false,
-            editor_file: FileName::parse(b"notes.txt").unwrap(),
-            editor_dir: fs::ROOT,
+            switcher: None,
+            hover: None,
+            clicks: ClickTracker::new(DOUBLE_CLICK_TICKS),
+            force_full: false,
+            extra_dirty: Rect::new(0, 0, 0, 0),
             cursor_x: sw / 2,
             cursor_y: sh / 2,
             prev_left: false,
             prev_right: false,
-        }
+        };
+        // The terminal is open (and focused) at boot.
+        desk.open_new(Kind::Terminal);
+        desk
     }
 
     pub fn cursor(&self) -> (i32, i32) {
         (self.cursor_x, self.cursor_y)
     }
 
-    // ---- focus / z-order ----
+    // ---- window lifecycle ----
 
-    pub(crate) fn focused(&self) -> Option<usize> {
-        osjeff_core::wm::focused(&self.order, |w| self.windows[w].active())
-    }
-
-    pub(crate) fn bring_to_front(&mut self, win: usize) {
-        osjeff_core::wm::bring_to_front(&mut self.order, win);
-    }
-
-    pub(crate) fn open(&mut self, win: usize) {
-        if self.windows[win].visible {
-            // Already shown (or animating out): cancel any close and just focus.
-            if matches!(self.windows[win].anim, Some(a) if a.is_closing()) {
-                self.windows[win].anim = Some(Anim::open());
-            }
-            self.bring_to_front(win);
-            return;
+    /// Lowest unused 1-based instance number of `kind` (so closing `shell 2` and
+    /// opening a terminal again names it `shell 2` once more).
+    fn free_index(&self, kind: Kind) -> u8 {
+        let mut idx = 1u8;
+        while self
+            .wm
+            .windows()
+            .iter()
+            .any(|w| w.app.kind() == kind && w.app.index == idx)
+        {
+            idx += 1;
         }
-        // Launching a closed app spawns a fresh process (new pid, uptime 0).
-        self.windows[win].visible = true;
-        self.windows[win].anim = Some(Anim::open());
+        idx
+    }
+
+    /// Opens a new window of `kind` with a new process. `None` when the window
+    /// table or the process table is full (nothing is created then).
+    pub(crate) fn open_new(&mut self, kind: Kind) -> Option<WindowId> {
+        if self.wm.is_full() {
+            return None;
+        }
+        let index = self.free_index(kind);
+        let mut name = [0u8; 16];
+        let n = numbered_name(kind.proc_name(), index, &mut name);
         let pid = self
             .procs
-            .spawn(
-                self.windows[win].proc_name,
-                ProcKind::App,
-                ProcState::Running,
+            .spawn(&name[..n], ProcKind::App, ProcState::Running)?;
+        let rect = if index == 1 {
+            kind.default_rect()
+        } else {
+            osjeff_core::winman::cascade_rect(
+                kind.default_rect(),
+                index as usize - 1,
+                self.work_area(),
             )
-            .unwrap_or(0);
-        self.windows[win].pid = pid;
-        self.bring_to_front(win);
-    }
-
-    pub(crate) fn request_close(&mut self, win: usize) {
-        // Ignore if already animating out.
-        if matches!(self.windows[win].anim, Some(a) if a.is_closing()) {
-            return;
+        };
+        let (min_w, min_h) = kind.min_size();
+        let mut title = String::from(kind.title());
+        if index > 1 {
+            // "OSJEFF SHELL 2": the same " N" suffix as the process name.
+            let mut tmp = [0u8; 16];
+            let k = numbered_name("", index, &mut tmp);
+            title.push_str(core::str::from_utf8(&tmp[..k]).unwrap_or(""));
         }
-        self.windows[win].anim = Some(Anim::close());
+        let inst = Inst {
+            app: App::new(kind),
+            pid,
+            index,
+            title,
+        };
+        let spec = WindowSpec {
+            rect,
+            min_w,
+            min_h,
+            resizable: kind.resizable(),
+        };
+        match self.wm.open(spec, inst) {
+            Ok(id) => Some(id),
+            Err(inst) => {
+                self.procs.kill(inst.pid);
+                None
+            }
+        }
     }
 
-    pub(crate) fn window_of_pid(&self, pid: u16) -> Option<usize> {
-        let pids: [u16; WIN_COUNT] = core::array::from_fn(|w| self.windows[w].pid);
-        osjeff_core::wm::window_of_pid(&pids, pid)
+    /// Dock-click semantics: focus (restoring if minimized) the most recently
+    /// used window of `kind`, or open one when there is none.
+    pub(crate) fn launch(&mut self, kind: Kind) -> Option<WindowId> {
+        if let Some(id) = self.mru_of_kind(kind) {
+            self.wm.activate(id);
+            return Some(id);
+        }
+        self.open_new(kind)
     }
 
-    pub(crate) fn topmost_at(&self, px: i32, py: i32) -> Option<usize> {
-        osjeff_core::wm::topmost_at(&self.order, px, py, |w| {
-            let win = &self.windows[w];
-            win.active().then_some(win.rect)
-        })
+    /// Ctrl+N / "Nova janela": one more window of `kind`; single-instance apps
+    /// just focus their window.
+    pub(crate) fn new_window(&mut self, kind: Kind) -> Option<WindowId> {
+        if kind.multi() {
+            self.open_new(kind)
+        } else {
+            self.launch(kind)
+        }
+    }
+
+    /// The most recently used live window of `kind`.
+    pub(crate) fn mru_of_kind(&self, kind: Kind) -> Option<WindowId> {
+        self.wm
+            .switch_list()
+            .into_iter()
+            .find(|&id| self.kind_of(id) == Some(kind))
+    }
+
+    pub(crate) fn kind_of(&self, id: WindowId) -> Option<Kind> {
+        self.wm.get(id).map(|w| w.app.kind())
+    }
+
+    /// The rectangle windows maximize into.
+    pub(crate) fn work_area(&self) -> Rect {
+        osjeff_core::layout::work_area(self.sw, self.sh)
+    }
+
+    pub(crate) fn app_mut(&mut self, id: WindowId) -> Option<&mut App> {
+        self.wm.get_mut(id).map(|w| &mut w.app.app)
+    }
+
+    pub(crate) fn term_mut(&mut self, id: WindowId) -> Option<&mut Terminal> {
+        match self.app_mut(id) {
+            Some(App::Terminal(t)) => Some(t),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn editor_mut(&mut self, id: WindowId) -> Option<&mut EditorState> {
+        match self.app_mut(id) {
+            Some(App::Editor(e)) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn calc_mut(&mut self, id: WindowId) -> Option<&mut Calc> {
+        match self.app_mut(id) {
+            Some(App::Calculator(c)) => Some(c),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn browser_state_mut(&mut self, id: WindowId) -> Option<&mut BrowserState> {
+        match self.app_mut(id) {
+            Some(App::Browser(b)) => Some(b),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn files_mut(&mut self, id: WindowId) -> Option<&mut FilesState> {
+        match self.app_mut(id) {
+            Some(App::Files(f)) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// The (single) browser window, if open.
+    fn browser_id(&self) -> Option<WindowId> {
+        self.wm
+            .windows()
+            .iter()
+            .find(|w| w.app.kind() == Kind::Browser && !w.is_closing())
+            .map(|w| w.id)
+    }
+
+    pub(crate) fn request_close(&mut self, id: WindowId) {
+        self.wm.request_close(id);
+    }
+
+    /// The window owning process `pid`.
+    pub(crate) fn window_of_pid(&self, pid: u16) -> Option<WindowId> {
+        if pid == 0 {
+            return None;
+        }
+        self.wm
+            .windows()
+            .iter()
+            .find(|w| w.app.pid == pid)
+            .map(|w| w.id)
+    }
+
+    pub(crate) fn focused(&self) -> Option<WindowId> {
+        self.wm.focused()
+    }
+
+    pub(crate) fn topmost_at(&self, px: i32, py: i32) -> Option<WindowId> {
+        self.wm.topmost_at(px, py)
     }
 
     // ---- animation & scheduler ----
@@ -392,24 +451,20 @@ impl Desktop {
     /// Advance all running animations by `dt`. Returns `true` while any window
     /// is still animating (the caller keeps rendering).
     pub fn animate(&mut self, dt: f32) -> bool {
-        let mut active = false;
-        for w in 0..WIN_COUNT {
-            if let Some(a) = self.windows[w].anim.as_mut() {
-                a.step(dt);
-                if a.finished() {
-                    let closing = a.is_closing();
-                    self.windows[w].anim = None;
-                    if closing {
-                        // Closing an app terminates its process (removed from
-                        // the table), matching how a desktop app behaves.
-                        self.windows[w].visible = false;
-                        let pid = self.windows[w].pid;
-                        self.procs.kill(pid);
-                        self.windows[w].pid = 0;
-                    }
-                } else {
-                    active = true;
-                }
+        let (active, gone) = self.wm.step(dt);
+        for w in gone {
+            // Closing an app terminates its process (removed from the table),
+            // matching how a desktop app behaves; dropping `w` frees its state.
+            self.procs.kill(w.app.pid);
+            if self.hover == Some(w.id) {
+                self.hover = None;
+            }
+            if self.drag.as_ref().is_some_and(|d| d.win == w.id) {
+                self.drag = None;
+            }
+            if w.minimized {
+                // A hidden window vanished: its dock indicator must go.
+                self.force_full = true;
             }
         }
         active
@@ -420,27 +475,20 @@ impl Desktop {
         self.procs.tick();
     }
 
-    pub(crate) fn clamp_menu(&self, x: i32, y: i32) -> (i32, i32) {
-        osjeff_core::layout::clamp_menu(self.sw, self.sh, x, y, MENU_ITEMS.len())
+    pub(crate) fn clamp_menu(&self, x: i32, y: i32, items: usize) -> (i32, i32) {
+        osjeff_core::layout::clamp_menu(self.sw, self.sh, x, y, items)
     }
 
     pub(crate) fn dock_hit(&self, px: i32, py: i32) -> Option<DockAction> {
         match osjeff_core::layout::dock_slot_at(self.sw, self.sh, px, py)? {
-            0 => Some(DockAction::Start), // system icon → start panel
-            1 => Some(DockAction::Open(TERM)),
-            2 => Some(DockAction::Open(EDIT)),
-            3 => Some(DockAction::Open(TASK)),
-            4 => Some(DockAction::Open(CALC)),
-            5 => Some(DockAction::Open(BROWSER)),
-            6 => Some(DockAction::Open(WASM)),
-            7 => Some(DockAction::Open(FILES)),
-            _ => None,
+            0 => Some(DockAction::Start), // system icon -> start panel
+            n => Kind::ALL.get(n - 1).map(|&k| DockAction::Open(k)),
         }
     }
 
-    /// True while a transient overlay (menu / start panel) is shown.
+    /// True while a transient overlay (menu / start panel / Alt+Tab) is shown.
     pub fn overlay_open(&self) -> bool {
-        self.menu.is_some() || self.start_open
+        self.menu.is_some() || self.start_open || self.switcher.is_some()
     }
 
     /// Screen rect of the bottom-right clock pill, including its drop shadow, so
@@ -467,12 +515,12 @@ impl Desktop {
     pub fn clock_repaint_is_local(&self) -> bool {
         /// Generous bound on how far a window's shadow extends past its rect.
         const SHADOW_REACH: i32 = 32;
-        if self.windows[TASK].visible {
+        if self.task_window_rect().is_some() {
             return false;
         }
         let pill = self.clock_rect();
-        !(0..WIN_COUNT).any(|w| {
-            self.windows[w].visible
+        !self.wm.windows().iter().any(|w| {
+            w.shown()
                 && self
                     .window_box(w)
                     .inflated(SHADOW_REACH)
@@ -497,13 +545,13 @@ impl Desktop {
 
     /// Screen rect of the Task Manager window when it is visible — its CPU
     /// figures refresh every second, so the cheap clock-tick path must repaint
-    /// it too. `None` when the window is hidden.
+    /// it too. `None` when no Task Manager window is shown.
     pub fn task_window_rect(&self) -> Option<Rect> {
-        if self.windows[TASK].visible {
-            Some(self.window_box(TASK))
-        } else {
-            None
-        }
+        self.wm
+            .windows()
+            .iter()
+            .find(|w| w.app.kind() == Kind::TaskMgr && w.shown())
+            .map(|w| self.window_box(w))
     }
 
     /// Bounding rect of the open overlay(s), inflated for their drop shadows and
@@ -511,14 +559,18 @@ impl Desktop {
     /// damage repaint.
     pub fn overlay_bounds(&self) -> Rect {
         let mut bounds: Option<Rect> = None;
-        if let Some((mx, my)) = self.menu {
-            let h = osjeff_core::layout::menu_height(MENU_ITEMS.len());
-            bounds = Some(Rect::new(mx, my, MENU_W, h));
+        if let Some(m) = self.menu {
+            let h = osjeff_core::layout::menu_height(m.kind.len());
+            bounds = Some(Rect::new(m.x, m.y, MENU_W, h));
         }
         if self.start_open {
             let (sx, sy) = start_origin(self.sw, self.sh);
             let sr = Rect::new(sx, sy, START_W, start_height());
             bounds = Some(bounds.map_or(sr, |b| b.union(&sr)));
+        }
+        if let Some(sw) = &self.switcher {
+            let r = self.switcher_rect(sw.list().len());
+            bounds = Some(bounds.map_or(r, |b| b.union(&r)));
         }
         match bounds {
             Some(b) => b.inflated(12).clamped_to(self.sw, self.sh),
@@ -527,9 +579,9 @@ impl Desktop {
     }
 
     /// On-screen rect of window `w`, including its current animation slide.
-    pub(crate) fn window_box(&self, w: usize) -> Rect {
-        let mut r = self.windows[w].rect;
-        if let Some(a) = self.windows[w].anim {
+    pub(crate) fn window_box(&self, w: &Win) -> Rect {
+        let mut r = w.rect;
+        if let Some(a) = w.anim {
             r.y += a.slide(SLIDE_PX) as i32;
         }
         r
@@ -539,22 +591,23 @@ impl Desktop {
     /// the steady-state loop repaint only this window on a content change (a
     /// keystroke, a calc button) instead of blitting the whole framebuffer.
     pub fn focused_box(&self) -> Option<Rect> {
-        self.focused().map(|w| self.window_box(w))
+        let id = self.focused()?;
+        self.wm.get(id).map(|w| self.window_box(w))
     }
 
     /// A "dynamic" window is one the compositor must redraw every frame and
     /// keep OUT of the cached static layer: one that is opening/closing, or the
-    /// one currently being dragged. Treating a drag like an animation lets the
-    /// existing damage-tracking fast-path move it by repainting only its old+new
-    /// rectangle each frame, instead of recomposing the whole desktop + an 8 MiB
-    /// blit on every mouse step.
-    pub(crate) fn is_dynamic(&self, w: usize) -> bool {
-        self.windows[w].anim.is_some()
-            || self.drag.as_ref().is_some_and(|d| d.win == w)
+    /// one currently being dragged or resized. Treating a drag like an
+    /// animation lets the existing damage-tracking fast-path move it by
+    /// repainting only its old+new rectangle each frame, instead of recomposing
+    /// the whole desktop + an 8 MiB blit on every mouse step.
+    pub(crate) fn is_dynamic(&self, w: &Win) -> bool {
+        w.anim.is_some()
+            || self.drag.as_ref().is_some_and(|d| d.win == w.id)
             // A visible WASM app renders a fresh frame every tick (it may animate
             // on its own clock), so it is kept out of the cached static layer and
             // repainted through the per-frame damage path like an animation.
-            || (self.windows[w].visible && self.windows[w].kind == Kind::WasmApp)
+            || (w.shown() && w.app.kind() == Kind::WasmApp)
     }
 
     /// True while any window is opening, closing, being dragged, or is a live
@@ -562,16 +615,37 @@ impl Desktop {
     /// app gets continuous frames, rather than the steady (repaint-on-change) one.
     pub fn has_animation(&self) -> bool {
         self.drag.is_some()
-            || (0..WIN_COUNT).any(|w| {
-                self.windows[w].visible
-                    && (self.windows[w].anim.is_some() || self.windows[w].kind == Kind::WasmApp)
-            })
+            || self
+                .wm
+                .windows()
+                .iter()
+                .any(|w| w.shown() && (w.anim.is_some() || w.app.kind() == Kind::WasmApp))
     }
 
-    /// True while the WASM app window is open — gates the app worker thread so it
-    /// runs (and burns CPU) only when its window is visible.
+    /// True while the WASM app window exists — gates the app worker thread so it
+    /// runs (and burns CPU) only while its window is open (a minimized WASM
+    /// window keeps its app alive, like any other minimized window).
     pub fn wasm_active(&self) -> bool {
-        self.windows[WASM].active()
+        self.wm
+            .windows()
+            .iter()
+            .any(|w| w.app.kind() == Kind::WasmApp && !w.is_closing())
+    }
+
+    /// Consume the "repaint everything" request (maximize, restore, ...).
+    pub fn take_full_repaint(&mut self) -> bool {
+        core::mem::take(&mut self.force_full)
+    }
+
+    /// Consume the extra region the next steady frame must upload.
+    pub fn take_extra_dirty(&mut self) -> Option<Rect> {
+        let r = core::mem::replace(&mut self.extra_dirty, Rect::new(0, 0, 0, 0));
+        (!r.is_empty()).then_some(r)
+    }
+
+    /// Add `r` to the extra upload region.
+    pub(crate) fn mark_dirty(&mut self, r: Rect) {
+        self.extra_dirty = self.extra_dirty.union(&r);
     }
 
     // ---- browser networking hand-off (driven by the kernel main loop) ----
@@ -581,190 +655,84 @@ impl Desktop {
     /// performs the blocking fetch and reports back with [`browser_load`] /
     /// [`browser_fail`].
     pub fn browser_take_request(&mut self, out: &mut [u8]) -> Option<usize> {
-        self.browser.take_request().map(|url| {
-            let n = url.len().min(out.len());
-            out[..n].copy_from_slice(&url[..n]);
-            n
-        })
+        let id = self.browser_id()?;
+        self.browser_state_mut(id)?
+            .browser
+            .take_request()
+            .map(|url| {
+                let n = url.len().min(out.len());
+                out[..n].copy_from_slice(&url[..n]);
+                n
+            })
     }
 
     /// Render a fetched raw HTTP response with the `web` engine and keep the
     /// resulting display list for painting/scrolling. `https` is the scheme of
     /// the final URL and `truncated` says the response hit the size cap; both
-    /// feed the address-bar badge and the truncation notice.
+    /// feed the address-bar badge and the truncation notice. Dropped when the
+    /// browser window was closed meanwhile.
     pub fn browser_load(&mut self, resp: &[u8], https: bool, truncated: bool) {
-        let content_w = BrowserChrome::of(self.windows[BROWSER].rect).content.w;
+        let Some(id) = self.browser_id() else {
+            return;
+        };
+        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
+            return;
+        };
+        let content_w = BrowserChrome::of(rect).content.w;
         let body = osjeff_core::browser::page_body(resp);
-        self.web_page = Some(osjeff_core::web::render(&body, content_w));
-        self.page_scroll = 0;
-        self.browser.loaded_with(https, truncated);
+        if let Some(b) = self.browser_state_mut(id) {
+            b.page = Some(osjeff_core::web::render(&body, content_w));
+            b.body = body;
+            b.layout_w = content_w;
+            b.scroll = 0;
+            b.browser.loaded_with(https, truncated);
+        }
     }
 
     /// Mark the in-flight browser fetch as failed.
     pub fn browser_fail(&mut self, reason: osjeff_core::browser::FailReason) {
-        self.web_page = None;
-        self.browser.fail_with(reason);
-    }
-
-    /// Scroll the rendered page by `dy` pixels, clamped to its content height.
-    pub(crate) fn scroll_page(&mut self, dy: i32) {
-        let view_h = BrowserChrome::of(self.windows[BROWSER].rect).content.h;
-        let max = self
-            .web_page
-            .as_ref()
-            .map(|p| (p.height - view_h).max(0))
-            .unwrap_or(0);
-        self.page_scroll = (self.page_scroll + dy).clamp(0, max);
-    }
-
-    // ---- file manager ----
-
-    /// The effective current directory: `files_cwd` if it is still a live folder,
-    /// else fall back to the root (e.g. after the folder was trashed).
-    pub(crate) fn files_cwd(&self) -> u8 {
-        let c = self.files_cwd;
-        if c == fs::ROOT {
-            return fs::ROOT;
-        }
-        let img = disk();
-        if fs::is_active(img, c as usize) && fs::is_dir(img, c as usize) {
-            c
-        } else {
-            fs::ROOT
+        if let Some(id) = self.browser_id()
+            && let Some(b) = self.browser_state_mut(id)
+        {
+            b.page = None;
+            b.body = Vec::new();
+            b.browser.fail_with(reason);
         }
     }
 
-    /// Rows shown in the current view. Views: 0 = files (within the current
-    /// directory), 1 = trash, 2/3 = the boot / filesystem disk panels (no rows).
-    pub(crate) fn files_rows(&self) -> usize {
-        let img = disk();
-        match self.files_view {
-            0 => {
-                let cwd = self.files_cwd();
-                (0..fs::MAX_FILES)
-                    .filter(|&i| fs::is_active(img, i) && fs::parent_at(img, i) == cwd)
-                    .count()
-            }
-            1 => fs::count_trashed(img),
-            _ => 0,
-        }
-    }
-
-    /// The filesystem slot backing visible row `n` of the current view.
-    fn files_slot(&self, n: usize) -> Option<usize> {
-        let img = disk();
-        match self.files_view {
-            0 => {
-                let cwd = self.files_cwd();
-                (0..fs::MAX_FILES)
-                    .filter(|&i| fs::is_active(img, i) && fs::parent_at(img, i) == cwd)
-                    .nth(n)
-            }
-            1 => (0..fs::MAX_FILES)
-                .filter(|&i| fs::is_trashed(img, i))
-                .nth(n),
-            _ => None,
-        }
-    }
-
-    /// Switch the file-manager view from a sidebar selection (0..=3).
-    pub(crate) fn files_set_view(&mut self, v: u8) {
-        self.files_view = v.min(3);
-        self.files_sel = 0;
-    }
-
-    pub(crate) fn files_move(&mut self, delta: i32) {
-        let rows = self.files_rows();
-        if rows == 0 {
-            self.files_sel = 0;
-            return;
-        }
-        let cur = self.files_sel.min(rows - 1) as i32;
-        self.files_sel = (cur + delta).clamp(0, rows as i32 - 1) as usize;
-    }
-
-    /// Cycle through the sidebar views (Files → Trash → boot → FS → …).
-    pub(crate) fn files_toggle_view(&mut self) {
-        self.files_view = (self.files_view + 1) % 4;
-        self.files_sel = 0;
-    }
-
-    /// Delete: in Files view, move the selection (a folder takes its contents) to
-    /// the trash; in Trash view, delete it permanently. Recursive for folders.
-    pub(crate) fn files_delete(&mut self) {
-        let Some(slot) = self.files_slot(self.files_sel) else {
+    /// Scroll the rendered page of browser window `id` by `dy` pixels, clamped
+    /// to its content height.
+    pub(crate) fn scroll_page(&mut self, id: WindowId, dy: i32) {
+        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
             return;
         };
-        if self.files_view == 0 {
-            fs::trash_slot(disk(), slot);
-        } else {
-            fs::purge_slot(disk(), slot);
+        let view_h = BrowserChrome::of(rect).content.h;
+        if let Some(b) = self.browser_state_mut(id) {
+            let max = b
+                .page
+                .as_ref()
+                .map(|p| (p.height - view_h).max(0))
+                .unwrap_or(0);
+            b.scroll = (b.scroll + dy).clamp(0, max);
         }
-        flush_disk();
-        self.files_move(0);
     }
 
-    /// Primary action (Enter): Trash view → restore; a folder → open it; a file →
-    /// open it in the editor.
-    pub(crate) fn files_primary(&mut self) {
-        let Some(slot) = self.files_slot(self.files_sel) else {
+    /// Lay the browser page out again for the window's current width (after a
+    /// resize or maximize). Cheap no-op when the width did not change.
+    pub(crate) fn relayout_browser(&mut self, id: WindowId) {
+        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
             return;
         };
-        if self.files_view == 1 {
-            fs::restore_slot(disk(), slot);
-            flush_disk();
-            self.files_move(0);
-            return;
-        }
-        if fs::is_dir(disk(), slot) {
-            self.files_cwd = slot as u8;
-            self.files_sel = 0;
-            return;
-        }
-        // Open by slot: the file lives in the current folder, not necessarily the root.
-        self.fs_load_slot(slot);
-    }
-
-    /// Go to the parent directory (Files view only).
-    pub(crate) fn files_up(&mut self) {
-        if self.files_view == 0 && self.files_cwd != fs::ROOT {
-            self.files_cwd = fs::parent_at(disk(), self.files_cwd as usize);
-            self.files_sel = 0;
-        }
-    }
-
-    /// Create a new auto-named folder in the current directory (Files view).
-    pub(crate) fn files_mkdir(&mut self) {
-        if self.files_view != 0 {
-            return;
-        }
-        let cwd = self.files_cwd();
-        let base: &[u8] = b"nova pasta";
-        let mut name = [0u8; fs::MAX_NAME];
-        for n in 1..=9u8 {
-            let len = if n == 1 {
-                name[..base.len()].copy_from_slice(base);
-                base.len()
-            } else {
-                name[..base.len()].copy_from_slice(base);
-                name[base.len()] = b' ';
-                name[base.len() + 1] = b'0' + n;
-                base.len() + 2
-            };
-            if fs::find_in(disk(), cwd, &name[..len]).is_none() {
-                let _ = fs::mkdir(disk(), cwd, &name[..len]);
-                flush_disk();
-                break;
-            }
-        }
-        self.files_move(0);
-    }
-
-    /// Select the row at content-local `y` within the files list (for clicks).
-    pub(crate) fn files_select_at(&mut self, row: usize) {
-        let rows = self.files_rows();
-        if row < rows {
-            self.files_sel = row;
+        let content = BrowserChrome::of(rect).content;
+        if let Some(b) = self.browser_state_mut(id)
+            && b.page.is_some()
+            && b.layout_w != content.w
+        {
+            let page = osjeff_core::web::render(&b.body, content.w);
+            let max = (page.height - content.h).max(0);
+            b.scroll = b.scroll.clamp(0, max);
+            b.page = Some(page);
+            b.layout_w = content.w;
         }
     }
 }
@@ -773,6 +741,8 @@ mod apps;
 mod files;
 mod files_ui;
 mod input;
+mod instance;
 mod render;
 mod widgets;
+pub(crate) use instance::*;
 pub(crate) use widgets::*;

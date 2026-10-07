@@ -1,7 +1,8 @@
 //! `Desktop::draw_files`: the file manager window's rendering — a macOS
 //! Finder-style layout: a dark sidebar (Favoritos + Discos) on the left and a
 //! main pane that shows the file list, the trash, or a disk's details. The
-//! manager's logic (navigation, trash/restore/purge) lives in `mod.rs`.
+//! manager's logic (navigation, trash/restore/purge) lives in `FilesState`
+//! (`instance.rs`); each file-manager window draws its own state.
 
 use super::*;
 
@@ -72,7 +73,7 @@ fn glyph(c: &mut Canvas, id: u8, x: i32, y: i32, s: i32, col: Color) {
 }
 
 impl Desktop {
-    pub(crate) fn draw_files(&self, c: &mut Canvas, r: Rect) {
+    pub(crate) fn draw_files(&self, c: &mut Canvas, r: Rect, st: &FilesState) {
         let cy0 = r.y + TITLE_H;
 
         // ---- sidebar ----
@@ -94,28 +95,35 @@ impl Desktop {
         font::draw_bytes(c, sx as usize, yy as usize, b"Favoritos", MUTED, 2);
         yy += 22;
         for it in &items[..2] {
-            yy = self.sb_item(c, sx, yy, *it);
+            yy = self.sb_item(c, sx, yy, *it, st);
         }
         yy += 12;
         font::draw_bytes(c, sx as usize, yy as usize, b"Discos", MUTED, 2);
         yy += 22;
         for it in &items[2..] {
-            yy = self.sb_item(c, sx, yy, *it);
+            yy = self.sb_item(c, sx, yy, *it, st);
         }
 
         // ---- main pane ----
         let mx = r.x + SBW + 16;
         let mw = r.right() - 16 - mx;
-        match self.files_view {
-            0 | 1 => self.draw_file_list(c, r, mx, mw),
-            v => self.draw_disk_panel(c, r, mx, (v - 2) as usize),
+        match st.view {
+            0 | 1 => self.draw_file_list(c, r, mx, mw, st),
+            v => self.draw_disk_panel(c, r, mx, (v - 2) as usize, st),
         }
     }
 
     /// Draw one sidebar row; returns the next y.
-    fn sb_item(&self, c: &mut Canvas, sx: i32, y: i32, item: (&[u8], u8, u8)) -> i32 {
+    fn sb_item(
+        &self,
+        c: &mut Canvas,
+        sx: i32,
+        y: i32,
+        item: (&[u8], u8, u8),
+        st: &FilesState,
+    ) -> i32 {
         let (label, view, gid) = item;
-        let selected = self.files_view == view;
+        let selected = st.view == view;
         if selected {
             c.fill_round_rect(
                 (sx - 6) as usize,
@@ -141,14 +149,14 @@ impl Desktop {
     }
 
     /// Main pane: the Files or Trash list.
-    fn draw_file_list(&self, c: &mut Canvas, r: Rect, mx: i32, mw: i32) {
+    fn draw_file_list(&self, c: &mut Canvas, r: Rect, mx: i32, mw: i32, st: &FilesState) {
         let right = mx + mw;
         let mut my = r.y + TITLE_H + 14;
-        if self.files_view == 1 {
+        if st.view == 1 {
             font::draw_text(c, mx as usize, my as usize, "Lixeira", FG, 3);
         } else {
             // Breadcrumb: the current folder name (or "Arquivos" at the root).
-            let cwd = self.files_cwd();
+            let cwd = st.cwd();
             if cwd == fs::ROOT {
                 font::draw_text(c, mx as usize, my as usize, "Arquivos", FG, 3);
             } else {
@@ -168,7 +176,7 @@ impl Desktop {
         c.fill_rect(mx as usize, my as usize, mw as usize, 1, SEP);
         my += 8;
 
-        let rows = self.files_rows();
+        let rows = st.rows();
         if rows == 0 {
             font::draw_text(c, mx as usize, (my + 6) as usize, "(vazio)", MUTED, 2);
         }
@@ -177,7 +185,7 @@ impl Desktop {
             if ry + ROW > r.bottom() - 34 {
                 break;
             }
-            let sel = self.files_sel == n;
+            let sel = st.sel == n;
             if sel {
                 c.fill_round_rect(
                     (mx - 6) as usize,
@@ -188,7 +196,7 @@ impl Desktop {
                     BLUE,
                 );
             }
-            let Some(slot) = self.files_slot(n) else {
+            let Some(slot) = st.slot(n) else {
                 break;
             };
             let img = disk();
@@ -232,11 +240,11 @@ impl Desktop {
             );
         }
 
-        self.files_footer(c, r, mx, rows);
+        self.files_footer(c, r, mx, rows, st);
     }
 
     /// Main pane: a single disk's details (Finder's "Get Info" feel).
-    fn draw_disk_panel(&self, c: &mut Canvas, r: Rect, mx: i32, idx: usize) {
+    fn draw_disk_panel(&self, c: &mut Canvas, r: Rect, mx: i32, idx: usize, st: &FilesState) {
         let mut my = r.y + TITLE_H + 14;
         glyph(c, 2, mx, my, 56, BLUE);
         let tx = mx + 72;
@@ -291,7 +299,7 @@ impl Desktop {
                 self.disk_row(c, mx, &mut my, "Rotacao", &rp[..p]);
             }
         }
-        self.files_footer(c, r, mx, 0);
+        self.files_footer(c, r, mx, 0, st);
     }
 
     fn disk_row(&self, c: &mut Canvas, mx: i32, my: &mut i32, key: &str, val: &[u8]) {
@@ -301,7 +309,7 @@ impl Desktop {
     }
 
     /// Bottom status bar: item count + key hints.
-    fn files_footer(&self, c: &mut Canvas, r: Rect, mx: i32, rows: usize) {
+    fn files_footer(&self, c: &mut Canvas, r: Rect, mx: i32, rows: usize, st: &FilesState) {
         let by = r.bottom() - 26;
         c.fill_rect(
             (r.x + 1) as usize,
@@ -310,7 +318,7 @@ impl Desktop {
             1,
             SEP,
         );
-        if self.files_view <= 1 {
+        if st.view <= 1 {
             let mut s = [0u8; 16];
             let p = push_num(&mut s, 0, rows as u32);
             let p = push(&mut s, p, b" itens");

@@ -417,6 +417,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Run the WASM app worker only while its window is open.
         wasm::set_active(desk.wasm_active());
 
+        // A maximize / restore / vanished minimized window changes pixels well
+        // outside the focused window: repaint (and upload) the whole screen once.
+        let force_full = desk.take_full_repaint();
+        scene_dirty |= force_full;
+        let extra_dirty = desk.take_extra_dirty();
+
         let any_anim = desk.has_animation();
 
         // The cheap clock-tick repaint (rect-only blit) is only valid in the
@@ -551,13 +557,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         } else {
             static_valid = false;
-            // A finished animation needs one final full recompose to settle.
+            // A finished animation (or a closed overlay) needs one final full
+            // recompose to settle.
             if was_anim {
                 scene_dirty = true;
             }
+            let settle = was_anim || force_full;
 
             if scene_dirty {
-                path = Some(if was_anim {
+                path = Some(if settle {
                     trace::Path::Settle
                 } else {
                     trace::Path::Steady
@@ -566,7 +574,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 copy_bg(back, bg);
                 desk.render(back, info, time);
                 trace::stage(trace::Stage::Compose, tc);
-                if was_anim {
+                if settle {
                     // Settle frame after an animation (and the first desktop
                     // frame): the whole scene may differ, so blit it all.
                     fb_full_blit(framebuffer.buffer_mut(), back, n);
@@ -584,6 +592,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     }
                     if let Some(pf) = prev_focused {
                         up(pf);
+                    }
+                    // Hover changes repaint the window the pointer entered / left.
+                    if let Some(r) = extra_dirty {
+                        up(r);
                     }
                     up(desk.clock_rect());
                 }
@@ -665,7 +677,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
             prev_focused = desk.focused_box();
         }
-        was_anim = any_anim;
+        // A closing overlay (menu, start panel, Alt+Tab) leaves pixels outside
+        // the focused window: treat the frame after it like a finished animation.
+        was_anim = any_anim || desk.overlay_open();
 
         // Record the frame time (only when we actually rendered).
         if work {

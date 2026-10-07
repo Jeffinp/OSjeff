@@ -4,12 +4,19 @@
 use super::*;
 
 pub(crate) use osjeff_core::layout::{
-    BrowserChrome, browser_home_layout, calc_button_at, calc_layout, dock_layout,
+    BrowserChrome, browser_home_layout, calc_button_at, calc_layout, dock_layout, fit_scale,
 };
 
-/// Index of the context-menu item under `(px, py)`, if any.
-pub(crate) fn menu_item_at(mx: i32, my: i32, px: i32, py: i32) -> Option<usize> {
-    osjeff_core::layout::menu_item_at(mx, my, px, py, MENU_ITEMS.len())
+/// Alt+Tab panel geometry.
+pub(crate) const SWITCH_W: i32 = 380;
+pub(crate) const SWITCH_PAD: i32 = 10;
+pub(crate) const SWITCH_ROW_H: i32 = 38;
+/// Most rows shown at once (the list scrolls with the selection).
+pub(crate) const SWITCH_ROWS: usize = 8;
+
+/// Index of the context-menu item under `(px, py)` in a menu of `items` entries.
+pub(crate) fn menu_item_at(mx: i32, my: i32, px: i32, py: i32, items: usize) -> Option<usize> {
+    osjeff_core::layout::menu_item_at(mx, my, px, py, items)
 }
 
 /// Label bytes for a keypad cell (`<` for the backspace sentinel).
@@ -39,20 +46,20 @@ pub(crate) fn key_style(k: u8, pending: Option<u8>) -> (Color, Color) {
 }
 
 pub(crate) fn start_height() -> i32 {
-    osjeff_core::layout::start_height(START_APPS.len())
+    osjeff_core::layout::start_height(Kind::ALL.len())
 }
 
 /// Top-left of the start panel, centered above the dock's system icon.
 pub(crate) fn start_origin(sw: i32, sh: i32) -> (i32, i32) {
-    osjeff_core::layout::start_origin(sw, sh, START_APPS.len())
+    osjeff_core::layout::start_origin(sw, sh, Kind::ALL.len())
 }
 
 /// The start-panel item under `(px, py)`, if any.
 pub(crate) fn start_item_at(sw: i32, sh: i32, px: i32, py: i32) -> Option<StartItem> {
     use osjeff_core::layout::StartHit;
     Some(
-        match osjeff_core::layout::start_item_at(sw, sh, START_APPS.len(), px, py)? {
-            StartHit::App(i) => StartItem::App(START_APPS[i].1),
+        match osjeff_core::layout::start_item_at(sw, sh, Kind::ALL.len(), px, py)? {
+            StartHit::App(i) => StartItem::App(Kind::ALL[i]),
             StartHit::Reboot => StartItem::Reboot,
             StartHit::Shutdown => StartItem::Shutdown,
         },

@@ -3,8 +3,9 @@
 use super::*;
 
 impl Desktop {
-    pub(crate) fn draw_menu(&self, c: &mut Canvas, mx: i32, my: i32) {
-        let count = MENU_ITEMS.len() as i32;
+    pub(crate) fn draw_menu(&self, c: &mut Canvas, m: MenuState) {
+        let (mx, my) = (m.x, m.y);
+        let count = m.kind.len() as i32;
         let h = MENU_PAD * 2 + count * MENU_ITEM_H;
 
         // Drop shadow + panel.
@@ -26,18 +27,12 @@ impl Desktop {
             theme::WINDOW_BODY,
         );
 
-        let item_icons = [
-            Icon::Terminal,
-            Icon::Editor,
-            Icon::TaskMgr,
-            Icon::Calculator,
-            Icon::Browser,
-            Icon::WasmApp,
-            Icon::Files,
-        ];
-        for (i, (label, _)) in MENU_ITEMS.iter().enumerate() {
+        for i in 0..m.kind.len() {
+            let Some((label, kind, _)) = m.kind.entry(i) else {
+                continue;
+            };
             let iy = my + MENU_PAD + i as i32 * MENU_ITEM_H;
-            if menu_item_at(mx, my, self.cursor_x, self.cursor_y) == Some(i) {
+            if menu_item_at(mx, my, self.cursor_x, self.cursor_y, m.kind.len()) == Some(i) {
                 c.fill_round_rect_alpha(
                     (mx + 4) as usize,
                     (iy + 2) as usize,
@@ -50,7 +45,7 @@ impl Desktop {
             }
             let isz = 20usize;
             let iyc = (iy + (MENU_ITEM_H - isz as i32) / 2) as usize;
-            icons::draw(c, item_icons[i], (mx + 10) as usize, iyc, isz);
+            icons::draw(c, kind.icon(), (mx + 10) as usize, iyc, isz);
             font::draw_text(
                 c,
                 (mx + 40) as usize,
@@ -62,7 +57,7 @@ impl Desktop {
         }
     }
 
-    pub(crate) fn draw_calculator(&self, c: &mut Canvas, r: Rect, _focused: bool) {
+    pub(crate) fn draw_calculator(&self, c: &mut Canvas, r: Rect, calc: &Calc) {
         let x = r.x.max(0) as usize;
         let y = r.y.max(0) as usize;
         let w = r.w as usize;
@@ -74,7 +69,7 @@ impl Desktop {
         let dw = w - pad * 2;
         let dh = 48usize;
         c.fill_round_rect(dx, dy, dw, dh, 8, Color::rgb(0x0E, 0x16, 0x28));
-        let disp = self.calc.display();
+        let disp = calc.display();
         let dscale = 3usize;
         let tw = disp.len() * font::cell_w(dscale);
         let tx = if tw + 16 < dw {
@@ -82,7 +77,7 @@ impl Desktop {
         } else {
             dx + 10
         };
-        let color = if self.calc.is_error() {
+        let color = if calc.is_error() {
             theme::CLOSE
         } else {
             theme::ACCENT
@@ -91,7 +86,7 @@ impl Desktop {
 
         // Keypad.
         let (gx, gy, cw, ch, gap) = calc_layout(r);
-        let pending = self.calc.operator();
+        let pending = calc.operator();
         for (row, keys) in CALC_KEYS.iter().enumerate() {
             for (col, &k) in keys.iter().enumerate() {
                 // Skip the cells absorbed by a spanning button.
@@ -120,7 +115,7 @@ impl Desktop {
         }
     }
 
-    pub(crate) fn draw_browser(&self, c: &mut Canvas, r: Rect, focused: bool) {
+    pub(crate) fn draw_browser(&self, c: &mut Canvas, r: Rect, focused: bool, bs: &BrowserState) {
         let ch = BrowserChrome::of(r);
 
         // ---- toolbar: nav buttons + address bar + search button ----
@@ -156,9 +151,9 @@ impl Desktop {
         // secure: no padlock, an explicit "not verified" warning instead (and
         // plain http says it is not encrypted). Text is ASCII (bitmap font).
         let mut badge_reserved = 0;
-        if let Some(label) = self.browser.security().label() {
+        if let Some(label) = bs.browser.security().label() {
             use osjeff_core::browser::Security;
-            let (bg, fg) = match self.browser.security() {
+            let (bg, fg) = match bs.browser.security() {
                 Security::Http => (Color::rgb(0xFF, 0xD9, 0xD9), Color::rgb(0xA3, 0x1D, 0x1D)),
                 _ => (Color::rgb(0xFF, 0xE6, 0x9C), Color::rgb(0x6B, 0x3F, 0x00)),
             };
@@ -182,7 +177,7 @@ impl Desktop {
 
         let tx = (bar.x + 36) as usize;
         let ty = (bar.y + (bar.h - 14) / 2) as usize;
-        let url = self.browser.url();
+        let url = bs.browser.url();
         let bar_cols = (((bar.w - 48 - badge_reserved).max(0)) as usize / font::cell_w(2)).max(1);
         if url.is_empty() {
             font::draw_text(
@@ -197,7 +192,7 @@ impl Desktop {
             let shown = &url[url.len().saturating_sub(bar_cols)..];
             font::draw_bytes(c, tx, ty, shown, theme::TEXT, 2);
             if focused {
-                let caret = self.browser.caret().min(shown.len());
+                let caret = bs.browser.caret().min(shown.len());
                 let cx = tx + caret * font::cell_w(2);
                 c.fill_rect(cx, ty - 1, 2, 16, theme::ACCENT);
             }
@@ -209,11 +204,11 @@ impl Desktop {
 
         // ---- body: native start page, loading state, or page text ----
         use osjeff_core::browser::Status;
-        if self.browser.is_home() {
+        if bs.browser.is_home() {
             self.draw_browser_home(c, ch.content);
             return;
         }
-        if self.browser.status() == Status::Loading {
+        if bs.browser.status() == Status::Loading {
             let msg = "Carregando...";
             let w = font::text_width(msg, 2);
             font::draw_text(
@@ -228,22 +223,22 @@ impl Desktop {
         }
 
         let content = ch.content;
-        let Some(page) = &self.web_page else {
+        let Some(page) = &bs.page else {
             font::draw_text(
                 c,
                 (content.x + 8) as usize,
                 (content.y + 8) as usize,
-                self.browser.fail_reason().message(),
+                bs.browser.fail_reason().message(),
                 theme::CLOSE,
                 2,
             );
             return;
         };
-        self.paint_web_page(c, page, content);
+        self.paint_web_page(c, page, content, bs.scroll);
 
         // The response hit the size cap: say so on the page instead of showing
         // a silently cut document.
-        if self.browser.truncated() && content.h > 24 {
+        if bs.browser.truncated() && content.h > 24 {
             let h = 24;
             let y = (content.bottom() - h) as usize;
             c.fill_rect(
@@ -271,7 +266,7 @@ impl Desktop {
             let thumb_h = ((track_h * track_h) / page.height as usize).max(16);
             let max_scroll = (page.height - content.h) as usize;
             let thumb_y = content.y as usize
-                + ((track_h - thumb_h) * self.page_scroll as usize)
+                + ((track_h - thumb_h) * bs.scroll as usize)
                     .checked_div(max_scroll)
                     .unwrap_or(0);
             c.fill_round_rect(track_x, thumb_y, 4, thumb_h, 2, theme::ACCENT);
@@ -285,9 +280,10 @@ impl Desktop {
         c: &mut Canvas,
         page: &osjeff_core::web::Page,
         content: Rect,
+        scroll: i32,
     ) {
         use osjeff_core::web::Cmd;
-        let top = self.page_scroll;
+        let top = scroll;
         let bottom = top + content.h;
         let ox = content.x;
         let oy = content.y - top;
@@ -324,16 +320,15 @@ impl Desktop {
                     }
                     let px = (ox + *x) as usize;
                     let py = (oy + *y) as usize;
-                    font::draw_bytes(c, px, py, text.as_bytes(), rgb(*color), *scale as usize);
+                    // Clip to the content box on the right (a page laid out for a
+                    // wider window while it is being resized).
+                    let room = ((content.right() - (ox + *x)).max(0) as usize)
+                        / font::cell_w(*scale as usize);
+                    let bytes = text.as_bytes();
+                    let bytes = &bytes[..bytes.len().min(room)];
+                    font::draw_bytes(c, px, py, bytes, rgb(*color), *scale as usize);
                     if *bold {
-                        font::draw_bytes(
-                            c,
-                            px + 1,
-                            py,
-                            text.as_bytes(),
-                            rgb(*color),
-                            *scale as usize,
-                        );
+                        font::draw_bytes(c, px + 1, py, bytes, rgb(*color), *scale as usize);
                     }
                 }
             }
@@ -483,24 +478,14 @@ impl Desktop {
 
         let hovered = start_item_at(self.sw, self.sh, self.cursor_x, self.cursor_y);
         let top = sy + START_PAD;
-        let app_icons = [
-            Icon::Terminal,
-            Icon::Editor,
-            Icon::TaskMgr,
-            Icon::Calculator,
-            Icon::Browser,
-            Icon::WasmApp,
-            Icon::Files,
-        ];
-
-        for (i, (label, win)) in START_APPS.iter().enumerate() {
+        for (i, kind) in Kind::ALL.iter().enumerate() {
             let ry = top + i as i32 * START_ROW_H;
-            if hovered == Some(StartItem::App(*win)) {
+            if hovered == Some(StartItem::App(*kind)) {
                 start_row_highlight(c, sx, ry, theme::ACCENT);
             }
             icons::draw(
                 c,
-                app_icons[i],
+                kind.icon(),
                 (sx + START_PAD) as usize,
                 (ry + (START_ROW_H - 24) / 2) as usize,
                 24,
@@ -509,14 +494,14 @@ impl Desktop {
                 c,
                 (sx + START_PAD + 36) as usize,
                 (ry + (START_ROW_H - 14) / 2) as usize,
-                label,
+                kind.label(),
                 theme::HEADER_TEXT,
                 2,
             );
         }
 
         // Divider, then power actions.
-        let pwr_top = top + START_APPS.len() as i32 * START_ROW_H + START_GAP;
+        let pwr_top = top + Kind::ALL.len() as i32 * START_ROW_H + START_GAP;
         c.fill_rect(
             (sx + START_PAD) as usize,
             (pwr_top - START_GAP / 2) as usize,
@@ -551,48 +536,87 @@ impl Desktop {
         }
     }
 
-    pub(crate) fn draw_terminal(&self, c: &mut Canvas, x: usize, y: usize, focused: bool) {
-        let pad = 12usize;
-        let line_h = 18usize;
-        let tx = x + pad;
-        let mut ty = y + TITLE_H as usize + 8;
+    /// The terminal grid is 40 columns x (14 scrollback rows + the prompt line)
+    /// of fixed logical size. It is drawn at the biggest integer text scale
+    /// (2..=4, never distorted) that fits the window and anchored top-left; when
+    /// even scale 2 does not fit (a small window) the newest rows are kept and
+    /// long lines are clipped, so nothing is ever drawn outside the window.
+    pub(crate) fn draw_terminal(&self, c: &mut Canvas, r: Rect, t: &Terminal, focused: bool) {
+        use osjeff_core::terminal::{COLS, PROMPT, ROWS};
+        let pad = 12i32;
+        let top = TITLE_H + 8;
+        let (aw, ah) = (r.w - 2 * pad, r.h - top - 4);
+        let s = fit_scale(aw, ah, COLS as i32 * 6, (ROWS as i32 + 1) * 9, 2, 4) as usize;
+        let cell = font::cell_w(s);
+        let line_h = 9 * s;
+        let max_cols = (aw.max(0) as usize / cell).max(1);
+        let max_rows = (ah.max(0) as usize / line_h).max(1);
+        let tx = r.x.max(0) as usize + pad as usize;
+        let mut ty = r.y.max(0) as usize + top as usize;
         let fg = theme::TEXT;
 
-        for i in 0..self.term.row_count() {
-            font::draw_bytes(c, tx, ty, self.term.row(i), fg, 2);
+        // Keep the newest rows (and the prompt line) when the window is short.
+        let skip = (t.row_count() + 1).saturating_sub(max_rows);
+        for i in skip..t.row_count() {
+            let row = t.row(i);
+            font::draw_bytes(c, tx, ty, &row[..row.len().min(max_cols)], fg, s);
             ty += line_h;
         }
         font::draw_bytes(
             c,
             tx,
             ty,
-            osjeff_core::terminal::PROMPT,
+            &PROMPT[..PROMPT.len().min(max_cols)],
             theme::TERM_PROMPT,
-            2,
+            s,
         );
-        let ix = tx + osjeff_core::terminal::PROMPT.len() * font::cell_w(2);
-        font::draw_bytes(c, ix, ty, self.term.input(), fg, 2);
-        if focused {
-            let caret_x = ix + self.term.caret() * font::cell_w(2);
-            c.fill_rect(caret_x, ty, 2, 16, theme::TERM_PROMPT);
+        let ix = tx + PROMPT.len() * cell;
+        // Narrow window: show the tail of the input line, the part being typed.
+        let room = max_cols.saturating_sub(PROMPT.len());
+        let input = t.input();
+        let start = input.len().saturating_sub(room);
+        font::draw_bytes(c, ix, ty, &input[start..], fg, s);
+        if focused && t.caret() >= start && t.caret() - start <= room {
+            let caret_x = ix + (t.caret() - start) * cell;
+            c.fill_rect(caret_x, ty, s, 8 * s, theme::TERM_PROMPT);
         }
     }
 
-    pub(crate) fn draw_editor(&self, c: &mut Canvas, x: usize, y: usize, focused: bool) {
-        let pad = 10usize;
-        let line_h = 16usize;
-        let tx = x + pad;
-        let top = y + TITLE_H as usize + 6;
+    /// The editor grid is 44 columns x 18 rows of fixed logical size: drawn at
+    /// the biggest integer scale (2..=4) that fits, anchored top-left, scrolled to
+    /// keep the caret row visible and clipped to the window.
+    pub(crate) fn draw_editor(&self, c: &mut Canvas, r: Rect, e: &EditorState, focused: bool) {
+        use osjeff_core::editor::{COLS, ROWS};
+        let ed = &e.editor;
+        let pad = 10i32;
+        let status_h = 22i32;
+        let (aw, ah) = (r.w - 2 * pad, r.h - TITLE_H - 6 - status_h);
+        let s = fit_scale(aw, ah, COLS as i32 * 6, ROWS as i32 * 8, 2, 4) as usize;
+        let cell = font::cell_w(s);
+        let line_h = 8 * s;
+        let max_cols = (aw.max(0) as usize / cell).max(1);
+        let vis = (ah.max(0) as usize / line_h).max(1);
+        let tx = r.x.max(0) as usize + pad as usize;
+        let top = r.y.max(0) as usize + TITLE_H as usize + 6;
         let fg = theme::TEXT;
+        let (cxs, cys) = ed.cursor();
 
-        for i in 0..self.editor.rows() {
-            font::draw_bytes(c, tx, top + i * line_h, self.editor.line(i), fg, 2);
+        let first = (cys + 1).saturating_sub(vis);
+        for i in first..ed.rows().min(first + vis) {
+            let line = ed.line(i);
+            font::draw_bytes(
+                c,
+                tx,
+                top + (i - first) * line_h,
+                &line[..line.len().min(max_cols)],
+                fg,
+                s,
+            );
         }
-        let (cxs, cys) = self.editor.cursor();
-        if focused {
-            let caret_x = tx + cxs * font::cell_w(2);
-            let caret_y = top + cys * line_h;
-            c.fill_rect(caret_x, caret_y, 2, 14, theme::ACCENT);
+        if focused && cxs < max_cols && cys >= first && cys < first + vis {
+            let caret_x = tx + cxs * cell;
+            let caret_y = top + (cys - first) * line_h;
+            c.fill_rect(caret_x, caret_y, s, 7 * s, theme::ACCENT);
         }
 
         let mut status = [b' '; 22];
@@ -600,17 +624,21 @@ impl Desktop {
         two(&mut status, 3, (cys + 1) as u8);
         status[5..10].copy_from_slice(b"  Col");
         two(&mut status, 11, (cxs + 1) as u8);
-        if self.editor.dirty() {
+        if ed.dirty() {
             status[14] = b'*';
         }
         // The loaded file did not fit the grid: Ctrl+S is refused (see fs_save_in).
-        if self.editor.is_lossy() {
+        if ed.is_lossy() {
             status[16..21].copy_from_slice(b"TRUNC");
         }
-        font::draw_bytes(c, tx, y + 350 - 22, &status, theme::TEXT_MUTED, 2);
+        let status_y = (r.y + r.h - status_h).max(0) as usize;
+        font::draw_bytes(c, tx, status_y, &status, theme::TEXT_MUTED, 2);
     }
 
-    pub(crate) fn draw_taskmgr(&self, c: &mut Canvas, x: usize, y: usize) {
+    /// Process list (scrolls to keep the selection visible), the real kernel
+    /// threads and a footer pinned to the window's bottom edge.
+    pub(crate) fn draw_taskmgr(&self, c: &mut Canvas, r: Rect) {
+        let (x, y) = (r.x.max(0) as usize, r.y.max(0) as usize);
         let pad = 10usize;
         let line_h = 18usize;
         let tx = x + pad;
@@ -619,12 +647,23 @@ impl Desktop {
         font::draw_text(c, tx, ty, "PID NAME        ST   UP", theme::TEXT_MUTED, 2);
         ty += line_h + 2;
 
-        for i in 0..self.procs.len() {
+        // Rows that fit between the header and the thread block + footer.
+        let threads = sched::thread_count();
+        let reserved = 6 + line_h + 2 + threads * line_h + 30;
+        let list_h = (r.h.max(0) as usize).saturating_sub(ty - y + reserved);
+        let visible = (list_h / line_h).max(1);
+        let n = self.procs.len();
+        let sel = self.procs.selected();
+        let first = (sel + 1)
+            .saturating_sub(visible)
+            .min(n.saturating_sub(visible));
+
+        for i in first..(first + visible).min(n) {
             let p = match self.procs.at(i) {
                 Some(p) => p,
                 None => break,
             };
-            if i == self.procs.selected() {
+            if i == sel {
                 c.fill_round_rect_alpha(
                     tx - 4,
                     ty - 2,
@@ -652,10 +691,14 @@ impl Desktop {
         }
 
         // Real kernel threads from the scheduler, with live CPU time.
+        let footer_y = (r.bottom() - 24).max(0) as usize;
         ty += 6;
         font::draw_text(c, tx, ty, "KERNEL THREADS   CPU", theme::ACCENT_2, 2);
         ty += line_h + 2;
-        for i in 0..sched::thread_count() {
+        for i in 0..threads {
+            if ty + line_h > footer_y {
+                break;
+            }
             let name = sched::thread_name(i).as_bytes();
             let mut line = [b' '; 24];
             let n = name.len().min(14);
@@ -671,7 +714,87 @@ impl Desktop {
         }
 
         let footer = "UP/DN  ENTER:open  DEL:end";
-        font::draw_text(c, tx, y + 300 - 24, footer, theme::TEXT_MUTED, 2);
+        font::draw_text(c, tx, footer_y, footer, theme::TEXT_MUTED, 2);
+    }
+
+    /// Alt+Tab panel geometry for a list of `n` windows: centered, `SWITCH_ROWS`
+    /// rows at most.
+    pub(crate) fn switcher_rect(&self, n: usize) -> Rect {
+        let rows = n.clamp(1, SWITCH_ROWS) as i32;
+        let h = SWITCH_PAD * 2 + rows * SWITCH_ROW_H;
+        Rect::new(
+            (self.sw - SWITCH_W) / 2,
+            (self.sh - h) / 2 - 40,
+            SWITCH_W,
+            h,
+        )
+    }
+
+    /// The Alt+Tab overlay: every window in most-recently-used order, the
+    /// selection highlighted; minimized windows are tagged.
+    pub(crate) fn draw_switcher(&self, c: &mut Canvas, sw: &Switcher) {
+        let list = sw.list();
+        let r = self.switcher_rect(list.len());
+        c.fill_round_rect_alpha(
+            (r.x + 5) as usize,
+            (r.y + 10) as usize,
+            r.w as usize,
+            r.h as usize,
+            16,
+            theme::SHADOW,
+            40,
+        );
+        c.fill_round_rect(
+            r.x as usize,
+            r.y as usize,
+            r.w as usize,
+            r.h as usize,
+            14,
+            theme::DOCK,
+        );
+        let sel = sw.selected_index();
+        let first = (sel + 1).saturating_sub(SWITCH_ROWS);
+        for (row, idx) in (first..list.len().min(first + SWITCH_ROWS)).enumerate() {
+            let ry = r.y + SWITCH_PAD + row as i32 * SWITCH_ROW_H;
+            if idx == sel {
+                c.fill_round_rect_alpha(
+                    (r.x + 6) as usize,
+                    (ry + 2) as usize,
+                    (r.w - 12) as usize,
+                    (SWITCH_ROW_H - 4) as usize,
+                    8,
+                    theme::ACCENT,
+                    48,
+                );
+            }
+            let Some(w) = self.wm.get(list[idx]) else {
+                continue;
+            };
+            icons::draw(
+                c,
+                w.app.kind().icon(),
+                (r.x + 14) as usize,
+                (ry + (SWITCH_ROW_H - 24) / 2) as usize,
+                24,
+            );
+            let max_chars = ((r.w - 56 - 70) as usize) / font::cell_w(2);
+            let title = w.app.title.as_bytes();
+            let title = &title[..title.len().min(max_chars)];
+            let ty = (ry + (SWITCH_ROW_H - 14) / 2) as usize;
+            font::draw_bytes(c, (r.x + 50) as usize, ty, title, theme::HEADER_TEXT, 2);
+            if w.minimized {
+                let tag = "min";
+                let tw = font::text_width(tag, 2) as i32;
+                font::draw_text(
+                    c,
+                    (r.right() - 16 - tw) as usize,
+                    ty,
+                    tag,
+                    theme::TEXT_MUTED,
+                    2,
+                );
+            }
+        }
     }
 
     pub(crate) fn draw_cursor(&self, c: &mut Canvas) {
