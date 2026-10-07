@@ -1,4 +1,5 @@
-//! PS/2 byte-stream decoding: set-1 scancodes and 3-byte mouse packets.
+//! PS/2 byte-stream decoding: set-1 scancodes and 3-byte mouse packets (4-byte
+//! IntelliMouse packets, with a scroll wheel, once [`Decoder::set_wheel_mode`] is on).
 //!
 //! The kernel's IRQ handlers only push raw bytes into a ring; [`Decoder`] turns
 //! that byte stream into [`Event`]s. It is a pair of tiny state machines (the
@@ -11,6 +12,9 @@ pub struct Packet {
     pub dy: i32,
     pub left: bool,
     pub right: bool,
+    /// Wheel notches since the last packet: positive = scrolled up (away from the
+    /// user). Always 0 unless wheel mode is on.
+    pub wheel: i32,
 }
 
 /// A decoded key press or release.
@@ -32,16 +36,27 @@ pub enum Event {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Decoder {
     mouse_cycle: u8,
-    mouse_buf: [u8; 3],
+    mouse_buf: [u8; 4],
     key_extended: bool,
+    wheel_mode: bool,
 }
 
 impl Decoder {
     pub const fn new() -> Self {
         Self {
             mouse_cycle: 0,
-            mouse_buf: [0; 3],
+            mouse_buf: [0; 4],
             key_extended: false,
+            wheel_mode: false,
+        }
+    }
+
+    /// Switch between 3-byte packets (plain mouse) and 4-byte packets (IntelliMouse
+    /// with a wheel). Resets the packet cycle.
+    pub fn set_wheel_mode(&mut self, on: bool) {
+        if self.wheel_mode != on {
+            self.wheel_mode = on;
+            self.mouse_cycle = 0;
         }
     }
 
@@ -61,9 +76,11 @@ impl Decoder {
         }))
     }
 
-    /// Feed one mouse byte. Emits a [`Packet`] on every third byte; a first
-    /// byte with bit 3 clear is treated as out of sync and dropped.
+    /// Feed one mouse byte. Emits a [`Packet`] on every third byte (fourth in
+    /// wheel mode); a first byte with bit 3 clear is treated as out of sync and
+    /// dropped.
     pub fn mouse(&mut self, data: u8) -> Option<Event> {
+        let len = if self.wheel_mode { 4 } else { 3 };
         match self.mouse_cycle {
             0 => {
                 if data & 0x08 == 0 {
@@ -73,13 +90,13 @@ impl Decoder {
                 self.mouse_cycle = 1;
                 None
             }
-            1 => {
-                self.mouse_buf[1] = data;
-                self.mouse_cycle = 2;
+            n if n + 1 < len => {
+                self.mouse_buf[n as usize] = data;
+                self.mouse_cycle = n + 1;
                 None
             }
-            _ => {
-                self.mouse_buf[2] = data;
+            n => {
+                self.mouse_buf[n as usize] = data;
                 self.mouse_cycle = 0;
                 let flags = self.mouse_buf[0];
                 let mut dx = self.mouse_buf[1] as i32;
@@ -90,11 +107,19 @@ impl Decoder {
                 if flags & 0x20 != 0 {
                     dy -= 256;
                 }
+                // Fourth byte: signed 4-bit Z, positive = towards the user.
+                let wheel = if self.wheel_mode {
+                    let z = (self.mouse_buf[3] & 0x0F) as i32;
+                    -(if z >= 8 { z - 16 } else { z })
+                } else {
+                    0
+                };
                 Some(Event::Mouse(Packet {
                     dx,
                     dy,
                     left: flags & 0x01 != 0,
                     right: flags & 0x02 != 0,
+                    wheel,
                 }))
             }
         }
@@ -119,6 +144,7 @@ mod tests {
             dy,
             left,
             right,
+            wheel: 0,
         }))
     }
 
@@ -228,5 +254,61 @@ mod tests {
             }
         }
         assert_eq!(n, 300);
+    }
+
+    #[test]
+    fn wheel_mode_reads_four_byte_packets() {
+        let mut d = Decoder::new();
+        d.set_wheel_mode(true);
+        assert_eq!(d.mouse(0x09), None);
+        assert_eq!(d.mouse(3), None);
+        assert_eq!(d.mouse(4), None);
+        // Z = 0xFF (-1): the wheel turned away from the user = up.
+        assert_eq!(
+            d.mouse(0xFF),
+            Some(Event::Mouse(Packet {
+                dx: 3,
+                dy: 4,
+                left: true,
+                right: false,
+                wheel: 1
+            }))
+        );
+        // Z = +2 is down.
+        d.mouse(0x08);
+        d.mouse(0);
+        d.mouse(0);
+        match d.mouse(0x02) {
+            Some(Event::Mouse(p)) => assert_eq!(p.wheel, -2),
+            e => panic!("{e:?}"),
+        }
+    }
+
+    #[test]
+    fn wheel_mode_ignores_the_buttons_in_the_high_bits_of_z() {
+        let mut d = Decoder::new();
+        d.set_wheel_mode(true);
+        d.mouse(0x08);
+        d.mouse(0);
+        d.mouse(0);
+        match d.mouse(0x10 | 0x0F) {
+            Some(Event::Mouse(p)) => assert_eq!(p.wheel, 1),
+            e => panic!("{e:?}"),
+        }
+    }
+
+    #[test]
+    fn switching_wheel_mode_resets_the_cycle() {
+        let mut d = Decoder::new();
+        d.mouse(0x08);
+        d.mouse(1);
+        d.set_wheel_mode(true);
+        // A fresh packet starts clean.
+        assert_eq!(d.mouse(0x08), None);
+        assert_eq!(d.mouse(0), None);
+        assert_eq!(d.mouse(0), None);
+        assert!(d.mouse(0).is_some());
+        d.set_wheel_mode(false);
+        assert_eq!(mouse3(&mut d, 0x08, 1, 2), pkt(1, 2, false, false));
     }
 }

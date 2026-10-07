@@ -56,8 +56,23 @@ pub fn init() {
     outb(DATA, config);
 
     mouse_command(0xF6); // set defaults
+    // IntelliMouse handshake (sample rates 200, 100, 80), then ask for the device ID:
+    // 3 means the mouse has a wheel and sends 4-byte packets. Runs before the IRQs are
+    // unmasked, so the replies are read straight from the port.
+    for rate in [200u8, 100, 80] {
+        mouse_command(0xF3);
+        mouse_command(rate);
+    }
+    mouse_command(0xF2);
+    wait_read();
+    if inb(DATA) == 3 {
+        WHEEL_MODE.store(true, core::sync::atomic::Ordering::Relaxed);
+    }
     mouse_command(0xF4); // enable data reporting
 }
+
+/// Whether the mouse negotiated the 4-byte (wheel) protocol at boot.
+static WHEEL_MODE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 pub use osjeff_core::hw::ps2::{Decoder, Event};
 
@@ -76,6 +91,7 @@ pub fn poll() -> Option<Event> {
         // SAFETY: DECODER is only used here, in `poll()` on the compositor thread (ISRs only fill
         // the ring); calls are sequential, so this `&mut` is unique.
         let d = unsafe { &mut *DECODER.get() };
+        d.set_wheel_mode(WHEEL_MODE.load(core::sync::atomic::Ordering::Relaxed));
         let event = if source == SRC_KEYBOARD {
             d.keyboard(data)
         } else {
