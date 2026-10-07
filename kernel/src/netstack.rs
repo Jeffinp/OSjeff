@@ -206,7 +206,7 @@ impl Net {
     /// own answer and never goes to the network; otherwise the TTL cache is
     /// consulted, then the DHCP-supplied servers are asked in turn (rotating on
     /// timeout or SERVFAIL, see `osjeff_core::dns::Resolve`).
-    fn resolve(&mut self, host: &str) -> Option<IpAddress> {
+    pub(crate) fn resolve(&mut self, host: &str) -> Option<IpAddress> {
         if let Some(ip) = parse_ipv4(host.as_bytes()) {
             return Some(IpAddress::Ipv4(ip.0.into()));
         }
