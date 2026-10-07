@@ -349,6 +349,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Animation fast-path state. `was_anim` starts true so the first steady
     // frame forces one full repaint over the splash even if no animation runs.
     let mut was_anim = true;
+    let mut was_overlay = false;
     let mut static_valid = false;
     let mut last_sig = 0u64;
     let mut prev_damage = Rect::new(0, 0, 0, 0);
@@ -419,7 +420,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
         // A maximize / restore / vanished minimized window changes pixels well
         // outside the focused window: repaint (and upload) the whole screen once.
-        let force_full = desk.take_full_repaint();
+        // The frame after an overlay (menu, start panel, Alt+Tab) closes must also
+        // repaint everything: the overlay covered pixels outside the focused window.
+        let overlay_closed = was_overlay && !desk.overlay_open();
+        was_overlay = desk.overlay_open();
+        let force_full = desk.take_full_repaint() || overlay_closed;
         scene_dirty |= force_full;
         let extra_dirty = desk.take_extra_dirty();
 
@@ -557,8 +562,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         } else {
             static_valid = false;
-            // A finished animation (or a closed overlay) needs one final full
-            // recompose to settle.
+            // A finished animation needs one final full recompose to settle.
             if was_anim {
                 scene_dirty = true;
             }
@@ -677,9 +681,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
             prev_focused = desk.focused_box();
         }
-        // A closing overlay (menu, start panel, Alt+Tab) leaves pixels outside
-        // the focused window: treat the frame after it like a finished animation.
-        was_anim = any_anim || desk.overlay_open();
+        was_anim = any_anim;
 
         // Record the frame time (only when we actually rendered).
         if work {

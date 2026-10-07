@@ -428,7 +428,16 @@ impl Desktop {
                 Some(DockAction::Open(k)) => MenuKind::Dock(k),
                 _ => MenuKind::Desktop,
             };
-            let (mx, my) = self.clamp_menu(cx, cy, kind.len());
+            let (mx, my) = match kind {
+                // A dock icon's menu pops up above the icon, centered on it.
+                MenuKind::Dock(k) => {
+                    let (_, icons) = dock_layout(self.sw, self.sh);
+                    let r = icons[k.index() + 1];
+                    let h = osjeff_core::layout::menu_height(kind.len());
+                    self.clamp_menu(r.x + r.w / 2 - MENU_W / 2, r.y - h - 14, kind.len())
+                }
+                MenuKind::Desktop => self.clamp_menu(cx, cy, kind.len()),
+            };
             self.menu = Some(MenuState { x: mx, y: my, kind });
             scene = true;
         }
