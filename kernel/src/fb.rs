@@ -2,46 +2,10 @@
 
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 
-/// Integer square root (floor). Used to inset rounded-rectangle corner rows.
-fn isqrt(n: usize) -> usize {
-    if n == 0 {
-        return 0;
-    }
-    let mut x = n;
-    let mut y = x.div_ceil(2);
-    while y < x {
-        x = y;
-        y = (x + n / x) / 2;
-    }
-    x
-}
-
-#[derive(Clone, Copy)]
-pub struct Color {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-}
-
-impl Color {
-    pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
-        Self { r, g, b }
-    }
-
-    /// Linear blend between `self` and `other`. `t` in 0..=255 (0 = self).
-    pub fn lerp(self, other: Color, t: u16) -> Color {
-        let mix = |a: u8, b: u8| -> u8 {
-            let a = a as u16;
-            let b = b as u16;
-            ((a * (255 - t) + b * t) / 255) as u8
-        };
-        Color::rgb(
-            mix(self.r, other.r),
-            mix(self.g, other.g),
-            mix(self.b, other.b),
-        )
-    }
-}
+pub use osjeff_core::gfx::Color;
+use osjeff_core::gfx::{
+    alpha255_to_256, blend_lut, corner_inset, luma, mix256, split_span_around_hole,
+};
 
 /// Minimum `w*h` for the table-driven alpha fill (building the table costs
 /// ~3k instructions, which only pays off on large areas).
@@ -120,7 +84,7 @@ impl<'a> Canvas<'a> {
             }
             PixelFormat::U8 => {
                 // Grayscale: luminance approximation.
-                px[0] = ((c.r as u16 * 54 + c.g as u16 * 183 + c.b as u16 * 19) >> 8) as u8;
+                px[0] = luma(c);
             }
             _ => {
                 // Unknown layout: best-effort RGB.
@@ -138,13 +102,13 @@ impl<'a> Canvas<'a> {
         for y in 0..ih {
             for x in 0..iw {
                 let o = (y * iw + x) * 4;
-                let a = data[o + 3] as u16;
+                let a = data[o + 3];
                 if a == 0 {
                     continue;
                 }
                 let col = Color::rgb(data[o], data[o + 1], data[o + 2]);
                 // Scale 0..255 alpha to the 0..256 range blend_pixel expects.
-                self.blend_pixel(x0 + x, y0 + y, col, a + (a >> 7));
+                self.blend_pixel(x0 + x, y0 + y, col, alpha255_to_256(a));
             }
         }
     }
@@ -245,7 +209,6 @@ impl<'a> Canvas<'a> {
             return;
         }
         let a = alpha.min(256);
-        let ia = 256 - a;
         let bpp = self.info.bytes_per_pixel;
         let o = (y * self.info.stride + x) * bpp;
         let (c0, c1, c2) = match self.info.pixel_format {
@@ -253,10 +216,9 @@ impl<'a> Canvas<'a> {
             PixelFormat::Bgr => (c.b, c.g, c.r),
             _ => return,
         };
-        let mix = |dst: u8, src: u8| ((dst as u16 * ia + src as u16 * a) / 256) as u8;
-        self.buf[o] = mix(self.buf[o], c0);
-        self.buf[o + 1] = mix(self.buf[o + 1], c1);
-        self.buf[o + 2] = mix(self.buf[o + 2], c2);
+        self.buf[o] = mix256(self.buf[o], c0, a);
+        self.buf[o + 1] = mix256(self.buf[o + 1], c1, a);
+        self.buf[o + 2] = mix256(self.buf[o + 2], c2, a);
     }
 
     /// Rounded rectangle blended over existing pixels at `alpha` (0..=256).
@@ -344,13 +306,7 @@ impl<'a> Canvas<'a> {
         // output) so the per-pixel work is 3 loads + 3 stores instead of 3
         // multiplies, 3 divides-by-256 and 6 bounds-checked accesses.
         let lut = if w * h >= LUT_MIN_PIXELS && (bpp == 3 || bpp == 4) {
-            let mut t = [[0u8; 256]; 3];
-            for v in 0..256usize {
-                t[0][v] = ((v as u16 * ia + sa0) / 256) as u8;
-                t[1][v] = ((v as u16 * ia + sa1) / 256) as u8;
-                t[2][v] = ((v as u16 * ia + sa2) / 256) as u8;
-            }
-            Some(t)
+            Some(blend_lut([c0, c1, c2], a))
         } else {
             None
         };
@@ -360,17 +316,7 @@ impl<'a> Canvas<'a> {
             if py >= self.info.height {
                 break;
             }
-            let inset = if r == 0 {
-                0
-            } else if y < r {
-                let dy = r - y; // 1..=r
-                r - isqrt(r * r - dy * dy)
-            } else if y >= h - r {
-                let dy = y - (h - 1 - r); // 0..=r
-                r - isqrt(r.saturating_mul(r).saturating_sub(dy * dy))
-            } else {
-                0
-            };
+            let inset = corner_inset(r, y, h);
             if w <= 2 * inset {
                 continue;
             }
@@ -411,13 +357,12 @@ impl<'a> Canvas<'a> {
             };
             if hw > 0 && py >= hy && py < hy + hh {
                 // Rows crossing the hole: blend only left of / right of it.
-                let left_end = xe.min(hx);
-                if xs < left_end {
-                    blend(self.buf, xs, left_end);
+                let (left, right) = split_span_around_hole(xs, xe, hx, hw);
+                if let Some((a, b)) = left {
+                    blend(self.buf, a, b);
                 }
-                let right_start = xs.max(hx + hw);
-                if right_start < xe {
-                    blend(self.buf, right_start, xe);
+                if let Some((a, b)) = right {
+                    blend(self.buf, a, b);
                 }
             } else {
                 blend(self.buf, xs, xe);
@@ -453,17 +398,7 @@ impl<'a> Canvas<'a> {
         // Per-row spans: corner rows inset by the circle, middle rows full
         // width. Each span is one fast `fill_rect` instead of per-pixel `put`.
         for y in 0..h {
-            let inset = if r == 0 {
-                0
-            } else if y < r {
-                let dy = r - y; // 1..=r
-                r - isqrt(r * r - dy * dy)
-            } else if y >= h - r {
-                let dy = y - (h - 1 - r); // 0..=r
-                r - isqrt(r.saturating_mul(r).saturating_sub(dy * dy))
-            } else {
-                0
-            };
+            let inset = corner_inset(r, y, h);
             if w > 2 * inset {
                 self.fill_rect(x0 + inset, y0 + y, w - 2 * inset, 1, c);
             }

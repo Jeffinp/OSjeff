@@ -19,6 +19,7 @@ pub mod calc;
 pub mod clipboard;
 pub mod editor;
 pub mod fs;
+pub mod gfx;
 pub mod heap;
 pub mod hw;
 pub mod keymap;
