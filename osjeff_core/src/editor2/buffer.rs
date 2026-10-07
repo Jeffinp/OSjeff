@@ -379,8 +379,8 @@ impl TextBuf {
         removed
     }
 
-    /// Test hook: the incremental line index equals a fresh rebuild.
-    #[cfg(test)]
+    /// Hook for tests and fuzzing: the incremental line index equals a fresh
+    /// rebuild (O(n)).
     pub fn lines_consistent(&self) -> bool {
         let fresh = TextBuf::from_bytes(&self.to_vec());
         fresh.lines == self.lines

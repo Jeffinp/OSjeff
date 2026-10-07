@@ -340,6 +340,45 @@ impl Editor {
         }
     }
 
+    /// Verify the internal invariants (cursor validity, line index, scroll
+    /// state). O(text length); for tests and fuzzing.
+    pub fn check_invariants(&self) -> Result<(), &'static str> {
+        if !self.text.lines_consistent() {
+            return Err("line index out of sync with the text");
+        }
+        if self.cursor > self.text.len() {
+            return Err("cursor past the end");
+        }
+        if self.normalize(self.cursor) != self.cursor {
+            return Err("cursor not at a valid position");
+        }
+        if self.anchor.is_some_and(|a| a > self.text.len()) {
+            return Err("selection anchor past the end");
+        }
+        if self.view.top >= self.text.line_count() {
+            return Err("scroll position past the last line");
+        }
+        if self.view.rows == 0 || self.view.cols == 0 {
+            return Err("empty viewport");
+        }
+        let mut shown = 0;
+        for row in self.visible_rows() {
+            shown += 1;
+            if row.cells().count() > self.text_cols() {
+                return Err("row wider than the window");
+            }
+        }
+        if shown > self.view.rows {
+            return Err("more rows than the window holds");
+        }
+        if let Some((r, c)) = self.cursor_screen()
+            && (r >= self.view.rows || c >= self.view.cols)
+        {
+            return Err("cursor drawn outside the window");
+        }
+        Ok(())
+    }
+
     // ---- modified state ------------------------------------------------
 
     /// True when the text differs from what was last saved/loaded. Undoing

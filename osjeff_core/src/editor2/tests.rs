@@ -2206,3 +2206,16 @@ fn modified_flag_matches_text_difference_after_random_undo_redo() {
     while e.undo() {}
     assert_eq!(text(&e), base);
 }
+
+#[test]
+fn check_invariants_hold_on_fresh_and_edited_editors() {
+    assert_eq!(Editor::new().check_invariants(), Ok(()));
+    let mut e = ed("héllo\r\nwörld\n\tx");
+    e.set_soft_wrap(true);
+    e.resize(3, 7);
+    e.move_doc_end(false);
+    type_str(&mut e, "€€€");
+    assert_eq!(e.check_invariants(), Ok(()));
+    e.resize(0, 0);
+    assert_eq!(e.check_invariants(), Ok(()));
+}
