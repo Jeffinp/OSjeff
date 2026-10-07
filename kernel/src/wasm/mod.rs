@@ -326,6 +326,10 @@ fn app_mut() -> Option<&'static mut App> {
 // latest finished frame into the window. Input is queued to the worker. This is
 // the same decoupling the browser's background fetcher uses.
 
+/// Minimum spacing between two `render` calls of the resident app, in timer
+/// ticks (4 ms each): 4 ticks = 16 ms, about 62 frames per second.
+const RENDER_PERIOD_TICKS: u64 = 4;
+
 /// Offscreen surface size — the WASM window's content box (window 720×470).
 const WASM_SW: usize = 692;
 const WASM_SH: usize = 414;
@@ -483,6 +487,7 @@ pub extern "C" fn worker() -> ! {
             crate::sched::block(crate::sched::FOREVER, || ACTIVE.load(Ordering::Acquire));
             continue;
         };
+        let frame_start = crate::interrupts::ticks();
         let back = 1 - FRONT.load(Ordering::Relaxed);
         {
             // SAFETY: the worker is the only writer of SURFACE[back] (the buffer not published as FRONT); the
@@ -511,6 +516,15 @@ pub extern "C" fn worker() -> ! {
         app.store.data_mut().info = None;
         FRONT.store(back, Ordering::Release);
         READY.store(true, Ordering::Release);
+
+        // Pace the app: at most one `render` per `RENDER_PERIOD_TICKS`. The
+        // compositor shows a frame at most every few ms anyway, so rendering
+        // faster only steals CPU from it; apps keep their own time via
+        // `host.time_ms`. Input cuts the nap short (`push_ev` wakes us).
+        crate::sched::block(frame_start + RENDER_PERIOD_TICKS, || {
+            ACTIVE.load(Ordering::Acquire)
+                && EV_TAIL.load(Ordering::Acquire) == EV_HEAD.load(Ordering::Acquire)
+        });
     }
 }
 
