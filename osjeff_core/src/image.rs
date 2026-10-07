@@ -722,5 +722,108 @@ fn blend4_alpha(p: [u32; 4], w: [u32; 4]) -> u32 {
     (a << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)
 }
 
+// ---------------------------------------------------------------------------
+// Format detection and one-call decode/encode
+// ---------------------------------------------------------------------------
+
+/// A file format this crate can read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Format {
+    Png,
+    Bmp,
+    /// Netpbm `P3`/`P6`.
+    Ppm,
+}
+
+impl Format {
+    /// A short lowercase name ("png", "bmp", "ppm").
+    pub fn name(self) -> &'static str {
+        match self {
+            Format::Png => "png",
+            Format::Bmp => "bmp",
+            Format::Ppm => "ppm",
+        }
+    }
+}
+
+/// Identifies the format from the first bytes, without decoding. A file that
+/// starts like a PNG/BMP/PPM but is damaged is still reported as that format,
+/// so [`decode`] can say *why* it failed.
+pub fn detect(bytes: &[u8]) -> Option<Format> {
+    if bytes.starts_with(b"\x89PNG") {
+        Some(Format::Png)
+    } else if bytes.starts_with(b"BM") {
+        Some(Format::Bmp)
+    } else if bytes.len() >= 3
+        && bytes[0] == b'P'
+        && matches!(bytes[1], b'3' | b'6')
+        && matches!(bytes[2], b' ' | b'\t' | b'\n' | b'\r' | b'#')
+    {
+        Some(Format::Ppm)
+    } else {
+        None
+    }
+}
+
+/// Why [`decode`] failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DecodeError {
+    /// The signature matches no supported format.
+    UnknownFormat,
+    Png(crate::png::PngError),
+    Bmp(crate::bmp::BmpError),
+    Ppm(crate::ppm::PpmError),
+}
+
+impl From<crate::png::PngError> for DecodeError {
+    fn from(e: crate::png::PngError) -> Self {
+        DecodeError::Png(e)
+    }
+}
+
+impl From<crate::bmp::BmpError> for DecodeError {
+    fn from(e: crate::bmp::BmpError) -> Self {
+        DecodeError::Bmp(e)
+    }
+}
+
+impl From<crate::ppm::PpmError> for DecodeError {
+    fn from(e: crate::ppm::PpmError) -> Self {
+        DecodeError::Ppm(e)
+    }
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DecodeError::UnknownFormat => f.write_str("unknown image format"),
+            DecodeError::Png(e) => write!(f, "png: {e}"),
+            DecodeError::Bmp(e) => write!(f, "bmp: {e}"),
+            DecodeError::Ppm(e) => write!(f, "ppm: {e}"),
+        }
+    }
+}
+
+/// Decodes a PNG, BMP or PPM file, picked by its signature.
+pub fn decode(bytes: &[u8]) -> Result<Image, DecodeError> {
+    match detect(bytes) {
+        Some(Format::Png) => Ok(crate::png::decode(bytes)?),
+        Some(Format::Bmp) => Ok(crate::bmp::decode(bytes)?),
+        Some(Format::Ppm) => Ok(crate::ppm::decode(bytes)?),
+        None => Err(DecodeError::UnknownFormat),
+    }
+}
+
+/// Encodes `img` ("save screenshot"): PNG (RGB8 or RGBA8), BMP (24-bit when
+/// opaque, else 32-bit with alpha) or P6 PPM (alpha flattened over black).
+pub fn encode(img: &Image, format: Format) -> Result<Vec<u8>, ImageError> {
+    match format {
+        Format::Png => crate::png::encode(img),
+        Format::Bmp if img.is_opaque() => crate::bmp::encode_24(img, 0),
+        Format::Bmp => crate::bmp::encode_32(img),
+        Format::Ppm => crate::ppm::encode_p6(img, 0),
+    }
+}
+
 #[cfg(test)]
 mod tests;
