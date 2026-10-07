@@ -21,6 +21,7 @@ pub mod browser;
 pub mod calc;
 pub mod clipboard;
 pub mod editor2;
+pub mod deflate;
 pub mod editor;
 pub mod fs3;
 pub mod fs;
