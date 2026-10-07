@@ -141,7 +141,9 @@ fn fetch_url(net: &mut netstack::Net, url: &[u8]) -> Option<Vec<u8>> {
         } else {
             net.http_get(host, path, u.port)
         };
-        let r = resp?;
+        let resp = resp?;
+        let truncated = resp.truncated;
+        let r = resp.data;
 
         let code = status_code(&r).unwrap_or(0);
         if matches!(code, 301 | 302 | 303 | 307 | 308)
@@ -160,7 +162,12 @@ fn fetch_url(net: &mut netstack::Net, url: &[u8]) -> Option<Vec<u8>> {
             }
         }
 
-        serial_println!("fetch: {} bytes (status {})", r.len(), code);
+        serial_println!(
+            "fetch: {} bytes (status {}){}",
+            r.len(),
+            code,
+            if truncated { " truncated" } else { "" }
+        );
         return Some(r);
     }
 }

@@ -13,6 +13,21 @@ pub const URL_CAP: usize = 220;
 /// Max host length.
 pub const HOST_CAP: usize = 80;
 
+/// Maximum bytes of one HTTP(S) response accepted from the network (headers +
+/// body). Shared by the plain-HTTP and the TLS path so neither can be talked
+/// into exhausting the kernel's single heap. An oversized response is cut at
+/// this size and the page is flagged as truncated.
+pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+
+/// Append `data` to `out`, never letting `out` grow past `cap` bytes. Returns
+/// `true` when some of `data` had to be dropped (the response is truncated).
+pub fn append_capped(out: &mut alloc::vec::Vec<u8>, data: &[u8], cap: usize) -> bool {
+    let room = cap.saturating_sub(out.len());
+    let take = data.len().min(room);
+    out.extend_from_slice(&data[..take]);
+    take < data.len()
+}
+
 /// Where a fetch stands, surfaced in the UI.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Status {
@@ -861,5 +876,38 @@ mod tests {
         assert_eq!(decode_utf8("\u{e9}".as_bytes()), (0xE9, 2));
         assert_eq!(decode_utf8(&[0xE2, 0x82]), (0, 1)); // cut mid-sequence
         assert_eq!(decode_utf8(&[0xFF]), (0, 1));
+    }
+
+    /// Regression: `http_get` appended every received byte to a `Vec` with no
+    /// ceiling (the TLS path had its own 256 KiB check), so a server could
+    /// stream until the 64 MiB heap was gone. Both paths now share this cap.
+    #[test]
+    fn append_capped_never_exceeds_the_cap() {
+        let mut v = alloc::vec::Vec::new();
+        assert!(!append_capped(&mut v, b"abcd", 10));
+        assert!(!append_capped(&mut v, b"efghij", 10)); // exactly full: not truncated
+        assert_eq!(v, b"abcdefghij");
+        assert!(append_capped(&mut v, b"k", 10)); // one byte over
+        assert_eq!(v.len(), 10);
+        let mut v = alloc::vec::Vec::new();
+        assert!(append_capped(&mut v, &[7u8; 100], 30));
+        assert_eq!(v.len(), 30);
+        assert!(append_capped(&mut v, b"x", 30));
+        assert_eq!(v.len(), 30);
+        // Already above the cap (cap lowered): nothing added, no underflow.
+        assert!(append_capped(&mut v, b"yz", 5));
+        assert_eq!(v.len(), 30);
+        // Streaming a huge body in small pieces stays at the cap.
+        let mut v = alloc::vec::Vec::new();
+        let mut truncated = false;
+        for _ in 0..1000 {
+            truncated |= append_capped(&mut v, &[0u8; 1024], MAX_RESPONSE_BYTES);
+        }
+        assert_eq!(v.len(), MAX_RESPONSE_BYTES);
+        assert!(truncated);
+        // A body that fits is untouched.
+        let mut v = alloc::vec::Vec::new();
+        assert!(!append_capped(&mut v, &[1u8; 1024], MAX_RESPONSE_BYTES));
+        assert_eq!(v.len(), 1024);
     }
 }

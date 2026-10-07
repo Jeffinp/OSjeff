@@ -10,6 +10,7 @@ use crate::{interrupts, io, ne2000};
 use alloc::vec;
 use alloc::vec::Vec;
 use embedded_tls::blocking::*;
+use osjeff_core::browser::{MAX_RESPONSE_BYTES, append_capped};
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
 use smoltcp::socket::{dns, tcp};
@@ -24,6 +25,13 @@ const DNS_SERVER: IpAddress = IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 3));
 fn now() -> Instant {
     let ms = interrupts::ticks() * 1000 / interrupts::TIMER_HZ as u64;
     Instant::from_millis(ms as i64)
+}
+
+/// A raw HTTP response (headers + body) as read from the network.
+pub struct Fetched {
+    pub data: Vec<u8>,
+    /// The response was cut at [`MAX_RESPONSE_BYTES`]; the rest was discarded.
+    pub truncated: bool,
 }
 
 // ---- NE2000 as a smoltcp phy::Device ----
@@ -141,8 +149,9 @@ impl Net {
         None
     }
 
-    /// Blocking HTTP/1.0 GET over plain TCP. Returns the raw response bytes.
-    pub fn http_get(&mut self, host: &str, path: &str, port: u16) -> Option<Vec<u8>> {
+    /// Blocking HTTP/1.0 GET over plain TCP. Returns the raw response bytes,
+    /// at most [`MAX_RESPONSE_BYTES`] of them (the same cap as the TLS path).
+    pub fn http_get(&mut self, host: &str, path: &str, port: u16) -> Option<Fetched> {
         let ip = self.resolve(host)?;
 
         // Connect.
@@ -172,19 +181,22 @@ impl Net {
             s.send_slice(&req).ok()?;
         }
 
-        // Drain the response until the peer closes.
+        // Drain the response until the peer closes or the cap is reached.
         let mut out = Vec::new();
+        let mut truncated = false;
         let end = Self::deadline(10000);
         while interrupts::ticks() < end {
             self.pump();
             let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
             if s.can_recv() {
                 let _ = s.recv(|data| {
-                    out.extend_from_slice(data);
+                    // Consume everything the socket holds (so it keeps
+                    // draining) but keep only what fits under the cap.
+                    truncated |= append_capped(&mut out, data, MAX_RESPONSE_BYTES);
                     (data.len(), ())
                 });
             }
-            if !s.is_active() {
+            if truncated || !s.is_active() {
                 break;
             }
         }
@@ -192,7 +204,13 @@ impl Net {
             let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
             s.abort();
         }
-        Some(out)
+        if truncated {
+            crate::serial_println!("http: response truncated at {} bytes", MAX_RESPONSE_BYTES);
+        }
+        Some(Fetched {
+            data: out,
+            truncated,
+        })
     }
 
     /// Open the TCP connection to `ip:port` (bounded). Returns `true` once the
@@ -218,12 +236,14 @@ impl Net {
     }
 
     /// Blocking HTTPS GET over TLS 1.3. Returns the raw HTTP response (headers +
-    /// body) as received inside the TLS tunnel.
+    /// body) as received inside the TLS tunnel, capped at
+    /// [`MAX_RESPONSE_BYTES`] like [`Net::http_get`].
     ///
-    /// NOTE: certificate verification is skipped (`UnsecureProvider`). This
-    /// reaches real search engines but does NOT authenticate the server — it is
-    /// demo-grade, not production-secure.
-    pub fn https_get(&mut self, host: &str, path: &str, port: u16) -> Option<Vec<u8>> {
+    /// NOTE: certificate verification is skipped (`UnsecureProvider`). The
+    /// traffic is encrypted, but the server is NOT authenticated: a man in the
+    /// middle is not detected. The browser UI therefore labels every `https://`
+    /// page "Conexao nao verificada" and never shows a padlock.
+    pub fn https_get(&mut self, host: &str, path: &str, port: u16) -> Option<Fetched> {
         let ip = self.resolve(host)?;
         if !self.connect(ip, port) {
             return None;
@@ -270,16 +290,18 @@ impl Net {
             return None;
         }
 
-        // Drain the decrypted response until the peer closes (read returns 0).
+        // Drain the decrypted response until the peer closes (read returns 0)
+        // or the cap is reached.
         let mut out = Vec::new();
+        let mut truncated = false;
         let mut buf = [0u8; 2048];
         loop {
             match tls.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    out.extend_from_slice(&buf[..n]);
-                    if out.len() > 256 * 1024 {
-                        break; // cap a runaway page
+                    if append_capped(&mut out, &buf[..n], MAX_RESPONSE_BYTES) {
+                        truncated = true; // cap a runaway page
+                        break;
                     }
                 }
                 Err(_) => break, // includes the peer's close_notify
@@ -289,7 +311,17 @@ impl Net {
         // `tls` is unused past here, so its `&mut self` borrow (via Stream) ends
         // and we can touch the socket again to tear the connection down.
         self.sockets.get_mut::<tcp::Socket>(self.tcp).abort();
-        if out.is_empty() { None } else { Some(out) }
+        if truncated {
+            crate::serial_println!("https: response truncated at {} bytes", MAX_RESPONSE_BYTES);
+        }
+        if out.is_empty() {
+            None
+        } else {
+            Some(Fetched {
+                data: out,
+                truncated,
+            })
+        }
     }
 }
 
