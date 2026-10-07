@@ -25,6 +25,8 @@ o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
   0 testes): hardware, scheduler, compositor, drivers.
 - **Multitarefa preemptiva** a 250 Hz, com bloqueio. Cinco threads: `compositor`,
   `fetcher` (rede), `appd` e duas `shelld` (comandos do terminal).
+- **Multitarefa preemptiva** a 250 Hz, com bloqueio. Quatro threads: `compositor`,
+  `fetcher` (rede), `appd` (apps WASM) e `logd` (grava o log em disco, dorme até ser chamada).
 - **Memória:** heap fixo de 64 MiB num BSS de ~91 MiB; sem alocador de frames. As page
   tables são do bootloader; o kernel só edita uma entrada de nível 1 por pilha de thread,
   para criar uma **guard page**.
@@ -37,7 +39,8 @@ o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
   único** da NIC (`netd`, na thread `fetcher`), DHCP com renovação (T1/T2/expiração),
   resolvedor próprio com cache e vários servidores, cliente de ping, estatísticas por
   interface, `smoltcp` configurado pelo lease (fallback estático do SLIRP), TLS 1.3
-  **sem verificação de certificado**, motor HTML/CSS próprio, `wasmi` (um app por build).
+  **com verificação de cadeia e nome** (§9), motor HTML/CSS próprio, `wasmi` com apps
+  instaláveis que guardam dados no disco OJFS v3 e usam a rede pelo mesmo `fetcher`.
 - **Boot [M]:** primeiro frame em ~5 s (BIOS e UEFI) após a entrada do kernel, quase tudo
   é o splash.
 
@@ -114,11 +117,12 @@ tamanho, zera) -> BACK/BG/STATIC
 da pilha de boot) -> ps2::init
 -> interrupts::init (IDT, PIC, PIT 250 Hz, sti) -> calibra TSC (25 ticks)
 -> nic::probe (virtio-net, senão NE2000) + Netd::boot (DHCP, NetConfig, ARP gratuito)
--> spawn fetcher (só com NIC, stack com guard page; sem NIC, `fetch::init_offline`) e wasmapp
-
--> ne2000::init + DHCP (NetConfig) + ARP gratuito -> spawn fetcher (só com NIC, stack
-com guard page) e appd
--> splash -> wallpaper em BG -> Desktop::new (lê o FS do ATA) -> laço do compositor
+-> spawn fetcher (só com NIC, stack com guard page; sem NIC, `fetch::init_offline`) e appd
+-> storage::init (OJFS v3: monta, migra ou formata; sempre antes de qualquer arquivo)
+-> spawn logd
+-> splash -> Desktop::new (semeia os apps embutidos uma vez, monta o catálogo, abre o terminal)
+-> load_settings (/etc/osjeff.conf, já com o volume pronto) -> wallpaper em BG
+-> laço do compositor (no 1º quadro: logd grava /var/log/boot.log)
 ```
 
 A ordem importa [L]: `gdt::init` precede `sched::init` e `interrupts::init` porque os gates
@@ -320,15 +324,17 @@ dava `#GP` fatal sob WHPX não tem sustentação no código atual.
 |---|---|---|---|---|
 | 0 | `compositor` (`kernel_main`) | sempre, é o contexto de boot | 512 KiB do bootloader, guard page achada por `sched::init` | **fatal** (tela de erro) |
 | 1 | `fetcher` (`fetch::worker`), que também é o `netd` | só se `nic::probe()` achou uma NIC | 128 KiB do heap + guard page | morre sozinha |
-| 1 ou 2 | `wasmapp` (`wasm::worker`) | sempre, mesmo sem janela WASM | 128 KiB do heap + guard page | morre sozinha |
-
-| 1 | `fetcher` (`fetch::worker`) | só se `ne2000::init()` achou a placa | 128 KiB do heap + guard page | morre sozinha |
 | 1 ou 2 | `appd` (`wasm::worker`) | sempre, mesmo sem janela WASM | 128 KiB do heap + guard page | morre sozinha |
 | 2 a 4 | `shelld` e `shelld2` (`desktop::shellhost::worker`, `worker2`) | sempre: executam as linhas de comando dos terminais (`sleep`, `ping`, `curl` esperam aqui, não no compositor) | 128 KiB do heap + guard page | morre sozinha; terminais com comando em andamento são liberados com "the command thread stopped" |
 
 `MAX_THREADS = 8` (`assert!` em `spawn`). Threads **nunca terminam por conta própria**: a
 entrada é `extern "C" fn() -> !` e a tabela só cresce; a única saída é morrer (§3.4), e o
 slot morto continua contando em `thread_count`. O HUD mostra `thr 5` (4 sem NIC).
+| última | `logd` (`logd::worker`) | sempre (criada depois do `storage::init`) | 128 KiB do heap + guard page | morre sozinha (o log de boot deixa de ser gravado) |
+
+`MAX_THREADS = 8` (`assert!` em `spawn`). Threads **nunca terminam por conta própria**: a
+entrada é `extern "C" fn() -> !` e a tabela só cresce; a única saída é morrer (§3.4), e o
+slot morto continua contando em `thread_count`. O HUD mostra `thr 4` (3 sem NIC).
 
 ### 4.2 Política e estados
 
@@ -838,6 +844,17 @@ um `VfsError` mostrado ao usuário, nunca um pânico. A API (documentada no topo
 O terminal usa a mesma camada pelo `VfsFs` (`desktop/shellhost.rs`): `ShellFs` sobre `vfs::*`, caminho
 absoluto por chamada e o diretório corrente guardado no próprio terminal; `rm` e `mv` por cima de um
 arquivo mandam o antigo para a lixeira. O editor lê e grava só com `vfs::read_file`/`write_file`.
+**O que mais vive no volume (W18).** O mesmo volume (disco v3 ou RAM) guarda, por convenção:
+`/etc/osjeff.conf` (configurações, `VfsStore`), `/var/log/syslog.txt` ("Salvar" do visualizador de
+log) e `/var/log/boot.log` (a thread `logd`, uma vez por boot, `klog::dump_bounded`), e a
+**plataforma de apps**: `/apps/<id>.wasm` (+ `/apps/.seeded`), `/data/<id>` e `/home`. Os apps não
+falam com o VFS: `osjeff_core::appfs::VolumeFs` é um adaptador `AppFs` sobre o mesmo `Backend`
+(`kernel/src/wasm/appfs_backend.rs::with` abre uma seção crítica do volume por chamada, sem
+mascarar interrupções e sem atravessar código do guest), e só enxerga essas três árvores. Cada
+escrita de app sobe `vfs::generation()` e o Arquivos recarrega em até 100 ms. Ordem de boot: o
+volume existe antes de qualquer um desses leitores (`storage::init` < `Desktop::new` <
+`load_settings`).
+
 ## 9. Rede e navegador
 
 ### 9.1 Pilha
@@ -1018,7 +1035,10 @@ e, opcionalmente, `osjeff.icon` (PNG até 64x64). O leitor de seções
 acima do teto do sistema (24 MiB, 20 M de combustível, 4 MiB de disco, 32 descritores) são
 **recusados**. `osjeff_core::appinstall` instala em `/apps/<id>.wasm` (valida antes, recusa id
 duplicado, grava em nome temporário e renomeia), remove, lista (catálogo com ícone 24x24) e
-semeia os apps embutidos no primeiro boot sem sobrescrever os do usuário.
+semeia os apps embutidos **uma vez** (`seed_once`, com o marcador `/apps/.seeded`: um app
+removido não volta no boot seguinte) sem sobrescrever os do usuário. O Arquivos tem o lugar
+**Apps** (instalar, remover, abrir, manifesto em Propriedades; `osjeff_core::fileman::apps`) e abre
+um `.wasm` instalando-o e executando-o. O manifesto aceita `net_hosts` (lista de destinos de rede).
 
 `kernel/build.rs` compila `wasm-apps/{hello,clock,notes,paint,snake,plasma}` (Rust,
 `wasm32-unknown-unknown`, workspaces isolados, SDK em `wasm-apps/sdk`) e os embute. Um módulo
@@ -1048,15 +1068,20 @@ do combustível do app. Um app v1 não precisa mudar nada.
 bytes ASCII imprimíveis, sem `\ : * ? " < > |`; <= 256 B, <= 8 níveis). `Sandbox`: raiz por app
 (`/data/<id>/` com `fs=own`, `/home` com `fs=home`, tudo negado com `fs=none`), tabela de
 descritores (`max_fds`), cota de disco (soma de tamanhos + 256 B por entrada; escrita parcial até
-o limite) e teto de 64 KiB por chamada. O backend é o trait `AppFs`; **hoje é um `MemFs` em RAM**
-(`kernel/src/wasm/appfs_backend.rs`, o único ponto de troca: quando `kernel::storage` existir é
-ali que entra `storage::with_fs`), então `/apps` e `/data` **não sobrevivem ao reboot**.
+o limite) e teto de 64 KiB por chamada. O backend é o trait `AppFs`; **o do kernel é o
+`VolumeFs`** (`kernel/src/wasm/appfs_backend.rs`, o único ponto de troca) sobre o volume OJFS v3
+do desktop, então `/apps`, `/data/<id>` e `/home` **sobrevivem ao reboot** (provado em QEMU); sem
+disco v3 são o volume em RAM do desktop. O `VolumeFs` só alcança `/apps`, `/data` e `/home`.
 
 **Rede.** `osjeff_core::appnet` decide (esquemas `http(s)`, URL <= 512 B, destinos locais,
-privados, IPv6 e IPs disfarçados recusados, 1 requisição por segundo, 256 KiB, 8 s). O
-transporte **não está ligado**: a pilha (`fetch`) tem uma só vaga de requisição, compartilhada
-com o navegador e dirigida pelo laço principal; `net_http_get` valida permissão, URL e filtro e
-devolve `ERR_NOSYS`. Sockets TCP (`net=tcp`) são só aceitos no manifesto.
+privados, IPv6 e IPs disfarçados recusados, `net_hosts` do manifesto, 1 requisição por segundo,
+256 KiB, 8 s em http e 20 s em https) e `net_http_get` **transporta de verdade**: a vaga única de
+requisição do `fetcher` é dividida com o navegador por um `compare_exchange`
+(`IDLE -> CLAIMED`), a thread `appd` dorme em `sched::block` até a resposta, o `fetcher` repete a
+política a cada redirecionamento e sobre o endereço resolvido, TLS tem verificação completa e
+nenhum "continuar mesmo assim", e só o corpo de uma resposta 2xx chega ao app. Enquanto um app
+espera a rede os outros apps esperam (uma só `appd`). Sockets TCP (`net=tcp`) são só aceitos no
+manifesto. Detalhes em `docs/design/apps.md` §7 e `docs/SECURITY-MODEL.md` §3.6.
 
 ### 10.3 Limites de recurso (por app)
 
@@ -1137,8 +1162,9 @@ código seguro em `osjeff_core`, testado e fuzzado, mas a cola em `abi2.rs` e `m
   de ser mapeado em 4 KiB. NMI e #MC sem pilha própria; sem watchdog. Corretude por
   convenção em `RacyCell` e nas 5 `fn` seguras `&'static mut`; `SURFACE` pode rasgar um
   quadro; a serial não tem lock.
-- **Rede e web.** HTTPS **não autentica o servidor**, e sem `RDRAND` (o caso do QEMU/TCG
-  padrão) o RNG do handshake é fraco. Só o QEMU/SLIRP foi exercitado (o lease é renovado,
+- **Rede e web.** O HTTPS autentica o servidor (cadeia, nome e `CertificateVerify`; sem
+  revogação nem *pinning*), e sem `RDRAND` (o caso do QEMU/TCG padrão) o RNG do handshake é fraco.
+  Uma chamada `net_http_get` de app bloqueia a thread `appd` (os outros apps) até 8 s (20 s em https). Só o QEMU/SLIRP foi exercitado (o lease é renovado,
   mas só provado contra o servidor DHCP do SLIRP); uma conexão por vez, HTTP/1.0, sem
   cookies, JPEG/GIF/WebP nem JS. IPv6, `e1000`/`rtl8139`, virtio só-legado, MSI-X/interrupções da
   NIC e RELEASE no desligamento não existem. `smoltcp` e os drivers de NIC não são fuzzados
@@ -1150,8 +1176,9 @@ código seguro em `osjeff_core`, testado e fuzzado, mas a cola em `abi2.rs` e `m
   não há como editar esses arquivos. `LS` lista todos os itens ativos sem
   caminho; os outros comandos de arquivo só veem a raiz. Disco com magic desconhecido é
   formatado.
-- **WebAssembly.** Um app por build, sem loader; `plasma` órfão; DOOM não reproduzível do
-  checkout. Combustível não retomável: um quadro legítimo pesado (carga de nível do DOOM
+- **WebAssembly.** Apps instaláveis (`.wasm` com manifesto) com dados persistentes; sem
+  assinatura de pacotes nem atualização de versão; uma só thread `appd` para todos os apps (uma
+  chamada de rede ou de disco lenta os atrasa); DOOM não reproduzível do checkout. Combustível não retomável: um quadro legítimo pesado (carga de nível do DOOM
   [A]) pode estourar 20 M e ser encerrado. WASI é subconjunto; as escritas no FS fingem
   sucesso. O guest roda no ring 0 (§10.4).
 - **Código e documentação.** O rótulo "artificial >= 5 s" do marco de splash em `main.rs`

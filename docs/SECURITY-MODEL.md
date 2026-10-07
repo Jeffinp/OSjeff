@@ -12,8 +12,9 @@ trecho de código. O que não foi provado está marcado como *suposição*.
 2. Por isso a defesa é **na entrada**: todo dado que vem de fora (rede, disco,
    HTML/CSS, `.wasm`) passa por código que não usa `unsafe`, tem limites
    explícitos e foi fuzzado.
-3. O que ainda é fraco e conhecido: **HTTPS não verifica certificado** e não há
-   isolamento entre apps e kernel.
+3. O que ainda é fraco e conhecido: não há isolamento entre apps e kernel (a fronteira é o
+   WebAssembly com limites), o HTTPS não tem revogação nem *pinning* (§3.1) e os apps agora
+   têm disco e rede reais, com as regras do §3.6.
 4. Falhas fatais são **visíveis** (tela de erro + serial) e uma thread secundária que
    falha **morre sozinha** em vez de derrubar a máquina.
 5. Nenhuma garantia vale em hardware real: tudo foi verificado em QEMU.
@@ -28,7 +29,8 @@ Quem controla o dado, quem o interpreta e o que impede o pior.
 | 2 | **Respostas HTTP/HTTPS** | servidor remoto, ou quem estiver no caminho | `fetch` → `osjeff_core::browser` (cabeçalhos, `chunked`, redirect) | corpo limitado a 256 KiB (`MAX_RESPONSE_BYTES`) nos dois protocolos e 1 MiB descompactado (gzip/deflate); `dechunk` sem panic; redirect sem rebaixar https→http, no máximo 5 saltos, rejeita caracteres de controle; **TLS com cadeia de certificado, nome e `CertificateVerify` verificados** contra uma trust store embutida (§3.1) | sem revogação (CRL/OCSP), *pinning* nem HSTS (§3.1) |
 | 3 | **HTML e CSS** | página remota | `osjeff_core::web` | profundidade 40, 8 000 nós, 1 000 regras e 2 000 seletores; comprimentos CSS limitados; cores não-ASCII rejeitadas; fuzz de ~0,7 M execuções sem crash | cascata ainda é O(regras × elementos) dentro dos tetos; fuzz do `web` ainda ganhava cobertura quando parou |
 | 4 | **Disco (OJFS)** | quem fornecer a imagem | `osjeff_core::fs` | validação de `size`, `parent` (ciclos), imagem curta; fuzz de 1 M execuções sem crash; falha de leitura **não** reescreve o disco | disco com conteúdo desconhecido ainda é formatado (é o desenho do disco dedicado); sem permissões nem criptografia |
-| 5 | **Apps `.wasm`** | embutidos no build (hoje) | `wasmi` + 31 host functions | combustível por chamada (20 M; 256 M na inicialização), memória de 24 MiB, tetos nas host functions, o app é encerrado e liberado em qualquer falha | o TCB inclui `wasmi` e as host functions: um bug ali é fuga total; não há *fuel* retomável (um quadro pesado legítimo é encerrado) |
+| 5 | **Apps `.wasm`** | embutidos no build, **ou instalados pelo usuário** (um `.wasm` aberto no Arquivos; o manifesto pede permissões e cotas e o instalador recusa o que passa do teto) | `wasmi` + as host functions `host.*`/`osj.*`; `osjeff_core::{wasmsec, appmanifest, appfs, appnet, appinstall}` | combustível por chamada (20 M; 256 M na inicialização), memória de 24 MiB, tetos nas host functions, o app é encerrado e liberado em qualquer falha; arquivos só em `/data/<id>` ou `/home` conforme `fs=`, com cota; rede só com `net=http`, destinos públicos e `net_hosts` (§3.6) | o TCB inclui `wasmi` e as host functions: um bug ali é fuga total; não há *fuel* retomável (um quadro pesado legítimo é encerrado); sem assinatura de pacotes: quem instala um `.wasm` concede o que o manifesto pede |
+| 5b | **Dados persistentes dos apps** (`/apps`, `/data/<id>`, `/home` no disco OJFS v3) | os apps (conteúdo), o usuário (pacotes) | `osjeff_core::appfs::{Sandbox, VolumeFs}` sobre o `Backend` do VFS | caminho nunca concatenado (componentes validados, `..` acima da raiz é erro); só as três árvores da plataforma são alcançáveis pelo adaptador (`/etc`, `/var`, `/.trash`, pastas do usuário: `ERR_PERM`); cota por app (inclui o que já estava em disco); arquivo <= 64 MiB; fuzz `app_sandbox` sobre `MemFs` e sobre `VolumeFs`; testes de remount e de disco cheio | `fs=home` dá acesso a **tudo** em `/home` (é a pasta do usuário, por definição); apps com `fs=own` deixam dados no disco mesmo depois de removidos; nenhum apagamento seguro; ver §3.6 |
 | 6 | **Dispositivos** (PS/2, virtio, ATA) | hardware | drivers do kernel | `virtio` valida `qsize`, BAR e limites de capability antes de tocar MMIO (testado no host) | dispositivos são confiáveis por premissa; DMA do virtio-gpu não tem IOMMU |
 | 7 | **Firmware/bootloader** | fabricante | `bootloader 0.11` | — | imagem **não assinada**: Secure Boot precisa estar desligado |
 
@@ -141,6 +143,41 @@ caminho fraco é o exercitado; com `-cpu max` o `RDRAND` é usado.
 - Não há criptografia, permissões nem usuários no OJFS. O disco dedicado é tratado
   como confiável depois de validado.
 
+### 3.6 Apps: dados persistentes e rede (W18)
+Os apps passaram a ter **superfície persistente** (o disco) e **superfície de rede real**.
+- **Disco.** `/apps/<id>.wasm`, `/data/<id>` e `/home` vivem no volume OJFS v3 (antes eram RAM).
+  O app nunca fala com o volume: o `Sandbox` traduz a raiz dele (`/data/<id>` ou `/home`), valida
+  cada caminho por componentes, mede a cota (`disk_kib`, 256 B por entrada + tamanho; o que já
+  está em disco conta depois de um reboot) e limita descritores; o `VolumeFs` repete a defesa:
+  só `/apps`, `/data` e `/home` existem para um app, as pastas-raiz não saem, e o arquivo
+  tem teto de 64 MiB. Um app cheio de dados pode encher o **volume** (não só a sua cota) se
+  tiver `fs=home`, pois a cota de `home` conta só o que ele escreveu naquela execução: o
+  usuário vê "Disco cheio" no Arquivos e o `fsck` continua limpo (testado com um volume de 1 MiB).
+  Os dados de um app removido ficam em `/data/<id>` até o usuário apagá-los pelo Arquivos.
+  Cada chamada de arquivo é uma seção crítica do `YieldMutex` do volume, nunca atravessa a
+  execução do guest, e uma chamada aninhada ou um dono morto viram erro, não travamento.
+- **Rede.** `net_http_get` agora transporta de verdade (thread `fetcher`, a dona da NIC).
+  Regras, todas testadas no host e provadas em QEMU contra um servidor falso:
+  1. precisa de `net=http`/`tcp`; sem isso `ERR_PERM` sem sequer analisar a URL;
+  2. o filtro de destinos (`appnet`) recusa `localhost`, nomes de uma só etiqueta, `.local`/
+     `.internal`/`.lan`, IPv6, IPv4 privado/loopback/reservado e IPs disfarçados; o gateway
+     do QEMU e a LAN ficam fora de alcance;
+  3. `net_hosts` (opcional) restringe a uma lista exata ou com curinga de subdomínios;
+  4. a regra vale para **cada salto de redirecionamento** (um `Location` para IP privado, outro
+     host ou `https -> http` é recusado) e para o **endereço resolvido** (um nome público que
+     aponta para loopback ou para a LAN é barrado depois do DNS: `Net::set_public_only`);
+  5. **TLS com verificação completa** (§3.1): cadeia, nome, `CertificateVerify`; para um app não
+     existe o "continuar mesmo assim", então um certificado autoassinado, expirado ou de outro
+     nome é `ERR_NET` e nada do corpo chega ao guest; `http://` é aceito (o manifesto pediu
+     `net=http`), sem rebaixar `https` por redirecionamento;
+  6. só o corpo de uma resposta 2xx, decodificado e cortado em 256 KiB; no máximo 1 pedido por
+     segundo por app e um pedido por vez no sistema; tempo limite de 8 s (20 s em https).
+  Limite conhecido: o pedido é síncrono e há uma só thread `appd`, então um app esperando a rede
+  atrasa os **outros apps** (não o compositor) até o prazo; é negação de serviço entre apps
+  (todos rodam em ring 0 e o app já pode gastar o combustível de qualquer forma), não fuga.
+  O conteúdo de uma resposta é dado não confiável: o decodificador gzip é limitado (1 MiB) e o
+  guest recebe bytes, nunca algo que o kernel interprete.
+
 ## 4. Cenários de ataque e resultado hoje
 
 | Cenário | O que acontecia antes da auditoria | Hoje |
@@ -159,6 +196,9 @@ caminho fraco é o exercitado; com `-cpu max` o `RDRAND` é usado.
 | `random_get(0x7fffffff)` / `fd_write` com 2³¹ iovecs | trabalho ilimitado | `EINVAL` |
 | MITM em HTTPS | possível | **bloqueado** pela verificação de cadeia/nome/assinatura (§3.1); ainda possível com uma raiz da trust store comprometida, sem revogação, ou mentindo a hora por SNTP |
 | Servidor malicioso faz resposta de vários MiB | OOM mudo no `http_get` | truncado em 256 KiB, avisado na página |
+| App tenta ler/escrever `/etc/osjeff.conf`, `/var/log`, `/.trash` ou os arquivos do usuário | (apps sem disco real) | `ERR_PERM` no `VolumeFs`, mesmo que o `Sandbox` falhasse (testes e fuzz sobre o volume) |
+| App pede uma URL que redireciona para `http://10.0.2.2/` ou para um nome público que resolve para `127.0.0.1` | — (`net_http_get` não transportava) | recusado no salto / depois do DNS; provado em QEMU (`w18-net.sh`) |
+| App contra um servidor HTTPS autoassinado | — | `tls: certificate check FAILED`, o app recebe `ERR_NET` e nenhum byte |
 
 ## 5. Como reproduzir as provas
 

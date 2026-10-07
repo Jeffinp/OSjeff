@@ -27,6 +27,37 @@ tem releases versionadas; as seções são marcos na `master`.
   `CloseAsk`, comandos de rede, Ctrl+C. Fuzz: `shell_parse` agora executa uma sessão de terminal
   inteira e os comandos de rede; novo alvo `editor_dialog`. Cenários `tools/perf/scen/w15b-*.sh`
   (`typestr` em `lib.sh`).
+## 2026-10 — Apps e gerenciamento do sistema sobre o disco e a rede reais (W18)
+
+- **Apps no disco** (`osjeff_core::appfs::VolumeFs`): `/apps/<id>.wasm`, `/data/<id>` e `/home`
+  vivem no volume OJFS v3 (o mesmo do Arquivos; sem disco v3, no volume em RAM do desktop) e
+  **persistem entre boots**. O adaptador só alcança essas três árvores, protege as pastas-raiz,
+  limita arquivos a 64 MiB e mantém a cota exata depois de um reboot; uma chamada = uma seção
+  crítica do `YieldMutex` do volume, sem mascarar interrupções e sem atravessar o guest.
+  Provado em QEMU: o Notas salva em `/data/notes`, o sistema reinicia com a mesma imagem e a nota
+  abre. `seed_once` (`/apps/.seeded`): um app embutido removido não volta no boot seguinte.
+  `fuzz/app_sandbox` também roda sobre `VolumeFs`; 18 testes novos (paridade com `MemFs`,
+  remount, cota, disco cheio, só-as-três-árvores).
+- **Arquivos, lugar Apps:** barra lateral e tecla `A`; lista pacotes instalados e embutidos com
+  ícone, tamanho e estado; `Enter` executa (instalando antes), `I` instala, `Del` remove, menu
+  de contexto, erros na linha de estado. **Propriedades** de um app e de qualquer `.wasm` mostram
+  o manifesto (permissões e cotas). `Desktop::{app_rows, install_bundled, remove_app}` voltaram a
+  ter uso (sem `#[allow(dead_code)]`); arquivos escritos por apps aparecem no Arquivos em 100 ms.
+- **Rede dos apps:** `net_http_get` deixou de devolver `ERR_NOSYS`; usa o `fetcher`/`netd`, com a
+  política (permissão, filtro de destinos, **`net_hosts`** novo no manifesto) aplicada antes e em
+  cada redirecionamento, checagem do endereço **resolvido**, TLS com verificação completa e sem
+  "continuar mesmo assim", só corpo 2xx decodificado. Provado em QEMU contra um servidor falso
+  (`tools/nettest-server.py`, app de teste `wasm-apps/nettest`). Limite documentado: um app
+  esperando a rede atrasa os outros apps.
+- **Boot e logs:** a ordem `storage::init` < `Desktop::new` < `load_settings` está documentada e
+  provada (imagem de fundo, destaque, relógio 12 h, fuso e ABNT2 voltam depois de reiniciar com o
+  mesmo disco); o caminho de papel de parede sem barra (`papel.png`) deixou de falhar; "Salvar"
+  escreve `/var/log/syslog.txt`; a nova thread `logd` grava `/var/log/boot.log` (limitado a
+  96 KiB, fora do compositor e de IRQ). Falhas de E/S de arquivos do sistema e de ATA agora
+  deixam um WARN. O monitor e as configurações leem os contadores de rede de `netd::stats()`
+  (o módulo `netstats.rs` saiu; o gráfico agora anda também com virtio-net).
+- Testes: 2071 -> 2112 no core (VolumeFs, `seed_once`, lugar Apps, `net_hosts`, `authorize`,
+  `app_response`, `dump_bounded`, `absolute_path`); cenários `tools/perf/scen/w18-*.sh`.
 
 ## 2026-10 — Desktop sobre o OJFS v3: gerenciador de arquivos e visualizador de imagens
 

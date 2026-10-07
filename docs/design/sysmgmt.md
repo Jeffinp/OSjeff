@@ -8,8 +8,8 @@ de diferença nos dois modos).
 
 | Peça | Lógica pura (`osjeff_core`) | Cola (`kernel/src`) |
 |---|---|---|
-| Log do sistema | `klog` (anel, filtro, visão, `LineAsm`/`classify`) | `klog.rs`, `desktop/logview.rs` |
-| Monitor de recursos | `sysmon` (séries, `CpuSampler`, ordenação, formatadores) | `desktop/monitor.rs`, `sysinfo.rs`, `netstats.rs` |
+| Log do sistema | `klog` (anel, filtro, visão, `LineAsm`/`classify`, `dump_bounded`) | `klog.rs`, `desktop/logview.rs`, `logd.rs` (gravação em disco) |
+| Monitor de recursos | `sysmon` (séries, `CpuSampler`, ordenação, formatadores) | `desktop/monitor.rs`, `sysinfo.rs` (contadores de rede: `netd::stats()`) |
 | Configurações | `settings`, `wallpaper`, `hw::rtc` (data/hora/fuso), `keymap` (ABNT2) | `settings.rs`, `rtc.rs`, `desktop/settings_ui.rs`, `font.rs` (Latin-1) |
 | Notificações | `notify` (`Toasts`) | `notify.rs`, `desktop/toasts_ui.rs` |
 | Interfaces para outras frentes | `sysif` (traits) | `desktop/sysstore.rs` (implementações de hoje) |
@@ -62,8 +62,9 @@ editor foram migrados para `klog!` com nível explícito; a saída serial é a m
 
 **Visualizador** (`desktop/logview.rs`, janela única): botão de nível mínimo (clique ou
 Tab), caixa de busca (digite; Del limpa; Esc limpa e, vazia, fecha), rolagem por setas,
-Home/End, barra e meia-janela, "Limpar", "Salvar" (trait `LogSink`; no FS v2 grava
-`syslog.txt` com o fim do log, ~1 KiB), cor por nível. Trabalha numa cópia (snapshot) do
+Home/End, barra e meia-janela, "Limpar", "Salvar" (trait `LogSink`; grava
+`/var/log/syslog.txt` com o log filtrado, até 256 KiB, as últimas linhas inteiras se passar disso),
+cor por nível. Trabalha numa cópia (snapshot) do
 anel, renovada a cada segundo.
 
 ## 2. Monitor de recursos (`desktop/monitor.rs`)
@@ -134,11 +135,27 @@ fora da faixa são ignorados (o campo fica no padrão), versão ausente ou nova 
   **Armazenamento** (`DiskUsage`, discos IDE), **Energia** (reiniciar/desligar com segundo
   clique para confirmar; bateria n/d), **Sobre**.
 
-**Aplicação no boot**: `Desktop::new` (que carrega o FS) vem antes de pintar o fundo;
-`load_settings` lê `osjeff.conf`; sem arquivo, valem os padrões. O arquivo só é escrito
-quando o usuário muda algo (por isso o boot padrão não muda). **Persistência** (provada:
-imagem + destaque violeta + relógio 12 h + fuso depois de reiniciar a VM com o mesmo
-disco): trait `SettingsStore`, hoje `FsV2Store` (arquivo `osjeff.conf` na raiz do FS v2).
+**Aplicação no boot**: a ordem em `main.rs` é `storage::init()` (monta/migra/formata o OJFS v3)
+-> splash -> `Desktop::new` -> `load_settings` -> pintar o fundo; as configurações só são lidas
+**depois** de o volume existir, e o papel de parede por imagem também sai do volume. Sem arquivo
+valem os padrões. O arquivo é escrito quando o usuário muda algo (por isso o boot padrão não
+muda). **Persistência** (provada em dois boots no mesmo disco, `w18-settings-{1,2}.sh`: papel de
+parede por imagem `/papel.png`, destaque violeta, relógio 12 h, fuso UTC-02:00 e teclado ABNT2
+voltam sem tocar nas Configurações; `settings: loaded 120 bytes from osjeff.conf`): trait
+`SettingsStore`, hoje `VfsStore` (`/etc/osjeff.conf` no volume do desktop). O caminho do papel
+de parede pode ser um nome simples (`papel.png`, como o FS plano antigo guardava): vale
+`/papel.png` (`settings::absolute_path`).
+
+**Log no disco** (`kernel/src/logd.rs`). "Salvar" escreve `/var/log/syslog.txt` pela thread do
+compositor (uma ação do usuário, um arquivo). Já o **log de boot** é gravado por uma thread
+própria, `logd`, que dorme em `sched::block` (sem fatia de tempo) até o compositor pedir, depois
+do primeiro quadro do desktop (para o log ter o boot inteiro): ela renderiza o anel
+(`klog::dump_bounded`: todos os níveis, no máximo 96 KiB, as linhas mais novas vencem) e grava
+`/var/log/boot.log` pelo mesmo `LogSink`; cada boot substitui o arquivo; sem volume em disco ela só
+registra que pulou. Regras: nunca a partir de IRQ (só em contexto de thread), nunca segura outro
+lock além do volume e nunca trava o compositor, que no máximo espera uma escrita se precisar do
+disco naquele instante. Falhas de escrita de arquivos do sistema e de transferência ATA agora
+deixam um WARN no log (e um toast) em vez de falhar em silêncio.
 
 ## 4. Notificações (toasts)
 
@@ -163,11 +180,11 @@ hoje; a frente que trouxer algo melhor só implementa o trait e troca o objeto.
 
 | Trait | Implementação de hoje | O que a outra frente liga |
 |---|---|---|
-| `DiskUsage` (`label`, `usage() -> DiskUsageInfo{total,used,items}`) | `FsV2Usage` (`desktop/sysstore.rs`): 48 slots × 1 KiB | FS v3: capacidade real do volume, bytes livres; trocar o objeto usado em `draw_disk_usage` / `draw_storage` |
-| `NetStats` (`counters() -> Option<NetCounters>`) | `KernelNetStats` sobre contadores atômicos em `netstats.rs` (ganchos de 1 linha em `ne2000::send`/`poll`) | estatísticas completas (descartes, erros, por protocolo); `NetCounters` pode ganhar campos |
+| `DiskUsage` (`label`, `usage() -> DiskUsageInfo{total,used,items}`) | `VfsUsage` (`desktop/sysstore.rs`): capacidade real do volume (`statfs`), "OJFS v3 (IDE)" ou "Memoria" | inodes livres (`items_*`) |
+| `NetStats` (`counters() -> Option<NetCounters>`) | `KernelNetStats` sobre `netd::stats()` (os contadores de `nic::STATS`, alimentados por **todos** os drivers; a página Rede das Configurações lê o mesmo `Snapshot`) | `NetCounters` pode ganhar campos (descartes, erros) |
 | `NetControl` (`renew_dhcp()`) | `NoNetControl` (sempre `Unsupported`) | renovação DHCP; o botão da página Rede já chama o trait |
-| `LogSink` (`write_file(nome, dados)`) | `FsV2Sink`: arquivo da raiz do FS v2, mantém as últimas linhas inteiras que cabem em 1 KiB (`SinkError::Truncated`) | FS v3: `/var/log/syslog` sem o limite de 1 KiB |
-| `SettingsStore` (`load`/`save`) | `FsV2Store`: `osjeff.conf` na raiz do FS v2 | FS v3: `/etc/osjeff.conf` |
+| `LogSink` (`write_file(nome, dados)`) | `VfsSink`: `/var/log/<nome>` no volume; mantém as últimas linhas inteiras que cabem em 256 KiB (`SinkError::Truncated`) | rotação de logs |
+| `SettingsStore` (`load`/`save`) | `VfsStore`: `/etc/osjeff.conf` no volume | — |
 
 Outros pontos de integração: `klog!`/`notify!` já podem ser usados em qualquer módulo
 (`netstack`, `fetch`, `ata`, `wasm` seguem com `serial_println!`, espelhado no log como INFO
@@ -179,8 +196,9 @@ ou pela palavra-chave; trocar por `klog!(Warn, ...)` dá o nível exato);
 ## 6. Como reproduzir as provas
 
 Todos os cenários são `tools/perf/scen/w14-*.sh` (rodam com `tools/perf/run.sh`; o de
-configurações usa `FS_IMG=` com um disco FS v2 que tem `papel.png`, preparado por
-`cargo run -p osjeff_core --example fsinject -- disco.img papel.png arquivo.png`).
+configurações usa `FS_IMG=` com um disco que tem `papel.png`, preparado por
+`cargo run -p osjeff_core --example fs3_inject -- disco.img papel.png /papel.png`; os de W18 são
+`w18-*.sh`).
 
 | Cenário | Mostra |
 |---|---|
@@ -189,6 +207,7 @@ configurações usa `FS_IMG=` com um disco FS v2 que tem `papel.png`, preparado 
 | `w14-endtask.sh` | `DEL` no monitor fecha a calculadora |
 | `w14-set.sh`, `w14-pages.sh` | papel de parede (gradiente e PNG), destaque, 12 h, fuso, data/hora, ABNT2, páginas Rede/Armazenamento/Energia/Sobre |
 | `w14-toast.sh` (com gancho) | toast WARN, expira em 4 s, toast ERROR, clique fecha |
+| `w18-settings-1.sh` / `-2.sh` | W18: configurações (imagem, destaque, 12 h, fuso, ABNT2) e log salvo no boot 1; tudo de volta no boot 2 com o mesmo disco; `/var/log/{boot,syslog}.log` e `/etc/osjeff.conf` no disco (`fs3_inject --ls`) |
 
 Os ganchos de carga e de eventos são **temporários** (não estão no repositório): uma thread
 que gira 6 s e dorme 6 s, uma onda de heap e de tráfego DHCP por segundo, `klog!(Warn)`
@@ -226,9 +245,9 @@ ms por ser menor). Janelas vivas: Task Manager, Monitor, Configurações e Log.
 
 ## 8. Fora do escopo / limitações
 
-- FS v2: um arquivo tem no máximo 1 KiB. O papel de parede por arquivo funciona com
-  imagens pequenas (o cenário usa um PNG de 699 bytes que a tela "cobre" com
-  interpolação bilinear); com o FS v3 o mesmo caminho lê arquivos maiores sem mudança.
+- Sem disco v3 (sem disco, disco pequeno, desconhecido) as configurações e os logs ficam no
+  volume em RAM do desktop e não sobrevivem ao desligamento (o Arquivos já avisa); o log de boot
+  é pulado nesse caso. `boot.log` guarda só o boot atual (sem rotação).
 - A migração `serial_println!` → `klog!` com nível explícito foi feita nos arquivos que esta
   frente pode tocar; `ata`, `netstack`, `ne2000`, `fetch` e `wasm` ficam com o espelho
   automático (INFO / palavra-chave).

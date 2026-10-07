@@ -60,8 +60,8 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 | `html_img_form` | `[modo, zoom, largura, ...bytes]`: os bytes como HTML cru, dentro de `<img src/alt/width>`, de um `<form>` (action, name, value, size, método) ou como payload `data:image/png;base64,` | `web::Doc` com zoom 50-300% e qualquer estado de imagem (invariantes de geometria, índices de links, imagens e campos), `FormState` (teclas, Tab, foco, colagem, query, `target`, teclas mortas), `Page::find`/`select`, `base64`, `decode_for_page`/`decode_data_uri`/`image_key`, `ImageCache` (sequências de operações dentro do teto de bytes) e o `Browser` (barra, histórico, favoritos, sugestões, páginas `osjeff://`); roda numa thread de pilha pequena |
 | `x509_parse` | `[modo, bytes]`: o leitor DER/X.509 estrito, o casamento de nomes (SAN/curinga), o parser de datas, a validação de cadeia (`rustls-webpki` com âncora real) com os bytes como cadeia de 1 a 4 certificados, como folha ou intermediária substituindo as de uma cadeia de teste válida (chega à checagem de assinatura), e o `CertificateVerify` do TLS 1.3 com os bytes como assinatura | `osjeff_core::x509`, `osjeff_core::tlsverify` (nunca pânico nem travamento; semente: os certificados de `tools/gen-test-certs.py`) |
 
-| `app_manifest` | bytes como `.wasm` inteiro, como payload de `osjeff.manifest` ou de `osjeff.icon` (embrulhado numa seção válida), ou como manifesto/ícone soltos | `wasmsec` (cabeçalho, seções, LEB128), `appmanifest` (chaves, quotas, ícone PNG até 64x64) e as invariantes do manifesto aceito |
-| `app_sandbox` | sequência de operações com caminhos em bytes crus sobre dois apps que dividem um `MemFs` (mais URLs) | `appfs` (normalização, `Sandbox`, cota, descritores) e `appnet`: nada existe fora de `/data/<id>`, o arquivo do sistema fica intacto, a cota vale, URL aceita nunca é local |
+| `app_manifest` | bytes como `.wasm` inteiro, como payload de `osjeff.manifest` ou de `osjeff.icon` (embrulhado numa seção válida), ou como manifesto/ícone soltos | `wasmsec` (cabeçalho, seções, LEB128), `appmanifest` (chaves, quotas, `net_hosts`, ícone PNG até 64x64) e as invariantes do manifesto aceito (inclui: `net_hosts` limitado, só com permissão de rede, nunca admite o que o filtro de destinos recusa) |
+| `app_sandbox` | sequência de operações com caminhos em bytes crus sobre dois apps que dividem um `MemFs` **ou** um `VolumeFs` sobre um OJFS v3 de 1 MiB em RAM (o primeiro bool escolhe; mais URLs) | `appfs` (normalização, `Sandbox`, `VolumeFs`, cota, descritores) e `appnet`: nada existe fora de `/data/<id>`, os arquivos do sistema e do usuário ficam intactos, a cota vale, `fsck` limpo, URL aceita nunca é local |
 
 ```bash
 cargo install cargo-fuzz
@@ -335,6 +335,21 @@ Projeto em [`docs/design/apps.md`](design/apps.md). O que é testado e como:
 | Heap estável | `w13-soak.sh` + `w8-heap.sh` (100 rodadas de Ola + Pintura) | BIOS: primeira amostra = última = 1 415 248 B (`last-first = 0 B`), pico de 4 797 408 B com os apps abertos; UEFI: primeira amostra = última = 1 415 248 B (`last-first = 0 B`), pico de 5 169 408 B com os apps abertos |
 | CPU por app | `w13-cpu.sh` | `docs/img/apps-taskmgr.png` |
 
+### W18: apps e gerenciamento no disco e na rede reais
+
+| O quê | Como | Resultado |
+|---|---|---|
+| `VolumeFs` (AppFs sobre o VFS) | `cargo test -p osjeff_core volume` (18 testes) | os mesmos passos dão os mesmos resultados no `MemFs`; só `/apps`, `/data`, `/home` alcançáveis; persistência de dados, pacotes e remoções por remount de um `Fs3<RamDisk>`; cota exata depois do remount; volume de 1 MiB cheio: `NOSPC` e `fsck` limpo; esparsos; sequência do sandbox idêntica nos dois |
+| `seed_once` | `cargo test -p osjeff_core appinstall` | uma vez só; app removido não volta, mesmo depois de remount; pacote novo entra; marcador hostil |
+| Lugar Apps do Arquivos | `cargo test -p osjeff_core fileman` (11 novos) | pseudo-caminho que nunca lê o volume; seleção por id; `Enter`/`I`/`Del` e mensagens; menu sem comandos de arquivo; texto do manifesto |
+| Política de rede | `cargo test -p osjeff_core appnet appmanifest` | `net_hosts`, `authorize`, cada salto de redirecionamento, `app_response` |
+| Log de boot | `cargo test -p osjeff_core klog` | `dump_bounded` nunca passa do limite, mantém as linhas mais novas inteiras |
+| Persistência de app (QEMU) | `w18-persist-1.sh`, depois `FS_IMG=<out1>/fs.img` com `w18-persist-2.sh` | boot 1: Notas salva `nota-1.txt` (29 B) em `/data/notes`; boot 2: `apps: 0 bundled packages installed` e a nota abre (`docs/img/w18-persist-notes.png`) |
+| Lugar Apps (QEMU) | `w18-apps.sh`, `w18-wasmfile.sh` | remover/instalar/abrir, erros, menu, Propriedades do app e de `/apps/hello.wasm` (`docs/img/w18-files-apps.png`, `w18-app-props.png`, `w18-wasm-props.png`) |
+| Configurações e logs entre boots (QEMU) | `w18-settings-1.sh`, depois `-2.sh` com o mesmo disco (preparo no cabeçalho do primeiro) | imagem `/papel.png`, destaque violeta, 12 h, fuso UTC-02:00 e ABNT2 voltam (`settings: loaded 120 bytes`); `fs3_inject --ls /var/log` lista `boot.log` e `syslog.txt`; `/etc/osjeff.conf` no disco (`docs/img/w18-settings-persisted.png`) |
+| Rede real de app (QEMU) | `tools/nettest-server.py &`; `QEMU_NETDEV="user,id=n0,net=203.0.113.0/24,host=203.0.113.5,dhcpstart=203.0.113.15,dns=203.0.113.3"` com `w18-net.sh` (preparo no cabeçalho; app `wasm-apps/nettest`, **não** embutido) | `/hello` 26 B; redirecionamento válido seguido; redirecionamento para `10.0.2.2` recusado no salto; 404 e fora de `net_hosts` e IP privado recusados; gzip e chunked decodificados; HTTPS autoassinado: `tls: certificate check FAILED` e o app recebe erro; `127.0.0.1.nip.io`: "resolves to 127.0.0.1, a non-public address: refused"; o servidor só viu os pedidos permitidos (`docs/img/w18-net-app.png`) |
+| Heap com o disco | `w13-soak.sh` (`ROUNDS=30`) + `w8-heap.sh`, build `perf-trace` | 234 amostras: primeira 1 001 312 B, última 982 416 B (sem deriva), pico de 4 364 568 B com os apps abertos |
+
 **App hostil.** Não está no repositório: é um módulo WAT montado por um gancho **temporário**
 em `kernel/build.rs` (`apps/hostile.wasm`, `fs=own`, `max_fds=4`, `mem_mib=2`) e o gancho é
 revertido depois (`git checkout kernel/build.rs`). A tecla 1 a 7 dispara um ataque cada.
@@ -362,10 +377,14 @@ Os ataques que matam o app (laço infinito, ponteiro inválido) deixam na janela
 
 - O `kernel/` não tem testes automatizados. A migração de lógica pura para o core
   é contínua (ver [`ROADMAP.md`](ROADMAP.md)).
-- As funções `osj.*` (`kernel/src/wasm/abi2.rs`), o `AppManager` e a cola do desktop não são
-  fuzzados nem têm teste unitário (são `kernel/`): a decisão que elas executam (caminhos,
-  cotas, URL, manifesto, ponteiros) está em `osjeff_core` e é testada, e o conjunto é exercitado
-  por boot (`w13-*.sh`, app hostil). `net_http_get` valida mas não transporta.
+- As funções `osj.*` (`kernel/src/wasm/abi2.rs`), o `AppManager`, a cola do desktop e o
+  transporte de rede do app (`fetch::app_get`, o slot compartilhado com o navegador) não são
+  fuzzados nem têm teste unitário (são `kernel/`): a decisão que eles executam (caminhos, cotas,
+  URL, `net_hosts`, resposta, manifesto, ponteiros) está em `osjeff_core` e é testada, e o
+  conjunto é exercitado por boot (`w13-*.sh`, `w18-*.sh`, app hostil). Uma falha de E/S do ATA
+  no meio de uma instalação (volume "envenenado" por um erro de commit) foi vista **uma vez**
+  num boot de QEMU muito carregado e não se repetiu em 10 execuções seguintes (nem com 4
+  processos de CPU em paralelo); o driver agora loga cada transferência que falha.
 - Nenhum teste em hardware real.
 - TLS real: o sandbox de QEMU não tem internet útil; os caminhos de rede são
   testados por unidade e por boot. A resolução DNS pela SLIRP funcionou neste ambiente

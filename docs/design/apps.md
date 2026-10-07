@@ -1,7 +1,7 @@
 # Plataforma de apps do OSjeff (WebAssembly)
 
-Estado: **projeto** (escrito antes do código; a seção "O que vira teste" lista o que cada
-parte precisa provar). Escopo: transformar o WebAssembly (hoje: um app embutido, preso à
+Estado: **implementado** (W13) e **ligado ao disco e à rede reais** (W18: §5, §7 e §8 dizem o
+que mudou; a seção "O que vira teste" lista o que cada parte prova). Escopo: transformar o WebAssembly (hoje: um app embutido, preso à
 thread `wasmapp`, janela de tamanho fixo, sem arquivos nem rede) em uma plataforma com
 **pacote**, **manifesto**, **permissões**, **quotas**, **ABI v2**, **vários apps ao mesmo
 tempo**, **instalação** e **lançador**.
@@ -12,7 +12,7 @@ host e fuzzado). O kernel só liga: instâncias `wasmi`, threads, pixels.
 ```
 osjeff_core::wasmsec      leitor seguro de seções do binário .wasm (nunca panica)
 osjeff_core::appmanifest  manifesto `osjeff.manifest` + ícone `osjeff.icon` + política de quotas
-osjeff_core::appfs        caminhos, trait AppFs, MemFs, SandboxFs (raiz por app, descritores, cota)
+osjeff_core::appfs        caminhos, trait AppFs, MemFs (testes), VolumeFs (o volume OJFS v3), Sandbox (raiz por app, descritores, cota)
 osjeff_core::appnet       política de rede: URL, filtro de destinos, limites
 osjeff_core::appabi       constantes da ABI v2 (erros, flags), validação de ponteiros do guest
 kernel/src/wasm/          AppManager (instâncias, appd, host functions `osj.*`, `host.*` v1)
@@ -54,6 +54,7 @@ extensões e ignoradas). Obrigatórias: `id`, `name`, `version`.
 | `abi` | `1` (módulo `host`) ou `2` (módulo `osj`) | `2` |
 | `fs` | `none` \| `own` \| `home` | `none` |
 | `net` | `none` \| `http` \| `tcp` | `none` |
+| `net_hosts` | lista de destinos permitidos, separados por vírgula: `api.exemplo.com` (exato) ou `*.cdn.exemplo.org` (subdomínios; o próprio `cdn.exemplo.org` não entra); no máximo 8, minúsculos, nomes públicos (o que o filtro de destinos recusa não pode ser listado), só com `net=http`/`tcp`. Vazio = qualquer destino público | vazio |
 | `clipboard` | `none` \| `rw` | `none` |
 | `mem_mib` | memória linear máxima, 1..=24 (teto do sistema) | 8 |
 | `fuel_frame` | combustível por chamada ao guest, 10 000..=20 000 000 (teto do sistema) | 4 000 000 |
@@ -76,7 +77,7 @@ novo ao iniciar (defesa em profundidade: um arquivo copiado à mão para `/apps`
 | `fs=none` | toda função `fs_*` devolve `ERR_PERM` |
 | `fs=own` | `/` do guest = `/data/<id>/` (criada na primeira escrita) |
 | `fs=home` | `/` do guest = `/home/` (a pasta do usuário) |
-| `net=http` | `net_http_get` liberado, com o filtro de destinos abaixo |
+| `net=http` | `net_http_get` liberado, com o filtro de destinos abaixo e, se houver, a lista `net_hosts` (fora dela: `ERR_PERM`) |
 | `net=tcp` | implica `http`; reservado para sockets TCP (**fora do escopo desta entrega**: a permissão é aceita e validada, mas a ABI v2.0 não exporta sockets) |
 | `clipboard=rw` | `clip_get` / `clip_set` |
 
@@ -143,7 +144,7 @@ combustível não vê é cobrado (ver §6) e tem teto.
 | | `fs_close(fd)`, `fs_stat(path,plen,out)` | `out`: 16 B (`kind u32`, `size u64`, reservado) |
 | | `fs_readdir(path,plen,index,out,cap)` | `out[0]`=tipo (1 arquivo, 2 pasta), resto = nome; devolve o tamanho do nome, 0 = fim |
 | | `fs_mkdir`, `fs_unlink` (arquivo ou pasta vazia), `fs_rename(from,flen,to,tlen)` | |
-| rede | `net_http_get(url,ulen,out,cap) -> i32` | `net=http`; só `http://` e `https://`, corpo truncado em `cap` (<= 256 KiB), tempo limite 8 s, filtro de destinos §7 |
+| rede | `net_http_get(url,ulen,out,cap) -> i32` | `net=http`; só `http://` e `https://`, só o corpo de uma resposta 2xx (decodificado), truncado em `cap` (<= 256 KiB), tempo limite 8 s (20 s em https), filtro de destinos e `net_hosts` §7; devolve o tamanho do corpo ou `ERR_NET` (qualquer falha, status não 2xx, certificado recusado) / `ERR_PERM` (sem permissão ou fora de `net_hosts`) |
 
 `render` é chamado só quando há motivo (app `abi=2` orientado a eventos: um app parado não
 consome CPU). Um app **v1** (sem `on_*` v2) mantém o laço contínuo atual (`render` a cada
@@ -155,10 +156,22 @@ A decisão é toda de `osjeff_core::appfs`:
 
 * **`AppFs`** é um trait puro e sem estado de descritor (operações por caminho absoluto já
   normalizado: `stat`, `read_at`, `write_at`, `truncate`, `create`, `mkdir`, `remove`,
-  `rename`, `read_dir`, `tree_size`). `MemFs` é a implementação em memória (testes; e o
-  kernel enquanto `kernel::storage` não existe). **Ponto único de troca no kernel:**
-  `kernel/src/wasm/appfs_backend.rs::with`; quando `storage::with_fs` existir, é
-  só ali que se liga o OJFS v3 (o resto do código só vê `&mut dyn AppFs`).
+  `rename`, `read_dir`, `tree_size`). `MemFs` é a implementação em memória (o oráculo dos
+  testes). **`VolumeFs`** (W18) é a do kernel: um adaptador sobre o `Backend` do VFS do
+  desktop, o mesmo objeto que o Arquivos usa, que serve o **disco OJFS v3** (quando montado) e
+  o **volume em RAM** do fallback; `/apps/<id>.wasm`, `/data/<id>` e `/home` ficam no mesmo
+  espaço de nomes do usuário e **persistem entre boots**. **Ponto único de troca no kernel:**
+  `kernel/src/wasm/appfs_backend.rs::with` (o resto do código só vê `&mut dyn AppFs`).
+* **Defesa em profundidade do `VolumeFs`:** só caminhos canônicos; só as três árvores da
+  plataforma (`/apps`, `/data`, `/home`) são alcançáveis: `/etc`, `/var`, `/.trash` e as pastas do
+  usuário dão `ERR_PERM` mesmo que o `Sandbox` falhe; `/apps`, `/data` e `/home` não podem ser
+  removidos nem renomeados; um arquivo tem no máximo 64 MiB; a listagem pula nomes que o app não
+  consegue endereçar (não ASCII, criados pelo Arquivos); `NoSpace` do volume vira `ERR_NOSPC`.
+  Cada chamada é **uma seção crítica** do `YieldMutex` do volume (sem mascarar interrupções, sem
+  reentrada: uma chamada aninhada ou um dono morto viram `ERR_INVAL`, nunca travam) e nunca
+  atravessa a execução do guest; o estado do sandbox (descritores, cota) fica no `HostState` do
+  app. Custo medido: cada `write` é uma transação com barreiras de flush (13 a 23 ms no QEMU
+  sem KVM), por isso o SDK já divide gravações grandes em blocos de 64 KiB.
 * **Normalização** (`appfs::normalize`): barras duplas e `.` somem; `..` só resolve
   lexicalmente **dentro** da raiz do guest e, se subir acima dela, é **erro** `ERR_PERM`
   (nunca "preso na raiz": um app que tenta `../../etc/x` deve saber que errou e é
@@ -238,10 +251,24 @@ protegida por um trinco de uma palavra; sem quadro torto. O dock e o desktop do 
 * limites: corpo <= 256 KiB, 8 s de tempo total, **uma** requisição por vez por app, 1 por
   segundo; combustível cobrado por KiB recebido.
 
-O transporte usa a pilha existente (`fetch`/`netstack`), de propriedade de outra frente: onde
-ela não puder ser usada de dentro de `appd` sem arriscar a pilha, `net_http_get` valida tudo
-(permissão, URL, filtro) e devolve `ERR_NOSYS` para o transporte. Isso fica registrado como
-limitação, não escondido.
+**Transporte (W18).** `net_http_get` usa a pilha real: a thread `fetcher` (dona da NIC, `netd`).
+O *slot* de requisição é dividido com o navegador por um `compare_exchange` `IDLE -> CLAIMED`;
+cada resultado só é retirado por quem o pediu; um app que estoura o prazo **abandona** o slot e o
+`fetcher` descarta o resultado tardio. A política vale **duas vezes**: `appnet::authorize` antes de
+postar (permissão, tamanho, filtro de destinos, `net_hosts`) e no `fetcher` a cada salto de
+redirecionamento (um `Location` para IP privado, outro host ou `https -> http` é recusado como um
+pedido direto); depois da resolução DNS o endereço **resolvido** é checado de novo
+(`Net::set_public_only`), então um nome público que aponta para `127.0.0.1` ou para a LAN é
+barrado. TLS é o do navegador, **com verificação completa** (cadeia, nome, `CertificateVerify`,
+`docs/SECURITY-MODEL.md` §3.1) e **sem** o "continuar mesmo assim": para um app, certificado ruim
+é `ERR_NET`. Só o corpo de uma resposta 2xx chega ao app (`appnet::app_response`: `chunked`,
+gzip e deflate decodificados, cortado em `cap`); outro status, resposta malformada ou
+codificação que não decodifica é `ERR_NET`, nunca lixo.
+
+*Limitação honesta:* a chamada é síncrona e há **uma** thread `appd` para todos os apps, então
+enquanto um app espera a rede (até 8 s em http, 20 s em https) os **outros apps** não rodam; o
+compositor, o navegador e o resto do sistema seguem. Retomar a chamada de forma assíncrona
+(`wasmi` resumable) é trabalho futuro. Prova: `tools/perf/scen/w18-net.sh` (TESTING.md §6).
 
 ## 8. Instalação e lançador
 
@@ -260,16 +287,28 @@ limitação, não escondido.
   padrão (`snake`), como hoje. Como o Painel Iniciar só aparece aberto, o desktop do boot
   fica pixel a pixel igual à linha de base (`tools/verify-boot.sh`, 0 pixels).
 * **Primeiro boot:** a imagem embute os apps de exemplo (`clock`, `notes`, `paint`, `hello`,
-  `snake`, `plasma`) e `appinstall::seed` instala os que faltam em `/apps`, sem sobrescrever
-  o que o usuário já tem.
-* **Gerenciador de arquivos:** uma vista "Apps" lista `/apps` (e os pacotes embutidos ainda
-  não instalados); `Enter` executa (instalando antes se for um pacote embutido), `I` instala,
-  `Del` remove. `Enter` num arquivo `*.wasm` da vista Arquivos valida o pacote, instala se for novo
-  e executa; no OJFS v2 atual um arquivo tem no máximo 1 KiB, então isso só serve a pacotes
-  minúsculos até o FS v3 ser ligado.
-* Enquanto o FS v3 não está ligado ao kernel, `/apps` e `/data` vivem em `MemFs` (RAM): o
-  catálogo é repovoado a cada boot pelo `seed`; os dados dos apps **não persistem entre boots**
-  até a troca do backend (§5). Documentado como limitação.
+  `snake`, `plasma`) e `appinstall::seed_once` instala os que faltam em `/apps`, sem sobrescrever
+  o que o usuário já tem. Com o volume persistente cada pacote embutido é oferecido **uma vez**:
+  o arquivo `/apps/.seeded` guarda os ids já oferecidos, então um app que o usuário removeu **não
+  volta** no boot seguinte, e um pacote novo numa versão posterior do sistema ainda é instalado
+  (`appinstall::seed`, sem memória, continua para volumes que não persistem). Num disco em
+  branco a primeira semeadura grava ~700 KiB e leva ~3 s no QEMU sem KVM, antes do primeiro
+  quadro do desktop; nos boots seguintes não grava nada.
+* **Gerenciador de arquivos:** o lugar **Apps** da barra lateral (tecla `A` em qualquer pasta;
+  `Tab`/`Backspace` voltam) lista os pacotes instalados e os embutidos ainda não instalados, com
+  ícone, tamanho do pacote e estado; `Enter` executa (instalando antes se for um pacote
+  embutido), `I` instala, `Del` remove (os dados em `/data/<id>` ficam), o botão direito oferece
+  Abrir/Instalar/Remover/Propriedades e uma falha aparece na linha de estado. Propriedades de um
+  app, e de qualquer arquivo `.wasm`, mostram o manifesto: versão, ABI, arquivos, rede,
+  área de transferência, memória/disco/descritores, janela e se está instalado. `Enter` num
+  arquivo `*.wasm` valida o pacote, instala se for novo e executa. Um app que grava arquivos
+  aparece no Arquivos em até 100 ms (o contador `vfs::generation` sobe e as janelas recarregam).
+* `/apps`, `/data` e `/home` **persistem** no disco OJFS v3 (provado em QEMU: o Notas salva
+  `nota-1.txt` em `/data/notes`, o sistema reinicia com a mesma imagem e a nota abre; o boot
+  seguinte loga `apps: 0 bundled packages installed`). Sem disco v3 (sem disco, disco pequeno,
+  desconhecido) vivem no volume em RAM do desktop e se perdem ao desligar, o que o Arquivos já avisa
+  (verificado com `FS_SIZE=64K`); esse volume tem 4 MiB no total e os seis pacotes embutidos já
+  ocupam ~1,2 MiB, então as cotas de dados dos apps ficam limitadas pelo que sobra.
 
 ## 9. SDK e apps de exemplo
 
@@ -288,13 +327,16 @@ empacotados com manifesto.
 | `wasmsec` | cabeçalho errado, truncado, LEB128 longo demais/não terminado, tamanho de seção > buffer, seções demais, nomes não UTF-8, duplicadas, módulo vazio; **fuzz** `app_manifest` |
 | `appmanifest` | cada chave: válido/inválido/limites; duplicada, desconhecida, `x-`, CRLF, comentário, sem `=`, >64 linhas, >4 KiB; padrões; `id` hostil; quotas acima do teto (`grant` e instalador recusam); ícone > 64x64, PNG corrompido |
 | `appfs` | **tabela de caminhos hostis** (`..`, `../..`, `/../`, `a/../../b`, `//`, `.`, `\`, NUL, controle, não ASCII, nomes longos, profundidade, `%2e%2e`, `....`, `/data/outro`, `~`): nenhum escapa; descritores (teto, fechar, reuso), cota (parcial, `NOSPC`), isolamento entre dois apps no mesmo `MemFs`, leitura/escrita/seek/append/trunc, readdir, rename, unlink, permissões `none/own/home`; *property test* "nenhum caminho gerado acessa fora da raiz" |
-| `appnet` | tabela de destinos permitidos/recusados, IPs disfarçados, esquemas, tamanhos |
+| `appnet` | tabela de destinos permitidos/recusados, IPs disfarçados, esquemas, tamanhos; `net_hosts` (exato, curinga, nomes parecidos, base do curinga fora); ordem das recusas de `authorize`; cada salto de redirecionamento passa pelo mesmo portão; resposta só 2xx, `chunked`, corte, codificação ilegível |
+| `VolumeFs` (W18) | os **mesmos** passos dão os mesmos resultados no `MemFs` e no `VolumeFs`; só `/apps`, `/data`, `/home` são alcançáveis (e as pastas-raiz não saem); persistência de dados, pacotes e remoções por um remount do `Fs3<RamDisk>`; cota exata depois do remount; volume de 1 MiB cheio dá `NOSPC` e `fsck` limpo; arquivos esparsos; sequência do sandbox deixa a mesma árvore nos dois; **fuzz** `app_sandbox` também sobre `VolumeFs` |
 | `appabi` | `check_range` (estouro, zero, limites exatos) |
-| catálogo/instalação | instalar, duplicado, manifesto inválido, quota acima do teto, remover, seed sem sobrescrever |
+| catálogo/instalação | instalar, duplicado, manifesto inválido, quota acima do teto, remover, seed sem sobrescrever; `seed_once`: uma vez só, app removido não volta, pacote novo entra, marcador hostil |
+| Arquivos, lugar Apps | linhas, pseudo-caminho que nunca lê o volume, seleção que acompanha o app, `Enter`/`I`/`Del` e as mensagens de erro, menu sem comandos de arquivo, texto do manifesto |
 | kernel (QEMU) | provas (a) a (f): 4 apps ao mesmo tempo respondendo à entrada; app hostil (laço infinito, `memory.grow`, ponteiro inválido, `open("../../etc/x")`, descritores até o teto, ler FS de outro app, `net_http_get` sem permissão) contido; instalar/remover via Arquivos; 100 aberturas/fechamentos com heap estável; CPU por app; desktop do boot idêntico |
+| kernel (QEMU), W18 | persistência de app (`w18-persist-{1,2}.sh`); lugar Apps (`w18-apps.sh`, `w18-wasmfile.sh`); rede real do app contra um servidor falso (`w18-net.sh`: 200, redirecionamento válido, redirecionamento para IP privado, 404, fora de `net_hosts`, IP privado, gzip, chunked, certificado autoassinado, nome público que resolve para loopback); 30 rodadas de abrir/fechar com o disco (heap sem deriva: 1 001 312 -> 982 416 B) |
 
 ## 11. Fora do escopo desta entrega
 
-Sockets TCP (`net=tcp` só é aceito no manifesto), transporte HTTP real se a pilha de rede
-não puder ser usada de `appd`, persistência de `/apps` e `/data` (depende do `kernel::storage`),
-assinatura de pacotes, atualização de versão de app instalado, WASM threads/SIMD, áudio.
+Sockets TCP (`net=tcp` só é aceito no manifesto), chamadas de rede assíncronas (hoje um app
+esperando a rede segura os outros: §7), assinatura de pacotes, atualização de versão de app
+instalado, "remover com dados", WASM threads/SIMD, áudio.
