@@ -16,6 +16,7 @@ extern crate alloc;
 pub mod anim;
 pub mod blockcache;
 pub mod blockdev;
+pub mod bmp;
 pub mod browser;
 pub mod calc;
 pub mod clipboard;
@@ -39,6 +40,8 @@ pub mod rng;
 pub mod schedule;
 pub mod shell;
 pub mod terminal;
+#[cfg(test)]
+pub(crate) mod testutil;
 pub mod web;
 pub mod window;
 pub mod wm;
