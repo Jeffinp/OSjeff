@@ -68,12 +68,14 @@ impl GpuDevice {
         caps: VirtioCaps,
         phys_offset: u64,
     ) -> Option<GpuDevice> {
-        let common_addr =
-            virtio::bar_base(gpu, caps.common.bar) + phys_offset + caps.common.offset as u64;
-        // SAFETY: `common_addr` is BAR base + `phys_offset` + capability offset, i.e. the common-cfg
-        // window reached through the bootloader's linear physical mapping (as in `virt_to_phys`).
-        // NOTE: not validated: BAR index and offset come from the device's PCI capability and are not
-        // range-checked (docs/audit/01-memoria-unsafe.md finding 9).
+        let Some(common_addr) = mmio_addr(gpu, &caps.common, phys_offset) else {
+            serial_println!("virtio-gpu: invalid common-config BAR/offset");
+            return None;
+        };
+        // SAFETY: `common_addr` is the BAR base + `phys_offset` + capability offset of a memory BAR
+        // (`bar_base` rejects non-existent / I/O / unassigned BARs), i.e. the common-cfg window reached
+        // through the bootloader's linear physical mapping (as in `virt_to_phys`). `discover` guarantees
+        // the capability is at least `COMMON_CFG_LEN` (0x38) bytes, covering every register `Common` touches.
         let common = unsafe { Common::new(common_addr) };
 
         if !virtio::negotiate(&common) {
@@ -89,7 +91,11 @@ impl GpuDevice {
 
         // Program the control queue (index 0).
         common.select_queue(0);
-        let qsize = common.queue_size().min(QSIZE);
+        let Some(qsize) = virtio::validate_queue_size(common.queue_size(), QSIZE) else {
+            serial_println!("virtio-gpu: control queue unavailable or invalid size");
+            common.set_status(virtio::S_FAILED);
+            return None;
+        };
         common.set_queue_size(qsize);
         common.set_queue_desc(queue_phys + DESC_OFF as u64);
         common.set_queue_driver(queue_phys + AVAIL_OFF as u64);
@@ -97,8 +103,14 @@ impl GpuDevice {
         common.enable_queue();
 
         let notify_off = common.queue_notify_off();
-        let notify_addr = notify_base(gpu, &caps.notify, phys_offset)
-            + notify_off as u64 * caps.notify_off_mul as u64;
+        let notify_addr =
+            virtio::notify_doorbell_offset(&caps.notify, caps.notify_off_mul, notify_off)
+                .and_then(|rel| mmio_addr(gpu, &caps.notify, phys_offset)?.checked_add(rel));
+        let Some(notify_addr) = notify_addr else {
+            serial_println!("virtio-gpu: notify doorbell outside its window");
+            common.set_status(virtio::S_FAILED);
+            return None;
+        };
 
         // Driver is fully up.
         common.set_status(
@@ -174,8 +186,8 @@ impl GpuDevice {
 
         // Notify the device that queue 0 has a new buffer.
         // SAFETY: `notify_addr` is the queue-0 doorbell (notify BAR + offset + queue_notify_off * mul)
-        // through the linear map; a 16-bit volatile MMIO write.
-        // NOTE: not range-checked against the BAR (docs/audit/01-memoria-unsafe.md finding 9).
+        // through the linear map; a 16-bit volatile MMIO write. `init` checked that the doorbell lies
+        // inside the notify capability's advertised length (`notify_doorbell_offset`).
         unsafe { core::ptr::write_volatile(self.notify_addr as *mut u16, 0) };
 
         // Poll the used ring (bounded).
@@ -315,7 +327,10 @@ fn put_rect(b: &mut [u8], off: usize, x: u32, y: u32, w: u32, h: u32) {
     put32(b, off + 12, h);
 }
 
-/// Virtual address of the notify region for this device.
-fn notify_base(gpu: &crate::pci::PciDevice, notify: &CapLoc, phys_offset: u64) -> u64 {
-    virtio::bar_base(gpu, notify.bar) + phys_offset + notify.offset as u64
+/// Virtual address of the start of a capability's MMIO structure: memory-BAR base +
+/// `phys_offset` + capability offset. `None` if the BAR is unusable or the sum overflows.
+fn mmio_addr(gpu: &crate::pci::PciDevice, loc: &CapLoc, phys_offset: u64) -> Option<u64> {
+    virtio::bar_base(gpu, loc.bar)?
+        .checked_add(phys_offset)?
+        .checked_add(loc.offset as u64)
 }

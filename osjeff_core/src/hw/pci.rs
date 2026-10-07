@@ -56,6 +56,29 @@ pub fn bar_address(lo: u32, hi: u32) -> u64 {
     }
 }
 
+/// Number of base address registers in a type-0 header.
+pub const BAR_COUNT: u8 = 6;
+
+/// Config-space offset of BAR `index`, or `None` if it is not one of the six.
+pub fn bar_offset(index: u8) -> Option<u8> {
+    (index < BAR_COUNT).then(|| 0x10 + index * 4)
+}
+
+/// Memory base address of BAR `index` from its low dword and the dword of the
+/// next slot (`hi`, only used by 64-bit BARs). `None` when the BAR cannot hold
+/// an MMIO window: bad index, an I/O-space BAR, a 64-bit BAR in the last slot
+/// (no room for its high half), or an unassigned (zero) base.
+pub fn memory_bar_base(index: u8, lo: u32, hi: u32) -> Option<u64> {
+    if index >= BAR_COUNT || lo & 1 != 0 {
+        return None;
+    }
+    if bar_is_64bit(lo) && index + 1 >= BAR_COUNT {
+        return None;
+    }
+    let base = bar_address(lo, hi);
+    (base != 0).then_some(base)
+}
+
 /// Walks bus 0: calls `f(slot, func, vendor, device)` for every present
 /// function. `read16(slot, func, offset)` reads config space. A slot whose
 /// function 0 is absent is skipped entirely; other absent functions are skipped
@@ -136,6 +159,31 @@ mod tests {
         assert_eq!(bar_address(0xFE00_000C, 0x0000_0001), 0x1_FE00_0000);
         assert_eq!(bar_address(0x0000_0004, 0xFFFF_FFFF), 0xFFFF_FFFF_0000_0000);
         assert_eq!(bar_address(0, 0), 0);
+    }
+
+    #[test]
+    fn bar_offsets_cover_exactly_six_registers() {
+        assert_eq!(bar_offset(0), Some(0x10));
+        assert_eq!(bar_offset(5), Some(0x24));
+        assert_eq!(bar_offset(6), None);
+        assert_eq!(bar_offset(255), None); // would have overflowed `0x10 + i * 4`
+    }
+
+    #[test]
+    fn memory_bar_base_accepts_mmio_bars() {
+        assert_eq!(memory_bar_base(0, 0xFEBC_0000, 0), Some(0xFEBC_0000));
+        assert_eq!(memory_bar_base(4, 0xFE00_000C, 1), Some(0x1_FE00_0000));
+        assert_eq!(memory_bar_base(0, 0xFEBC_0008, 0xFFFF), Some(0xFEBC_0000)); // 32-bit: hi ignored
+    }
+
+    #[test]
+    fn memory_bar_base_rejects_unusable_bars() {
+        assert_eq!(memory_bar_base(6, 0xFEBC_0000, 0), None); // no such BAR
+        assert_eq!(memory_bar_base(0, 0x0000_C001, 0), None); // I/O space
+        assert_eq!(memory_bar_base(0, 0, 0), None); // unassigned
+        assert_eq!(memory_bar_base(0, 0x0000_000F, 0), None); // flags only
+        assert_eq!(memory_bar_base(5, 0xFE00_000C, 1), None); // 64-bit in the last slot
+        assert_eq!(memory_bar_base(0, 0x0000_0004, 0), None); // 64-bit, base 0
     }
 
     #[test]

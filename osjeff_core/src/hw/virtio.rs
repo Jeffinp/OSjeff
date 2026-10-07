@@ -30,6 +30,49 @@ impl CapLoc {
     pub fn present(&self) -> bool {
         self.length != 0
     }
+
+    /// Whether the capability is well formed and at least `min_len` bytes long:
+    /// BAR index 0..=5 and the byte range `offset..offset + length` inside a 32-bit
+    /// BAR offset space (no wrap-around).
+    pub fn is_valid(&self, min_len: u32) -> bool {
+        self.bar < BAR_COUNT
+            && self.length >= min_len
+            && self.offset as u64 + self.length as u64 <= 1 << 32
+    }
+}
+
+/// Size of the common-config structure the driver accesses (through
+/// `queue_device`, offset 0x30 + 8).
+pub const COMMON_CFG_LEN: u32 = 0x38;
+/// Smallest notify window: one 16-bit doorbell.
+const NOTIFY_MIN_LEN: u32 = 2;
+
+/// Clamps the device's advertised queue size to the driver's ring capacity
+/// `max`. `None` when the queue is unavailable (size 0) or the device reports a
+/// size that is not a power of two (the split ring requires one).
+pub fn validate_queue_size(device_qsize: u16, max: u16) -> Option<u16> {
+    if device_qsize == 0 || !device_qsize.is_power_of_two() {
+        return None;
+    }
+    Some(device_qsize.min(max))
+}
+
+/// Byte offset of queue `queue_notify_off`'s doorbell from the start of the
+/// notify structure (`queue_notify_off * notify_off_mul`), or `None` if the
+/// structure is absent or the 16-bit doorbell would not fit inside it.
+pub fn notify_doorbell_offset(
+    notify: &CapLoc,
+    notify_off_mul: u32,
+    queue_notify_off: u16,
+) -> Option<u64> {
+    if !notify.present() {
+        return None;
+    }
+    let rel = queue_notify_off as u64 * notify_off_mul as u64;
+    if rel + NOTIFY_MIN_LEN as u64 > notify.length as u64 {
+        return None;
+    }
+    Some(rel)
 }
 
 /// The four virtio config structures plus the notify offset multiplier.
@@ -56,6 +99,8 @@ pub trait CapSpace {
     /// Reads the config-space dword at `offset`.
     fn read32(&self, offset: u8) -> u32;
 }
+
+use super::pci::BAR_COUNT;
 
 /// Maximum capabilities visited; guards against a corrupt (looping) list.
 const MAX_CAPS: usize = 48;
@@ -99,7 +144,22 @@ pub fn discover<S: CapSpace>(dev: &S) -> Option<VirtioCaps> {
         off = next;
     }
 
-    have_common.then_some(caps)
+    // Reject a common-config window the driver could not safely touch, and drop
+    // any other structure whose BAR/offset/length is nonsensical (it then reads
+    // as "not present").
+    if !have_common || !caps.common.is_valid(COMMON_CFG_LEN) {
+        return None;
+    }
+    if !caps.notify.is_valid(NOTIFY_MIN_LEN) {
+        caps.notify = CapLoc::default();
+    }
+    if !caps.isr.is_valid(1) {
+        caps.isr = CapLoc::default();
+    }
+    if !caps.device.is_valid(0) {
+        caps.device = CapLoc::default();
+    }
+    Some(caps)
 }
 
 /// The device-status and feature registers of the common-config window that the
@@ -231,6 +291,78 @@ mod tests {
         let caps = discover(&c).expect("caps");
         assert_eq!(caps.common.bar, 1);
         assert_eq!(caps.common.offset, 0x10);
+    }
+
+    #[test]
+    fn common_cfg_smaller_than_the_driver_needs_is_rejected() {
+        let mut c = Cfg::new(Some(0x40));
+        c.virtio_cap(0x40, 0, CFG_COMMON, 0, 0, COMMON_CFG_LEN - 1);
+        assert_eq!(discover(&c), None);
+        c.virtio_cap(0x40, 0, CFG_COMMON, 0, 0, COMMON_CFG_LEN);
+        assert!(discover(&c).is_some());
+    }
+
+    #[test]
+    fn out_of_range_bar_or_overflowing_offset_is_rejected() {
+        let mut c = Cfg::new(Some(0x40));
+        c.virtio_cap(0x40, 0, CFG_COMMON, 6, 0, 0x38); // BAR 6 does not exist
+        assert_eq!(discover(&c), None);
+        c.virtio_cap(0x40, 0, CFG_COMMON, 0, 0xFFFF_FFF0, 0x38); // offset + len wraps
+        assert_eq!(discover(&c), None);
+        c.virtio_cap(0x40, 0, CFG_COMMON, 0, 0xFFFF_FFC8, 0x38); // ends exactly at 2^32
+        assert!(discover(&c).is_some());
+    }
+
+    #[test]
+    fn malformed_optional_structures_read_as_absent() {
+        let mut c = standard();
+        c.virtio_cap(0x50, 0x64, CFG_NOTIFY, 9, 0x3000, 0x1000); // bad BAR
+        c.virtio_cap(0x64, 0x74, CFG_ISR, 0, 0, 0); // zero length
+        c.virtio_cap(0x74, 0, CFG_DEVICE, 1, u32::MAX, 16); // overflow
+        let caps = discover(&c).expect("common is fine");
+        assert!(!caps.notify.present());
+        assert!(!caps.isr.present());
+        assert!(!caps.device.present());
+    }
+
+    #[test]
+    fn queue_size_validation() {
+        assert_eq!(validate_queue_size(0, 16), None); // unavailable queue
+        assert_eq!(validate_queue_size(3, 16), None); // not a power of two
+        assert_eq!(validate_queue_size(12, 16), None);
+        assert_eq!(validate_queue_size(8, 16), Some(8));
+        assert_eq!(validate_queue_size(256, 16), Some(16)); // clamped to the ring
+        assert_eq!(validate_queue_size(16, 16), Some(16));
+        assert_eq!(validate_queue_size(0x8000, 16), Some(16));
+    }
+
+    #[test]
+    fn notify_doorbell_must_fit_in_the_window() {
+        let n = CapLoc {
+            bar: 4,
+            offset: 0x3000,
+            length: 0x1000,
+        };
+        assert_eq!(notify_doorbell_offset(&n, 4, 0), Some(0));
+        assert_eq!(notify_doorbell_offset(&n, 4, 1), Some(4));
+        assert_eq!(notify_doorbell_offset(&n, 4, 0x3FE), Some(0xFF8));
+        // rel = 0xFFE: the 2-byte doorbell ends exactly at the window end.
+        assert_eq!(notify_doorbell_offset(&n, 2, 0x7FF), Some(0xFFE));
+        assert_eq!(notify_doorbell_offset(&n, 4, 0x3FF), Some(0xFFC)); // ends at 0xFFE
+        assert_eq!(notify_doorbell_offset(&n, 4, 0x400), None); // rel 0x1000: past the end
+    }
+
+    #[test]
+    fn notify_doorbell_rejects_absent_and_huge_offsets() {
+        assert_eq!(notify_doorbell_offset(&CapLoc::default(), 4, 0), None);
+        let n = CapLoc {
+            bar: 0,
+            offset: 0,
+            length: 0x1000,
+        };
+        assert_eq!(notify_doorbell_offset(&n, u32::MAX, u16::MAX), None); // no u32 overflow
+        assert_eq!(notify_doorbell_offset(&n, 0, u16::MAX), Some(0)); // mul 0: shared doorbell
+        assert_eq!(notify_doorbell_offset(&n, 0x1000, 1), None);
     }
 
     #[test]

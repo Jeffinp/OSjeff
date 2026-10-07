@@ -8,8 +8,8 @@ const CONFIG_ADDRESS: u16 = 0xCF8;
 const CONFIG_DATA: u16 = 0xCFC;
 
 use osjeff_core::hw::pci::{
-    VIRTIO_GPU_LEGACY, VIRTIO_GPU_MODERN, VIRTIO_VENDOR, cap_list_start, config_address,
-    extract_u16,
+    VIRTIO_GPU_LEGACY, VIRTIO_GPU_MODERN, VIRTIO_VENDOR, bar_offset, cap_list_start,
+    config_address, extract_u16,
 };
 
 /// A located PCI function.
@@ -40,9 +40,12 @@ pub fn write32(bus: u8, slot: u8, func: u8, offset: u8, value: u32) {
 }
 
 impl PciDevice {
-    /// Raw value of base address register `i` (0..6).
+    /// Raw value of base address register `i` (0..6); 0 for a non-existent BAR.
     pub fn bar(&self, i: u8) -> u32 {
-        read32(self.bus, self.slot, self.func, 0x10 + i * 4)
+        match bar_offset(i) {
+            Some(off) => read32(self.bus, self.slot, self.func, off),
+            None => 0,
+        }
     }
 
     /// Set the memory-space + bus-master bits in the command register, required

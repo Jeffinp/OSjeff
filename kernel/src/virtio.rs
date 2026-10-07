@@ -31,7 +31,8 @@ pub fn virt_to_phys(virt: u64, phys_offset: u64) -> Option<u64> {
 }
 
 pub use osjeff_core::hw::virtio::{
-    CapLoc, S_ACK, S_DRIVER, S_DRIVER_OK, S_FEATURES_OK, VirtioCaps, discover, negotiate,
+    CapLoc, S_ACK, S_DRIVER, S_DRIVER_OK, S_FAILED, S_FEATURES_OK, VirtioCaps, discover, negotiate,
+    notify_doorbell_offset, validate_queue_size,
 };
 use osjeff_core::hw::virtio::{CapSpace, CommonCfg};
 
@@ -178,14 +179,15 @@ impl CommonCfg for Common {
     }
 }
 
-/// Physical base address of BAR `bar`, handling 64-bit (two-dword) BARs.
-pub fn bar_base(dev: &PciDevice, bar: u8) -> u64 {
+/// Physical base address of memory BAR `bar`, handling 64-bit (two-dword) BARs.
+/// `None` for a non-existent, I/O-space or unassigned BAR.
+pub fn bar_base(dev: &PciDevice, bar: u8) -> Option<u64> {
     let lo = dev.bar(bar);
     // 64-bit memory BAR: the high half is in the next BAR slot.
     let hi = if osjeff_core::hw::pci::bar_is_64bit(lo) {
-        dev.bar(bar + 1)
+        dev.bar(bar.saturating_add(1))
     } else {
         0
     };
-    osjeff_core::hw::pci::bar_address(lo, hi)
+    osjeff_core::hw::pci::memory_bar_base(bar, lo, hi)
 }
