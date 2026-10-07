@@ -821,6 +821,7 @@ mod settings_ui;
 mod sysstore;
 mod toasts_ui;
 mod ui;
+mod vfs;
 mod wasmwin;
 mod widgets;
 pub(crate) use instance::*;

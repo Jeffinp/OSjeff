@@ -9,19 +9,19 @@
 //! | smaller than 1 MiB (the old 64 KiB one) | log `TooSmall`, stay on OJFS v2, write nothing      |
 //! | valid v3                               | mount (journal replay), `fsck`, expose              |
 //! | v2 image in sectors 0..99              | `migrate_v2` into the v3 area, mount, expose        |
-//! | blank, >= 1 MiB                        | `format` v3 + welcome files; v2 is left to the desktop, which formats it as before |
+//! | blank, >= 1 MiB                        | `format` v3 + welcome files (the v2 area stays blank) |
 //! | `OJF3` magic with a bad checksum, or unknown content | log and **write nothing** |
 //!
-//! The desktop, terminal and editor still use the in-RAM v2 image (`fs::*`); until
-//! their migration lands, the v3 volume is a snapshot taken at migration time and
-//! the v2 image stays the desktop's source of truth. Sectors 0..127 are never
-//! written by this module (the v3 library guarantees it), so the v2 image is
-//! byte-for-byte what the old boot left there.
+//! The desktop reaches the volume through `desktop/vfs.rs` (file manager, viewer,
+//! editor, terminal commands), which also builds the RAM fallback when this module
+//! leaves the disk alone. Sectors 0..127 are never written by this module (the v3
+//! library guarantees it), so a v2 image there stays byte-for-byte as it was. The
+//! welcome files come from `osjeff_core::vfs::seed_welcome`, the only copy.
 //!
-//! API for the future consumers: [`with_fs`] (run a closure on the mounted
-//! [`Fs3`]), [`is_v3`], [`state`] and [`now`] (Unix seconds, UTC, for the
-//! timestamps v3 wants). The filesystem sits behind a [`YieldMutex`], which a
-//! thread may hold across disk I/O (the ATA driver yields between sectors).
+//! API: [`with_fs`] (run a closure on the mounted [`Fs3`]), [`is_v3`], [`state`]
+//! and [`now`] (Unix seconds, UTC, for the timestamps v3 wants). The filesystem
+//! sits behind a [`YieldMutex`], which a thread may hold across disk I/O (the ATA
+//! driver yields between sectors).
 
 use crate::ata::AtaDisk;
 use crate::sync::YieldMutex;
@@ -59,7 +59,6 @@ fn set_state(s: State) {
 }
 
 /// What the storage service found at boot.
-#[allow(dead_code)] // API for the desktop/terminal/editor migration
 pub fn state() -> State {
     match STATE.load(Ordering::Acquire) {
         1 => State::NoDisk,
@@ -71,8 +70,7 @@ pub fn state() -> State {
     }
 }
 
-/// Whether OJFS v3 is mounted (the desktop is still on v2 until its consumers move).
-#[allow(dead_code)] // API for the desktop/terminal/editor migration
+/// Whether OJFS v3 is mounted.
 pub fn is_v3() -> bool {
     state() == State::V3
 }
@@ -97,12 +95,6 @@ pub fn now() -> u64 {
 }
 
 const MIB: u64 = 1024 * 1024;
-
-/// Welcome files for a fresh disk. Same content as the v2 seed in
-/// `desktop/mod.rs` (`Desktop::new`): keep both in sync until v2 goes away.
-const SEED_README: &[u8] = b"Bem-vindo ao OSjeff.\nGerenciador de arquivos:\n setas   navegam\n Del     manda pra lixeira\n Tab     alterna arquivos/lixeira\n Enter   abre\n";
-const SEED_NOTES: &[u8] = b"Arquivo de exemplo do OSjeff.";
-const SEED_PROJECT: &[u8] = b"Arquivo dentro de uma pasta.";
 
 fn format_options() -> FormatOptions {
     let now = now();
@@ -250,8 +242,7 @@ fn migrate(mut dev: AtaDisk) {
 }
 
 /// A blank large disk: format v3 and seed the welcome files. The v2 image area is
-/// not touched here: `Desktop::new` still formats and seeds v2 on its own, so the
-/// current consumers keep working until they are migrated.
+/// left blank: nothing reads it any more.
 fn format_and_seed(dev: AtaDisk) {
     let sectors = dev.sector_count();
     let opts = format_options();
@@ -264,21 +255,13 @@ fn format_and_seed(dev: AtaDisk) {
             return;
         }
     };
-    match seed(&mut fs, now) {
+    match osjeff_core::vfs::seed_welcome(&mut fs, now) {
         Ok(()) => {
             crate::serial_println!("storage: blank disk, formatted OJFS v3 with 3 welcome files")
         }
         Err(e) => crate::serial_println!("storage: welcome files not written ({:?})", e),
     }
     verify_and_install(fs, sectors);
-}
-
-fn seed(fs: &mut Fs3<AtaDisk>, now: u64) -> Result<(), FsError> {
-    fs.write_file("/leiame.txt", SEED_README, now)?;
-    fs.write_file("/notas.txt", SEED_NOTES, now)?;
-    fs.mkdir("/Documentos", now)?;
-    fs.write_file("/Documentos/projeto.txt", SEED_PROJECT, now)?;
-    Ok(())
 }
 
 /// Boot-time storage self-test (perf-trace builds with `OSJ_STORAGE_SELFTEST` set at

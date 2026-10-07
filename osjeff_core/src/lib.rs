@@ -65,6 +65,7 @@ pub mod tlsverify;
 pub mod unixtime;
 pub mod wallpaper;
 pub mod wasmsec;
+pub mod vfs;
 pub mod web;
 pub mod window;
 pub mod winman;
