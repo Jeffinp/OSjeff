@@ -1,7 +1,10 @@
 //! ATA `IDENTIFY DEVICE` parsing and PIO command arithmetic.
 //!
 //! The kernel driver talks to the I/O ports; everything that merely *interprets*
-//! the 256-word IDENTIFY block or computes register values lives here.
+//! the 256-word IDENTIFY block, validates and slices transfers, or computes
+//! register values lives here.
+
+use crate::blockdev::IoError;
 
 /// Bytes per ATA sector.
 pub const SECTOR: usize = 512;
@@ -104,9 +107,262 @@ pub fn lba28_regs(lba: u32) -> [u8; 4] {
     ]
 }
 
+/// Status register: BSY (drive busy, the other bits are meaningless).
+pub const SR_BSY: u8 = 0x80;
+/// Status register: DF (device fault).
+pub const SR_DF: u8 = 0x20;
+/// Status register: DRQ (data request: a sector can be transferred).
+pub const SR_DRQ: u8 = 0x08;
+/// Status register: ERR (the command failed).
+pub const SR_ERR: u8 = 0x01;
+
+/// Sectors addressable with 28-bit LBA (2^28, 128 GiB). The driver only issues
+/// `READ SECTORS`/`WRITE SECTORS`, never the EXT forms, so a larger disk is
+/// treated as if it ended here.
+pub const LBA28_SECTORS: u64 = 1 << 28;
+
+/// What one status-register sample means to the driver.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Status {
+    /// `0xFF`: nothing drives the bus (no drive, or a dead controller).
+    Floating,
+    /// BSY set: keep waiting.
+    Busy,
+    /// ERR or DF set while not busy: the command failed.
+    Fault,
+    /// Not busy, DRQ set: the drive wants or offers a data sector.
+    Drq,
+    /// Not busy, no DRQ, no error: command complete.
+    Ready,
+}
+
+/// Classify one status sample. A floating bus is checked first, then BSY
+/// (the other bits are undefined while the drive is busy), then faults (a failed
+/// command may leave DRQ up), then DRQ.
+pub fn classify_status(s: u8) -> Status {
+    if s == 0xFF {
+        Status::Floating
+    } else if s & SR_BSY != 0 {
+        Status::Busy
+    } else if s & (SR_ERR | SR_DF) != 0 {
+        Status::Fault
+    } else if s & SR_DRQ != 0 {
+        Status::Drq
+    } else {
+        Status::Ready
+    }
+}
+
+/// Sectors the driver may address on a drive that identified itself with
+/// `identified` sectors (capped at the LBA28 limit).
+pub fn usable_sectors(identified: u64) -> u64 {
+    identified.min(LBA28_SECTORS)
+}
+
+/// Validate a transfer of `buf_len` bytes at `lba` on a device of `total`
+/// sectors and return its length in sectors (0 for an empty buffer, which is a
+/// no-op). `BadLength` when `buf_len` is not a multiple of 512, `OutOfRange` when
+/// the range passes `total` or the 28-bit LBA limit.
+pub fn check_transfer(total: u64, lba: u64, buf_len: usize) -> Result<usize, IoError> {
+    if !buf_len.is_multiple_of(SECTOR) {
+        return Err(IoError::BadLength);
+    }
+    let n = buf_len / SECTOR;
+    let end = lba.checked_add(n as u64).ok_or(IoError::OutOfRange)?;
+    if end > total || end > LBA28_SECTORS {
+        return Err(IoError::OutOfRange);
+    }
+    Ok(n)
+}
+
+/// One PIO command of a sliced transfer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Chunk {
+    /// First sector (28-bit LBA).
+    pub lba: u32,
+    /// Sectors in this command (1..=255).
+    pub sectors: u8,
+    /// Byte offset of this chunk inside the caller's buffer.
+    pub offset: usize,
+}
+
+/// Iterator over the commands that carry a transfer, each at most
+/// [`MAX_SECTORS_PER_CMD`] sectors. The range must already have passed
+/// [`check_transfer`]; a longer one simply stops at the 28-bit limit.
+#[derive(Clone, Debug)]
+pub struct Chunks {
+    lba: u64,
+    left: usize,
+    offset: usize,
+}
+
+/// Slice `sectors` sectors starting at `lba` into ATA commands of at most 255.
+pub fn chunks(lba: u64, sectors: usize) -> Chunks {
+    Chunks {
+        lba,
+        left: sectors,
+        offset: 0,
+    }
+}
+
+impl Iterator for Chunks {
+    type Item = Chunk;
+    fn next(&mut self) -> Option<Chunk> {
+        if self.left == 0 || self.lba >= LBA28_SECTORS {
+            return None;
+        }
+        let n = self.left.min(MAX_SECTORS_PER_CMD);
+        let c = Chunk {
+            lba: self.lba as u32,
+            sectors: n as u8,
+            offset: self.offset,
+        };
+        self.lba += n as u64;
+        self.left -= n;
+        self.offset += n * SECTOR;
+        Some(c)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_classification() {
+        assert_eq!(classify_status(0xFF), Status::Floating);
+        assert_eq!(classify_status(0x80), Status::Busy);
+        // BSY hides ERR/DRQ: those bits are undefined while busy.
+        assert_eq!(classify_status(0x80 | SR_ERR | SR_DRQ), Status::Busy);
+        assert_eq!(classify_status(0x50), Status::Ready); // DRDY | DSC
+        assert_eq!(classify_status(0x58), Status::Drq);
+        assert_eq!(classify_status(0x51), Status::Fault); // ERR
+        assert_eq!(classify_status(0x70), Status::Fault); // DF
+        assert_eq!(classify_status(0x59), Status::Fault); // fault wins over DRQ
+        assert_eq!(classify_status(0x00), Status::Ready);
+    }
+
+    #[test]
+    fn usable_sectors_caps_at_lba28() {
+        assert_eq!(usable_sectors(0), 0);
+        assert_eq!(usable_sectors(131_072), 131_072); // 64 MiB
+        assert_eq!(usable_sectors(1 << 28), 1 << 28);
+        assert_eq!(usable_sectors(u64::MAX), 1 << 28);
+    }
+
+    #[test]
+    fn check_transfer_validates_length_and_bounds() {
+        assert_eq!(check_transfer(100, 0, 512), Ok(1));
+        assert_eq!(check_transfer(100, 99, 512), Ok(1));
+        assert_eq!(check_transfer(100, 0, 100 * 512), Ok(100));
+        assert_eq!(check_transfer(100, 100, 0), Ok(0)); // empty at the end: fine
+        assert_eq!(check_transfer(100, 100, 512), Err(IoError::OutOfRange));
+        assert_eq!(check_transfer(100, 99, 1024), Err(IoError::OutOfRange));
+        assert_eq!(check_transfer(100, 0, 511), Err(IoError::BadLength));
+        assert_eq!(check_transfer(100, 0, 513), Err(IoError::BadLength));
+        // BadLength wins when both are wrong, so a caller bug is reported as such.
+        assert_eq!(check_transfer(100, 500, 3), Err(IoError::BadLength));
+        assert_eq!(check_transfer(100, u64::MAX, 512), Err(IoError::OutOfRange));
+        assert_eq!(
+            check_transfer(u64::MAX, u64::MAX - 1, 1024),
+            Err(IoError::OutOfRange)
+        );
+    }
+
+    #[test]
+    fn check_transfer_respects_the_lba28_ceiling() {
+        // A device reporting more than 2^28 sectors still ends at 2^28 for us.
+        let big = u64::MAX;
+        assert_eq!(check_transfer(big, LBA28_SECTORS - 1, 512), Ok(1));
+        assert_eq!(
+            check_transfer(big, LBA28_SECTORS, 512),
+            Err(IoError::OutOfRange)
+        );
+        assert_eq!(
+            check_transfer(big, LBA28_SECTORS - 1, 1024),
+            Err(IoError::OutOfRange)
+        );
+    }
+
+    fn collect(lba: u64, sectors: usize) -> alloc::vec::Vec<(u32, u8, usize)> {
+        chunks(lba, sectors)
+            .map(|c| (c.lba, c.sectors, c.offset))
+            .collect()
+    }
+
+    #[test]
+    fn chunks_split_at_255_sectors() {
+        assert!(collect(0, 0).is_empty());
+        assert_eq!(collect(7, 1), [(7, 1, 0)]);
+        assert_eq!(collect(0, 255), [(0, 255, 0)]);
+        assert_eq!(collect(0, 256), [(0, 255, 0), (255, 1, 255 * 512)]);
+        // 256 blocks of 4 KiB in one cache read.
+        assert_eq!(
+            collect(1000, 2048),
+            [
+                (1000, 255, 0),
+                (1255, 255, 255 * 512),
+                (1510, 255, 510 * 512),
+                (1765, 255, 765 * 512),
+                (2020, 255, 1020 * 512),
+                (2275, 255, 1275 * 512),
+                (2530, 255, 1530 * 512),
+                (2785, 255, 1785 * 512),
+                (3040, 8, 2040 * 512),
+            ]
+        );
+    }
+
+    #[test]
+    fn chunks_cover_exactly_and_never_exceed_255() {
+        let cases = [
+            (0u64, 1usize),
+            (128, 8),
+            (5, 254),
+            (5, 255),
+            (5, 509),
+            (5, 510),
+            (5, 511),
+            (3, 10_000),
+        ];
+        for (lba, n) in cases {
+            let cs: alloc::vec::Vec<Chunk> = chunks(lba, n).collect();
+            assert_eq!(cs.iter().map(|c| c.sectors as usize).sum::<usize>(), n);
+            let mut next = lba;
+            let mut off = 0;
+            for c in &cs {
+                assert!(c.sectors >= 1);
+                assert_eq!(c.lba as u64, next, "chunks are contiguous");
+                assert_eq!(c.offset, off);
+                next += c.sectors as u64;
+                off += c.sectors as usize * SECTOR;
+            }
+        }
+    }
+
+    #[test]
+    fn chunks_stop_at_the_lba28_limit() {
+        let last = LBA28_SECTORS - 2;
+        assert_eq!(collect(last, 10), [(last as u32, 10, 0)]);
+        // A start already past the limit yields nothing (check_transfer rejects it first).
+        assert!(collect(LBA28_SECTORS, 1).is_empty());
+    }
+
+    #[test]
+    fn chunks_drive_a_ram_model_end_to_end() {
+        // Reading through `chunks` reproduces a straight copy: offsets line up.
+        let total = 3000usize;
+        let disk: alloc::vec::Vec<u8> = (0..total * SECTOR).map(|i| (i % 251) as u8).collect();
+        let lba = 17u64;
+        let n = 2500usize;
+        let mut out = alloc::vec![0u8; n * SECTOR];
+        for c in chunks(lba, n) {
+            let src = c.lba as usize * SECTOR;
+            let len = c.sectors as usize * SECTOR;
+            out[c.offset..c.offset + len].copy_from_slice(&disk[src..src + len]);
+        }
+        assert_eq!(&out[..], &disk[17 * SECTOR..(17 + n) * SECTOR]);
+    }
 
     /// Encodes `s` into IDENTIFY model words (27..=46), byte-swapped, padded.
     fn put_model(id: &mut [u16; 256], s: &[u8]) {
