@@ -18,6 +18,38 @@ tem releases versionadas; as seções são marcos na `master`.
 - Testes: 423 → 525; `fuzz/net_parse` cobre a máquina de lease, o DNS e o ICMP.
 - `tools/qemu-headless.sh` ganhou `QEMU_NIC` (`ne2k`, `virtio`, `none`); `tools/pcapsum.py`.
 
+## 2026-10 — Plataforma de apps WebAssembly
+
+O WebAssembly deixou de ser "um app embutido numa thread" e virou a plataforma de apps do
+SO: pacote com manifesto e permissões, vários apps ao mesmo tempo, instalação e lançador
+([`docs/design/apps.md`](docs/design/apps.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §10).
+
+- **Pacote e manifesto** (`osjeff_core::{wasmsec, appmanifest}`): um `.wasm` com as seções
+  `osjeff.manifest` (`chave=valor`: id, nome, versão, permissões `fs`/`net`/`clipboard`,
+  quotas, janela) e `osjeff.icon` (PNG até 64x64). Leitor de seções que nunca entra em
+  pânico, quotas com teto imposto pelo sistema, alvo de fuzz `app_manifest`.
+- **ABI v2** (módulo `osj`): janela, desenho (`blit_rgba`, `draw_image_png`), entrada por
+  exports (`on_key/on_text/on_pointer/on_resize/on_tick/on_close`), tempo, `random`, `log`,
+  clipboard, **arquivos** com raiz por app (`/data/<id>/`, `/home`), cota de disco e teto de
+  descritores (`osjeff_core::appfs`, tabela de caminhos hostis, alvo de fuzz `app_sandbox`) e
+  **rede** com filtro de destinos (`osjeff_core::appnet`; o transporte ainda não está ligado).
+  O `host.*` v1 segue igual (snake, plasma, DOOM).
+- **Execução multi-app**: `AppManager` com uma `Store` por app, thread `appd` em round-robin
+  por fatia, contabilidade de CPU/memória/combustível por app, estados e término real
+  (trap, falta de combustível, ponteiro inválido encerram só aquele app; a janela mostra "O
+  app encerrou: <motivo>"). Cada janela WASM é uma instância do window manager dinâmico,
+  redimensionável conforme o manifesto. Task Manager com seção APPS (`R` reinicia).
+- **Instalação e lançador**: `/apps/<id>.wasm`, instalador que valida antes de gravar
+  (`osjeff_core::appinstall`), Painel Iniciar com os apps instalados (ícone, nome, rolagem),
+  vista **Apps** no Gerenciador de arquivos, apps de exemplo semeados no primeiro boot. O
+  desktop do boot continua idêntico (dock inalterado, `verify-boot` com 0 pixels).
+- **SDK e apps** (`wasm-apps/sdk`): wrappers seguros da ABI v2 e macros `manifest!`/`icon!`/
+  `export_app!`; apps `hello`, `clock`, `notes` (arquivos em `/data/notes`), `paint` (BMP);
+  `snake` e `plasma` empacotados. Passo a passo em [`docs/BUILDING.md`](docs/BUILDING.md).
+- Limitações conhecidas: `/apps` e `/data` vivem em RAM até o `kernel::storage` existir
+  (um só ponto de troca, `appfs_backend.rs`); `net_http_get` valida mas não transporta;
+  sockets TCP e a roda do mouse (`on_scroll`) não existem; o menu do dock não lista os apps.
+
 ## 2026-10 — Window manager dinâmico
 
 O desktop deixou de ter 7 janelas fixas (uma por app) e passou a gerenciar qualquer

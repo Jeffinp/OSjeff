@@ -150,6 +150,11 @@ impl Desktop {
         if fs::is_dir(img, slot) {
             return;
         }
+        // A `.wasm` package is installed (if new) and run, not opened as text.
+        if fs::name_at(img, slot).ends_with(b".wasm") {
+            self.open_wasm_file(slot);
+            return;
+        }
         let dir = fs::parent_at(img, slot);
         if let Some(f) = FileName::parse(fs::name_at(img, slot)) {
             self.fs_load_in(None, dir, f);

@@ -856,9 +856,10 @@ fn run_slice(i: usize) -> bool {
     if job.starting {
         match build_runtime(i) {
             Ok(rt) => {
-                rts()[i] = Some(rt);
-                with(|slots| {
-                    if let Some(s) = slots[i].as_mut() {
+                // The window may have been closed while the module was loading (the slot
+                // can even be gone already): then the new runtime is dropped right away.
+                let alive = with(|slots| match slots[i].as_mut() {
+                    Some(s) if !s.closing => {
                         s.state = if s.visible {
                             State::Running
                         } else {
@@ -867,8 +868,14 @@ fn run_slice(i: usize) -> bool {
                         s.rt_dropped = false;
                         s.started_tick = now;
                         s.last_tick = now;
+                        true
                     }
+                    _ => false,
                 });
+                if !alive {
+                    return true;
+                }
+                rts()[i] = Some(rt);
             }
             Err(why) => {
                 finish(i, State::Crashed, why);

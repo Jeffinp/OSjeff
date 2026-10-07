@@ -214,11 +214,21 @@ impl Notes {
 
     /// The sandbox self-test: paths that try to leave the app's folder.
     fn sandbox_test(&mut self) {
-        let a = File::open("../../etc/passwd", O_READ).err().map_or(0, |e| e.0);
+        let a = File::open("../../etc/passwd", O_READ)
+            .err()
+            .map_or(0, |e| e.0);
         let b = File::open("/../notes2/x", O_READ).err().map_or(0, |e| e.0);
         let c = stat("..").err().map_or(0, |e| e.0);
-        log!("notes sandbox test: ../../etc/passwd={} /../notes2/x={} ..={}", a, b, c);
-        self.say(format_args!("sandbox: ../../etc={} /../x={} ..={} (-1 = recusado)", a, b, c));
+        log!(
+            "notes sandbox test: ../../etc/passwd={} /../notes2/x={} ..={}",
+            a,
+            b,
+            c
+        );
+        self.say(format_args!(
+            "sandbox: ../../etc={} /../x={} ..={} (-1 = recusado)",
+            a, b, c
+        ));
     }
 }
 
@@ -239,7 +249,9 @@ impl App for Notes {
             status: StrBuf::new(),
         };
         n.refresh_list();
-        n.say(format_args!("Ctrl+S salva  Ctrl+N nova  Tab lista  Ctrl+T teste do sandbox"));
+        n.say(format_args!(
+            "Ctrl+S salva  Ctrl+N nova  Tab lista  Ctrl+T teste do sandbox"
+        ));
         n
     }
 
@@ -321,7 +333,11 @@ impl App for Notes {
             let y = 40 + i as i32 * 20;
             let selected = i == self.sel;
             if selected {
-                let col = if self.focus == Focus::List { 0x0A84FF } else { 0x2A3140 };
+                let col = if self.focus == Focus::List {
+                    0x0A84FF
+                } else {
+                    0x2A3140
+                };
                 c.fill_rect(4, y - 2, LIST_W - 8, 18, col);
             }
             c.text(10, y, self.file_name(i), 0xE6EAF2, 1);
@@ -329,7 +345,11 @@ impl App for Notes {
         // editor
         let ex = LIST_W + 12;
         let mut title = StrBuf::<48>::new();
-        let nm = if self.name.as_str().is_empty() { "(nova nota)" } else { self.name.as_str() };
+        let nm = if self.name.as_str().is_empty() {
+            "(nova nota)"
+        } else {
+            self.name.as_str()
+        };
         let _ = write!(title, "{}{}", nm, if self.dirty { " *" } else { "" });
         c.text(ex, 12, title.as_str(), 0xFFFFFF, 2);
         c.fill_rect(ex, 34, w - ex - 10, 1, 0x2A3140);

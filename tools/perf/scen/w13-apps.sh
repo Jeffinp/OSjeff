@@ -19,7 +19,9 @@ goto 440 "$(srow 9)"; click; sleep 2                                   # clock
 dock 451; click; sleep 0.6; key down; key down; sleep 0.4
 goto 440 "$(srow 10)"; click; sleep 2                                  # snake
 # arrange (topmost window first): snake right, clock top-right, paint middle, notes left
-drag 524 173 760 135
+# BIOS (720 high) clamps the snake window up to y=158; UEFI (800) keeps y=214
+SY=173; [ "$MODE" = uefi ] && SY=229
+drag 524 $SY 760 135
 drag 416 201 1060 110
 drag 388 173 692 215
 drag 360 145 134 110
@@ -36,6 +38,7 @@ goto 678 263; click; sleep 0.3
 goto 640 340
 mon "mouse_button 1"; sleep 0.2
 for i in 1 2 3 4 5 6 7 8; do move 28 $(( (i % 2) * 24 - 12 )); sleep 0.15; done
+CX=$(( CX + 8 * 28 ))                  # keep the absolute-position tracking in sync (y nets to 0)
 mon "mouse_button 0"; sleep 0.4
 key ctrl-s; sleep 1
 shot a3-paint
@@ -45,4 +48,7 @@ for k in r d s a w d; do key $k; sleep 0.3; done
 shot a4-snake-clock
 sleep 2
 shot a5-later
+# the clock's surface follows the window: maximize it (double-click on its title bar)
+goto 1060 110; click; click; sleep 2.5
+shot a6-clock-maximized
 finish

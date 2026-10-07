@@ -681,3 +681,70 @@ fn single_byte_flips_never_panic() {
         }
     }
 }
+
+#[test]
+fn values_with_stray_whitespace_are_refused() {
+    for kv in [
+        "fs=own ",
+        "fs= own",
+        "net=http\t",
+        "abi=2 ",
+        "resizable=1 ",
+        "mem_mib=8 ",
+    ] {
+        assert!(with(kv).is_err(), "{kv:?}");
+    }
+    assert!(parse("id=a \nname=A\nversion=1.0.0").is_err());
+    assert!(parse("id=a\nname=A\nversion=1.0.0 ").is_err());
+}
+
+#[test]
+fn empty_values_are_refused() {
+    for k in [
+        "id",
+        "name",
+        "version",
+        "fs",
+        "net",
+        "clipboard",
+        "mem_mib",
+        "win_w",
+    ] {
+        let text = if matches!(k, "id" | "name" | "version") {
+            let mut t = String::new();
+            for (kk, v) in [("id", "a"), ("name", "A"), ("version", "1.0.0")] {
+                t.push_str(&format!("{kk}={}\n", if kk == k { "" } else { v }));
+            }
+            t
+        } else {
+            format!("{MIN}{k}=\n")
+        };
+        assert!(parse(&text).is_err(), "{k}");
+    }
+}
+
+#[test]
+fn keys_are_case_sensitive() {
+    assert_eq!(with("FS=own"), Err(ManifestError::Syntax));
+    assert_eq!(with("Fs=own"), Err(ManifestError::Syntax));
+}
+
+#[test]
+fn manifest_is_equal_after_a_roundtrip_through_a_package() {
+    let direct = parse(MIN).unwrap();
+    let via = parse_package(&pkg(MIN)).unwrap().manifest;
+    assert_eq!(direct, via);
+}
+
+#[test]
+fn a_full_4k_manifest_of_x_keys_is_still_bounded() {
+    // 64 lines of ~60 bytes each stays under 4096 bytes and the line limit.
+    let mut t = String::from(MIN);
+    for i in 0..60 {
+        t.push_str(&format!("x-pad{i:02}={}\n", "y".repeat(50)));
+    }
+    assert!(t.len() < MAX_MANIFEST_BYTES);
+    assert!(parse(&t).is_ok());
+    t.push_str(&"z".repeat(MAX_MANIFEST_BYTES));
+    assert_eq!(parse(&t), Err(ManifestError::TooLarge));
+}

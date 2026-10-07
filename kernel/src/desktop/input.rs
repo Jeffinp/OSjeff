@@ -604,7 +604,11 @@ impl Desktop {
                 scene = true;
             } else if let Some(action) = self.dock_hit(cx, cy) {
                 match action {
-                    DockAction::Start => self.start_open = !self.start_open,
+                    DockAction::Start => {
+                        self.start_open = !self.start_open;
+                        // the app list always opens at its top
+                        self.start_scroll = 0;
+                    }
                     // Focus (or restore) the app's window; open one if none.
                     DockAction::Open(k) => {
                         self.launch(k);

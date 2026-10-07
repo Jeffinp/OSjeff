@@ -837,7 +837,7 @@ impl Desktop {
             }
         }
 
-        let footer = "UP/DN ENTER:open DEL:end R:restart";
+        let footer = "ENTER:open DEL:end R:restart";
         font::draw_text(c, tx, footer_y, footer, theme::TEXT_MUTED, 2);
     }
 

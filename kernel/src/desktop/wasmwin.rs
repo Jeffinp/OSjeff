@@ -105,6 +105,35 @@ impl Desktop {
         rows
     }
 
+    /// Enter on a `.wasm` file of the file system: validate it as a package, install it
+    /// when it is new (the installer refuses a bad manifest or quota, see the serial log)
+    /// and run it. A file over 1 KiB cannot exist on the current OJFS, so this serves tiny
+    /// packages until the disk filesystem (OJFS v3) is wired.
+    pub(crate) fn open_wasm_file(&mut self, slot: usize) {
+        let Some(bytes) = fs::read_slot(disk(), slot).map(|d| d.to_vec()) else {
+            return;
+        };
+        let manifest = match appinstall::check(&bytes) {
+            Ok(m) => m,
+            Err(e) => {
+                serial_println!("apps: .wasm file refused: {}", e);
+                return;
+            }
+        };
+        let installed = appfs_backend::with(|fs| appinstall::is_installed(fs, &manifest.id));
+        if !installed {
+            match appfs_backend::with(|fs| appinstall::install(fs, &bytes)) {
+                Ok(m) => serial_println!("apps: installed `{}` {} from a file", m.id, m.version),
+                Err(e) => {
+                    serial_println!("apps: install refused: {}", e);
+                    return;
+                }
+            }
+            self.refresh_catalog();
+        }
+        self.launch_wasm_app(&manifest.id);
+    }
+
     /// Install the bundled package `id` (Files, `I`). `Err` carries the reason.
     pub(crate) fn install_bundled(&mut self, id: &str) -> Result<(), String> {
         let pkg = wasm::BUNDLED

@@ -53,7 +53,11 @@ impl App for Hello {
         let _ = write!(b, "teclas: {}   cliques: {}", self.keys, self.clicks);
         c.text(14, 84, b.as_str(), 0xFFFFFF, 2);
         b.clear();
-        let _ = write!(b, "mouse: {}, {}   janela {}x{}", self.mouse.0, self.mouse.1, w, h);
+        let _ = write!(
+            b,
+            "mouse: {}, {}   janela {}x{}",
+            self.mouse.0, self.mouse.1, w, h
+        );
         c.text(14, 112, b.as_str(), 0x9AA6BD, 1);
         if !self.last.as_str().is_empty() {
             c.text(14, 134, self.last.as_str(), 0xFFD84D, 1);

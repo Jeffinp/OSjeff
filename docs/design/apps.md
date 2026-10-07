@@ -157,7 +157,7 @@ A decisão é toda de `osjeff_core::appfs`:
   normalizado: `stat`, `read_at`, `write_at`, `truncate`, `create`, `mkdir`, `remove`,
   `rename`, `read_dir`, `tree_size`). `MemFs` é a implementação em memória (testes; e o
   kernel enquanto `kernel::storage` não existe). **Ponto único de troca no kernel:**
-  `kernel/src/wasm/appfs_backend.rs::with_backend`; quando `storage::with_fs` existir, é
+  `kernel/src/wasm/appfs_backend.rs::with`; quando `storage::with_fs` existir, é
   só ali que se liga o OJFS v3 (o resto do código só vê `&mut dyn AppFs`).
 * **Normalização** (`appfs::normalize`): barras duplas e `.` somem; `..` só resolve
   lexicalmente **dentro** da raiz do guest e, se subir acima dela, é **erro** `ERR_PERM`
@@ -263,7 +263,10 @@ limitação, não escondido.
   `snake`, `plasma`) e `appinstall::seed` instala os que faltam em `/apps`, sem sobrescrever
   o que o usuário já tem.
 * **Gerenciador de arquivos:** uma vista "Apps" lista `/apps` (e os pacotes embutidos ainda
-  não instalados); `Enter` executa, `I` instala, `Del` remove.
+  não instalados); `Enter` executa (instalando antes se for um pacote embutido), `I` instala,
+  `Del` remove. `Enter` num arquivo `*.wasm` da vista Arquivos valida o pacote, instala se for novo
+  e executa; no OJFS v2 atual um arquivo tem no máximo 1 KiB, então isso só serve a pacotes
+  minúsculos até o FS v3 ser ligado.
 * Enquanto o FS v3 não está ligado ao kernel, `/apps` e `/data` vivem em `MemFs` (RAM): o
   catálogo é repovoado a cada boot pelo `seed`; os dados dos apps **não persistem entre boots**
   até a troca do backend (§5). Documentado como limitação.

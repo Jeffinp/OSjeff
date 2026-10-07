@@ -270,3 +270,43 @@ fn display_messages_are_distinct() {
         seen.push(s);
     }
 }
+
+#[test]
+fn custom_section_with_only_a_name() {
+    let c = custom("only.name", b"");
+    let m = module(&[(0, &c)]);
+    let v: Vec<_> = Sections::new(&m).unwrap().map(|s| s.unwrap()).collect();
+    assert_eq!(v[0].name, b"only.name");
+    assert!(v[0].data.is_empty());
+}
+
+#[test]
+fn section_ending_exactly_at_the_buffer_end_is_accepted() {
+    let m = module(&[(1, &[1, 2, 3, 4])]);
+    assert_eq!(Sections::new(&m).unwrap().count(), 1);
+    let cut = &m[..m.len() - 1];
+    assert_eq!(
+        Sections::new(cut).unwrap().next(),
+        Some(Err(WasmError::Truncated))
+    );
+}
+
+#[test]
+fn trailing_garbage_after_valid_sections_is_reported() {
+    let mut m = module(&[(1, &[1])]);
+    m.push(0xFF); // an invalid section id with no size
+    let r: Vec<_> = Sections::new(&m).unwrap().collect();
+    assert_eq!(r.len(), 2);
+    assert!(r[0].is_ok());
+    assert_eq!(r[1], Err(WasmError::BadSectionId));
+}
+
+#[test]
+fn long_but_valid_name_lengths() {
+    let name = "n".repeat(300);
+    let c = custom(&name, b"x");
+    let m = module(&[(0, &c)]);
+    let s = Sections::new(&m).unwrap().next().unwrap().unwrap();
+    assert_eq!(s.name.len(), 300);
+    assert_eq!(s.data, b"x");
+}

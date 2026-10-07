@@ -7,6 +7,8 @@ diferente, e a lista abaixo diz **o que cada uma não cobre**.
 |---|---|---|---|---|
 | Testes unitários | A lógica pura está certa? | `cargo test-core` | `osjeff_core` (terminal, shell, editor, editor2, calc, janelas, heap, FS v2/v3, blockdev/blockcache, rede, HTML/CSS, browser) | `kernel/` (hardware) |
 | Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net` (+ lease DHCP, DNS, ICMP), `fs` (v2 e v3), `web`, `shell`, `editor2`, `image`, `x509` (cadeia de certificados) | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
+
+| Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net`, `fs` (v2 e v3), `web`, `shell`, `editor2`, manifesto de app (`app_manifest`), sandbox de arquivos (`app_sandbox`) | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
 | Boot em QEMU | O kernel sobe e o desktop é o mesmo? | `tools/verify-boot.sh` | BIOS e UEFI, panic/exceção na serial, imagem do desktop | Hardware real, rede real |
 | Lint | Há `unsafe` sem justificativa, avisos? | `cargo lint-kernel`, `cargo lint-host` | Todo o código | Corretude |
 | Supply chain | Dependência vulnerável ou de licença ruim? | `cargo deny check`, `cargo audit` | `Cargo.lock` | Código das dependências |
@@ -245,6 +247,7 @@ QEMU sem aceleração **não** representa hardware real. Compare proporções.
 | `cargo build --release -p os --features perf-trace` | estatísticas por segundo na serial (`[trace]`): custo por etapa de render, ISR, alocações, latência de entrada |
 | `tools/perf/run.sh`, `ab.sh`, `cmp.sh` | cenários scriptados (mouse/teclas pelo monitor do QEMU), A/B intercalado, `-icount` para razões estáveis |
 | `tools/perf/scen/w8-*.sh`, `w8-heap.sh` | window manager: várias instâncias (`w8-multi`), maximizar/minimizar/Alt+Tab/redimensionar (`w8-wm`), 30+ janelas (`w8-stress`), soak de abrir/fechar 100x com a ocupação exata do heap (`w8-soak` + `w8-heap.sh`, build `perf-trace`) |
+| `tools/perf/scen/w13-*.sh` | plataforma de apps: quatro apps ao mesmo tempo (`w13-apps`), app hostil (`w13-hostile`, só com o gancho temporário descrito abaixo), instalar/remover pelo Files (`w13-install`), CPU por app no Gerenciador de tarefas (`w13-cpu`), soak de abrir/fechar apps 100x (`w13-soak` + `w8-heap.sh`, build `perf-trace`) |
 | `cd bench && cargo bench` | microbenchmarks no host (criterion), crate fora do workspace |
 
 Os marcos de boot (`[trace] boot + N ms`) saem na serial em qualquer build.
@@ -262,10 +265,54 @@ cargo audit
 O kernel liga `#![warn(clippy::undocumented_unsafe_blocks)]`: com `-D warnings`,
 **todo `unsafe` precisa de um comentário `// SAFETY:`** dizendo a invariante.
 
+## 6. Plataforma de apps WASM (W13)
+
+Projeto em [`docs/design/apps.md`](design/apps.md). O que é testado e como:
+
+| O quê | Como | Resultado |
+|---|---|---|
+| Leitor de seções, manifesto, ícone, quotas | `cargo test-core` (`wasmsec` 24, `appmanifest` 43 testes) | tabela de chaves válidas/inválidas, duplicadas, acima do teto, `x-`, CRLF, LEB128 hostil, todos os prefixos e todas as trocas de um byte de um pacote sem pânico |
+| Sandbox de arquivos | `appfs` (40 testes), incluindo a **tabela de caminhos hostis** (`..`, `../..`, `/../`, `a/../../b`, `//`, `\`, NUL, controle, não ASCII, `%2e%2e`, nomes longos, profundidade), um teste de propriedade (30 000 caminhos gerados: nenhum resolve fora do prefixo) e uma sequência de 20 000 operações hostis sobre dois apps que dividem um `MemFs` | nada existe fora de `/data/<id>`; um app não vê os arquivos do outro; cota e teto de descritores valem |
+| Rede, ABI, instalador | `appnet` (13), `appabi` (7), `appinstall` (18) | filtro de destinos (loopback, privados, IPv6, IPs disfarçados), `check_range` sem estouro, duplicado/inválido/acima do teto/semeadura sem sobrescrever |
+| Fuzz `app_manifest` | `cargo fuzz run app_manifest -- -max_total_time=660` | 57,3 M execuções, 0 falhas |
+| Fuzz `app_sandbox` | `cargo fuzz run app_sandbox -- -max_total_time=660` | 2,7 M execuções (operações com caminhos em bytes crus sobre dois apps), 0 falhas |
+| Quatro apps ao mesmo tempo | `w13-apps.sh` (BIOS e UEFI) | `docs/img/apps-*.png` |
+| App hostil | `w13-hostile.sh` | log abaixo; `docs/img/apps-hostile-*.png` |
+| Instalar/remover | `w13-install.sh` | `docs/img/apps-files.png`, `apps-start.png` |
+| Heap estável | `w13-soak.sh` + `w8-heap.sh` (100 rodadas de Ola + Pintura) | BIOS: primeira amostra = última = 1 415 248 B (`last-first = 0 B`), pico de 4 797 408 B com os apps abertos; UEFI: primeira amostra = última = 1 415 248 B (`last-first = 0 B`), pico de 5 169 408 B com os apps abertos |
+| CPU por app | `w13-cpu.sh` | `docs/img/apps-taskmgr.png` |
+
+**App hostil.** Não está no repositório: é um módulo WAT montado por um gancho **temporário**
+em `kernel/build.rs` (`apps/hostile.wasm`, `fs=own`, `max_fds=4`, `mem_mib=2`) e o gancho é
+revertido depois (`git checkout kernel/build.rs`). A tecla 1 a 7 dispara um ataque cada.
+Serial do `w13-hostile.sh` (um app morre por vez; clock e notes seguem rodando):
+
+```text
+apps: `hostile` crashed: falta de combustivel (laco infinito?)
+apps: `hostile` crashed: ponteiro invalido
+[app hostile] memory.grow: -1
+[app hostile] memory.grow: 1
+[app hostile] sandbox: path escape refused (attempt 1)
+[app hostile] open ../../etc/x: -1
+[app hostile] open /data/notes/nota-1.txt: -2
+[app hostile] sandbox: path escape refused (attempt 2)
+[app hostile] open ../notes/nota-1.txt: -1
+[app hostile] fds opened / last code: 4
+[app hostile] fds opened / last code: -7
+[app hostile] net_http_get without permission: -1
+```
+
+Os ataques que matam o app (laço infinito, ponteiro inválido) deixam na janela dele
+"O app encerrou: <motivo>"; os demais devolvem um código de erro e o app continua.
+
 ## O que ainda não é testado
 
 - O `kernel/` não tem testes automatizados. A migração de lógica pura para o core
   é contínua (ver [`ROADMAP.md`](ROADMAP.md)).
+- As funções `osj.*` (`kernel/src/wasm/abi2.rs`), o `AppManager` e a cola do desktop não são
+  fuzzados nem têm teste unitário (são `kernel/`): a decisão que elas executam (caminhos,
+  cotas, URL, manifesto, ponteiros) está em `osjeff_core` e é testada, e o conjunto é exercitado
+  por boot (`w13-*.sh`, app hostil). `net_http_get` valida mas não transporta.
 - Nenhum teste em hardware real.
 - TLS real: o sandbox de QEMU não tem internet útil; os caminhos de rede são
   testados por unidade e por boot. A resolução DNS pela SLIRP funcionou neste ambiente

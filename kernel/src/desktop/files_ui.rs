@@ -251,7 +251,7 @@ impl Desktop {
     fn draw_apps_list(&self, c: &mut Canvas, r: Rect, mx: i32, mw: i32, st: &FilesState) {
         let right = mx + mw;
         let mut my = r.y + TITLE_H + 14;
-        font::draw_text(c, mx as usize, my as usize, "Apps", FG, 3);
+        font::draw_text(c, mx as usize, my as usize, "Apps", theme::TEXT, 3);
         my += 36;
         font::draw_text(c, mx as usize, my as usize, "Nome", MUTED, 2);
         let th = font::text_width("Estado", 2) as i32;
@@ -280,7 +280,7 @@ impl Desktop {
                     BLUE,
                 );
             }
-            let tc = if sel { theme::WHITE } else { FG };
+            let tc = if sel { theme::WHITE } else { theme::TEXT };
             let icon = self
                 .apps
                 .iter()
