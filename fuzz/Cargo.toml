@@ -45,3 +45,17 @@ path = "fuzz_targets/web_parse.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "shell_parse"
+path = "fuzz_targets/shell_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "editor_ops"
+path = "fuzz_targets/editor_ops.rs"
+test = false
+doc = false
+bench = false

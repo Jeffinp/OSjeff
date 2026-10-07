@@ -6,7 +6,7 @@ diferente, e a lista abaixo diz **o que cada uma não cobre**.
 | Camada | Pergunta que responde | Comando | Cobre | Não cobre |
 |---|---|---|---|---|
 | Testes unitários | A lógica pura está certa? | `cargo test-core` | `osjeff_core` (terminal, editor, calc, janelas, heap, FS, rede, HTML/CSS, browser) | `kernel/` (hardware) |
-| Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net`, `fs`, `web` | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
+| Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net`, `fs`, `web`, `shell`, `editor2` | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
 | Boot em QEMU | O kernel sobe e o desktop é o mesmo? | `tools/verify-boot.sh` | BIOS e UEFI, panic/exceção na serial, imagem do desktop | Hardware real, rede real |
 | Lint | Há `unsafe` sem justificativa, avisos? | `cargo lint-kernel`, `cargo lint-host` | Todo o código | Corretude |
 | Supply chain | Dependência vulnerável ou de licença ruim? | `cargo deny check`, `cargo audit` | `Cargo.lock` | Código das dependências |
@@ -48,6 +48,8 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 | `net_parse` | bytes como frame Ethernet | `osjeff_core::net` (ARP, IPv4, ICMP, UDP, DHCP, `respond`) com buffers de saída de vários tamanhos |
 | `ojfs_parse` | bytes como imagem de disco | todas as operações do OJFS (`list/read/write/remove/mkdir/trash/purge`) |
 | `web_parse` | bytes como HTML/CSS/URL/resposta HTTP | parser, CSS, layout, `dechunk`, URL |
+| `shell_parse` | bytes como linha/script de shell | lexer/parser, executor (FS em memória com limites, `SysInfo` mock), editor de linha com Tab |
+| `editor_ops` | documento + sequência de operações (`arbitrary`) | `editor2`: teclas, mouse, busca/substituição, undo/redo, wrap; invariantes depois de cada operação |
 
 ```bash
 cargo install cargo-fuzz
@@ -55,6 +57,8 @@ cd fuzz
 cargo fuzz run net_parse -- -max_total_time=600 -print_final_stats=1 -dict=dict/net.dict
 cargo fuzz run ojfs_parse -- -max_total_time=600
 cargo fuzz run web_parse  -- -max_total_time=600 -dict=dict/web.dict
+cargo fuzz run shell_parse -- -max_total_time=600 -print_final_stats=1 -dict=dict/shell.dict
+cargo fuzz run editor_ops  -- -max_total_time=600 -print_final_stats=1
 ```
 
 O perfil de release do `fuzz/` liga `overflow-checks` e `debug-assertions`: um
