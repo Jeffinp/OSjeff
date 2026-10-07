@@ -27,6 +27,7 @@ pub mod editor2;
 pub mod fs;
 pub mod fs3;
 pub mod gfx;
+pub mod gzip;
 pub mod heap;
 pub mod hw;
 pub mod icmp;

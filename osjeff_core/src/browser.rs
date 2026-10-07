@@ -29,17 +29,22 @@ pub fn append_capped(out: &mut alloc::vec::Vec<u8>, data: &[u8], cap: usize) -> 
 }
 
 /// What the browser can honestly say about the connection that produced the
-/// page on screen. There is deliberately no "secure" variant: the TLS client
-/// does not validate server certificates, so no connection is ever verified.
+/// page on screen. "Secure" exists only as [`Security::HttpsVerified`], which
+/// the kernel may report only after the server's certificate chain was
+/// validated against the embedded trust store, the host name matched and the
+/// handshake signature verified; there is no way to reach it without that.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Security {
-    /// Nothing loaded (start page).
+    /// Nothing loaded (start page), or an `https://` load still in flight.
     None,
     /// Plain `http://`: not encrypted.
     Http,
-    /// `https://`: encrypted, but the server certificate is NOT validated, so
-    /// the peer's identity is unverified (a man in the middle is possible).
-    HttpsUnverified,
+    /// `https://` with a verified certificate chain for this host.
+    HttpsVerified,
+    /// `https://` where verification failed and the user chose to continue
+    /// anyway for this origin, for this session only: encrypted but the peer
+    /// is not authenticated.
+    HttpsInvalid,
 }
 
 impl Security {
@@ -49,16 +54,38 @@ impl Security {
         match self {
             Security::None => None,
             Security::Http => Some("Nao seguro"),
-            Security::HttpsUnverified => Some("Conexao nao verificada"),
+            Security::HttpsVerified => Some("Conexao segura"),
+            Security::HttpsInvalid => Some("Certificado invalido"),
         }
     }
+}
+
+/// How a loaded page actually arrived, reported by the kernel's fetcher.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Conn {
+    /// Plain `http://`.
+    Plain,
+    /// TLS with a validated chain and a matching host name.
+    Verified,
+    /// TLS where validation failed and the user allowed this origin.
+    Insecure,
 }
 
 /// Why a navigation failed, so the UI can say more than "failed".
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FailReason {
-    /// DNS, connect, TLS or timeout: no usable response.
+    /// DNS, connect, TLS or timeout: no usable response (cause not known).
     Network,
+    /// The host name does not resolve.
+    Dns,
+    /// The server refused the TCP connection.
+    Refused,
+    /// No answer in time (connect, handshake or response).
+    Timeout,
+    /// The TLS handshake failed for a reason other than the certificate.
+    Tls,
+    /// The server certificate was refused.
+    Cert(crate::tlsverify::CertError),
     /// A redirect tried to move from `https://` to `http://`; blocked.
     RedirectDowngrade,
     /// A redirect `Location` was malformed or unsupported.
@@ -76,6 +103,11 @@ impl FailReason {
     pub fn message(self) -> &'static str {
         match self {
             FailReason::Network => "Falha ao carregar a pagina.",
+            FailReason::Dns => "Nome nao encontrado: confira o endereco (DNS).",
+            FailReason::Refused => "Conexao recusada pelo servidor.",
+            FailReason::Timeout => "Tempo esgotado: o servidor nao respondeu.",
+            FailReason::Tls => "Falha na negociacao TLS (conexao segura).",
+            FailReason::Cert(e) => e.page_message(),
             FailReason::RedirectDowngrade => "Bloqueado: redirecionamento de HTTPS para HTTP.",
             FailReason::RedirectInvalid => "Redirecionamento invalido.",
             FailReason::RedirectLoop => "Redirecionamento em ciclo.",
@@ -344,17 +376,41 @@ fn trim_ascii(mut s: &[u8]) -> &[u8] {
     s
 }
 
-/// The clean HTML body of a raw HTTP response: headers stripped and, if the
-/// response is `Transfer-Encoding: chunked`, the chunk framing removed.
+/// The clean HTML body of a raw HTTP response: headers stripped, the chunk
+/// framing removed if the response is `Transfer-Encoding: chunked`, and
+/// `Content-Encoding: gzip` / `deflate` decompressed (bounded by
+/// [`crate::gzip::MAX_DECODED_BYTES`]). A body that cannot be decoded becomes a
+/// short explanatory page instead of garbage.
 pub fn page_body(resp: &[u8]) -> alloc::vec::Vec<u8> {
     let body = http_body(resp);
     let chunked = header_value(resp, b"transfer-encoding")
         .map(|v| v.eq_ignore_ascii_case(b"chunked"))
         .unwrap_or(false);
-    if chunked {
+    let raw = if chunked {
         dechunk(body)
     } else {
         body.to_vec()
+    };
+    let enc = header_value(resp, b"content-encoding")
+        .map(crate::gzip::Encoding::parse)
+        .unwrap_or(crate::gzip::Encoding::Identity);
+    if enc == crate::gzip::Encoding::Identity {
+        return raw;
+    }
+    match crate::gzip::decode_body(enc, &raw) {
+        Ok(v) => v,
+        Err(e) => {
+            let msg: &[u8] = match e {
+                crate::gzip::EncodingError::TooLarge => {
+                    b"<p>Pagina descompactada grande demais (limite de 1 MiB).</p>"
+                }
+                _ if enc == crate::gzip::Encoding::Unsupported => {
+                    b"<p>Codificacao de conteudo nao suportada.</p>"
+                }
+                _ => b"<p>Falha ao descompactar a pagina (dados corrompidos ou cortados).</p>",
+            };
+            msg.to_vec()
+        }
     }
 }
 
@@ -533,6 +589,52 @@ pub struct Browser {
     security: Security,
     truncated: bool,
     fail_reason: FailReason,
+    insecure: InsecureHosts,
+}
+
+/// Most origins the user can allow to continue past a certificate error in one
+/// session.
+pub const MAX_INSECURE_HOSTS: usize = 8;
+
+/// Hosts the user chose to open despite a certificate error. Lives only in
+/// memory: it is never saved, so it ends with the browser window's state.
+struct InsecureHosts {
+    hosts: [[u8; HOST_CAP]; MAX_INSECURE_HOSTS],
+    lens: [u8; MAX_INSECURE_HOSTS],
+    n: usize,
+}
+
+impl InsecureHosts {
+    const fn new() -> Self {
+        Self {
+            hosts: [[0; HOST_CAP]; MAX_INSECURE_HOSTS],
+            lens: [0; MAX_INSECURE_HOSTS],
+            n: 0,
+        }
+    }
+
+    fn find(&self, host: &[u8]) -> Option<usize> {
+        (0..self.n).find(|&i| self.hosts[i][..usize::from(self.lens[i])].eq_ignore_ascii_case(host))
+    }
+
+    /// Remember `host` (the oldest entry is dropped when full).
+    fn add(&mut self, host: &[u8]) {
+        if host.is_empty() || host.len() > HOST_CAP || self.find(host).is_some() {
+            return;
+        }
+        if self.n == MAX_INSECURE_HOSTS {
+            for i in 1..MAX_INSECURE_HOSTS {
+                self.hosts[i - 1] = self.hosts[i];
+                self.lens[i - 1] = self.lens[i];
+            }
+            self.n -= 1;
+        }
+        let i = self.n;
+        self.hosts[i] = [0; HOST_CAP];
+        self.hosts[i][..host.len()].copy_from_slice(host);
+        self.lens[i] = host.len() as u8;
+        self.n += 1;
+    }
 }
 
 /// Quick-link shortcuts shown on the start page (label, URL). All chosen to
@@ -564,6 +666,7 @@ impl Browser {
             security: Security::None,
             truncated: false,
             fail_reason: FailReason::Network,
+            insecure: InsecureHosts::new(),
         };
         b.set_url(b"");
         b
@@ -720,10 +823,11 @@ impl Browser {
         };
         self.nav_len = n;
         self.nav[..n].copy_from_slice(&nav[..n]);
+        // A verified connection is only ever reported by `loaded_with`.
         self.security = if starts_with_ci(&nav[..n], b"http://") {
             Security::Http
         } else {
-            Security::HttpsUnverified
+            Security::None
         };
         self.truncated = false;
         self.status = Status::Loading;
@@ -749,17 +853,53 @@ impl Browser {
         self.home = false;
     }
 
-    /// Like [`Browser::loaded`], recording how the page actually arrived: `https`
-    /// is the scheme of the *final* URL (after redirects) and `truncated` says
+    /// Like [`Browser::loaded`], recording how the page actually arrived: `conn`
+    /// describes the *final* connection (after redirects) and `truncated` says
     /// the response hit [`MAX_RESPONSE_BYTES`].
-    pub fn loaded_with(&mut self, https: bool, truncated: bool) {
-        self.security = if https {
-            Security::HttpsUnverified
-        } else {
-            Security::Http
+    pub fn loaded_with(&mut self, conn: Conn, truncated: bool) {
+        self.security = match conn {
+            Conn::Plain => Security::Http,
+            Conn::Verified => Security::HttpsVerified,
+            Conn::Insecure => Security::HttpsInvalid,
         };
         self.truncated = truncated;
         self.loaded();
+    }
+
+    /// The navigation target of the last (or pending) request.
+    pub fn nav_url(&self) -> &[u8] {
+        &self.nav[..self.nav_len]
+    }
+
+    /// The host of the current navigation when the user allowed it to proceed
+    /// despite a certificate error (the fetcher then skips validation for that
+    /// host only, on every hop of this navigation).
+    pub fn insecure_host(&self) -> Option<&[u8]> {
+        let u = parse_url(self.nav_url())?;
+        if !u.https {
+            return None;
+        }
+        let i = self.insecure.find(u.host())?;
+        Some(&self.insecure.hosts[i][..usize::from(self.insecure.lens[i])])
+    }
+
+    /// True when the failed navigation can be retried anyway: the failure is a
+    /// certificate error (nothing else offers an unsafe override).
+    pub fn can_continue_insecure(&self) -> bool {
+        self.status == Status::Error && matches!(self.fail_reason, FailReason::Cert(_))
+    }
+
+    /// The user's explicit "continue anyway (insecure)": remember this host for
+    /// the session and load the page again.
+    pub fn continue_insecure(&mut self) {
+        if !self.can_continue_insecure() {
+            return;
+        }
+        if let Some(u) = parse_url(self.nav_url()) {
+            self.insecure.add(u.host());
+        }
+        self.pending = true;
+        self.status = Status::Loading;
     }
 
     /// Mark the current fetch as failed (the kernel shows the error state).
@@ -1032,21 +1172,21 @@ mod tests {
     }
 
     #[test]
-    fn https_is_labelled_unverified_and_never_secure() {
+    fn https_is_never_secure_until_the_fetcher_says_verified() {
         let mut b = Browser::new();
         assert_eq!(b.security(), Security::None);
         assert_eq!(b.security().label(), None);
         b.open(b"https://example.com");
-        assert_eq!(b.security(), Security::HttpsUnverified);
-        let label = b.security().label().unwrap();
-        assert!(label.to_ascii_lowercase().contains("nao verificada"));
+        // In flight: no claim either way (and certainly no padlock).
+        assert_eq!(b.security(), Security::None);
         let _ = b.take_request();
-        b.loaded_with(true, false);
-        assert_eq!(b.security(), Security::HttpsUnverified);
+        b.loaded_with(Conn::Verified, false);
+        assert_eq!(b.security(), Security::HttpsVerified);
+        assert_eq!(b.security().label(), Some("Conexao segura"));
         assert!(!b.truncated());
-        // A bare host is normalised to https, so it is labelled too.
+        // A bare host is normalised to https: a new load drops the padlock at once.
         b.open(b"example.com");
-        assert_eq!(b.security(), Security::HttpsUnverified);
+        assert_eq!(b.security(), Security::None);
         // Plain http says so.
         b.open(b"http://example.com");
         assert_eq!(b.security(), Security::Http);
@@ -1054,16 +1194,130 @@ mod tests {
     }
 
     #[test]
+    fn only_a_verified_load_shows_the_padlock() {
+        for conn in [Conn::Plain, Conn::Insecure] {
+            let mut b = Browser::new();
+            b.open(b"https://example.com");
+            let _ = b.take_request();
+            b.loaded_with(conn, false);
+            assert_ne!(b.security(), Security::HttpsVerified, "{conn:?}");
+        }
+        let mut b = Browser::new();
+        b.open(b"https://example.com");
+        let _ = b.take_request();
+        b.loaded_with(Conn::Insecure, false);
+        assert_eq!(b.security(), Security::HttpsInvalid);
+        assert_eq!(b.security().label(), Some("Certificado invalido"));
+        // The page-load entry points that do not carry a connection state never
+        // produce a padlock.
+        b.loaded();
+        assert_ne!(b.security(), Security::HttpsVerified);
+    }
+
+    #[test]
     fn final_scheme_after_redirect_wins_over_requested_one() {
         let mut b = Browser::new();
         b.open(b"http://example.com"); // asked for http...
         let _ = b.take_request();
-        b.loaded_with(true, false); // ...but ended on https
-        assert_eq!(b.security(), Security::HttpsUnverified);
+        b.loaded_with(Conn::Verified, false); // ...but ended on verified https
+        assert_eq!(b.security(), Security::HttpsVerified);
         b.open(b"https://example.com");
         let _ = b.take_request();
-        b.loaded_with(false, false); // (the kernel blocks this; the model stays honest)
+        b.loaded_with(Conn::Plain, false); // (the kernel blocks this; the model stays honest)
         assert_eq!(b.security(), Security::Http);
+    }
+
+    #[test]
+    fn cert_failure_offers_a_per_origin_session_override() {
+        use crate::tlsverify::CertError;
+        let mut b = Browser::new();
+        b.open(b"https://expired.example.com/page");
+        let _ = b.take_request();
+        assert_eq!(b.insecure_host(), None);
+        b.fail_with(FailReason::Cert(CertError::Expired));
+        assert!(b.can_continue_insecure());
+        assert_eq!(b.fail_reason().message(), "Certificado invalido: expirado");
+        b.continue_insecure();
+        assert_eq!(b.status(), Status::Loading);
+        assert_eq!(
+            b.take_request(),
+            Some(&b"https://expired.example.com/page"[..])
+        );
+        assert_eq!(b.insecure_host(), Some(&b"expired.example.com"[..]));
+        b.loaded_with(Conn::Insecure, false);
+        assert_eq!(b.security(), Security::HttpsInvalid);
+        // Another origin is not covered.
+        b.open(b"https://other.example.com/");
+        assert_eq!(b.insecure_host(), None);
+        // Same origin, other path: covered (it is per origin, case-insensitive).
+        b.open(b"https://EXPIRED.example.com/x");
+        assert_eq!(b.insecure_host(), Some(&b"expired.example.com"[..]));
+        // http never uses the override.
+        b.open(b"http://expired.example.com/");
+        assert_eq!(b.insecure_host(), None);
+    }
+
+    #[test]
+    fn override_is_only_offered_for_certificate_errors() {
+        let mut b = Browser::new();
+        b.open(b"https://x.example.com");
+        let _ = b.take_request();
+        for r in [
+            FailReason::Network,
+            FailReason::Dns,
+            FailReason::Refused,
+            FailReason::Timeout,
+            FailReason::Tls,
+            FailReason::RedirectDowngrade,
+        ] {
+            b.fail_with(r);
+            assert!(!b.can_continue_insecure(), "{r:?}");
+            b.continue_insecure(); // must be a no-op
+            assert_eq!(b.status(), Status::Error);
+            assert_eq!(b.insecure_host(), None);
+        }
+    }
+
+    #[test]
+    fn override_list_is_bounded_and_forgets_the_oldest() {
+        use crate::tlsverify::CertError;
+        let mut b = Browser::new();
+        for i in 0..MAX_INSECURE_HOSTS + 2 {
+            let url = alloc::format!("https://h{i}.example.com/");
+            b.open(url.as_bytes());
+            let _ = b.take_request();
+            b.fail_with(FailReason::Cert(CertError::NameMismatch));
+            b.continue_insecure();
+            let _ = b.take_request();
+        }
+        b.open(b"https://h0.example.com/");
+        assert_eq!(b.insecure_host(), None, "oldest was evicted");
+        b.open(b"https://h9.example.com/");
+        assert!(b.insecure_host().is_some());
+    }
+
+    #[test]
+    fn every_failure_message_is_ascii_and_distinct_for_network_causes() {
+        use crate::tlsverify::CertError;
+        let causes = [
+            FailReason::Network,
+            FailReason::Dns,
+            FailReason::Refused,
+            FailReason::Timeout,
+            FailReason::Tls,
+            FailReason::Cert(CertError::Expired),
+        ];
+        for (i, a) in causes.iter().enumerate() {
+            assert!(a.message().is_ascii());
+            for b in &causes[i + 1..] {
+                assert_ne!(a.message(), b.message());
+            }
+        }
+        assert!(
+            FailReason::Cert(CertError::NameMismatch)
+                .message()
+                .starts_with("Certificado invalido:")
+        );
     }
 
     #[test]
@@ -1071,7 +1325,7 @@ mod tests {
         let mut b = Browser::new();
         b.open(b"example.com");
         let _ = b.take_request();
-        b.loaded_with(true, true);
+        b.loaded_with(Conn::Verified, true);
         assert!(b.truncated());
         assert_eq!(b.status(), Status::Done);
         // A new navigation clears the flag.
@@ -1119,5 +1373,51 @@ mod tests {
         // The next navigation starts clean.
         b.open(b"example.org");
         assert_eq!(b.status(), Status::Loading);
+    }
+
+    const GZ_PAGE: &str = "1f8b08000000000002ffb3c928c9cdb1b349ca4fa9b4b3c930b4f3cf49b4d107d2360576e95599050ae5f945d9c50a99790afec159a9696936fa057636fa10d5fa60ad0094af60dd41000000";
+
+    fn hexv(s: &str) -> alloc::vec::Vec<u8> {
+        (0..s.len() / 2)
+            .map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn page_body_gunzips_content_encoding_gzip() {
+        let mut resp =
+            b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Type: text/html\r\n\r\n"
+                .to_vec();
+        resp.extend_from_slice(&hexv(GZ_PAGE));
+        let body = page_body(&resp);
+        assert!(body.starts_with(b"<html><body><h1>Ola</h1>"));
+    }
+
+    #[test]
+    fn page_body_dechunks_then_gunzips() {
+        let gz = hexv(GZ_PAGE);
+        let (a, b) = gz.split_at(20);
+        let mut resp =
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Encoding: GZIP\r\n\r\n"
+                .to_vec();
+        for part in [a, b] {
+            resp.extend_from_slice(alloc::format!("{:x}\r\n", part.len()).as_bytes());
+            resp.extend_from_slice(part);
+            resp.extend_from_slice(b"\r\n");
+        }
+        resp.extend_from_slice(b"0\r\n\r\n");
+        assert!(page_body(&resp).starts_with(b"<html><body><h1>Ola</h1>"));
+    }
+
+    #[test]
+    fn page_body_bad_or_unsupported_encoding_gives_a_notice() {
+        let resp = b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\nnot gzip at all, sorry";
+        let body = page_body(resp);
+        assert!(String::from_utf8_lossy(&body).contains("Falha ao descompactar"));
+        let resp = b"HTTP/1.1 200 OK\r\nContent-Encoding: br\r\n\r\n\x01\x02";
+        assert!(String::from_utf8_lossy(&page_body(resp)).contains("nao suportada"));
+        // identity is a no-op
+        let resp = b"HTTP/1.1 200 OK\r\nContent-Encoding: identity\r\n\r\n<p>x</p>";
+        assert_eq!(page_body(resp), b"<p>x</p>");
     }
 }

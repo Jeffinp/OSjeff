@@ -161,6 +161,17 @@ impl BrowserChrome {
     }
 }
 
+/// Rect of the error page's "continue anyway (insecure)" button, offered only for
+/// certificate errors. Inside the content box, below the message lines.
+pub fn browser_continue_button(content: Rect) -> Rect {
+    Rect::new(
+        content.x + 8,
+        content.y + 104,
+        (content.w - 16).clamp(0, 420),
+        34,
+    )
+}
+
 /// Start-page layout: the brand logo rect and the four shortcut-tile rects,
 /// centered in the content box.
 pub fn browser_home_layout(content: Rect) -> (Rect, [Rect; 4]) {
@@ -509,6 +520,18 @@ mod tests {
         assert_eq!(c.home.y, r.y + TITLE_H + 12);
         assert!(c.content.y > c.home.bottom());
         assert_eq!(c.content.bottom(), r.bottom() - 14);
+    }
+
+    #[test]
+    fn continue_button_is_inside_the_content_box() {
+        let content = Rect::new(100, 200, 600, 300);
+        let b = browser_continue_button(content);
+        assert!(b.x >= content.x && b.right() <= content.right());
+        assert!(b.y > content.y + 60 && b.bottom() <= content.bottom());
+        assert_eq!(b.w, 420);
+        // Narrow windows shrink it instead of overflowing.
+        let narrow = browser_continue_button(Rect::new(0, 0, 200, 300));
+        assert_eq!(narrow.w, 184);
     }
 
     #[test]
