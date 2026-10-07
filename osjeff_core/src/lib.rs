@@ -32,6 +32,7 @@ pub mod process;
 pub mod redirect;
 pub mod rng;
 pub mod schedule;
+pub mod shell;
 pub mod terminal;
 pub mod web;
 pub mod window;
