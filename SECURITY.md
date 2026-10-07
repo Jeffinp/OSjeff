@@ -19,8 +19,8 @@ Isso não é bug, é uma decisão de projeto documentada. Interessam, em ordem:
 4. Falhas de **supply chain**: dependência vulnerável ou de licença incompatível.
 
 **Já conhecidos** (não precisam de relato, estão em [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md#3-o-que-não-é-protegido)):
-HTTPS sem verificação de certificado, ausência de ring 3, pilhas de thread sem página
-de guarda, lease DHCP sem renovação nem autenticação, imagem sem assinatura (Secure Boot desligado).
+HTTPS sem verificação de certificado, ausência de ring 3, threads mortas que não são
+reiniciadas nem liberam recursos, lease DHCP sem renovação nem autenticação, imagem sem assinatura (Secure Boot desligado).
 
 ## Como relatar
 

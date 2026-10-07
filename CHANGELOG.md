@@ -28,6 +28,13 @@ Cada mudança é um commit separado, com teste ou prova em QEMU.
 - Disco: uma falha de leitura no boot não reescreve mais o filesystem.
 
 ### Robustez
+- Uma thread secundária (`fetcher`, `wasmapp`) que entra em panic ou exceção **morre
+  sozinha**: a serial registra o motivo, o Gerenciador de tarefas mostra `DEAD`, o
+  navegador e a janela WASM mostram o erro, e o compositor continua. Compositor, `#DF`
+  e falhas com interrupções desligadas seguem fatais.
+- Páginas de guarda (desmapeadas) sob as pilhas das threads, com `#PF` em pilha IST
+  própria: um estouro, inclusive de frame grande (150 KiB), deixa de corromper o heap
+  vizinho.
 - GDT/TSS próprias com pilha IST para #DF e pilha de boot de 512 KiB: estouro de
   pilha deixa de ser triple fault mudo.
 - Panic, todas as exceções da CPU e OOM imprimem na serial e pintam uma tela de
@@ -67,10 +74,9 @@ Cada mudança é um commit separado, com teste ou prova em QEMU.
 - `os/` roda o QEMU com 256 MB (UEFI entrava em pânico com 128 MB: o BSS do kernel
   tem ~91 MiB).
 - Todo bloco `unsafe` do kernel tem `// SAFETY:` (de 100 sem comentário para 0).
-- Testes: 189 → 379. `cargo fmt` e `cargo lint-*` passam e são exigidos no CI.
+- Testes: 189 → 423. `cargo fmt` e `cargo lint-*` passam e são exigidos no CI.
 
 ### Conhecido e ainda aberto
-HTTPS sem verificação de certificado; sem ring 3; pilhas de thread sem página de
-guarda e panic em thread secundária ainda para a máquina; lease DHCP sem renovação e
-um único driver de NIC (NE2000); nenhum teste em hardware real. Ver
-[`docs/ROADMAP.md`](docs/ROADMAP.md).
+HTTPS sem verificação de certificado; sem ring 3; thread morta não é reiniciada nem libera
+recursos; lease DHCP sem renovação e um único driver de NIC (NE2000); nenhum teste em
+hardware real. Ver [`docs/ROADMAP.md`](docs/ROADMAP.md).

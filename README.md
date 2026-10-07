@@ -9,7 +9,7 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly--2026--10--05-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-379%20passing-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-423%20passing-success?style=for-the-badge)
 ![Fuzz](https://img.shields.io/badge/fuzz-3%20targets-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
@@ -70,7 +70,7 @@ variantes (DOOM) e solução de problemas: [`docs/BUILDING.md`](docs/BUILDING.md
 | Camada | O que foi construído | Onde |
 |---|---|---|
 | **Boot e CPU** | Boot BIOS/UEFI (`bootloader 0.11`), GDT/TSS próprias com pilha IST para #DF, IDT completa, PIC 8259, PIT 250 Hz, tratamento de todas as exceções e IRQs espúrias, tela de erro | `kernel/src/{gdt,interrupts,crash}.rs` |
-| **Scheduler** | Preemptivo por timer (troca de contexto no ISR, assembly), threads **prontas/bloqueadas**, yield por `int 0x81`, `hlt` sem perder wakeups, canário de pilha, CPU real por thread | `sched.rs`, `switch.s` |
+| **Scheduler** | Preemptivo por timer (troca de contexto no ISR, assembly), threads **prontas/bloqueadas**, yield por `int 0x81`, `hlt` sem perder wakeups, **pilhas com página de guarda**, **uma thread que falha morre sozinha**, CPU real por thread | `sched.rs`, `switch.s` |
 | **Memória** | Heap `GlobalAlloc` (free-list com coalescência, spin lock com IRQs desligadas), matemática de alinhamento testada no host | `allocator.rs`, `osjeff_core/src/heap.rs` |
 | **Gráficos** | Compositor com damage tracking, double buffer, fonte 8×8 própria, sombras alpha, animações; HUD de desempenho | `fb.rs`, `desktop/` |
 | **Apps** | Terminal, Editor, Gerenciador de tarefas, Calculadora, Gerenciador de arquivos, Navegador, app WebAssembly | `desktop/`, `osjeff_core` |
@@ -90,7 +90,7 @@ que compila com `std` sob teste. O kernel só liga o hardware a ela.
 
 ```mermaid
 flowchart LR
-    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 379 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 423 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · unsafe documentado<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>builder da imagem BIOS/UEFI"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -100,7 +100,7 @@ flowchart LR
 
 | Verificação | Estado |
 |---|---|
-| Testes unitários | **379** no `osjeff_core`; cobertura de linhas 96% (bruta, inclui os módulos de teste) |
+| Testes unitários | **423** no `osjeff_core`; cobertura de linhas 96% (bruta, inclui os módulos de teste) |
 | Fuzzing | 3 alvos (rede, disco, HTML/CSS/HTTP); **9 bugs achados e corrigidos**, cada um com entrada mínima e teste |
 | `unsafe` | **100%** dos blocos do kernel com `// SAFETY:`, imposto por `clippy::undocumented_unsafe_blocks` |
 | Boot em QEMU | BIOS **e** UEFI em todo commit de kernel, desktop comparado pixel a pixel com a baseline (`tools/verify-boot.sh`) |
@@ -115,10 +115,10 @@ Mais em [`docs/TESTING.md`](docs/TESTING.md).
 | | Antes | Depois |
 |---|---|---|
 | Build do `master` | não compilava | compila, toolchain fixado |
-| Testes | 189 (README antigo: 152) | **379** |
+| Testes | 189 (README antigo: 152) | **423** |
 | `unsafe` sem justificativa | 100 | **0** |
 | Falha fatal | `hlt` mudo ou reinício | **tela de erro + serial** |
-| Estouro de pilha | triple fault | `#DF` reportado |
+| Estouro de pilha | triple fault; em thread secundária, corrupção silenciosa do heap | página de guarda: `#PF` reportado, só a thread morre |
 | Compositor em idle | 83 iterações/s | **250** |
 | Latência tecla→captura | ~11 ms | **~0,4 ms** |
 | Tick do relógio | 15,6 ms | **0,2 ms** |
@@ -135,8 +135,7 @@ Relatório completo, com a prova de cada item e o que **não** valia a pena faze
 
 A defesa é na entrada: tudo que vem da rede, do disco, de HTML/CSS ou de `.wasm`
 passa por código sem `unsafe`, com limites e fuzz. O que **não** existe: isolamento
-entre apps e kernel (ring 0 único), verificação de certificado TLS e páginas de guarda
-nas pilhas das threads secundárias. Detalhes, cenários de ataque e como relatar:
+entre apps e kernel (ring 0 único) e verificação de certificado TLS. Detalhes, cenários de ataque e como relatar:
 [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md) · [`SECURITY.md`](SECURITY.md).
 
 ---
@@ -150,7 +149,7 @@ nas pilhas das threads secundárias. Detalhes, cenários de ataque e como relata
 - **Rede só com NE2000** (placa ISA rara, só no QEMU): o IP, o gateway e o DNS vêm do DHCP (testado em outra sub-rede), mas não há driver de NIC comum e o lease não é renovado.
 - **Sem teste em hardware real.** BIOS entrega 1280×720 em 24 bpp e UEFI precisa de
   ≥ 192 MB de RAM (o BSS do kernel tem ~91 MiB).
-- Um panic em qualquer thread ainda para a máquina inteira.
+- Uma thread secundária que falha morre sozinha (o resto segue), mas **não é reiniciada** e seus recursos não são liberados; falha no compositor ou dentro de uma interrupção ainda para tudo.
 
 Lista priorizada do que vem a seguir: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 

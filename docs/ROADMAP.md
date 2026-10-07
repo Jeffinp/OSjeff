@@ -9,23 +9,23 @@ depois o que limita o que ele consegue fazer, depois polimento.
 | Área | Entregue |
 |---|---|
 | Base | Boot BIOS e UEFI, compositor com damage tracking, window manager, 7 apps, scheduler preemptivo, heap com coalescência, OJFS com pastas e lixeira, ATA PIO, NE2000 + ARP/IPv4/ICMP/DHCP, TCP/IP (`smoltcp`) e TLS 1.3, navegador HTML/CSS, runtime WebAssembly (`wasmi`) |
-| Robustez | GDT/TSS com IST para #DF; todas as exceções tratadas; tela de erro e serial em panic/exceção/OOM; IRQ espúria; recusa de framebuffer grande; disco intocado se a leitura falhar |
+| Robustez | GDT/TSS com IST para #DF e #PF; todas as exceções tratadas; tela de erro e serial em panic/exceção/OOM; **thread secundária que falha morre sozinha**; **páginas de guarda nas pilhas**; IRQ espúria; recusa de framebuffer grande; disco intocado se a leitura falhar; editor não salva buffer truncado |
 | Parsers | 9 bugs achados por fuzzing/leitura e corrigidos (rede, disco, HTML/CSS, URL, `chunked`); limites de corpo, profundidade, nós e regras; redirect seguro |
 | Scheduler | Estado "bloqueada" (`sched::block/wake/idle`), compositor de 83 → 250 iterações/s em idle, latência tecla→captura de ~11 ms → ~0,4 ms, CPU real no gerenciador de tarefas |
 | WebAssembly | *fuel* por chamada, limite de memória, término real do app, tetos nas host functions |
 | Desempenho | Tick do relógio 15,6 → 0,2 ms; quadro de tecla 26 → 13 ms; preenchimento 24 bpp 14 → 3 ciclos/px |
-| Qualidade | 379 testes (de 189); ~10 mil linhas de lógica no `osjeff_core` testadas no host; `unsafe` 100% documentado e imposto pelo lint; CI, `cargo deny`, fuzzing, harness de boot em QEMU |
+| Qualidade | 423 testes (de 189); ~11,7 mil linhas de lógica no `osjeff_core` testadas no host; `unsafe` 100% documentado e imposto pelo lint; CI, `cargo deny`, fuzzing, harness de boot em QEMU |
 
 ## Próximos passos, em ordem
 
 Cada item tem um **critério de aceite verificável** (como se prova que acabou).
 
-### 1. Uma thread que falha não derruba a máquina
-Hoje um panic ou #PF em qualquer thread para tudo. Marcar a thread como morta,
-imprimir o motivo e seguir; pilhas de thread em páginas alinhadas com página de
-guarda (exige o kernel passar a editar suas page tables, hoje do bootloader).
-*Aceite:* estourar a pilha do `fetcher` encerra só o `fetcher`; o compositor
-continua e a serial registra o motivo. (ADR de isolamento, passos S3/S4.)
+### 1. Reiniciar e limpar uma thread que morreu
+~~Uma thread que falha não derruba a máquina~~ **feito** (S3/S4 do ADR): panic ou
+exceção em `fetcher`/`wasmapp` mata só a thread, e as pilhas têm página de guarda. Falta
+**reiniciar** a thread (hoje o navegador e o app WASM ficam inutilizáveis até o reboot) e
+**liberar** o que ela usava (pilha, alocações, `Store` do `wasmi`, locks).
+*Aceite:* matar o `fetcher` e abrir o navegador de novo funciona sem reiniciar o sistema.
 
 ### 2. HTTPS de verdade
 Trust store, relógio confiável e verificação de cadeia com `embedded-tls`

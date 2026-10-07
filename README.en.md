@@ -9,7 +9,7 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly--2026--10--05-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-379%20passing-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-423%20passing-success?style=for-the-badge)
 ![Fuzz](https://img.shields.io/badge/fuzz-3%20targets-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
@@ -70,7 +70,7 @@ variants (DOOM) and troubleshooting: [`docs/BUILDING.md`](docs/BUILDING.md) (Por
 | Layer | What was built | Where |
 |---|---|---|
 | **Boot and CPU** | BIOS/UEFI boot (`bootloader 0.11`), own GDT/TSS with an IST stack for #DF, full IDT, 8259 PIC, 250 Hz PIT, every CPU exception and spurious IRQ handled, error screen | `kernel/src/{gdt,interrupts,crash}.rs` |
-| **Scheduler** | Timer-preemptive (context switch in the ISR, assembly), **ready/blocked** threads, yield via `int 0x81`, `hlt` without lost wakeups, stack canary, real per-thread CPU | `sched.rs`, `switch.s` |
+| **Scheduler** | Timer-preemptive (context switch in the ISR, assembly), **ready/blocked** threads, yield via `int 0x81`, `hlt` without lost wakeups, **guard-page stacks**, **a failing thread dies alone**, real per-thread CPU | `sched.rs`, `switch.s` |
 | **Memory** | `GlobalAlloc` heap (free list with coalescing, spin lock with IRQs off), alignment math tested on the host | `allocator.rs`, `osjeff_core/src/heap.rs` |
 | **Graphics** | Damage-tracking compositor, double buffering, own 8×8 font, alpha shadows, animations; performance HUD | `fb.rs`, `desktop/` |
 | **Apps** | Terminal, Editor, Task manager, Calculator, File manager, Browser, WebAssembly app | `desktop/`, `osjeff_core` |
@@ -90,7 +90,7 @@ builds with `std` under test. The kernel only wires hardware to it.
 
 ```mermaid
 flowchart LR
-    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 379 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 423 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · documented unsafe<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>BIOS/UEFI image builder"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -100,7 +100,7 @@ flowchart LR
 
 | Verification | Status |
 |---|---|
-| Unit tests | **379** in `osjeff_core`; 96% line coverage (raw, includes the test modules) |
+| Unit tests | **423** in `osjeff_core`; 96% line coverage (raw, includes the test modules) |
 | Fuzzing | 3 targets (network, disk, HTML/CSS/HTTP); **9 bugs found and fixed**, each with a minimal input and a test |
 | `unsafe` | **100%** of kernel blocks carry `// SAFETY:`, enforced by `clippy::undocumented_unsafe_blocks` |
 | QEMU boot | BIOS **and** UEFI on every kernel commit, desktop compared pixel by pixel to a baseline (`tools/verify-boot.sh`) |
@@ -115,10 +115,10 @@ More in [`docs/TESTING.md`](docs/TESTING.md) (Portuguese).
 | | Before | After |
 |---|---|---|
 | `master` build | did not compile | compiles, pinned toolchain |
-| Tests | 189 (old README: 152) | **379** |
+| Tests | 189 (old README: 152) | **423** |
 | `unsafe` without justification | 100 | **0** |
 | Fatal failure | silent `hlt` or reboot | **error screen + serial** |
-| Stack overflow | triple fault | reported `#DF` |
+| Stack overflow | triple fault; in a secondary thread, silent heap corruption | guard page: `#PF` reported, only that thread dies |
 | Compositor at idle | 83 iterations/s | **250** |
 | Key IRQ → pickup latency | ~11 ms | **~0.4 ms** |
 | Clock tick | 15.6 ms | **0.2 ms** |
@@ -135,8 +135,7 @@ Full report, with proof for each item and what was **not** worth doing:
 
 Defence is at the input: everything from the network, disk, HTML/CSS or `.wasm` goes
 through `unsafe`-free code with limits and fuzzing. What does **not** exist: isolation
-between apps and kernel (single ring 0), TLS certificate verification, and guard pages
-on secondary thread stacks. Details, attack scenarios and how to report:
+between apps and kernel (single ring 0) and TLS certificate verification. Details, attack scenarios and how to report:
 [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md) · [`SECURITY.md`](SECURITY.md).
 
 ---
@@ -150,7 +149,7 @@ on secondary thread stacks. Details, attack scenarios and how to report:
 - **Network is NE2000 only** (a rare ISA card, QEMU only): IP, gateway and DNS come from DHCP (tested on another subnet), but there is no common-NIC driver and the lease is not renewed.
 - **No real-hardware testing.** BIOS gives 1280×720 at 24 bpp and UEFI needs at least
   192 MB of RAM (the kernel BSS is ~91 MiB).
-- A panic in any thread still halts the whole machine.
+- A failing secondary thread dies alone (the rest keeps running) but is **not restarted** and its resources are not freed; a fault in the compositor or inside an interrupt still halts everything.
 
 Prioritised list of what comes next: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 

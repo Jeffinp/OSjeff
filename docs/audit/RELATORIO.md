@@ -88,7 +88,7 @@ Ordem: itens abertos por prioridade (alavanca ÷ esforço, depois severidade), d
 
 | # | Sev. | Esforço | Área | Título | Status | Prova |
 |---|---|---|---|---|---|---|
-| 1 | MÉDIA | 1–2 d | Kernel/diagnóstico | Panic, exceções, OOM e canário são mudos (só `hlt`); `panic!` do canário roda no ISR e mata a máquina toda; threads panicadas viram zumbis | **CORRIGIDO** `46ab710` (serial) e `4d241a0` (tela de erro, panic/exceção/OOM); falta tratar thread panicada (S4) | PROVADO antes e depois (QEMU) |
+| 1 | MÉDIA | 1–2 d | Kernel/diagnóstico | Panic, exceções, OOM e canário são mudos (só `hlt`); `panic!` do canário roda no ISR e mata a máquina toda; threads panicadas viram zumbis | **CORRIGIDO** `46ab710` (serial) e `4d241a0` (tela de erro, panic/exceção/OOM); thread panicada: **CORRIGIDO** `13d8153` (morre sozinha; não é reiniciada) | PROVADO antes e depois (QEMU) |
 | 2 | MÉDIA ↓ | 1–2 d | Kernel/IRQ | Sem GDT/TSS/IST: estouro da pilha de boot (80 KiB) → #PF → #DF → triple fault; #UD/#DE/#NP e IRQ 7/15 sem handler caem em #DF | **CORRIGIDO** `a56218d` (IST/#DF), `46ab710`+`74d6249` (todas as exceções e IRQ 7/15) | PROVADO antes e depois (BIOS e UEFI) |
 | 3 | MÉDIA | 0,5 d | Disco | K4: erro transitório de leitura ou disco sem magic `OJF2` → `fs::format` + `write_image` sobrescreve o LBA 0 | **CORRIGIDO** `11121bf` (falha de leitura); disco não-OJFS ainda é formatado (por desenho) | PROVADO (hash do disco igual após falha injetada) |
 | 4 | MÉDIA | 1 d | Disco/UI | K3: gerenciador abre/salva por nome na raiz; arquivo dentro de pasta não abre e Ctrl+S cria ou sobrescreve o homônimo da raiz | **CORRIGIDO** `a969ec4` (+`e63fa38`): abre e salva na pasta certa; screenshots em `docs/img/k3-*` | PROVADO por leitura |
@@ -96,7 +96,7 @@ Ordem: itens abertos por prioridade (alavanca ÷ esforço, depois severidade), d
 | 6 | MÉDIA | 2–3 d | WASM | Sem fuel, `ResourceLimiter`, kill/restart; fechar a janela não libera a `Store`; laços `n`/`len` do guest nas host fns; `proc_exit` finge | **CORRIGIDO** `40c0cea`, `88539c7` (fuel, 24 MiB, término real, tetos WASI); *fuel* retomável: A FAZER (ROADMAP 4) | PROVADO (ADR: laço infinito, grow 513 pág.; mitigação validada) |
 | 7 | MÉDIA | 0,5 d | Rede/memória | `http_get` sem teto de corpo (HTTPS tem 256 KiB) e DOM/CSS sem teto de nós/regras; heap único de 64 MiB sem cota | **CORRIGIDO** `6b0ef64` (teto único de 256 KiB), `635ce91` (nós/regras) | OOM PROVADO (mudo); vetor SUPOSIÇÃO |
 | 8 | MÉDIA | 2–3 d | Scheduler/perf | Round-robin sem estado bloqueado: compositor a 83 Hz idle, WASM com 1/3 da CPU, Task Manager "CPU" conta fatias dormindo | **CORRIGIDO** `ca996c1`, `79d23dc`: compositor idle 83 → 250 it/s, tecla→captura ~11 → ~0,4 ms (medido) | PROVADO (medido, 02 e 04) |
-| 9 | MÉDIA ↓ | 4–6 d | Kernel/threads | Pilhas de thread no heap sem guard page; canário de 8 B contornável (corrompeu 80 B sem detecção); uso real 9–13 KiB de 128 KiB | PROPOSTA-ADR (S3/S4); ROADMAP 1 | mecanismo PROVADO; gatilho real SUPOSIÇÃO |
+| 9 | MÉDIA ↓ | 4–6 d | Kernel/threads | Pilhas de thread no heap sem guard page; canário de 8 B contornável (corrompeu 80 B sem detecção); uso real 9–13 KiB de 128 KiB | **CORRIGIDO** `13d8153`, `e5a267f`: guard pages (frame de 150 KiB cai na guarda) e IST para #PF; canário só como reserva | mecanismo PROVADO; gatilho real SUPOSIÇÃO |
 | 10 | MÉDIA | 2–3 d | Boot/hardware | UEFI com 128 MiB panica (BSS 91 MiB; `os/src/main.rs` usa `-m 128M`); framebuffer > 1920x1080x4 estoura buffers estáticos → panic mudo no splash | RAM **CORRIGIDO** `687c08a`; framebuffer grande **CORRIGIDO** `cdfad5b` (recusa com tela de erro); adaptar à resolução: ROADMAP 5 | RAM PROVADO; resolução: mecanismo PROVADO, cenário SUPOSIÇÃO |
 | 11 | BAIXA | 1 d | CI/qualidade | Não há CI; `lint-kernel` e `lint-host` falham (`render.rs:74`); `fmt` com 27 diffs; badges do README mentem | **CORRIGIDO** `bfe6166`, `ea1c4c6`, `3ba2b12` (fmt bloqueante) | PROVADO (rodei) |
 | 12 | BAIXA | 0,5 d | Deps | `spin 0.9.8` (yanked) linkado no kernel via wasmi; `bootloader_api` 0.11.15 vs 0.11.17; `license` ausente nos 3 crates; sem `deny.toml` | **CORRIGIDO** `3f679af`, `677af15`, `8ebcc89` (`deny.toml`, `publish = false`) | PROVADO |
@@ -237,15 +237,17 @@ QEMU/TCG sem KVM: valores de desempenho são proporções, não hardware real. D
 | Métrica | Antes | Depois |
 |---|---|---|
 | Build do `master` | **não compilava** (nightly sem data + x86_64 0.15.4 + bootloader 0.11.15) | compila; nightly fixado em `nightly-2026-10-05` |
-| Testes em `osjeff_core` | 189 (README dizia 152) | **379** |
-| Cobertura de linhas (`cargo llvm-cov`, bruta) | 92,33% (README dizia ~98%) | **96,08%** (bruta, inclui os módulos de teste; só produção não foi remedida, era ~88%) |
-| Linhas de lógica testável (core) / kernel | — | ~10,7 mil / ~10,5 mil |
+| Testes em `osjeff_core` | 189 (README dizia 152) | **423** |
+| Cobertura de linhas (`cargo llvm-cov`, bruta) | 92,33% (README dizia ~98%) | **96,52%** (bruta, inclui os módulos de teste; só produção não foi remedida, era ~88%) |
+| Linhas de lógica testável (core) / kernel | — | ~11,7 mil / ~11,0 mil |
 | Blocos `unsafe` sem `// SAFETY:` (clippy) | 100 | **0** (lint `warn` ligado; CI usa `-D warnings`) |
 | `static mut` | 0 (mas 23 `RacyCell`, mesmo padrão) | 0 (idem) |
 | Crashes de fuzzing encontrados / corrigidos | — | **9 / 9** (8 achados pelo fuzzer, 1 por leitura, todos com teste de regressão) |
-| Falhas (panic, #PF/#GP/#DF/#UD, OOM) | `hlt` mudo | **tela de erro + serial** (vetor, RIP, RSP, CR2, thread) |
-| Estouro da pilha do compositor | triple fault (reset mudo) | `#DF` reportado na pilha IST, sem reset (BIOS e UEFI) |
+| Falhas (panic, #PF/#GP/#DF/#UD, OOM) | `hlt` mudo; qualquer thread derrubava a máquina | **tela de erro + serial** (vetor, RIP, RSP, CR2, thread); thread secundária morre sozinha |
+| Estouro de pilha | compositor: triple fault (reset mudo); `fetcher`/`wasmapp`: corrompia o heap vizinho em silêncio | compositor: `#DF`/`#PF` reportado em pilha IST; threads: página de guarda, **só a thread morre**, o desktop segue (BIOS e UEFI) |
 | IRQ espúria 7/15 | #NP/#DF, e travava o boot com `virtio-gpu-pci` | ignorada e contada |
+| Rede do navegador | IP/gateway/DNS fixos do SLIRP; DHCP só alimentava o responder | configurada pelo lease DHCP (provado em 192.168.77.0/24); fallback estático |
+| Editor com arquivo maior que a grade | truncava em silêncio e o save destruía o resto | marcado `TRUNC` e save recusado |
 | Disco após erro de leitura no boot | formatado e sobrescrito | intocado (hash idêntico, falha injetada) |
 | `cargo run -p os -- uefi` | panic no bootloader (128M) | boota (256M) |
 | `lint-kernel` / `lint-host` / `fmt` | **falhavam** | passam, bloqueiam no CI |
@@ -263,4 +265,4 @@ QEMU/TCG sem KVM: valores de desempenho são proporções, não hardware real. D
 | Aparência do desktop | — | idêntica (0 pixels de diferença fora de HUD e relógio, BIOS e UEFI, em todos os commits de kernel) |
 | CI | nenhum | `.github/workflows/ci.yml` (não executou no GitHub nesta sessão; cada comando rodou localmente) |
 
-**Ficou de fora, e por quê:** ver a seção E e o [`ROADMAP`](../ROADMAP.md). Os mais relevantes: thread morta em vez de máquina morta e guard pages (exigem o kernel editar suas page tables), verificação de certificado TLS, DHCP alimentando o `netstack` e driver de NIC comum, *fuel* retomável do WASM, teste em hardware real, e o frame que cruza o anel do NE2000 (K5, não provado em QEMU).
+**Ficou de fora, e por quê:** ver a seção E e o [`ROADMAP`](../ROADMAP.md). Os mais relevantes: reiniciar e liberar uma thread que morreu, verificação de certificado TLS, renovação do lease DHCP e driver de NIC comum, *fuel* retomável do WASM, teste em hardware real, e o frame que cruza o anel do NE2000 (K5, não provado em QEMU).

@@ -12,11 +12,10 @@ trecho de código. O que não foi provado está marcado como *suposição*.
 2. Por isso a defesa é **na entrada**: todo dado que vem de fora (rede, disco,
    HTML/CSS, `.wasm`) passa por código que não usa `unsafe`, tem limites
    explícitos e foi fuzzado.
-3. O que ainda é fraco e conhecido: **HTTPS não verifica certificado**, as pilhas
-   das threads secundárias não têm página de guarda, e não há isolamento entre apps
-   e kernel.
-4. Falhas fatais agora são **visíveis** (tela de erro + serial) em vez de
-   congelamento ou reinício mudo.
+3. O que ainda é fraco e conhecido: **HTTPS não verifica certificado** e não há
+   isolamento entre apps e kernel.
+4. Falhas fatais são **visíveis** (tela de erro + serial) e uma thread secundária que
+   falha **morre sozinha** em vez de derrubar a máquina.
 5. Nenhuma garantia vale em hardware real: tudo foi verificado em QEMU.
 
 ## 1. Fronteiras de confiança
@@ -44,7 +43,9 @@ Quem controla o dado, quem o interpreta e o que impede o pior.
 | W^X na imagem do kernel, NX no resto | herdado do bootloader | escrever em `.text` e executar no heap dão `#PF` (medido na auditoria) |
 | `unsafe` documentado | 100% dos blocos com `// SAFETY:`, imposto pelo clippy | `cargo lint-kernel` (`-D warnings`) |
 | Core sem `unsafe` | `#![forbid(unsafe_code)]` | compilação |
-| Canário de pilha | só em `fetcher` e `wasmapp` | parcial: um frame maior que o canário o pula |
+| Página de guarda nas pilhas das threads | feito (`vm.rs`, `sched::spawn`) | estouro em `fetcher`/`wasmapp` (recursão e frame de 150 KiB) cai na guarda, `#PF` em pilha IST, só a thread morre; antes, corrompia o heap (BIOS e UEFI) |
+| Thread que falha morre sozinha | feito (`sched::kill_current`, `crash::fault`) | panic, `ud2` e `#PF` em `fetcher`/`wasmapp`: o compositor segue, Gerenciador mostra DEAD; no compositor, em `#DF` ou com IF=0 continua fatal |
+| Canário de pilha | só como reserva quando não há guarda | fraco: um teste forçado corrompeu o heap antes da detecção |
 | Recusa de framebuffer maior que os buffers | feito | "UNSUPPORTED SCREEN" (`docs/img/panic-oversize-*.png`) |
 | Disco intocado se a leitura falhar | feito (`PERSIST`) | hash do disco idêntico com falha injetada |
 
@@ -79,12 +80,16 @@ relógio confiável (o RTC não é verificado) e verificação de cadeia.
   limites), e adiar o ring 3 até haver um gatilho concreto.
 
 ### 3.3 Pilhas e memória
-- As pilhas de `fetcher` e `wasmapp` (128 KiB cada) vêm do heap, **sem página de
-  guarda**. O canário (8 bytes) é checado só na troca de contexto. Uso medido:
-  9–13 KiB; nenhum estouro real observado.
+- As pilhas de `fetcher` e `wasmapp` (128 KiB cada) vêm do heap, **com página de
+  guarda** (a página de nível 1 é desmapeada; o heap em `.bss` usa páginas de 4 KiB
+  em BIOS e UEFI). Uso medido: 9–13 KiB. Um estouro dentro de uma interrupção que roda
+  na própria pilha da thread (IF=0) continua fatal, com a mensagem certa.
 - O heap é um bloco único de 64 MiB sem cota por consumidor. Esgotá-lo vira panic
   (agora visível), não corrupção.
-- Um panic em uma thread secundária para a máquina inteira (não há "thread morta").
+- Uma thread secundária que falha **morre sozinha**, mas não é reiniciada e não libera
+  nada: sua pilha, suas alocações e a `Store` do `wasmi` ficam; um lock que ela
+  segurava com interrupções ligadas fica preso. O navegador e o app WASM ficam
+  inutilizáveis até o reboot (a interface mostra o motivo).
 
 ### 3.4 Rede
 - O IP, o gateway e o DNS do navegador vêm do lease DHCP (com fallback estático
@@ -118,7 +123,7 @@ relógio confiável (o RTC não é verificado) e verificação de cadeia.
 
 ## 5. Como reproduzir as provas
 
-- Testes: `cargo test-core` (379 testes; regressões dos achados em `osjeff_core`).
+- Testes: `cargo test-core` (423 testes; regressões dos achados em `osjeff_core`).
 - Fuzz: [`TESTING.md`](TESTING.md#2-fuzzing) — as entradas mínimas dos crashes estão em
   `fuzz/regressions/`.
 - Falhas visíveis e IST: [`TESTING.md`](TESTING.md#provando-falhas-padrão-usado-na-auditoria).
