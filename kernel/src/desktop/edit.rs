@@ -55,6 +55,9 @@ pub(crate) struct EditorState {
     pub force_close: bool,
     /// Last text click: tick, byte offset and how many in a row (double / triple click).
     last_click: (u64, usize, u8),
+    /// Where the last text press happened: a "drag" that has not moved leaves a word or line
+    /// selection (double / triple click) alone.
+    press_at: (i32, i32),
 }
 
 impl EditorState {
@@ -68,6 +71,7 @@ impl EditorState {
             msg: None,
             force_close: false,
             last_click: (0, 0, 0),
+            press_at: (-1, -1),
         }
     }
 
@@ -648,6 +652,7 @@ impl Desktop {
                 // Same spot within half a second: double (word), triple (line).
                 let count = e.click_count(ticks, pos);
                 e.ed.mouse_down(row, col, count, shift);
+                e.press_at = (px, py);
                 self.drag = Some(Drag {
                     win: id,
                     mode: DragMode::Select,
@@ -693,7 +698,7 @@ impl Desktop {
     pub(crate) fn editor_drag(&mut self, id: WindowId, px: i32, py: i32) {
         let Some(rect) = self.rect_of(id) else { return };
         let Some(e) = self.editor_mut(id) else { return };
-        if e.modal.is_some() {
+        if e.modal.is_some() || (px, py) == e.press_at {
             return;
         }
         let lay = editor_layout(rect, e.ed.is_prompt_open());
