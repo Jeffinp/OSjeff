@@ -484,6 +484,10 @@ pub fn report(khz: u64, ticks: u64) {
     if vu > 0 {
         crate::serial_println!("[trace]   vram upload={}B changed={}B", vu, vc);
     }
+    // Exact heap occupancy (the HUD only shows whole percent of 64 MiB): lets a
+    // window open/close soak prove nothing leaks.
+    let used = crate::HEAP_SIZE - crate::ALLOCATOR.free_bytes().min(crate::HEAP_SIZE);
+    crate::serial_println!("[trace]   heap used={}B", used);
     let an = take(&ALLOC_N);
     let fnn = take(&FREE_N);
     if an + fnn > 0 {

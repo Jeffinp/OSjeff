@@ -442,15 +442,45 @@ impl<A> WindowManager<A> {
 // ------------------------------------------------------------ free helpers
 
 /// Placement of the `k`-th (0-based) window of a kind: `base` shifted down and
-/// right by [`CASCADE_STEP`] per index (wrapping after [`CASCADE_WRAP`]) and
-/// then moved so it lies inside `work`.
+/// right by [`CASCADE_STEP`] per index, wrapping after [`CASCADE_WRAP`] (each
+/// wrap also nudges the row 12 px right so wrapped windows do not sit exactly on
+/// top of the first ones), then moved so it lies inside `work`.
 pub fn cascade_rect(base: Rect, k: usize, work: Rect) -> Rect {
     let off = (k % CASCADE_WRAP) as i32 * CASCADE_STEP;
+    let nudge = (k / CASCADE_WRAP) as i32 * 12;
     let w = base.w.min(work.w);
     let h = base.h.min(work.h);
-    let x = (base.x + off).clamp(work.x, (work.right() - w).max(work.x));
+    let x = (base.x + off + nudge).clamp(work.x, (work.right() - w).max(work.x));
     let y = (base.y + off).clamp(work.y, (work.bottom() - h).max(work.y));
     Rect::new(x, y, w, h)
+}
+
+/// Writes `base` — followed by a space and the number for instances after the
+/// first (`shell`, `shell 2`, `shell 3`...) — into `out`, truncating to its
+/// length. Returns the byte count. With an empty `base` it yields just `" N"`,
+/// the suffix of a numbered window title.
+pub fn numbered_name(base: &str, index: u8, out: &mut [u8]) -> usize {
+    let mut n = 0;
+    let mut put = |b: u8| {
+        if n < out.len() {
+            out[n] = b;
+            n += 1;
+        }
+    };
+    for &b in base.as_bytes() {
+        put(b);
+    }
+    if index > 1 {
+        put(b' ');
+        if index >= 100 {
+            put(b'0' + index / 100);
+        }
+        if index >= 10 {
+            put(b'0' + (index / 10) % 10);
+        }
+        put(b'0' + index % 10);
+    }
+    n
 }
 
 /// The next entry when cycling a list of `len` items from `cur`, forwards or
@@ -888,7 +918,44 @@ mod tests {
         assert_eq!(cascade_rect(base, 0, WORK), base);
         assert_eq!(cascade_rect(base, 1, WORK), Rect::new(128, 128, 400, 300));
         assert_eq!(cascade_rect(base, 2, WORK), Rect::new(156, 156, 400, 300));
-        assert_eq!(cascade_rect(base, CASCADE_WRAP, WORK), base);
+        // After a full lap the row restarts, nudged 12 px right.
+        assert_eq!(
+            cascade_rect(base, CASCADE_WRAP, WORK),
+            Rect::new(112, 100, 400, 300)
+        );
+    }
+
+    #[test]
+    fn cascade_positions_stay_distinct_for_a_full_table() {
+        let base = Rect::new(70, 80, 512, 320);
+        let mut seen: Vec<(i32, i32)> = Vec::new();
+        for k in 0..DEFAULT_MAX_WINDOWS {
+            let r = cascade_rect(base, k, WORK);
+            assert!(!seen.contains(&(r.x, r.y)), "k={k}");
+            seen.push((r.x, r.y));
+        }
+    }
+
+    #[test]
+    fn numbered_names_follow_the_instance_index() {
+        let mut buf = [0u8; 16];
+        let n = numbered_name("shell", 1, &mut buf);
+        assert_eq!(&buf[..n], b"shell");
+        let n = numbered_name("shell", 2, &mut buf);
+        assert_eq!(&buf[..n], b"shell 2");
+        let n = numbered_name("shell", 12, &mut buf);
+        assert_eq!(&buf[..n], b"shell 12");
+        let n = numbered_name("", 7, &mut buf);
+        assert_eq!(&buf[..n], b" 7");
+        let n = numbered_name("", 1, &mut buf);
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn numbered_names_truncate_to_the_buffer() {
+        let mut buf = [0u8; 6];
+        let n = numbered_name("compositor", 3, &mut buf);
+        assert_eq!(&buf[..n], b"compos");
     }
 
     #[test]

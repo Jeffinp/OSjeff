@@ -250,31 +250,7 @@ impl Inst {
 /// A window record of this desktop.
 pub(crate) type Win = osjeff_core::winman::Window<Inst>;
 
-/// Writes `base` (and ` N` for instances after the first) into `out`; returns
-/// the length. `out` is the process-name buffer, so it is truncated to fit.
-pub(crate) fn numbered_name(base: &str, index: u8, out: &mut [u8; 16]) -> usize {
-    let mut n = 0;
-    let mut put = |b: u8| {
-        if n < out.len() {
-            out[n] = b;
-            n += 1;
-        }
-    };
-    for &b in base.as_bytes() {
-        put(b);
-    }
-    if index > 1 {
-        put(b' ');
-        if index >= 100 {
-            put(b'0' + index / 100);
-        }
-        if index >= 10 {
-            put(b'0' + (index / 10) % 10);
-        }
-        put(b'0' + index % 10);
-    }
-    n
-}
+pub(crate) use osjeff_core::winman::numbered_name;
 
 // ---------------------------------------------------------------- file manager
 
