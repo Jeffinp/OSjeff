@@ -148,6 +148,24 @@ pub fn read<'a>(img: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
     read_slot(img, find(img, name)?)
 }
 
+/// Read the contents of file `name` inside directory `parent` ([`ROOT`] for the
+/// top level). A same-named file in another directory is never returned.
+pub fn read_in<'a>(img: &'a [u8], parent: u8, name: &[u8]) -> Option<&'a [u8]> {
+    read_slot(img, find_in(img, parent, name)?)
+}
+
+/// `parent` if it is [`ROOT`] or still a live (non-trashed) directory, else
+/// [`ROOT`]. Lets a caller that remembered a directory slot (an editor's file
+/// location) fall back safely when that folder was trashed or deleted meanwhile
+/// instead of writing under a stale or reused slot.
+pub fn live_dir(img: &[u8], parent: u8) -> u8 {
+    if parent == ROOT || (is_active(img, parent as usize) && is_dir(img, parent as usize)) {
+        parent
+    } else {
+        ROOT
+    }
+}
+
 /// Allocate (or reuse a same-name) active record in `parent`, returning its slot
 /// and writing its header. Shared by [`write_in`] and [`mkdir`].
 fn alloc(img: &mut [u8], parent: u8, name: &[u8], dir: bool) -> Result<usize, FsError> {
@@ -543,6 +561,48 @@ mod tests {
             purge_slot(&mut short, 0);
             empty_trash(&mut short);
         }
+    }
+
+    #[test]
+    fn same_name_in_folder_and_root_are_independent() {
+        let mut img = img();
+        let docs = mkdir(&mut img, ROOT, b"docs").unwrap() as u8;
+        write_in(&mut img, docs, b"p.txt", b"inside").unwrap();
+        write(&mut img, b"p.txt", b"root").unwrap();
+
+        // Name-only (root) lookups never see the folder's file...
+        assert_eq!(read(&img, b"p.txt"), Some(&b"root"[..]));
+        // ...and the parent-aware read picks the right one.
+        assert_eq!(read_in(&img, docs, b"p.txt"), Some(&b"inside"[..]));
+        assert_eq!(read_in(&img, ROOT, b"p.txt"), Some(&b"root"[..]));
+        assert_eq!(read_in(&img, docs, b"missing"), None);
+
+        // Saving into the folder rewrites the folder's file only.
+        write_in(&mut img, docs, b"p.txt", b"edited").unwrap();
+        assert_eq!(read_in(&img, docs, b"p.txt"), Some(&b"edited"[..]));
+        assert_eq!(read(&img, b"p.txt"), Some(&b"root"[..]));
+        assert_eq!(count(&img), 3); // docs + two files, no stray copy
+    }
+
+    #[test]
+    fn live_dir_falls_back_to_root() {
+        let mut img = img();
+        let docs = mkdir(&mut img, ROOT, b"docs").unwrap();
+        let file = {
+            write_in(&mut img, docs as u8, b"f", b"x").unwrap();
+            find_in(&img, docs as u8, b"f").unwrap()
+        };
+        assert_eq!(live_dir(&img, ROOT), ROOT);
+        assert_eq!(live_dir(&img, docs as u8), docs as u8);
+        assert_eq!(live_dir(&img, file as u8), ROOT); // a file is not a directory
+        assert_eq!(live_dir(&img, 40), ROOT); // free slot
+        assert_eq!(live_dir(&img, 200), ROOT); // out of range
+        trash_slot(&mut img, docs);
+        assert_eq!(live_dir(&img, docs as u8), ROOT); // trashed folder
+        purge_slot(&mut img, docs);
+        assert_eq!(live_dir(&img, docs as u8), ROOT); // deleted folder
+        let short = [0u8; 8];
+        assert_eq!(live_dir(&short, 0), ROOT); // unformatted / too small
     }
 
     #[test]
