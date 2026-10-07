@@ -50,6 +50,21 @@ SO: pacote com manifesto e permissões, vários apps ao mesmo tempo, instalaçã
   (um só ponto de troca, `appfs_backend.rs`); `net_http_get` valida mas não transporta;
   sockets TCP e a roda do mouse (`on_scroll`) não existem; o menu do dock não lista os apps.
 
+## 2026-10 — Gerenciamento do sistema
+
+Log do kernel, monitor de recursos, configurações e notificações
+([`docs/design/sysmgmt.md`](docs/design/sysmgmt.md)).
+
+- `klog`: anel de 64 KiB sem alocação (seguro em ISR, com teste de zero alocações e de
+  100 000 mensagens), `klog!(Warn, ...)` com a mesma saída serial de antes, espelho de todo
+  `serial_println!`, app **Log do sistema** (filtro, busca, salvar).
+- **Monitor** (Processos, Desempenho com gráficos de 60 s, Sistema com CPUID/RAM/boot) e
+  **Configurações** (papel de parede incluindo imagem PNG/BMP/PPM do disco, destaque,
+  relógio 12/24 h, fuso, ajuste do RTC, teclado ABNT2, rede, armazenamento, energia),
+  persistidas em `osjeff.conf`; toasts para WARN/ERROR e `notify!`.
+- Traits para outras frentes (`DiskUsage`, `NetStats`, `NetControl`, `LogSink`,
+  `SettingsStore`); o dock e o desktop ocioso continuam idênticos.
+
 ## 2026-10 — Window manager dinâmico
 
 O desktop deixou de ter 7 janelas fixas (uma por app) e passou a gerenciar qualquer

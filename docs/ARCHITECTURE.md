@@ -666,6 +666,13 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   apps do sistema; o Gerenciador de arquivos ganhou a vista **Apps** (`Enter` abre, `I` instala,
   `Del` remove).
 
+- **App WASM:** §10.
+- **Monitor, Configurações e Log do sistema** (só no Painel Iniciar e no menu de contexto;
+  o dock não mudou): monitor de recursos com abas Processos/Desempenho/Sistema, janela de
+  configurações (papel de parede, destaque, relógio, fuso, data/hora, teclado ABNT2, rede,
+  armazenamento, energia) e visualizador do log do kernel (`klog`), mais as notificações
+  em toast. Detalhes, formatos e traits de integração: `docs/design/sysmgmt.md`.
+
 ### 7.4 Como registrar um app novo
 
 1. `desktop/instance.rs`: nova variante em `Kind` (metadados `const`: título, nome de
@@ -673,7 +680,9 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
    (estado por janela, criado em `App::new`).
 2. `desktop/render.rs` (`draw_window`) e `apps.rs`: desenhar dentro do `Rect` da janela
    (nunca fora dele); `input.rs`: teclas (`handle_key`) e cliques (`click_window`).
-3. Dock: `layout::DOCK_COUNT` e a lista de ícones em `widgets::paint_background`.
+3. Dock: `layout::DOCK_COUNT` e a lista de ícones em `widgets::paint_background`. Só os
+   primeiros `DOCK_APPS` (`instance.rs`) de `Kind::ALL` têm ícone; os demais aparecem apenas
+   no Painel Iniciar e no menu de contexto.
 
 Foco, z-order, minimizar/maximizar/redimensionar, Alt+Tab, processo (`nome`, `nome 2`...),
 ponto de minimizada, menu "Nova janela" e o encerramento ao fechar não pedem nenhuma mudança.
