@@ -12,7 +12,7 @@ $root = Split-Path $PSScriptRoot   # tools\ -> project root
 Set-Location $root
 
 $fs = Join-Path $root 'osjeff-fs.img'
-if (-not (Test-Path $fs)) { [IO.File]::WriteAllBytes($fs, (New-Object byte[] (64 * 1024))) }
+if (-not (Test-Path $fs)) { $f = [IO.File]::Create($fs); $f.SetLength(64MB); $f.Close() }
 $shots = Join-Path $root '.shots'
 New-Item -ItemType Directory -Force -Path $shots | Out-Null
 

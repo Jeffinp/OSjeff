@@ -7,14 +7,15 @@
 # (tools/perf/scen/*.sh; gets $OUT and $MODE) drives the QEMU monitor (mouse/keys)
 # in the background and touches $OUT/done when finished; then we screendump to
 # <outdir>/screen.png and quit.
-# Env: QEMU_MEM (default 128M, 512M for uefi), QEMU_EXTRA (e.g. "-icount shift=0").
+# Env: QEMU_MEM (default 128M, 512M for uefi), QEMU_EXTRA (e.g. "-icount shift=0"),
+# FS_SIZE (filesystem disk size, default 64M; 64K gives the old OJFS v2-only disk).
 set -u
 img=$1; mode=$2; out=$3; secs=$4; scen=${5:-}
 rm -rf "$out"; mkdir -p "$out"
 # Unix socket paths are limited to 107 bytes, so keep the monitor socket short.
 export MON_SOCK=$(mktemp -u /tmp/osj-mon.XXXXXX)
 echo "$MON_SOCK" > "$out/mon.path"
-dd if=/dev/zero of="$out/fs.img" bs=1k count=64 status=none
+truncate -s "${FS_SIZE:-64M}" "$out/fs.img"  # sparse 64 MiB (OJFS v3 needs >= 1 MiB)
 mem=${QEMU_MEM:-128M}; [ "$mode" = uefi ] && mem=${QEMU_MEM:-512M}
 args=(-m "$mem" -display none -no-reboot -no-shutdown
   -serial "file:$out/serial.log"

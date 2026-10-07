@@ -41,8 +41,14 @@ tools/run.sh uefi       # UEFI (usa OVMF)
 tools/run.sh bios -- -accel kvm   # com KVM, bem mais rápido
 ```
 
-O disco do filesystem (`osjeff-fs.img`, 64 KiB) é criado na primeira execução e
-persiste entre boots.
+O disco do filesystem (`osjeff-fs.img`) é criado na primeira execução e persiste entre
+boots. Desde o OJFS v3 ele tem **64 MiB**, mas é um arquivo *esparso* (`truncate -s 64M`;
+`run.ps1` usa `SetLength(64MB)`): quase nada ocupa o disco do host. O OJFS v3 exige pelo
+menos 1 MiB. Um `osjeff-fs.img` antigo de 64 KiB continua aceito: o boot loga
+`storage: disk too small for OJFS v3 (64 KiB), staying on v2` e segue com o v2 como antes.
+Para migrar um disco antigo, aumente-o (`truncate -s 64M osjeff-fs.img`): a imagem v2 dos
+primeiros 64 KiB é migrada para o v3 no boot seguinte e esses 64 KiB não são alterados.
+`FS_SIZE=64K tools/run.sh` (ou apagar o arquivo e criá-lo de 64 KiB) reproduz o disco antigo.
 
 > `cargo run -p os -- uefi` só funciona se `OVMF_PATH` apontar para um firmware
 > **único** (`OVMF.fd`). O Ubuntu moderno distribui o OVMF dividido em

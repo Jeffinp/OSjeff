@@ -24,10 +24,14 @@ fn main() {
     qemu.arg("-m").arg("256M");
 
     // Persistent filesystem disk on the secondary IDE channel (master). Created
-    // blank on first run; the kernel formats it if it holds no filesystem.
+    // blank on first run (a 64 MiB sparse file: OJFS v3 needs at least 1 MiB); the
+    // kernel formats it if it holds no filesystem. An older 64 KiB disk still boots:
+    // the kernel logs "disk too small for OJFS v3" and stays on OJFS v2.
     let fs_img = "osjeff-fs.img";
     if !std::path::Path::new(fs_img).exists() {
-        std::fs::write(fs_img, vec![0u8; 64 * 1024]).expect("failed to create fs disk image");
+        std::fs::File::create(fs_img)
+            .and_then(|f| f.set_len(64 * 1024 * 1024))
+            .expect("failed to create fs disk image");
     }
     qemu.arg("-drive")
         .arg(format!("format=raw,file={fs_img},if=ide,index=2"));

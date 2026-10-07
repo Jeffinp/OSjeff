@@ -137,13 +137,28 @@ Sem tela e sem KVM (TCG), BIOS e UEFI:
 tools/qemu-headless.sh bios /tmp/osj 25      # serial.log + screen.png
 QEMU_MEM=256M tools/qemu-headless.sh uefi /tmp/osj-uefi 40
 KEEP_FS=1 tools/qemu-headless.sh bios /tmp/osj 25   # reaproveita fs.img (persistência, disco corrompido)
+FS_SIZE=64K tools/qemu-headless.sh bios /tmp/osj 25 # disco antigo de 64 KiB (fica no OJFS v2)
 ```
+
+O disco do filesystem do runner (`<outdir>/fs.img`) é um arquivo esparso de **64 MiB** por
+padrão (o OJFS v3 exige >= 1 MiB; `tools/run.sh` e `tools/perf/run.sh` seguem a mesma
+regra e aceitam `FS_SIZE`). Em um disco novo em branco o boot formata o v3 e semeia
+`leiame.txt`, `notas.txt` e `Documentos/projeto.txt`; a serial mostra as linhas
+`storage: ...` (montagem, migração, `TooSmall`, `Unknown`). Com `FS_SIZE=64K` o boot loga
+`storage: disk too small for OJFS v3 (64 KiB), staying on v2` e o desktop funciona como antes.
+
+**Migração v2 -> v3 no QEMU:** `cp <fs.img v2 de 64 KiB> disco.img && truncate -s 64M disco.img`
+e `KEEP_FS=1` com esse arquivo copiado para `<outdir>/fs.img`: o primeiro boot loga
+`storage: migrated OJFS v2 -> v3: ...`, o segundo só `OJFS v3 mounted` (sem remigrar), e
+`cmp -n 65536` entre antes e depois prova que os 64 KiB iniciais não mudaram.
 
 `tools/verify-boot.sh <outdir> [baseline]` constrói, sobe os dois modos e falha se
 o boot não completar, se aparecer `KERNEL PANIC`/`FATAL` na serial, ou se o desktop
 diferir da baseline (o HUD e o relógio são mascarados porque mudam a cada execução).
 Para tirar uma baseline, rode o script uma vez num commit bom e passe o `outdir`
 como segundo argumento nos seguintes.
+Uma baseline tirada com o disco antigo de 64 KiB continua valendo com o disco de 64 MiB:
+montar o v3 não muda um pixel do desktop (provado: 0 pixels em BIOS e UEFI).
 
 ### Rede em QEMU
 

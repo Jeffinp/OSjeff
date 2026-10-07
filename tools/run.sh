@@ -15,7 +15,9 @@ mode=${1:-bios}
 cargo build --release -p os
 img=$(find target/release/build -path "*/out/osjeff-$mode.img" -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)
 [ -f "$img" ] || { echo "no $mode image found" >&2; exit 1; }
-[ -f osjeff-fs.img ] || dd if=/dev/zero of=osjeff-fs.img bs=1k count=64 status=none
+# 64 MiB sparse file (OJFS v3 needs >= 1 MiB). An existing 64 KiB disk from an older
+# checkout still boots: the kernel logs "disk too small for OJFS v3" and stays on v2.
+[ -f osjeff-fs.img ] || truncate -s "${FS_SIZE:-64M}" osjeff-fs.img
 
 # 256M: the kernel BSS is ~91 MiB and UEFI needs it in conventional RAM.
 args=(-m 256M -drive "format=raw,file=$img"

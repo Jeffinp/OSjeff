@@ -80,7 +80,11 @@ if (-not (Test-Path $img)) { throw "Imagem nao existe: $img (rode sem -SkipBuild
 # the kernel formats it on first boot and persists files there across reboots.
 $fsImg = Join-Path $PSScriptRoot 'osjeff-fs.img'
 if (-not (Test-Path $fsImg)) {
-    [System.IO.File]::WriteAllBytes($fsImg, (New-Object byte[] (64 * 1024)))
+    # 64 MiB sparse-ish file (OJFS v3 needs >= 1 MiB). An older 64 KiB disk still
+    # boots: the kernel stays on OJFS v2 ("disk too small for OJFS v3" on the serial).
+    $fsFile = [System.IO.File]::Create($fsImg)
+    $fsFile.SetLength(64MB)
+    $fsFile.Close()
     Write-Host "Disco de arquivos criado: $fsImg" -ForegroundColor Green
 }
 

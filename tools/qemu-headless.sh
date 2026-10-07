@@ -47,9 +47,13 @@ sock=$(mktemp -u "${TMPDIR:-/tmp}/osjeff-mon.XXXXXX")
 echo "$sock" > "$out/mon.path"
 # Fresh persistent-FS disk each run so results are reproducible (KEEP_FS=1 keeps
 # an existing <outdir>/fs.img, e.g. to test persistence or corrupted disks).
+# The disk is a 64 MiB sparse file by default (FS_SIZE overrides, e.g. FS_SIZE=64K).
 fsimg="$out/fs.img"
 if [ -z "${KEEP_FS:-}" ] || [ ! -f "$fsimg" ]; then
-  dd if=/dev/zero of="$fsimg" bs=1k count=64 status=none
+  # 64 MiB sparse file (OJFS v3 needs >= 1 MiB); FS_SIZE=64K reproduces the old
+  # 64 KiB disk, on which the kernel stays on OJFS v2.
+  rm -f "$fsimg"
+  truncate -s "${FS_SIZE:-64M}" "$fsimg"
 fi
 
 case "${QEMU_NIC:-ne2k}" in
