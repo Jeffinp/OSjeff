@@ -1,0 +1,76 @@
+# Contribuindo com o OSjeff
+
+Este projeto é de um desenvolvedor só, mas trabalha como se não fosse: toda mudança
+precisa de prova. Estas regras são as que foram usadas na auditoria de desempenho
+e segurança (`docs/audit/`).
+
+## Antes de começar
+
+```bash
+rustup show                 # instala o nightly fixado e os alvos
+cargo test-core             # 200+ testes, ~0,1 s
+cargo lint-kernel && cargo lint-host
+```
+
+Veja [`docs/BUILDING.md`](docs/BUILDING.md) para QEMU/OVMF e
+[`docs/TESTING.md`](docs/TESTING.md) para as camadas de verificação.
+
+## Fluxo
+
+1. **Uma mudança por commit.** Cada um pode ser revertido sozinho. Mensagem em
+   inglês, no estilo do histórico: `fix(net): ...`, `perf(fb): ...`,
+   `refactor(core): ...`, `docs(audit): ...`. O corpo explica o *porquê* e **como foi
+   verificado**.
+2. **Nada muda sem teste.**
+   - Lógica pura (parser, regras de janela, FS, rede) → `osjeff_core`, com teste
+     unitário que **falha antes e passa depois**.
+   - Mudança no `kernel/` → `tools/verify-boot.sh` (BIOS **e** UEFI) com o desktop
+     idêntico à baseline, ou um screenshot explicando a diferença intencional.
+3. **Número antes/depois** para qualquer afirmação de desempenho. QEMU sem KVM só
+   vale como proporção; repita a medição e diga a dispersão.
+4. **Evidência.** Todo achado com `arquivo:linha` e o trecho. Não repita o README: ele
+   já esteve errado (testes e cobertura desatualizados).
+
+## Antes de abrir um PR
+
+```bash
+cargo fmt --all -- --check
+cargo test-core
+cargo lint-kernel
+cargo lint-host
+cargo deny check
+tools/verify-boot.sh /tmp/osj-novo /tmp/osj-baseline    # se tocou em kernel/
+```
+
+O CI roda os quatro primeiros. Mudou o `Cargo.lock`, o `bootloader` ou o nightly?
+Isso é uma decisão deliberada: explique no commit (um `nightly` sem data já
+quebrou o build uma vez, ver `docs/audit/RELATORIO.md`).
+
+## Regras de código
+
+- **`osjeff_core` é `forbid(unsafe_code)` e `no_std`.** Não adicione `std`.
+- **Todo `unsafe` leva `// SAFETY:`** com a invariante *real* e por que ela vale ali.
+  O kernel liga `clippy::undocumented_unsafe_blocks`; com `-D warnings` o lint falha
+  sem o comentário. Se o tipo **não** garante a invariante (por exemplo uma função
+  segura que devolve `&'static mut`), diga isso no comentário em vez de fingir.
+- **Estado global mutável** passa por `RacyCell` (`kernel/src/sync.rs`). É o mesmo
+  padrão de `static mut` com outro nome: documente qual thread/IRQ acessa cada um.
+- **Handlers de IRQ não alocam e não pegam lock.** O allocator usa spin lock com
+  interrupções desligadas, mas um ISR que aloque ainda é bug.
+- **Dado externo nunca é confiável.** Em parser de rede, disco, HTML/CSS ou `.wasm`:
+  `get()`/`checked_*`/`saturating_*` em vez de indexar e somar. O build de release
+  do kernel **não** tem `overflow-checks`, então um estouro dá a volta em silêncio.
+- **Não aumente a superfície de privilégio.** Tudo roda em ring 0. Qualquer coisa
+  que execute código de terceiros passa pelo WASM (com limites) e não pelo kernel.
+- **Dependências novas no `kernel`** precisam de justificativa (tamanho, `no_std`,
+  `unsafe`, licença) e passam por `cargo deny check`.
+
+## Decisões de arquitetura
+
+Mudanças grandes (modo usuário, paginação por processo, novo allocator, troca de
+bootloader) viram um ADR em `docs/audit/` antes de virar código. O estado atual é
+o [`adr-isolamento.md`](docs/audit/adr-isolamento.md).
+
+## Segurança
+
+Achou uma falha? Leia [`SECURITY.md`](SECURITY.md) antes de abrir uma issue pública.
