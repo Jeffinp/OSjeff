@@ -2,243 +2,192 @@
 
 # 🦀 OSJeff
 
-### An x86_64 operating system written **from scratch in Rust** — bare metal, no Linux underneath.
+### An x86_64 operating system written **from scratch in Rust**: bare metal, no Linux underneath.
 
-![Rust](https://img.shields.io/badge/Rust-nightly-000000?style=for-the-badge&logo=rust&logoColor=white)
+*Um sistema operacional x86_64 escrito do zero em Rust: bare metal, sem Linux por baixo.*
+
+![Rust](https://img.shields.io/badge/Rust-nightly--2026--10--05-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-201%20passing-success?style=for-the-badge)
-![Clippy](https://img.shields.io/badge/clippy-%2DD%20warnings-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-379%20passing-success?style=for-the-badge)
+![Fuzz](https://img.shields.io/badge/fuzz-3%20targets-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
 [🇧🇷 Português](README.md) · **🇺🇸 English**
 
 <img src="docs/img/demo.gif" alt="OSJeff in action: open the editor, type, close" width="760">
 
-<sub>Boot → open the editor (animation) → type → close (animation) — all on a hand-built kernel.</sub>
-
 </div>
 
-> Portfolio project by **Jeferson Reis Almeida**.
-> From boot to desktop, built by hand: a **preemptive scheduler**, a **heap
-> allocator**, **hardware interrupts**, a **damage-tracking compositor** and
-> three apps — all in Rust plus a little Assembly, with **no operating system
-> underneath**. The generated image boots on real hardware (or QEMU).
+OSJeff is a `no_std` x86_64 kernel that boots straight from firmware (BIOS or UEFI)
+and brings up a full desktop: a preemptive scheduler, its own heap, interrupts, a
+compositor, a persistent filesystem, a TCP/IP stack with TLS, an HTML/CSS browser and
+a WebAssembly runtime for applications. It is a **study project** that has been
+treated like a product: every change comes with a test or a QEMU proof, the parsers
+for everything that comes from outside are fuzzed, and the project went through a
+[full security and performance audit](docs/audit/RELATORIO.md) whose findings are
+fixed or documented. (Audit documents are in Portuguese.)
 
----
-
-## ✨ Why this is advanced
-
-It isn't an app running on top of an OS — it *is* the OS. Every piece below was
-built from scratch:
-
-| Technique | Where | Why it's hard |
-|---|---|---|
-| **Preemptive scheduler** | [`kernel/src/sched.rs`](kernel/src/sched.rs) · [`interrupts.rs`](kernel/src/interrupts.rs) | Context switch **inside the timer ISR** (naked ASM + `iretq`); preempts any thread without it cooperating |
-| **Heap allocator** | [`kernel/src/allocator.rs`](kernel/src/allocator.rs) | Linked free-list + spin lock as `#[global_allocator]` → enables `Vec`/`String`/`Box` |
-| **Hardware interrupts** | [`kernel/src/interrupts.rs`](kernel/src/interrupts.rs) | IDT, exception handlers, remapped 8259 PIC, PIT timer, IRQ-driven input |
-| **Damage-tracking compositor** | [`kernel/src/desktop.rs`](kernel/src/desktop.rs) | Caches the static layer and only repaints the damaged rectangle — O(window) cost |
-| **Pure, testable logic** | [`osjeff_core/`](osjeff_core/) | Every decision (parser, editor, keymap, geometry, allocator, filesystem) tested on the host: **201 tests, 93% line coverage** |
+> **Honesty first.** Everything runs in ring 0 with no isolation; HTTPS **does not
+> verify certificates**; nothing has been tested on real hardware. See
+> the "Known limits" section below and the [security model](docs/SECURITY-MODEL.md).
 
 ---
 
 ## 🖼️ Screenshots
 
-| Desktop | Task manager (real threads) |
+| Desktop | Task manager (real per-thread CPU) |
 |:---:|:---:|
 | <img src="docs/img/desktop.png" width="420"> | <img src="docs/img/taskmanager.png" width="420"> |
+| **File manager (folders, trash, persistent)** | **Browser (HTTPS flagged "not verified")** |
+| <img src="docs/img/files.png" width="420"> | <img src="docs/img/browser.png" width="420"> |
 
-> In the task manager, **`compositor`, `worker-a` and `worker-b`** accrue CPU
-> time identically: the workers are infinite loops with **no `yield`** — they run
-> only because the timer preempts them. Visual proof of real preemption.
+When the kernel fails it **says what happened**, on screen and on serial (here, a
+stack overflow handled on a dedicated IST stack, no triple fault):
+
+<img src="docs/img/panic-stack-uefi.png" width="520">
 
 ---
 
-## 🧩 Architecture
+## 🚀 Getting started
 
-Pure logic is kept separate from hardware so it can be **tested on the host** — a
-`no_std`/`no_main` kernel can't run `cargo test`, so every decision lives in a
-library that compiles against `std` under test and `no_std` in production.
-
-```mermaid
-flowchart TB
-    subgraph WS["Cargo workspace"]
-        direction TB
-        CORE["osjeff_core<br/><i>no_std + testable lib</i><br/>keymap · terminal · editor<br/>window · anim · process · heap"]
-        KERNEL["kernel<br/><i>no_std · x86_64-unknown-none</i><br/>boot · interrupts · sched · allocator<br/>fb · font · ps2 · rtc · desktop"]
-        OS["os<br/><i>builder (host)</i><br/>builds bootable image + runs QEMU"]
-    end
-    CORE -->|"tested logic"| KERNEL
-    KERNEL -->|"artifact dependency"| OS
-    OS -->|"bootloader 0.11"| IMG["osjeff-bios.img / uefi.img"]
-    IMG --> HW["real PC / QEMU"]
+```bash
+git clone https://github.com/Jeffinp/OSjeff && cd OSjeff
+rustup show                  # installs the pinned nightly and targets
+sudo apt install qemu-system-x86 ovmf    # or your distro's equivalent
+tools/run.sh                 # build and open QEMU (BIOS)
+tools/run.sh uefi            # same, UEFI
 ```
 
-### Boot flow
+Windows with acceleration: `.\run.ps1`. Headless (CI): `tools/qemu-headless.sh bios /tmp/osj 25`.
+USB stick and real hardware: [`docs/BOOT-USB.md`](docs/BOOT-USB.md). Full guide,
+variants (DOOM) and troubleshooting: [`docs/BUILDING.md`](docs/BUILDING.md) (Portuguese).
+
+---
+
+## 📦 What is inside
+
+| Layer | What was built | Where |
+|---|---|---|
+| **Boot and CPU** | BIOS/UEFI boot (`bootloader 0.11`), own GDT/TSS with an IST stack for #DF, full IDT, 8259 PIC, 250 Hz PIT, every CPU exception and spurious IRQ handled, error screen | `kernel/src/{gdt,interrupts,crash}.rs` |
+| **Scheduler** | Timer-preemptive (context switch in the ISR, assembly), **ready/blocked** threads, yield via `int 0x81`, `hlt` without lost wakeups, stack canary, real per-thread CPU | `sched.rs`, `switch.s` |
+| **Memory** | `GlobalAlloc` heap (free list with coalescing, spin lock with IRQs off), alignment math tested on the host | `allocator.rs`, `osjeff_core/src/heap.rs` |
+| **Graphics** | Damage-tracking compositor, double buffering, own 8×8 font, alpha shadows, animations; performance HUD | `fb.rs`, `desktop/` |
+| **Apps** | Terminal, Editor, Task manager, Calculator, File manager, Browser, WebAssembly app | `desktop/`, `osjeff_core` |
+| **Storage** | Own **OJFS** filesystem (48 files, folders, trash) over ATA PIO, persistent across boots | `osjeff_core/src/fs.rs`, `ata.rs` |
+| **Network** | NE2000 (ISA), own ARP/IPv4/ICMP/DHCP (answers `ping`), `smoltcp` for TCP/DNS, **TLS 1.3** (`embedded-tls`) | `ne2000.rs`, `netstack.rs`, `osjeff_core/src/net.rs` |
+| **Browser** | HTML parser, CSS (cascade), layout, redirects, resource limits, connection indicator | `osjeff_core/src/{web,browser,redirect}` |
+| **WebAssembly** | `wasmi` as the native app format: own ABI + a WASI subset, per-call *fuel*, 24 MiB memory cap, real app termination. Runs Snake; **DOOM** via `wasi-sdk` | `kernel/src/wasm/`, `wasm-apps/` |
+| **Devices** | PS/2 (keyboard, mouse), RTC, PCI, virtio-gpu (2D), ATA IDENTIFY | `ps2.rs`, `pci.rs`, `virtio*.rs` |
+
+---
+
+## 🧪 Why it can be trusted
+
+A `no_std` binary can't run `cargo test`. The fix is structural: **every decision
+that doesn't need hardware lives in `osjeff_core`** (`#![forbid(unsafe_code)]`), which
+builds with `std` under test. The kernel only wires hardware to it.
 
 ```mermaid
 flowchart LR
-    BIOS["BIOS/UEFI"] --> BL["bootloader 0.11"]
-    BL --> KM["kernel_main"]
-    KM --> HEAP["heap init"]
-    HEAP --> SCHED["sched init + spawn workers"]
-    SCHED --> PS2["PS/2 config"]
-    PS2 --> INT["IDT · PIC · PIT · sti"]
-    INT --> SPLASH["boot splash (>=5s)"]
-    SPLASH --> LOOP["compositor loop"]
+    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 379 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    KERNEL["kernel<br/>bare-metal · documented unsafe<br/>drivers · sched · compositor · wasm"]
+    OS["os<br/>BIOS/UEFI image builder"]
+    FUZZ["fuzz/<br/>net · ojfs · web"]
+    CORE -->|tested logic| KERNEL --> OS
+    FUZZ -.->|hostile input| CORE
 ```
 
-### Render pipeline (damage tracking)
+| Verification | Status |
+|---|---|
+| Unit tests | **379** in `osjeff_core`; 96% line coverage (raw, includes the test modules) |
+| Fuzzing | 3 targets (network, disk, HTML/CSS/HTTP); **9 bugs found and fixed**, each with a minimal input and a test |
+| `unsafe` | **100%** of kernel blocks carry `// SAFETY:`, enforced by `clippy::undocumented_unsafe_blocks` |
+| QEMU boot | BIOS **and** UEFI on every kernel commit, desktop compared pixel by pixel to a baseline (`tools/verify-boot.sh`) |
+| Lint and format | `cargo lint-kernel`, `cargo lint-host`, `cargo fmt --check`, all `-D warnings` |
+| Supply chain | `cargo deny check` (advisories, licenses, bans, sources) and `cargo audit` |
+| CI | `.github/workflows/ci.yml` (every command was run locally; the workflow has not run on GitHub yet) |
 
-```mermaid
-flowchart TB
-    EV["event<br/>(tick / mouse / key)"] --> Q{"animating?"}
-    Q -->|no| FULL["recompose scene → BACK<br/>full-screen blit + cursor"]
-    Q -->|yes| CACHE{"static layer<br/>cached?"}
-    CACHE -->|no| BUILD["compose STATIC<br/>(wallpaper + idle windows)"]
-    CACHE -->|yes| DMG["damage = animating window box"]
-    BUILD --> DMG
-    DMG --> RESTORE["copy STATIC[damage] → BACK"]
-    RESTORE --> DRAW["draw animating window (fade)"]
-    DRAW --> BLIT["blit only [damage] to VRAM + cursor"]
-```
+More in [`docs/TESTING.md`](docs/TESTING.md) (Portuguese).
 
-### Preemptive scheduler
+### The audit in numbers (QEMU without KVM; ratios, not absolute values)
 
-```mermaid
-sequenceDiagram
-    participant T as PIT timer (250Hz)
-    participant ISR as naked ISR
-    participant S as switch_current
-    participant N as Next thread
-    T->>ISR: IRQ0
-    ISR->>ISR: push all GP registers
-    ISR->>S: current rsp
-    S->>S: save current thread's rsp<br/>credit CPU · round-robin
-    S-->>ISR: next thread's rsp
-    ISR->>ISR: mov rsp, rax · pop regs
-    ISR->>N: iretq (restore RIP/RFLAGS/RSP)
-    Note over N: thread resumed<br/>without cooperating
-```
-
----
-
-## 📦 Features
-
-- **Bare-metal kernel** with its own visual identity (floating dock, mesh
-  wallpaper, shadows, logo) and an **animated boot splash**
-- **Hardware interrupts**: IDT + exceptions, 8259 PIC, PIT timer; fatal
-  fatal exceptions and panics are reported on serial (COM1) and then freeze; #DF runs on its own IST stack, so a stack overflow is no longer a silent triple fault
-- **IRQ-driven input**: keyboard (IRQ1) and mouse (IRQ12) via an SPSC ring buffer
-- **Heap allocator** (`alloc`): `Vec`/`String`/`Box` in the kernel
-- **Preemptive scheduler**: real threads with their own stacks, context switch in
-  the timer ISR, per-thread CPU in the task manager
-- **Window manager**: multiple windows, focus, z-order, dragging, right-click
-  context menu, open/close animations with damage tracking
-- **4 apps**: **Terminal** (history, commands), **Editor** (multi-line text, 2D
-  cursor), **Task Manager** and **Calculator** (4 functions, mouse + keyboard)
-- **Start panel**: the system icon opens a menu with every app plus **Restart**
-  and **Shut down** (reset via 8042/PCI, poweroff via ACPI ports)
-- **Persistent OJFS filesystem** (**ATA PIO** disk): the editor saves/loads
-  files that survive reboots; terminal `LS`, `CAT`, `SAVE`, `LOAD`, `RM`;
-  **Ctrl+S** in the editor
-- **Copy/paste** between apps with **Ctrl+C / Ctrl+V**
-- **Networking**: an **NE2000** NIC driver + **ARP/IPv4/ICMP** stack — answers
-  `ping` and announces itself with a gratuitous ARP on boot (visible in a `.pcap`)
-- **PS/2 mouse + keyboard** (Shift, Caps, arrows), RTC clock in local time
-- **Double buffering** + cursor dirty-rect → flicker-free rendering
-- Own 8×8 bitmap font; hand-drawn icons; logo embedded as RGBA
-
----
-
-## 🚀 Running
-
-### Windows (recommended — WHPX acceleration)
-
-`run.ps1` does everything: builds release inside WSL, copies the image, runs QEMU.
-
-```powershell
-cd C:\...\OSjeff
-.\run.ps1              # build release + boot (WHPX, fast)
-.\run.ps1 -NoAccel    # build release + boot (TCG, software)
-.\run.ps1 -SkipBuild  # just boot the existing image
-```
-
-### Linux / WSL
-
-```bash
-cd OSjeff
-cargo run --package os            # BIOS
-cargo run --package os -- uefi    # UEFI (needs OVMF)
-```
-
-### Flash to real hardware (USB stick)
-
-> **Warning:** `dd` erases the target disk. Double-check the device first.
-
-```bash
-sudo dd if=osjeff-bios.img of=/dev/sdX bs=4M status=progress && sync
-```
-
----
-
-## 🧪 Quality
-
-All logic lives in `osjeff_core` and is tested on the host:
-
-```bash
-cargo test-core                          # 201 tests
-cargo llvm-cov -p osjeff_core --summary-only  # coverage (~93% raw)
-cargo lint-kernel                        # bare-metal clippy, -D warnings
-cargo lint-host                          # host clippy, -D warnings
-```
-
-**201 tests** in `osjeff_core`; line coverage measured with `cargo llvm-cov`: **93%** (raw, includes the test modules themselves) and **~88%** counting production code only; 74% of branches. `kernel/` has no automated tests (see [`docs/audit/`](docs/audit/RELATORIO.md)).
-
-| Module (core) | Tests | Lines |
+| | Before | After |
 |---|---|---|
-| anim · window · heap · fs | 52 | 100% |
-| keymap · process · terminal | 51 | 98–99% |
-| net | 16 | 97% |
-| editor · clipboard · calc | 46 | 93–95% |
-| web · browser | 36 | 74–92% |
+| `master` build | did not compile | compiles, pinned toolchain |
+| Tests | 189 (old README: 152) | **379** |
+| `unsafe` without justification | 100 | **0** |
+| Fatal failure | silent `hlt` or reboot | **error screen + serial** |
+| Stack overflow | triple fault | reported `#DF` |
+| Compositor at idle | 83 iterations/s | **250** |
+| Key IRQ → pickup latency | ~11 ms | **~0.4 ms** |
+| Clock tick | 15.6 ms | **0.2 ms** |
+| Terminal keystroke frame | 26 ms | **13 ms** |
+| Disk after a read error | formatted | **untouched** |
+| Parsers vs hostile input | 3 trivial remote hangs | caps and fuzz |
 
-> Plain `cargo clippy` fails **on purpose**: the `no_std` kernel can't build on
-> the host (no unwinding). The aliases above scope the correct target.
-
----
-
-## 🗺️ Roadmap
-
-- [x] BIOS/UEFI boot + framebuffer
-- [x] Compositor, window manager and animations
-- [x] Terminal, editor and task manager
-- [x] IDT + PIC + PIT + exception handlers
-- [x] IRQ-driven input
-- [x] Heap allocator (`alloc`)
-- [x] **Preemptive** scheduler
-- [x] Damage-tracking compositor
-- [x] Free-block coalescing heap
-- [x] 32-bit render fast path + idle `hlt`
-- [x] Save FPU/SSE state (`fxsave`/`fxrstor`) on context switch
-- [x] Calculator + start panel (apps, restart, shut down)
-- [x] Copy/paste between apps (Ctrl+C / Ctrl+V)
-- [x] OJFS filesystem + file commands
-- [x] ATA PIO disk driver (persistence across reboots)
-- [x] Network stack (NE2000 + ARP/IPv4/ICMP, answers ping)
+Full report, with proof for each item and what was **not** worth doing:
+[`docs/audit/RELATORIO.md`](docs/audit/RELATORIO.md).
 
 ---
 
-## 📖 Deep dive
+## 🛡️ Security in two lines
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (Portuguese) for a subsystem-by-subsystem
-technical breakdown with diagrams.
+Defence is at the input: everything from the network, disk, HTML/CSS or `.wasm` goes
+through `unsafe`-free code with limits and fuzzing. What does **not** exist: isolation
+between apps and kernel (single ring 0), TLS certificate verification, and guard pages
+on secondary thread stacks. Details, attack scenarios and how to report:
+[`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md) · [`SECURITY.md`](SECURITY.md).
 
-## 👤 Author
+---
 
-**Jeferson Reis Almeida** — a portfolio project exploring low-level systems
-programming, kernel development and bare-metal Rust.
+## ⚠️ Known limits
 
-## 📄 License
+- **Single ring 0**: a bug anywhere is a bug in the whole kernel. The evolution path
+  (WebAssembly as the boundary, ring 3 only with a trigger) is in the
+  [isolation ADR](docs/audit/adr-isolamento.md).
+- **HTTPS does not verify certificates.** The UI says so ("Conexao nao verificada").
+- **The browser is tied to QEMU's SLIRP IP** (10.0.2.15); DHCP does not feed the TCP stack.
+- **No real-hardware testing.** BIOS gives 1280×720 at 24 bpp and UEFI needs at least
+  192 MB of RAM (the kernel BSS is ~91 MiB).
+- A panic in any thread still halts the whole machine.
 
-[MIT](LICENSE) © 2026 Jeferson Reis Almeida
+Prioritised list of what comes next: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+---
+
+## 📚 Documentation
+
+Most documents are in Portuguese.
+
+| | |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Technical deep dive into each subsystem |
+| [`docs/BUILDING.md`](docs/BUILDING.md) | Build, run, DOOM, common problems |
+| [`docs/TESTING.md`](docs/TESTING.md) | Tests, coverage, fuzzing, QEMU, performance |
+| [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md) | Trust boundaries, what is and isn't protected |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Next steps with acceptance criteria |
+| [`docs/audit/`](docs/audit/README.md) | Full audit, isolation ADR |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`SECURITY.md`](SECURITY.md) | How to contribute, history, how to report |
+
+---
+
+## 📁 Layout
+
+```
+OSjeff/
+├── osjeff_core/   # pure no_std logic, tested on the host (forbid(unsafe_code))
+├── kernel/        # bare-metal x86_64-unknown-none: drivers, scheduler, compositor, wasm
+├── os/            # builder: embeds the kernel and produces the BIOS/UEFI images
+├── fuzz/          # cargo-fuzz: net_parse, ojfs_parse, web_parse + regressions
+├── bench/         # microbenchmarks (criterion), outside the workspace
+├── wasm-apps/     # WebAssembly apps (snake default; plasma; cdemo; doom)
+├── tools/         # run.sh, qemu-headless.sh, verify-boot.sh, perf harness
+└── docs/          # architecture, guides, security, audit
+```
+
+---
+
+## 👤 Author and license
+
+**Jeferson Reis Almeida**: [MIT](LICENSE) © 2026.
