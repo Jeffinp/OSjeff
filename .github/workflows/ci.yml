@@ -56,6 +56,14 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo llvm-cov -p osjeff_core --branch --fail-under-lines 90 --summary-only
 
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
   # Non-blocking: catches the next toolchain break (like Step::forward_overflowing
   # in July 2026) before it lands on a pinned build.
   nightly-canary:

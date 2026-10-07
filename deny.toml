@@ -1,0 +1,29 @@
+# cargo-deny policy. Run: cargo deny check
+# (cargo tree/metadata need `-p kernel --target x86_64-unknown-none` because of
+# -Z bindeps; cargo-deny handles the workspace, but pass --all-features off.)
+
+[graph]
+targets = ["x86_64-unknown-none", "x86_64-unknown-linux-gnu"]
+
+[advisories]
+# bincode 1.3.3 is unmaintained (RUSTSEC-2025-0141) and only reaches the build
+# through the bootloader's build script; there is no fixed release.
+ignore = ["RUSTSEC-2025-0141"]
+
+[licenses]
+allow = [
+  "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause",
+  "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016", "Zlib", "0BSD",
+  "CC0-1.0", "MPL-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

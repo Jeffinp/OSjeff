@@ -3,6 +3,7 @@ name = "os"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+publish = false
 
 [features]
 # `cargo build --release -p os --features perf-trace` bakes the kernel's
