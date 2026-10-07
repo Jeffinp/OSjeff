@@ -3,8 +3,9 @@
 //!
 //! The keyboard (IRQ1) and mouse (IRQ12) ISRs push tagged bytes into a
 //! single-producer/single-consumer ring buffer that the main loop drains, so
-//! no busy-polling is needed. Fatal CPU exceptions halt with a frozen screen
-//! instead of triple-faulting (silent reboot), making bugs visible.
+//! no busy-polling is needed. Fatal CPU exceptions are reported on COM1 and on
+//! screen (see `crash`) instead of triple-faulting (silent reboot) or freezing
+//! without a word.
 
 use crate::io::{inb, outb};
 use crate::sync::RacyCell;
@@ -192,20 +193,38 @@ extern "x86-interrupt" fn mouse(_f: InterruptStackFrame) {
 
 extern "x86-interrupt" fn breakpoint(_f: InterruptStackFrame) {}
 
-/// Report a fatal CPU exception on COM1 (the only channel that still works
-/// when the compositor is dead), then freeze. Uses no allocation or locks.
+/// Report a fatal CPU exception on COM1 and on screen, then halt (`cli; hlt`).
+/// Uses no allocation or locks; see `crash::die`.
 fn fatal(name: &str, f: &InterruptStackFrame, code: Option<u64>) -> ! {
-    crate::serial_println!(
-        "FATAL EXCEPTION: {name} code={code:?} rip={:#x} rsp={:#x} rflags={:#x}",
-        f.instruction_pointer.as_u64(),
-        f.stack_pointer.as_u64(),
-        f.cpu_flags.bits()
-    );
-    halt()
+    fatal_msg(name, f, code, format_args!("unrecoverable CPU exception"))
+}
+
+fn fatal_msg(
+    name: &str,
+    f: &InterruptStackFrame,
+    code: Option<u64>,
+    msg: core::fmt::Arguments<'_>,
+) -> ! {
+    crate::crash::die(
+        crate::crash::Kind::Exception,
+        name,
+        msg,
+        Some(crate::crash::Frame {
+            rip: f.instruction_pointer.as_u64(),
+            rsp: f.stack_pointer.as_u64(),
+            rflags: f.cpu_flags.bits(),
+            code,
+        }),
+    )
 }
 
 extern "x86-interrupt" fn double_fault(f: InterruptStackFrame, code: u64) -> ! {
-    fatal("#DF double fault", &f, Some(code))
+    fatal_msg(
+        "#DF double fault",
+        &f,
+        Some(code),
+        format_args!("a fault occurred while delivering another one (stack overflow?)"),
+    )
 }
 
 extern "x86-interrupt" fn general_protection(f: InterruptStackFrame, code: u64) {
@@ -213,12 +232,16 @@ extern "x86-interrupt" fn general_protection(f: InterruptStackFrame, code: u64) 
 }
 
 extern "x86-interrupt" fn page_fault(f: InterruptStackFrame, code: PageFaultErrorCode) {
-    crate::serial_println!(
-        "FATAL EXCEPTION: #PF cr2={:#x} err={:?}",
-        x86_64::registers::control::Cr2::read_raw(),
-        code
-    );
-    fatal("#PF page fault", &f, Some(code.bits()))
+    fatal_msg(
+        "#PF page fault",
+        &f,
+        Some(code.bits()),
+        format_args!(
+            "page fault accessing {:#x}: {:?}",
+            x86_64::registers::control::Cr2::read_raw(),
+            code
+        ),
+    )
 }
 
 extern "x86-interrupt" fn divide_error(f: InterruptStackFrame) {
@@ -235,12 +258,6 @@ extern "x86-interrupt" fn segment_not_present(f: InterruptStackFrame, code: u64)
 
 extern "x86-interrupt" fn stack_segment_fault(f: InterruptStackFrame, code: u64) {
     fatal("#SS stack segment fault", &f, Some(code))
-}
-
-fn halt() -> ! {
-    loop {
-        x86_64::instructions::hlt();
-    }
 }
 
 // ---- 8259 PIC ----

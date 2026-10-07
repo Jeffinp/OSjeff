@@ -8,6 +8,7 @@ extern crate alloc;
 mod allocator;
 mod ata;
 mod boot;
+mod crash;
 mod desktop;
 mod fb;
 mod fetch;
@@ -106,10 +107,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         Some(fb) => fb,
         None => {
             serial_println!("FATAL: bootloader provided no framebuffer");
-            halt()
+            crash::halt()
         }
     };
     let info = framebuffer.info();
+    // From here on a panic or fatal exception paints an error page on this framebuffer.
+    crash::register_framebuffer(framebuffer.buffer_mut(), info);
     let n = framebuffer.buffer().len().min(MAX_BYTES);
 
     // Wipe the bootloader's on-screen debug log immediately, so the early init
@@ -933,17 +936,14 @@ fn heap_smoke_test() {
     core::hint::black_box(big.len());
 }
 
-fn halt() -> ! {
-    loop {
-        // SAFETY: `hlt` is legal in ring 0 and touches no memory; it only parks the CPU.
-        unsafe { core::arch::asm!("hlt", options(nomem, nostack, preserves_flags)) };
-    }
-}
-
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    // Serial is the one channel that survives a dead compositor; without this
-    // every panic (including allocation failure) was a silent `hlt`.
-    serial_println!("KERNEL PANIC: {info}");
-    halt();
+    // COM1 and the screen both get the report (see `crash`); without this every
+    // panic, including allocation failure, was a silent `hlt`.
+    crash::die(
+        crash::Kind::Panic,
+        "the kernel panicked",
+        format_args!("{info}"),
+        None,
+    )
 }
