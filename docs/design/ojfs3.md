@@ -66,7 +66,7 @@ flowchart LR
     BB --> IB["bitmap de inodes"]
     IB --> IT["tabela de inodes"]
     IT --> DATA["região de dados<br/>(dirs, extents, arquivos)"]
-    DATA --> SB2["último bloco<br/>cópia do superbloco"]
+    DATA --> SB2["ultimo bloco<br/>copia do superbloco"]
   end
   reservado --> v3
 ```
@@ -107,8 +107,8 @@ primário falhar, tenta a cópia do último bloco (posição derivada do tamanho
 dispositivo).
 
 Geometria: `jhdr = 1`, `payload = 2..2+J`, `bbitmap_start = 2+J`,
-`bbitmap_blocks = ceil(total/32736)`, depois o bitmap de inodes
-(`ceil(inode_count/32736)`), a tabela (`inode_count/8` blocos) e `data_start`. Padrões de
+`bbitmap_blocks = ceil(total/32704)`, depois o bitmap de inodes
+(`ceil(inode_count/32704)`), a tabela (`inode_count/8` blocos) e `data_start`. Padrões de
 `format`: `J = clamp(total/16, 24, 256)`, `inode_count = max(total/4, 64)` arredondado a
 múltiplo de 8 (um inode por 16 KiB), ambos sobrescrevíveis em `FormatOptions`.
 
@@ -116,7 +116,7 @@ múltiplo de 8 (um inode por 16 KiB), ambos sobrescrevíveis em `FormatOptions`.
 
 Um bit por bloco (`1` = usado), cobrindo **todo** o v3, inclusive superbloco, journal,
 bitmaps, tabela de inodes e a cópia final do superbloco (esses bits ficam sempre `1`).
-Cada bloco de bitmap: `[crc32:4][bits:4092]` = 32 736 bits. O bitmap de inodes tem o mesmo
+Cada bloco de bitmap: `[crc32:4][reservado:4][bits:4088]` = 32 704 bits (511 palavras de 64 bits). O bitmap de inodes tem o mesmo
 formato (bit `i` = inode `i+1`). No mount os dois são lidos inteiros para RAM; a alocação
 trabalha na RAM e só os blocos de bitmap tocados por uma transação entram no journal.
 Bits além do fim são tratados como usados.
@@ -135,7 +135,7 @@ Só inodes com bit `1` no bitmap são lidos; um inode livre pode conter qualquer
 | 8 | 4 | `uid` (reservado) |
 | 12 | 4 | `nlink` (sempre 1: não há hard links; campo para o futuro) |
 | 16 | 8 | `size` (bytes; em diretório, `nblocks*4096`) |
-| 24 | 8 | `ctime` |
+| 24 | 8 | `ctime` (**criação**; `rename` não muda) |
 | 32 | 8 | `mtime` |
 | 40 | 4 | `nblocks` (blocos de dados/diretório; soma dos `len` dos extents) |
 | 44 | 4 | `nextents` (total) |
@@ -145,7 +145,7 @@ Só inodes com bit `1` no bitmap são lidos; um inode livre pode conter qualquer
 | 60 | 4 | `trash_parent` (inode do diretório de origem, se na lixeira) |
 | 64 | 8 | `trash_time` (quando foi apagado) |
 | 72 | 1 | `trash_name_len` |
-| 76 | 4 | reservado |
+| 76 | 4 | `trash_pctime`: 32 bits baixos do `ctime` do diretório de origem (distingue um diretório que só reaproveitou o número de inode) |
 | 80 | 144 | 12 extents inline (12 B cada) |
 | 224 | 255 | `trash_name`: nome original, para restaurar |
 | 479 | 33 | zero |
@@ -217,15 +217,15 @@ sequenceDiagram
   participant FS as Fs3
   participant C as BlockCache
   participant D as Dispositivo
-  Note over FS: 1. aplica liberações adiadas ao bitmap; monta blocos de bitmap com CRC
-  FS->>C: 2. payload -> blocos 2..2+n do journal (escrita direta)
-  FS->>C: flush() (dados COW sujos + barreira)
-  C->>D: write dados + payload; FLUSH
-  Note over D: dados novos e payload duráveis; nada referencia ainda
-  FS->>D: 3. cabeçalho do journal (seq, targets, CRC) ; FLUSH
-  Note over D: PONTO DE COMMIT (1 bloco, validado por CRC)
-  FS->>D: 4. checkpoint: cada payload no destino ; FLUSH
-  FS->>D: 5. cabeçalho vazio (n = 0) ; FLUSH
+  Note over FS: 1. aplica as liberacoes adiadas ao bitmap e monta os blocos de bitmap com CRC
+  FS->>C: 2. payload nos blocos 2 a 2+n do journal (escrita direta)
+  FS->>C: flush dos dados COW sujos e barreira
+  C->>D: grava dados e payload, depois FLUSH
+  Note over D: dados novos e payload duraveis, nada os referencia ainda
+  FS->>D: 3. cabecalho do journal (seq, targets, CRC), depois FLUSH
+  Note over D: PONTO DE COMMIT (1 bloco validado por CRC)
+  FS->>D: 4. checkpoint, cada payload no seu destino, depois FLUSH
+  FS->>D: 5. cabecalho vazio (n = 0), depois FLUSH
 ```
 
 **Quedas, ponto a ponto** (provado com `FaultyDisk`, que corta a energia em **cada setor**
@@ -267,16 +267,16 @@ Limites de transação: uma transação cabe em J blocos de metadado distintos. 
 
 ```mermaid
 flowchart TD
-  A[ler superbloco primário] -->|CRC ruim| B[ler cópia do último bloco]
-  A -->|ok| C
-  B -->|ruim| X[BadSuperblock]
-  B -->|ok| C[validar geometria x tamanho do disco]
-  C --> D[ler cabeçalho do journal]
-  D -->|válido e n > 0| E[replay: regravar destinos, flush, limpar, flush]
-  D -->|vazio/inválido| F
-  E --> F[ler bitmaps na RAM, validar CRC e regiões reservadas]
-  F --> G[validar inodes 1 e 2: tipo, pai, entrada .trash]
-  G --> H[pronto]
+  A["ler superbloco primario"] -->|"CRC ruim"| B["ler copia do ultimo bloco"]
+  A -->|"ok"| C
+  B -->|"ruim"| X["BadSuperblock"]
+  B -->|"ok"| C["validar geometria contra o tamanho do disco"]
+  C --> D["ler cabecalho do journal"]
+  D -->|"valido e n maior que 0"| E["replay: regravar destinos, flush, limpar, flush"]
+  D -->|"vazio ou invalido"| F
+  E --> F["ler bitmaps na RAM, validar CRC e regioes reservadas"]
+  F --> G["validar inodes 1 e 2: tipo, pai, entrada .trash"]
+  G --> H["pronto"]
 ```
 
 O mount nunca panica nem entra em laço: todo campo vindo do disco é validado
@@ -298,17 +298,19 @@ as duas coisas).
 
 ```mermaid
 flowchart TD
-  S[migrate_v2 dev, imagem v2] --> P{imagem é OJF2 válida?}
-  P -->|não| E1[NotV2]
-  P -->|sim| Q{disco >= 1 MiB e cabe o conteúdo?}
-  Q -->|não| E2[TooSmall: nada escrito]
-  Q -->|sim| F[zera cópia do superbloco; grava journal, bitmaps; sem superbloco]
-  F --> G[cria raiz e .trash; recria pastas, arquivos e itens da lixeira em transações normais]
-  G --> H[fsck completo do v3 ainda sem superbloco]
-  H -->|falha| E3[Verify: v2 intacto]
-  H -->|ok| I[flush]
-  I --> J[PASSO FINAL: escreve superbloco primário, flush, cópia, flush]
-  J --> K[v3 válido; setores 0..127 nunca foram escritos]
+  S["migrate_v2 dev, imagem v2"] --> P{"imagem e OJF2 valida?"}
+  P -->|"nao"| E1["NotV2"]
+  P -->|"sim"| Z{"ja existe v3?"}
+  Z -->|"sim"| E0["AlreadyV3: nada escrito"]
+  Z -->|"nao"| Q{"disco com 1 MiB ou mais e o conteudo cabe?"}
+  Q -->|"nao"| E2["TooSmall: nada escrito"]
+  Q -->|"sim"| F["zera copia do superbloco, grava journal e bitmaps, sem superbloco"]
+  F --> G["cria raiz e .trash, recria pastas, arquivos e itens da lixeira em transacoes normais"]
+  G --> H["fsck completo do v3 ainda sem superbloco"]
+  H -->|"falha"| E3["Verify: v2 intacto"]
+  H -->|"ok"| I["flush"]
+  I --> J["PASSO FINAL: superbloco primario, flush, copia, flush"]
+  J --> K["v3 valido, setores 0 a 127 nunca foram escritos"]
 ```
 
 O superbloco é a **única** coisa que torna o v3 visível; é escrito por último e cabe num
@@ -334,15 +336,18 @@ fora de faixa, arquivo, lixeira ou em ciclo vão para a raiz.
   receber operações de escrita por caminho: `Reserved`). `trash(path)` **move** a entrada
   para `/.trash` (uma troca de entrada, O(1), também para pastas inteiras), guardando origem
   e nome original no inode; nome repetido na lixeira ganha `~2`, `~3`.
-  `trash_restore(nome)` devolve ao pai de origem (se ele ainda estiver vivo, senão à raiz;
-  `Exists` se o nome estiver ocupado). `remove`/`rmdir`/`remove_all`/`trash_purge`/
+  `trash_restore(nome, now)` devolve ao pai de origem (se ele ainda estiver vivo **e for o mesmo
+  diretório**: mesmo inode e mesmo `ctime`, senão à raiz; `Exists` se o nome estiver ocupado). `remove`/`rmdir`/`remove_all`/`trash_purge`/
   `empty_trash` são apagar permanente. `readdir("/")` esconde `.trash`.
 * **Rename/move**: destino existente → `Exists` (nada é sobrescrito); mover pasta para
   dentro de si mesma → `InvalidMove`; origem = destino é no-op.
 * **Escrita além do fim**: o intervalo vira buraco (zeros, sem blocos). `truncate` maior
   também. `append` = escrita em `size`.
-* **Tempo**: o chamador passa `now` (segundos Unix) nas operações que mudam algo; o
-  diretório pai tem `mtime` atualizado quando entradas mudam.
+* **Tempo**: o chamador passa `now` (segundos Unix) nas operações que criam ou alteram
+  conteúdo; `ctime` é o instante de criação e nunca muda; `mtime` do arquivo muda em
+  `write_at`/`append`/`truncate`; o `mtime` do diretório muda quando entradas são
+  inseridas (`create`, `mkdir`, `rename`, `trash`, `restore`). `remove`, `rmdir`,
+  `remove_all`, `trash_purge` e `empty_trash` não recebem `now` e não alteram `mtime`.
 * **Concorrência**: nenhuma; `&mut self`. O kernel serializa o acesso.
 
 ## 8. API pública
@@ -358,7 +363,8 @@ pub trait BlockDevice {
     fn flush(&mut self) -> Result<(), IoError>;
 }                               // também implementado para &mut T
 pub struct RamDisk;             // new(sectors), from_bytes, as_bytes, counters()
-pub struct FaultyDisk<D>;       // crash_after(events), CrashMode, fail_*_nth, bad ranges
+pub struct FaultyDisk<D>;       // crash_after(events), CrashMode, fail_*_nth,
+                                // set_fail_{read,write}_at, bad ranges, read_calls()
 
 // osjeff_core::blockcache
 pub struct BlockCache<D: BlockDevice>;  // new(dev, base_lba, nblocks, capacity)
@@ -370,11 +376,13 @@ pub enum Detected { V3, V2, Blank, Unknown }
 pub fn read_v2_image<D: BlockDevice>(dev: &mut D) -> Result<Vec<u8>, IoError>;
 pub fn migrate_v2<D: BlockDevice>(dev: &mut D, v2_image: &[u8], opts: &FormatOptions)
     -> Result<MigrationReport, MigrateError>;
+pub enum MigrateError { NotV2, AlreadyV3, TooSmall, Io(IoError), Fs(FsError), Verify }
 
 pub struct FormatOptions { pub uuid: [u8; 16], pub now: u64, pub inode_count: Option<u32>, pub journal_blocks: Option<u32> }
 impl<D: BlockDevice> Fs3<D> {
     pub fn format(dev: D, opts: &FormatOptions) -> Result<Self, FsError>;
-    pub fn mount(dev: D) -> Result<Self, FsError>;
+    pub fn mount(dev: D) -> Result<Self, FsError>;               // cache de 128 blocos
+    pub fn mount_with(dev: D, cache_blocks: usize) -> Result<Self, FsError>;
     pub fn mount_verified(dev: D) -> Result<Self, FsError>;       // mount + fsck
     pub fn into_device(self) -> D;
     // namespace
@@ -400,13 +408,14 @@ impl<D: BlockDevice> Fs3<D> {
     // lixeira
     pub fn trash(&mut self, path: &P, now: u64) -> Result<(), FsError>;
     pub fn trash_list(&mut self) -> Result<Vec<TrashEntry>, FsError>;
-    pub fn trash_restore(&mut self, trash_name: &[u8]) -> Result<Vec<u8>, FsError>;
+    pub fn trash_restore(&mut self, trash_name: &[u8], now: u64) -> Result<Vec<u8>, FsError>;
     pub fn trash_purge(&mut self, trash_name: &[u8]) -> Result<(), FsError>;
     pub fn empty_trash(&mut self) -> Result<(), FsError>;
     // sistema
     pub fn statfs(&self) -> StatFs;
     pub fn sync(&mut self) -> Result<(), FsError>;
     pub fn fsck(&mut self) -> Result<FsckReport, FsError>;
+    pub fn cache_stats(&self) -> CacheStats;
 }
 ```
 
@@ -418,7 +427,11 @@ inclui as barreiras de flush). `sync()` só força uma barreira extra no disposi
 ## 9. Integração prevista no kernel (onda seguinte, fora desta frente)
 
 1. Implementar `BlockDevice` sobre `ata.rs` (hoje só lê/escreve a imagem inteira; precisa de
-   `read_sectors(lba, ..)`/`write_sectors(lba, ..)` genéricos, LBA28, e do `CMD_FLUSH`).
+   `read_sectors(lba, ..)`/`write_sectors(lba, ..)` genéricos em LBA28 e do `CMD_FLUSH`
+   em `flush`). O comando ATA PIO move no máximo 255 setores: o impl deve **fatiar**
+   transferências maiores (o cache pede até 16 blocos = 128 setores ao descarregar e
+   leituras sequenciais longas chegam a 256 blocos = 2048 setores de uma vez). `sector_count`
+   vem do `IDENTIFY` (`osjeff_core::hw::ata::parse_identify`).
 2. No boot: `detect` → `V3`: `Fs3::mount`; `V2`: `read_v2_image` + `migrate_v2` (e depois
    `mount`); `TooSmall`: seguir no v2; `Blank`: `Fs3::format`; `Unknown`: não escrever.
 3. O disco de 64 KiB do `run.ps1` precisa crescer para ≥ 1 MiB (recomendado 64 MiB) para
@@ -431,11 +444,24 @@ inclui as barreiras de flush). `sync()` só força uma barreira extra no disposi
 | Bloco | 4096 B |
 | Tamanho do v3 | até `u32::MAX` blocos (16 TiB); mínimo 1 MiB de disco (2048 setores) |
 | Nome | 255 B |
-| Arquivo | `lblk` em `u32`: até ~16 TiB; limitado por espaço e por J (fragmentação extrema → `TxTooLarge`) |
+| Arquivo | `lblk` em `u32`: até ~16 TiB; limitado por espaço e por J (fragmentação extrema → `TxTooLarge`); `read_file` recusa mais de 64 MiB (`TooBig`) |
 | Entradas por pasta | só espaço (e `inode_count` no total) |
 | Inodes | `inode_count` fixo no `format` |
 | Extents inline / por bloco indireto | 12 / 339 |
 | Blocos de metadado por transação | J (24..256) |
+
+## 10.1 Limitações conhecidas
+
+* **Sobrescrever precisa de espaço livre**: como os dados são COW, reescrever um arquivo
+  (ou truncá-lo a um tamanho que não é múltiplo de 4 KiB) num disco 100% cheio devolve
+  `NoSpace`; remover arquivos funciona sempre.
+* **Uma operação = um commit** (4 barreiras de flush, ~2x a escrita em metadado).
+  Operações pequenas e muito frequentes pagam isso; um modo de commit em grupo é trabalho futuro.
+* Operações de várias etapas (`remove_all`, `trash_purge` de pasta, `empty_trash`) são
+  uma transação por item (folhas primeiro): uma queda no meio deixa uma árvore válida e menor,
+  não o estado "antes" nem "depois" do conjunto.
+* Busca em diretório é linear; sem hard links; `mode`/`uid` não são verificados.
+* Um disco v2 de 64 KiB não comporta o v3 (ver §3).
 
 ## 11. Verificação
 
@@ -452,3 +478,41 @@ inclui as barreiras de flush). `sync()` só força uma barreira extra no disposi
   memória, com `fsck` a cada N passos; imagem corrompida bit a bit; fuzz
   (`fuzz/fuzz_targets/ojfs3_parse.rs`, `ojfs3_ops.rs`). Números de desempenho e de
   amplificação de escrita: ver `docs/TESTING.md` e o exemplo `examples/ojfs3_bench.rs`.
+
+## 12. Desempenho medido
+
+`cargo run --release -p osjeff_core --example ojfs3_bench` (RamDisk no host, CPU de uma
+máquina de nuvem compartilhada: vale pela proporção e pelas contagens de setores, que
+são exatas; a latência de um disco real vem por cima):
+
+| Cenário | Resultado |
+|---|---|
+| escrever 8 MiB numa chamada | 547 MiB/s; 16 464 setores escritos para 16 384 de dados (x1,005) |
+| ler 8 MiB em blocos de 64 KiB | 5,5 GiB/s (16 384 setores lidos, sem releitura) |
+| anexar 8 MiB de 4 KiB em 4 KiB | 77 MiB/s; 56 setores escritos por anexo de 8 setores (x7) |
+| criar 1000 arquivos vazios numa pasta | 14 mil arquivos/s; 80 setores escritos e 4 flushes por criação |
+| gravar 1000 arquivos de 100 B | 9,3 mil arquivos/s; 104 setores por arquivo (100 B de dados) |
+| `lookup` numa pasta de 2000 entradas | 9 us |
+
+Setores (lidos / escritos / flushes) por operação num FS novo de 8 MiB:
+
+| Operação | lidos | escritos | flushes |
+|---|---:|---:|---:|
+| `create` | 8 | 64 | 4 |
+| `mkdir` | 0 | 64 | 4 |
+| `write_file` 100 B | 0 | 88 | 4 |
+| `write_file` 4 KiB | 0 | 88 | 4 |
+| `write_file` 64 KiB | 8 | 224 | 4 |
+| sobrescrever 1 KiB no meio de 64 KiB | 16 | 64 | 4 |
+| `rename` | 0 | 48 | 4 |
+| `trash` / `restore` | 0 / 8 | 80 / 64 | 4 / 4 |
+| `remove` | 0 | 80 | 4 |
+| `read_file` 64 KiB (cache frio) | 112 | 0 | 0 |
+
+Leitura: **escrita grande é quase sem amplificação** (os dados não passam pelo journal,
+só o metadado); **operação pequena escreve 6 a 11 blocos de 4 KiB** (payload no journal,
+registro de commit, cópia nos destinos, registro de retirada) mais 4 barreiras de flush.
+Num ATA PIO sob QEMU isso é aceitável (centenas de operações por segundo), mas o custo
+dominante é o número de flushes. Otimizações futuras, se o kernel precisar: commit em grupo
+(várias operações por transação, durabilidade só no `sync`) e dispensar o registro de
+retirada quando a próxima transação o sobrescreve de qualquer forma.
