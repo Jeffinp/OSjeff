@@ -231,7 +231,7 @@ impl Desktop {
             self.draw_browser_error(c, content, bs);
             return;
         };
-        self.paint_web_page(c, page, content, bs.scroll);
+        self.paint_web_page(c, page, content, bs.scroll, bs);
 
         // The response hit the size cap: say so on the page instead of showing
         // a silently cut document.
@@ -278,6 +278,7 @@ impl Desktop {
         page: &osjeff_core::web::Page,
         content: Rect,
         scroll: i32,
+        bs: &BrowserState,
     ) {
         use osjeff_core::web::Cmd;
         let top = scroll;
@@ -286,6 +287,15 @@ impl Desktop {
         let oy = content.y - top;
         for cmd in &page.cmds {
             match cmd {
+                Cmd::Image { x, y, w, h, idx } => {
+                    if *y + *h < top || *y > bottom {
+                        continue;
+                    }
+                    let key = bs.img_keys.get(*idx).and_then(|k| k.as_deref());
+                    if let Some(img) = key.and_then(|k| bs.images.image(k)) {
+                        paint_picture(c, img, ox + *x, oy + *y, *w, *h, content);
+                    }
+                }
                 Cmd::Rect { x, y, w, h, color } => {
                     if *y + *h < top || *y > bottom {
                         continue;
@@ -942,6 +952,39 @@ impl Desktop {
                 };
                 c.put(px + col, py + row, color);
             }
+        }
+    }
+}
+
+/// Copy `img` into the box `(x, y, w, h)` (screen coordinates), clipped to `clip`. A picture whose
+/// size is not the box's (the layout moved on, an image just arrived) is sampled nearest-neighbour.
+fn paint_picture(
+    c: &mut Canvas,
+    img: &osjeff_core::image::Image,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    clip: Rect,
+) {
+    let (iw, ih) = (img.width() as i64, img.height() as i64);
+    let (w, h) = (i64::from(w.max(1)), i64::from(h.max(1)));
+    let px = img.pixels();
+    let y0 = y.max(clip.y);
+    let y1 = (y + h as i32).min(clip.bottom());
+    let x0 = x.max(clip.x);
+    let x1 = (x + w as i32).min(clip.right());
+    for sy in y0..y1 {
+        let iy = ((i64::from(sy - y) * ih / h).min(ih - 1)) as usize;
+        let row = &px[iy * iw as usize..(iy + 1) * iw as usize];
+        for sx in x0..x1 {
+            let ix = ((i64::from(sx - x) * iw / w).min(iw - 1)) as usize;
+            let p = row[ix];
+            c.put(
+                sx as usize,
+                sy as usize,
+                Color::rgb((p >> 16) as u8, (p >> 8) as u8, p as u8),
+            );
         }
     }
 }

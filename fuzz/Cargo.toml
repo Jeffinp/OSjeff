@@ -101,3 +101,10 @@ path = "fuzz_targets/app_sandbox.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "html_img_form"
+path = "fuzz_targets/html_img_form.rs"
+test = false
+doc = false
+bench = false

@@ -208,12 +208,20 @@ impl Kind {
 /// HTML body so the page can be laid out again when the window is resized.
 pub(crate) struct BrowserState {
     pub browser: osjeff_core::Browser,
+    /// The parsed document (kept so the page can be laid out again without parsing).
+    pub doc: Option<osjeff_core::web::Doc>,
     pub page: Option<osjeff_core::web::Page>,
     pub scroll: i32,
-    /// Cleaned response body the page was rendered from (empty when none).
-    pub body: Vec<u8>,
     /// Viewport width `page` was laid out for.
     pub layout_w: i32,
+    /// Pictures of the page being shown (and a few recent ones).
+    pub images: osjeff_core::web::imgcache::ImageCache,
+    /// Cache key of each `page.images` entry (`None`: not fetchable).
+    pub img_keys: Vec<Option<String>>,
+    /// The picture the fetcher is working on.
+    pub img_inflight: Option<String>,
+    /// Page zoom in percent.
+    pub zoom: u16,
 }
 
 /// An editor window: the buffer and the file it was opened from / saves to.
@@ -371,10 +379,14 @@ impl App {
             Kind::Calculator => App::Calculator(Box::new(Calc::new())),
             Kind::Browser => App::Browser(Box::new(BrowserState {
                 browser: osjeff_core::Browser::new(),
+                doc: None,
                 page: None,
                 scroll: 0,
-                body: Vec::new(),
                 layout_w: 0,
+                images: osjeff_core::web::imgcache::ImageCache::new(),
+                img_keys: Vec::new(),
+                img_inflight: None,
+                zoom: 100,
             })),
             Kind::WasmApp => App::Wasm(Box::new(WasmWin {
                 id: 0,

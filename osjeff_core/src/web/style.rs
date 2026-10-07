@@ -13,7 +13,7 @@ use alloc::vec::Vec;
 pub(crate) const UA_CSS: &str = "
 html,body,div,p,h1,h2,h3,h4,h5,h6,ul,ol,header,footer,article,section,nav,main,blockquote,pre,table,tr,form,figure,figcaption{display:block}
 li{display:list-item}
-script,style,head,title,meta,link{display:none}
+script,style,head,title,meta,link,select,option,textarea,datalist{display:none}
 h1{font-size:30px;font-weight:bold;margin:16px}
 h2{font-size:25px;font-weight:bold;margin:14px}
 h3{font-size:21px;font-weight:bold;margin:12px}
@@ -75,7 +75,8 @@ fn default_display(tag: &str) -> Disp {
         | "header" | "footer" | "article" | "section" | "nav" | "main" | "blockquote" | "pre"
         | "table" | "tr" | "form" | "figure" | "figcaption" => Disp::Block,
         "li" => Disp::ListItem,
-        "script" | "style" | "head" | "title" | "meta" | "link" => Disp::None,
+        "script" | "style" | "head" | "title" | "meta" | "link" | "select" | "option"
+        | "textarea" | "datalist" => Disp::None,
         _ => Disp::Inline,
     }
 }

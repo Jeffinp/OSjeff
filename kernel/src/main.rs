@@ -814,20 +814,30 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // (non-blocking — the worker thread does the slow fetch while we keep
         // rendering the "Carregando" state), and pick up a finished result.
         if fetch::is_idle() {
-            let mut url = [0u8; 256];
+            let mut url = [0u8; 512];
             if let Some(len) = desk.browser_take_request(&mut url) {
                 let mut host = [0u8; 96];
                 let hlen = desk.browser_insecure_host(&mut host);
                 fetch::try_post(&url[..len], &host[..hlen]);
+            } else if let Some((len, fit_w)) = desk.browser_next_image(&mut url) {
+                // Nothing else is waiting: fetch the next picture of the page.
+                if !fetch::try_post_image(&url[..len], &[], fit_w) {
+                    desk.browser_image_done(Err(osjeff_core::web::imgcache::ImgFail::Failed));
+                    browser_redraw = true;
+                }
             }
         } else if fetch::worker_dead() {
             // The fetcher thread died: fail the navigation now instead of leaving the
             // browser on "Carregando" forever.
-            let mut url = [0u8; 256];
+            let mut url = [0u8; 512];
             if desk.browser_take_request(&mut url).is_some() {
                 desk.browser_fail(osjeff_core::browser::FailReason::WorkerDied);
                 browser_redraw = true;
             }
+        }
+        if let Some(res) = fetch::take_image_result() {
+            desk.browser_image_done(res);
+            browser_redraw = true;
         }
         if let Some(result) = fetch::take_result() {
             match result {

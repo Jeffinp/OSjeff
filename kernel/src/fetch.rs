@@ -28,7 +28,8 @@ use crate::sync::RacyCell;
 use crate::{netstack, serial_println};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use osjeff_core::browser::{Conn, FailReason};
+use osjeff_core::browser::{Conn, FailReason, MAX_RESPONSE_BYTES};
+use osjeff_core::web::imgcache::{self, ImgFail, Loaded as ImgLoaded};
 
 const IDLE: u8 = 0;
 const REQUESTED: u8 = 1;
@@ -55,6 +56,14 @@ static REQ_INSECURE: RacyCell<[u8; INSECURE_CAP]> = RacyCell::new([0; INSECURE_C
 static REQ_INSECURE_LEN: RacyCell<usize> = RacyCell::new(0);
 const INSECURE_CAP: usize = 96;
 static RESULT: RacyCell<Option<FetchResult>> = RacyCell::new(None);
+/// What the current request is for: a page (`KIND_PAGE`) or one picture of a page.
+static REQ_KIND: AtomicU8 = AtomicU8::new(KIND_PAGE);
+const KIND_PAGE: u8 = 0;
+const KIND_IMAGE: u8 = 1;
+/// Column width the downloaded picture is scaled to (image requests).
+static REQ_FIT_W: AtomicUsize = AtomicUsize::new(0);
+/// Outcome of the last image request (decoded on the fetcher thread, so the UI never waits).
+static IMG_RESULT: RacyCell<Option<Result<ImgLoaded, ImgFail>>> = RacyCell::new(None);
 
 /// A fetched page plus what the browser needs to describe it honestly.
 pub struct Loaded {
@@ -110,10 +119,30 @@ pub fn wake_worker() {
 /// `insecure_host` (usually empty) is the one host the user allowed to proceed
 /// despite a certificate error, for this session.
 pub fn try_post(url: &[u8], insecure_host: &[u8]) -> bool {
+    post(url, insecure_host, KIND_PAGE, 0)
+}
+
+/// Queue the download of one picture for the page being shown; it is decoded and scaled to
+/// `fit_w` pixels wide on the worker. Collect the answer with [`take_image_result`].
+pub fn try_post_image(url: &[u8], insecure_host: &[u8], fit_w: usize) -> bool {
+    post(url, insecure_host, KIND_IMAGE, fit_w)
+}
+
+fn post(url: &[u8], insecure_host: &[u8], kind: u8, fit_w: usize) -> bool {
     if STATE.load(Ordering::Acquire) != IDLE || worker_dead() {
         return false;
     }
     if OFFLINE.load(Ordering::Acquire) {
+        if kind == KIND_IMAGE {
+            // SAFETY: as below: IDLE and no worker; published by the Release store of DONE.
+            unsafe {
+                *IMG_RESULT.get() = Some(Err(ImgFail::Failed));
+            }
+            REQ_KIND.store(KIND_IMAGE, Ordering::Relaxed);
+            STATE.store(DONE, Ordering::Release);
+            return true;
+        }
+        REQ_KIND.store(KIND_PAGE, Ordering::Relaxed);
         // SAFETY: STATE is IDLE (checked above) and no worker exists (OFFLINE), so nothing else touches
         // RESULT; the Release store of DONE below publishes it to `take_result`.
         unsafe {
@@ -134,6 +163,8 @@ pub fn try_post(url: &[u8], insecure_host: &[u8]) -> bool {
         ib[..m].copy_from_slice(&insecure_host[..m]);
         *REQ_INSECURE_LEN.get() = m;
     }
+    REQ_KIND.store(kind, Ordering::Relaxed);
+    REQ_FIT_W.store(fit_w, Ordering::Relaxed);
     STATE.store(REQUESTED, Ordering::Release);
     let tid = TID.load(Ordering::Acquire);
     if tid != usize::MAX {
@@ -146,12 +177,13 @@ pub fn try_post(url: &[u8], insecure_host: &[u8]) -> bool {
 /// while nothing is ready.
 pub fn take_result() -> Option<FetchResult> {
     let state = STATE.load(Ordering::Acquire);
+    let is_page = REQ_KIND.load(Ordering::Relaxed) == KIND_PAGE;
     if matches!(state, REQUESTED | RUNNING) && worker_dead() {
         // The worker died with a request in flight: it will never answer.
         STATE.store(WORKER_DEAD, Ordering::Release);
-        return Some(Err(FailReason::WorkerDied));
+        return is_page.then_some(Err(FailReason::WorkerDied));
     }
-    if state != DONE {
+    if state != DONE || !is_page {
         return None;
     }
     // SAFETY: STATE == DONE (Acquire) means the worker finished writing RESULT and will not touch it
@@ -159,6 +191,26 @@ pub fn take_result() -> Option<FetchResult> {
     let r = unsafe { (*RESULT.get()).take() };
     STATE.store(IDLE, Ordering::Release);
     Some(r.unwrap_or(Err(FailReason::Network)))
+}
+
+/// If a picture request has finished, return its outcome and reset to idle.
+pub fn take_image_result() -> Option<Result<ImgLoaded, ImgFail>> {
+    let state = STATE.load(Ordering::Acquire);
+    if REQ_KIND.load(Ordering::Relaxed) != KIND_IMAGE {
+        return None;
+    }
+    if matches!(state, REQUESTED | RUNNING) && worker_dead() {
+        STATE.store(WORKER_DEAD, Ordering::Release);
+        return Some(Err(ImgFail::Failed));
+    }
+    if state != DONE {
+        return None;
+    }
+    // SAFETY: STATE == DONE (Acquire): the worker finished writing IMG_RESULT and will not touch it
+    // until the compositor sets IDLE below (the compositor is the only caller).
+    let r = unsafe { (*IMG_RESULT.get()).take() };
+    STATE.store(IDLE, Ordering::Release);
+    Some(r.unwrap_or(Err(ImgFail::Failed)))
 }
 
 /// Worker thread entry. Processes one queued request at a time and, while idle,
@@ -190,16 +242,31 @@ pub extern "C" fn worker() -> ! {
                 let n = *REQ_INSECURE_LEN.get();
                 (&*REQ_INSECURE.get())[..n].to_vec()
             };
+            let kind = REQ_KIND.load(Ordering::Relaxed);
+            let fit_w = REQ_FIT_W.load(Ordering::Relaxed);
             // SAFETY: NET is set once, before this thread exists (`fetch::init`), and used only by this
             // worker, one request at a time, so the `&mut` is unique.
-            let result = match unsafe { (*NET.get()).as_mut() } {
-                Some(netd) => fetch_url(netd.net_mut(), &url, &insecure),
-                None => Err(FailReason::Network),
-            };
-            // SAFETY: STATE is RUNNING here; the compositor only touches RESULT after seeing DONE, which is
-            // stored (Release) right after this write.
-            unsafe {
-                *RESULT.get() = Some(result);
+            let netd = unsafe { (*NET.get()).as_mut() };
+            if kind == KIND_IMAGE {
+                let result = match netd {
+                    Some(netd) => fetch_image(netd.net_mut(), &url, &insecure, fit_w),
+                    None => Err(ImgFail::Failed),
+                };
+                // SAFETY: STATE is RUNNING; the compositor reads IMG_RESULT only after seeing DONE
+                // (Release store right after this write).
+                unsafe {
+                    *IMG_RESULT.get() = Some(result);
+                }
+            } else {
+                let result = match netd {
+                    Some(netd) => fetch_url(netd.net_mut(), &url, &insecure, MAX_RESPONSE_BYTES),
+                    None => Err(FailReason::Network),
+                };
+                // SAFETY: STATE is RUNNING here; the compositor only touches RESULT after seeing DONE, which is
+                // stored (Release) right after this write.
+                unsafe {
+                    *RESULT.get() = Some(result);
+                }
             }
             STATE.store(DONE, Ordering::Release);
         } else {
@@ -242,7 +309,7 @@ fn resync_clock_if_needed(net: &mut netstack::Net) {
 /// [`osjeff_core::redirect::MAX_REDIRECTS`] redirects. Returns the final page,
 /// or why the navigation failed. Redirect policy (scheme kept, https -> http
 /// refused, loops, bad `Location` values) lives in `osjeff_core::redirect`.
-fn fetch_url(net: &mut netstack::Net, url: &[u8], insecure_host: &[u8]) -> FetchResult {
+fn fetch_url(net: &mut netstack::Net, url: &[u8], insecure_host: &[u8], cap: usize) -> FetchResult {
     use osjeff_core::browser::{header_value, parse_url, status_code};
     use osjeff_core::redirect::Redirects;
     let mut cur: Vec<u8> = url.to_vec();
@@ -270,9 +337,9 @@ fn fetch_url(net: &mut netstack::Net, url: &[u8], insecure_host: &[u8]) -> Fetch
             resync_clock_if_needed(net);
             // Validation is skipped only for the one host the user allowed.
             let allow = !insecure_host.is_empty() && u.host().eq_ignore_ascii_case(insecure_host);
-            net.https_get(host, path, u.port, allow)?
+            net.https_get(host, path, u.port, allow, cap)?
         } else {
-            (net.http_get(host, path, u.port)?, Conn::Plain)
+            (net.http_get(host, path, u.port, cap)?, Conn::Plain)
         };
 
         let code = status_code(&r.data).unwrap_or(0);
@@ -304,4 +371,47 @@ fn fetch_url(net: &mut netstack::Net, url: &[u8], insecure_host: &[u8]) -> Fetch
             truncated: r.truncated,
         });
     }
+}
+
+/// Download one picture (same stack, same redirect rules; at most `MAX_IMAGE_BYTES`) and turn it
+/// into column-sized pixels here, on the worker, so the compositor never decodes.
+fn fetch_image(
+    net: &mut netstack::Net,
+    url: &[u8],
+    insecure_host: &[u8],
+    fit_w: usize,
+) -> Result<ImgLoaded, ImgFail> {
+    let r = match fetch_url(
+        net,
+        url,
+        insecure_host,
+        imgcache::MAX_IMAGE_BYTES + 8 * 1024,
+    ) {
+        Ok(r) => r,
+        Err(_) => return Err(ImgFail::Failed),
+    };
+    let code = osjeff_core::browser::status_code(&r.data).unwrap_or(0);
+    let name = core::str::from_utf8(url).unwrap_or("?");
+    if code != 200 {
+        serial_println!("img: status {} for {}", code, name);
+        return Err(ImgFail::Failed);
+    }
+    if r.truncated {
+        return Err(ImgFail::TooBig);
+    }
+    let body = osjeff_core::browser::page_body(&r.data);
+    drop(r);
+    let out = imgcache::decode_for_page(&body, fit_w);
+    match &out {
+        Ok(l) => serial_println!(
+            "img: {} -> {}x{} (shown {}x{})",
+            name,
+            l.orig_w,
+            l.orig_h,
+            l.img.width(),
+            l.img.height()
+        ),
+        Err(e) => serial_println!("img: {} failed: {:?}", name, e),
+    }
+    out
 }

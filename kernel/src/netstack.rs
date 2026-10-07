@@ -24,7 +24,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 use embedded_tls::blocking::*;
-use osjeff_core::browser::{Conn, FailReason, MAX_RESPONSE_BYTES, append_capped};
+use osjeff_core::browser::{Conn, FailReason, append_capped};
 use osjeff_core::rng::WeakMixer;
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
@@ -316,7 +316,13 @@ impl Net {
 
     /// Blocking HTTP/1.1 GET over plain TCP. Returns the raw response bytes,
     /// at most [`MAX_RESPONSE_BYTES`] of them (the same cap as the TLS path).
-    pub fn http_get(&mut self, host: &str, path: &str, port: u16) -> Result<Fetched, FailReason> {
+    pub fn http_get(
+        &mut self,
+        host: &str,
+        path: &str,
+        port: u16,
+        cap: usize,
+    ) -> Result<Fetched, FailReason> {
         let ip = self.resolve_or_fail(host)?;
         self.connect(ip, port)?;
 
@@ -343,7 +349,7 @@ impl Net {
                 let _ = s.recv(|data| {
                     // Consume everything the socket holds (so it keeps
                     // draining) but keep only what fits under the cap.
-                    truncated |= append_capped(&mut out, data, MAX_RESPONSE_BYTES);
+                    truncated |= append_capped(&mut out, data, cap);
                     (data.len(), ())
                 });
             }
@@ -357,7 +363,7 @@ impl Net {
         }
         self.abort_conn();
         if truncated {
-            crate::serial_println!("http: response truncated at {} bytes", MAX_RESPONSE_BYTES);
+            crate::serial_println!("http: response truncated at {} bytes", cap);
         }
         if out.is_empty() {
             return Err(if timed_out {
@@ -417,6 +423,7 @@ impl Net {
         path: &str,
         port: u16,
         allow_insecure: bool,
+        cap: usize,
     ) -> Result<(Fetched, Conn), FailReason> {
         let ip = self.resolve_or_fail(host)?;
         self.connect(ip, port)?;
@@ -513,7 +520,7 @@ impl Net {
             match tls.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    if append_capped(&mut out, &buf[..n], MAX_RESPONSE_BYTES) {
+                    if append_capped(&mut out, &buf[..n], cap) {
                         truncated = true; // cap a runaway page
                         break;
                     }
@@ -526,7 +533,7 @@ impl Net {
         // and we can touch the socket again to tear the connection down.
         self.abort_conn();
         if truncated {
-            crate::serial_println!("https: response truncated at {} bytes", MAX_RESPONSE_BYTES);
+            crate::serial_println!("https: response truncated at {} bytes", cap);
         }
         if out.is_empty() {
             Err(FailReason::Network)

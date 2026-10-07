@@ -714,11 +714,13 @@ impl Desktop {
         let content_w = BrowserChrome::of(rect).content.w;
         let body = osjeff_core::browser::page_body(resp);
         if let Some(b) = self.browser_state_mut(id) {
-            b.page = Some(osjeff_core::web::render(&body, content_w));
-            b.body = body;
-            b.layout_w = content_w;
+            b.doc = Some(osjeff_core::web::Doc::parse(&body));
+            b.images.begin_page();
+            b.img_inflight = None;
             b.scroll = 0;
             b.browser.loaded_with(conn, truncated);
+            b.layout_w = content_w;
+            layout_browser(b, content_w, true);
         }
     }
 
@@ -728,7 +730,7 @@ impl Desktop {
             && let Some(b) = self.browser_state_mut(id)
         {
             b.page = None;
-            b.body = Vec::new();
+            b.doc = None;
             b.browser.fail_with(reason);
         }
     }
@@ -769,13 +771,115 @@ impl Desktop {
             && b.page.is_some()
             && b.layout_w != content.w
         {
-            let page = osjeff_core::web::render(&b.body, content.w);
-            let max = (page.height - content.h).max(0);
-            b.scroll = b.scroll.clamp(0, max);
-            b.page = Some(page);
             b.layout_w = content.w;
+            layout_browser(b, content.w, false);
+            let max = b.page.as_ref().map_or(0, |p| (p.height - content.h).max(0));
+            b.scroll = b.scroll.clamp(0, max);
         }
     }
+
+    /// The next picture of the page that has to be downloaded, if the fetcher is free: copies its
+    /// URL into `out` and returns the length and the column width to scale it to. Inline `data:`
+    /// pictures are decoded right here (they are small) and never reach the fetcher.
+    pub fn browser_next_image(&mut self, out: &mut [u8]) -> Option<(usize, usize)> {
+        let id = self.browser_id()?;
+        let rect = self.wm.get(id).map(|w| w.rect)?;
+        let content = BrowserChrome::of(rect).content;
+        let b = self.browser_state_mut(id)?;
+        if b.img_inflight.is_some() {
+            return None;
+        }
+        let fit_w = (content.w - 24).max(16) as usize;
+        let mut inline_done = false;
+        let mut result = None;
+        while let Some((key, data)) = b.images.next_pending() {
+            if let Some(uri) = data {
+                let r = osjeff_core::web::imgcache::decode_data_uri(&uri, fit_w);
+                b.images.finish(&key, r);
+                inline_done = true;
+                continue;
+            }
+            let n = key.len().min(out.len());
+            out[..n].copy_from_slice(&key.as_bytes()[..n]);
+            b.img_inflight = Some(key);
+            result = Some((n, fit_w));
+            break;
+        }
+        if inline_done {
+            layout_browser(b, content.w, false);
+        }
+        result
+    }
+
+    /// A picture request finished: store it and lay the page out again (images change sizes).
+    pub fn browser_image_done(
+        &mut self,
+        res: Result<osjeff_core::web::imgcache::Loaded, osjeff_core::web::imgcache::ImgFail>,
+    ) {
+        let Some(id) = self.browser_id() else {
+            return;
+        };
+        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
+            return;
+        };
+        let content = BrowserChrome::of(rect).content;
+        if let Some(b) = self.browser_state_mut(id)
+            && let Some(key) = b.img_inflight.take()
+        {
+            b.images.finish(&key, res);
+            layout_browser(b, content.w, false);
+            let max = b.page.as_ref().map_or(0, |p| (p.height - content.h).max(0));
+            b.scroll = b.scroll.clamp(0, max);
+        }
+    }
+}
+
+/// Lay the document of `b` out for `width` pixels with the current zoom and whatever the image
+/// cache knows. `register` (a new page) first lays out with the images unknown to learn which
+/// pictures the page has, asks the cache for them, then lays out again.
+fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
+    use osjeff_core::web::imgcache::{PageImages, image_key};
+    use osjeff_core::web::{Cmd, Layout};
+    let Some(doc) = &b.doc else {
+        return;
+    };
+    let base = b.browser.nav_url().to_vec();
+    let lay = |images: &osjeff_core::web::imgcache::ImageCache| {
+        doc.layout(&Layout {
+            width,
+            zoom: b.zoom,
+            images: &PageImages {
+                cache: images,
+                base: &base,
+            },
+        })
+    };
+    let mut page = lay(&b.images);
+    if register {
+        b.img_keys.clear();
+        for r in &page.images {
+            let key = image_key(&base, &r.src);
+            if let Some(k) = &key {
+                let data = (k.starts_with("data:#")).then_some(r.src.as_str());
+                b.images.want(k, data);
+            }
+            b.img_keys.push(key);
+        }
+        if page.images.len() > osjeff_core::web::imgcache::MAX_PAGE_IMAGES {
+            page = lay(&b.images);
+        }
+    }
+    // Make each stored picture exactly the size of its box so painting is a plain copy.
+    let mut changed = false;
+    for c in &page.cmds {
+        if let Cmd::Image { w, h, idx, .. } = c
+            && let Some(Some(k)) = b.img_keys.get(*idx)
+        {
+            changed |= b.images.fit_to(k, *w as usize, *h as usize);
+        }
+    }
+    let _ = changed;
+    b.page = Some(page);
 }
 
 mod apps;

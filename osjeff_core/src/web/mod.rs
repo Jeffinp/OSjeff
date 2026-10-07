@@ -12,12 +12,20 @@
 
 mod css;
 mod dom;
+pub mod form;
+pub mod imgcache;
 mod layout;
 mod style;
+#[cfg(test)]
+mod tests_img_form;
+pub mod textops;
 
 pub use css::{Decl, MAX_RULES, MAX_SELECTORS, Rule, Selector, Specificity, Stylesheet, parse_css};
 pub use dom::{Element, MAX_DEPTH, MAX_NODES, Node, parse_html};
-pub use layout::{Cmd, LinkHit, MAX_LINKS, Page, render};
+pub use layout::{
+    Cmd, Doc, FieldBox, ImgRef, Layout, LinkHit, MAX_IMAGES, MAX_LINKS, MAX_ZOOM, MIN_ZOOM, Page,
+    ZOOM_STEPS, render, zoom_in, zoom_out,
+};
 
 // ---- colors ----
 

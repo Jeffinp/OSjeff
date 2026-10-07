@@ -19,6 +19,7 @@ pub mod appfs;
 pub mod appinstall;
 pub mod appmanifest;
 pub mod appnet;
+pub mod base64;
 pub mod blockcache;
 pub mod blockdev;
 pub mod bmp;

@@ -377,6 +377,164 @@ fn decode_text(bytes: &[u8]) -> String {
     out
 }
 
+/// Named entities that decode to one character (the Latin letters Portuguese
+/// pages use, plus the markup-significant ones). `nbsp` becomes a plain space.
+fn entity_char(name: &str) -> Option<char> {
+    const LATIN: [(&str, char); 50] = [
+        ("aacute", '\u{e1}'),
+        ("agrave", '\u{e0}'),
+        ("acirc", '\u{e2}'),
+        ("atilde", '\u{e3}'),
+        ("auml", '\u{e4}'),
+        ("eacute", '\u{e9}'),
+        ("egrave", '\u{e8}'),
+        ("ecirc", '\u{ea}'),
+        ("euml", '\u{eb}'),
+        ("iacute", '\u{ed}'),
+        ("igrave", '\u{ec}'),
+        ("icirc", '\u{ee}'),
+        ("iuml", '\u{ef}'),
+        ("oacute", '\u{f3}'),
+        ("ograve", '\u{f2}'),
+        ("ocirc", '\u{f4}'),
+        ("otilde", '\u{f5}'),
+        ("ouml", '\u{f6}'),
+        ("uacute", '\u{fa}'),
+        ("ugrave", '\u{f9}'),
+        ("ucirc", '\u{fb}'),
+        ("uuml", '\u{fc}'),
+        ("ccedil", '\u{e7}'),
+        ("ntilde", '\u{f1}'),
+        ("Aacute", '\u{c1}'),
+        ("Agrave", '\u{c0}'),
+        ("Acirc", '\u{c2}'),
+        ("Atilde", '\u{c3}'),
+        ("Auml", '\u{c4}'),
+        ("Eacute", '\u{c9}'),
+        ("Egrave", '\u{c8}'),
+        ("Ecirc", '\u{ca}'),
+        ("Euml", '\u{cb}'),
+        ("Iacute", '\u{cd}'),
+        ("Igrave", '\u{cc}'),
+        ("Icirc", '\u{ce}'),
+        ("Iuml", '\u{cf}'),
+        ("Oacute", '\u{d3}'),
+        ("Ograve", '\u{d2}'),
+        ("Ocirc", '\u{d4}'),
+        ("Otilde", '\u{d5}'),
+        ("Ouml", '\u{d6}'),
+        ("Uacute", '\u{da}'),
+        ("Ugrave", '\u{d9}'),
+        ("Ucirc", '\u{db}'),
+        ("Uuml", '\u{dc}'),
+        ("Ccedil", '\u{c7}'),
+        ("Ntilde", '\u{d1}'),
+        ("euro", '\u{20ac}'),
+        ("copy", '\u{a9}'),
+    ];
+    match name {
+        "amp" => Some('&'),
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "quot" => Some('"'),
+        "apos" => Some('\''),
+        "nbsp" => Some(' '),
+        _ => {
+            if let [b'#', rest @ ..] = name.as_bytes() {
+                let cp = if let [b'x' | b'X', hex @ ..] = rest {
+                    u32::from_str_radix(core::str::from_utf8(hex).ok()?, 16).ok()?
+                } else {
+                    core::str::from_utf8(rest).ok()?.parse::<u32>().ok()?
+                };
+                // Controls would let a page smuggle line breaks into a URL or field.
+                if cp < 0x20 || (0x7f..0xa0).contains(&cp) {
+                    return None;
+                }
+                return char::from_u32(cp);
+            }
+            LATIN.iter().find(|(n, _)| *n == name).map(|&(_, c)| c)
+        }
+    }
+}
+
+/// Decode the entities of an attribute value (`&amp;` in a URL, `&eacute;` in a
+/// field value) to real characters, keeping every other character (UTF-8
+/// included) as it is.
+pub(crate) fn decode_attr(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'&' {
+            let mut j = i + 1;
+            while j < b.len() && j < i + 12 && b[j] != b';' {
+                j += 1;
+            }
+            if j < b.len()
+                && b[j] == b';'
+                && let Some(ch) = s.get(i + 1..j).and_then(entity_char)
+            {
+                out.push(ch);
+                i = j + 1;
+                continue;
+            }
+        }
+        // `i` always sits on a char boundary: it only advances by whole characters.
+        let ch = s[i..].chars().next().unwrap_or('\u{fffd}');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// Fold `s` to the bitmap font's printable ASCII for display: accented
+/// letters lose their accent, whitespace and controls collapse to one space,
+/// anything without an ASCII look-alike is dropped.
+pub(crate) fn fold_display(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_space = false;
+    for ch in s.chars() {
+        let cp = ch as u32;
+        let folded = if ch.is_whitespace() || cp < 0x20 || cp == 0x7f {
+            Some(b' ')
+        } else {
+            crate::browser::fold_ascii(cp)
+        };
+        match folded {
+            Some(b' ') => {
+                if !last_space {
+                    out.push(' ');
+                }
+                last_space = true;
+            }
+            Some(b) => {
+                out.push(b as char);
+                last_space = false;
+            }
+            None => {}
+        }
+    }
+    out
+}
+
+/// The text of `nodes` (depth-limited), without markup.
+pub(crate) fn text_content(nodes: &[Node]) -> String {
+    fn walk(nodes: &[Node], depth: usize, out: &mut String) {
+        if depth > 12 || out.len() > 4096 {
+            return;
+        }
+        for n in nodes {
+            match n {
+                Node::Text(t) => out.push_str(t),
+                Node::Element(e) => walk(&e.children, depth + 1, out),
+            }
+        }
+    }
+    let mut s = String::new();
+    walk(nodes, 0, &mut s);
+    s
+}
+
 #[cfg(test)]
 mod html_tests {
     use super::*;

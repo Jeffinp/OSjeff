@@ -9,7 +9,7 @@
 use crate::Key;
 
 /// Max bytes of a URL (address bar + resolved navigation target).
-pub const URL_CAP: usize = 220;
+pub const URL_CAP: usize = 480;
 /// Max host length.
 pub const HOST_CAP: usize = 80;
 
