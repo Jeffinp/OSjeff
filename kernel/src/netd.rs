@@ -56,6 +56,8 @@ const BOOT_BUDGET_MS: u64 = 2000;
 /// ARP resolution for a ping: retries and the wait for each.
 const ARP_TRIES: u32 = 3;
 const ARP_WAIT_MS: u64 = 300;
+/// Next hops remembered for ping.
+const ARP_SLOTS: usize = 4;
 /// How long a learned next-hop MAC is trusted.
 const ARP_TTL_MS: u64 = 60_000;
 /// Echo payload size (the classic 56 bytes).
@@ -263,8 +265,8 @@ pub struct Netd {
     net: Net,
     lease: Lease,
     ping: PingJob,
-    /// Last learned `(ip, mac, learned_ms)` of a ping next hop.
-    arp: Option<(Ipv4, Mac, u64)>,
+    /// Next hops learned for ping, `(ip, mac, learned_ms)`; the oldest is replaced.
+    arp: [Option<(Ipv4, Mac, u64)>; ARP_SLOTS],
     ping_seq: u16,
     ping_id: u16,
 }
@@ -385,7 +387,7 @@ impl Netd {
             net: Net::new(port, &cfg),
             lease,
             ping: PingJob::Idle,
-            arp: None,
+            arp: [None; ARP_SLOTS],
             ping_seq: 0,
             ping_id: (seed >> 8) as u16,
         };
@@ -405,7 +407,7 @@ impl Netd {
             Change::Bound(cfg) | Change::Reconfigured(cfg) => {
                 self.net.reconfigure(Some(&cfg));
                 STATS.set_config(Some(&cfg), now);
-                self.arp = None;
+                self.arp = [None; ARP_SLOTS];
                 log_lease("DHCP lease", &cfg);
                 let mac = self.net.port().mac();
                 let mut frame = [0u8; 64];
@@ -423,7 +425,7 @@ impl Netd {
                 self.net.reconfigure(None);
                 STATS.set_config(None, now);
                 STATS.on_dhcp_lost();
-                self.arp = None;
+                self.arp = [None; ARP_SLOTS];
                 serial_println!("net: DHCP lease expired; address dropped, searching again");
             }
         }
@@ -502,7 +504,7 @@ impl Netd {
         }
         let now = now_ms();
         if let Some((ip, mac)) = net::parse_arp_reply(frame, our_ip) {
-            self.arp = Some((ip, mac, now));
+            self.arp_learn(ip, mac, now);
             return;
         }
         if let PingJob::Waiting(p) = &mut self.ping
@@ -513,11 +515,29 @@ impl Netd {
         }
     }
 
+    /// Remember `ip -> mac`: refresh an existing entry, else take a free slot, else
+    /// replace the oldest.
+    fn arp_learn(&mut self, ip: Ipv4, mac: Mac, now: u64) {
+        let slot = self
+            .arp
+            .iter()
+            .position(|e| e.is_some_and(|(i, _, _)| i == ip))
+            .or_else(|| self.arp.iter().position(Option::is_none))
+            .unwrap_or_else(|| {
+                (0..ARP_SLOTS)
+                    .min_by_key(|&i| self.arp[i].map_or(0, |(_, _, t)| t))
+                    .unwrap_or(0)
+            });
+        self.arp[slot] = Some((ip, mac, now));
+    }
+
     /// Cached next-hop MAC, if still fresh.
     fn arp_lookup(&self, hop: Ipv4, now: u64) -> Option<Mac> {
         self.arp
-            .filter(|&(ip, _, t)| ip == hop && now.saturating_sub(t) < ARP_TTL_MS)
-            .map(|(_, m, _)| m)
+            .iter()
+            .flatten()
+            .find(|&&(ip, _, t)| ip == hop && now.saturating_sub(t) < ARP_TTL_MS)
+            .map(|&(_, m, _)| m)
     }
 
     fn send_echo(&mut self, cfg: &NetConfig, target: Ipv4, hop_mac: Mac, timeout_ms: u32) {
