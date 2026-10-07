@@ -30,6 +30,7 @@ pub mod rng;
 pub mod terminal;
 pub mod web;
 pub mod window;
+pub mod wm;
 
 pub use anim::Anim;
 pub use browser::Browser;

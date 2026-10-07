@@ -334,21 +334,11 @@ impl Desktop {
     // ---- focus / z-order ----
 
     pub(crate) fn focused(&self) -> Option<usize> {
-        for i in (0..WIN_COUNT).rev() {
-            let w = self.order[i];
-            if self.windows[w].active() {
-                return Some(w);
-            }
-        }
-        None
+        osjeff_core::wm::focused(&self.order, |w| self.windows[w].active())
     }
 
     pub(crate) fn bring_to_front(&mut self, win: usize) {
-        let pos = self.order.iter().position(|&w| w == win).unwrap_or(0);
-        for i in pos..WIN_COUNT - 1 {
-            self.order[i] = self.order[i + 1];
-        }
-        self.order[WIN_COUNT - 1] = win;
+        osjeff_core::wm::bring_to_front(&mut self.order, win);
     }
 
     pub(crate) fn open(&mut self, win: usize) {
@@ -384,20 +374,15 @@ impl Desktop {
     }
 
     pub(crate) fn window_of_pid(&self, pid: u16) -> Option<usize> {
-        if pid == 0 {
-            return None;
-        }
-        (0..WIN_COUNT).find(|&w| self.windows[w].pid == pid)
+        let pids: [u16; WIN_COUNT] = core::array::from_fn(|w| self.windows[w].pid);
+        osjeff_core::wm::window_of_pid(&pids, pid)
     }
 
     pub(crate) fn topmost_at(&self, px: i32, py: i32) -> Option<usize> {
-        for i in (0..WIN_COUNT).rev() {
-            let w = self.order[i];
-            if self.windows[w].active() && self.windows[w].rect.contains(px, py) {
-                return Some(w);
-            }
-        }
-        None
+        osjeff_core::wm::topmost_at(&self.order, px, py, |w| {
+            let win = &self.windows[w];
+            win.active().then_some(win.rect)
+        })
     }
 
     // ---- animation & scheduler ----
