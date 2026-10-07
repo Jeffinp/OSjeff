@@ -72,6 +72,35 @@ pub fn unix_time(year: u32, month: u8, day: u8, h: u8, m: u8, s: u8) -> Option<u
         4 | 6 | 9 | 11 => 30,
         2 => {
             if leap {
+
+// ------------------------------------------------------------ date and time
+
+/// A calendar date.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Date {
+    pub y: u16,
+    pub m: u8,
+    pub d: u8,
+}
+
+/// A calendar date and a time of day.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DateTime {
+    pub date: Date,
+    pub time: Time,
+}
+
+pub const fn is_leap(y: u16) -> bool {
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
+}
+
+/// Days in month `m` (1..=12) of year `y`; 0 for an invalid month.
+pub const fn days_in_month(y: u16, m: u8) -> u8 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if is_leap(y) {
                 29
             } else {
                 28
@@ -92,6 +121,107 @@ pub fn unix_time(year: u32, month: u8, day: u8, h: u8, m: u8, s: u8) -> Option<u
 /// Raw CMOS registers describing the current date and time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct RawDateTime {
+
+        _ => 0,
+    }
+}
+
+/// Days since 1970-01-01 of a civil date (proleptic Gregorian).
+pub fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// The civil date `days` days after 1970-01-01.
+pub fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+impl DateTime {
+    /// Earliest and latest year the editor accepts.
+    pub const MIN_YEAR: u16 = 1970;
+    pub const MAX_YEAR: u16 = 2099;
+
+    /// Is every field in range (a real calendar day, 00:00:00..=23:59:59,
+    /// year in [`MIN_YEAR`](Self::MIN_YEAR)..=[`MAX_YEAR`](Self::MAX_YEAR))?
+    pub fn is_valid(&self) -> bool {
+        let Date { y, m, d } = self.date;
+        (Self::MIN_YEAR..=Self::MAX_YEAR).contains(&y)
+            && (1..=12).contains(&m)
+            && d >= 1
+            && d <= days_in_month(y, m)
+            && self.time.h < 24
+            && self.time.m < 60
+            && self.time.s < 60
+    }
+
+    /// Seconds since 1970-01-01 00:00:00 (the fields are taken as they are).
+    pub fn to_epoch(&self) -> i64 {
+        let days = days_from_civil(self.date.y as i64, self.date.m as i64, self.date.d as i64);
+        days * 86_400 + self.time.h as i64 * 3600 + self.time.m as i64 * 60 + self.time.s as i64
+    }
+
+    pub fn from_epoch(secs: i64) -> DateTime {
+        let days = secs.div_euclid(86_400);
+        let rem = secs.rem_euclid(86_400);
+        let (y, m, d) = civil_from_days(days);
+        DateTime {
+            date: Date {
+                y: y.clamp(0, u16::MAX as i64) as u16,
+                m: m as u8,
+                d: d as u8,
+            },
+            time: Time {
+                h: (rem / 3600) as u8,
+                m: (rem / 60 % 60) as u8,
+                s: (rem % 60) as u8,
+            },
+        }
+    }
+
+    /// This instant moved by `minutes` (negative = earlier), carrying into the date.
+    pub fn shifted(&self, minutes: i32) -> DateTime {
+        DateTime::from_epoch(self.to_epoch() + minutes as i64 * 60)
+    }
+
+    /// Day of the week, 0 = Sunday.
+    pub fn weekday(&self) -> u8 {
+        let days = days_from_civil(self.date.y as i64, self.date.m as i64, self.date.d as i64);
+        (days + 4).rem_euclid(7) as u8
+    }
+}
+
+/// Time-zone offsets are minutes east of UTC, within UTC-12:00..=UTC+14:00.
+pub const TZ_MIN: i32 = -12 * 60;
+pub const TZ_MAX: i32 = 14 * 60;
+
+/// UTC (what the CMOS RTC holds) to local time.
+pub fn utc_to_local(utc: DateTime, tz_minutes: i32) -> DateTime {
+    utc.shifted(tz_minutes.clamp(TZ_MIN, TZ_MAX))
+}
+
+/// Local time (what the user types) to UTC for the CMOS RTC.
+pub fn local_to_utc(local: DateTime, tz_minutes: i32) -> DateTime {
+    local.shifted(-tz_minutes.clamp(TZ_MIN, TZ_MAX))
+}
+
+/// The raw CMOS registers that make up the date and time.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RawRtc {
     pub sec: u8,
     pub min: u8,
     pub hour: u8,
@@ -123,6 +253,105 @@ pub fn decode_unix(raw: RawDateTime, regb: u8) -> Option<u64> {
         t.m,
         t.s,
     )
+
+    pub year: u8,
+    /// Register 0x32; some firmware leaves it 0.
+    pub century: u8,
+}
+
+fn from_reg(v: u8, regb: u8) -> u8 {
+    if regb & REGB_BINARY == 0 {
+        bcd_to_bin(v)
+    } else {
+        v
+    }
+}
+
+fn to_reg(v: u8, regb: u8) -> u8 {
+    if regb & REGB_BINARY == 0 {
+        (v / 10) << 4 | (v % 10)
+    } else {
+        v
+    }
+}
+
+/// Decode the date and time registers (UTC) honouring BCD / binary and
+/// 12 / 24-hour mode. A missing or implausible century reads as 20.
+pub fn decode_datetime(raw: RawRtc, regb: u8) -> DateTime {
+    let t = decode(raw.sec, raw.min, raw.hour, regb, 0);
+    let c = from_reg(raw.century, regb);
+    let century = if (19..=21).contains(&c) { c as u16 } else { 20 };
+    DateTime {
+        date: Date {
+            y: century * 100 + from_reg(raw.year, regb) as u16 % 100,
+            m: from_reg(raw.month, regb).clamp(1, 12),
+            d: from_reg(raw.day, regb).clamp(1, 31),
+        },
+        time: t,
+    }
+}
+
+/// Encode `dt` (UTC) into the registers for the RTC mode `regb`. The hour uses
+/// the 12-hour form with the PM flag in bit 7 when the RTC is in that mode.
+pub fn encode_datetime(dt: &DateTime, regb: u8) -> RawRtc {
+    let h = dt.time.h % 24;
+    let hour = if regb & REGB_24H != 0 {
+        to_reg(h, regb)
+    } else {
+        let pm = h >= 12;
+        let h12 = match h % 12 {
+            0 => 12,
+            n => n,
+        };
+        to_reg(h12, regb) | if pm { 0x80 } else { 0 }
+    };
+    RawRtc {
+        sec: to_reg(dt.time.s % 60, regb),
+        min: to_reg(dt.time.m % 60, regb),
+        hour,
+        day: to_reg(dt.date.d, regb),
+        month: to_reg(dt.date.m, regb),
+        year: to_reg((dt.date.y % 100) as u8, regb),
+        century: to_reg((dt.date.y / 100) as u8, regb),
+    }
+}
+
+/// Longest [`format_clock`] output (`"03:45:12 PM"`).
+pub const CLOCK_LEN: usize = 11;
+
+/// Format the clock pill text: `"15:45:12"` in 24-hour mode, `"03:45:12 PM"`
+/// in 12-hour mode. Returns the length written.
+pub fn format_clock(t: Time, clock24: bool, out: &mut [u8; CLOCK_LEN]) -> usize {
+    let two = |out: &mut [u8; CLOCK_LEN], i: usize, v: u8| {
+        out[i] = b'0' + (v / 10) % 10;
+        out[i + 1] = b'0' + v % 10;
+    };
+    let h = if clock24 {
+        t.h
+    } else {
+        match t.h % 12 {
+            0 => 12,
+            n => n,
+        }
+    };
+    two(out, 0, h);
+    out[2] = b':';
+    two(out, 3, t.m);
+    out[5] = b':';
+    two(out, 6, t.s);
+    if clock24 {
+        8
+    } else {
+        out[8] = b' ';
+        out[9] = if t.h >= 12 { b'P' } else { b'A' };
+        out[10] = b'M';
+        CLOCK_LEN
+    }
+}
+
+/// Length [`format_clock`] writes for the given mode (to size the clock pill).
+pub const fn clock_len(clock24: bool) -> usize {
+    if clock24 { 8 } else { CLOCK_LEN }
 }
 
 #[cfg(test)]
@@ -258,6 +487,103 @@ mod tests {
                         prev = t;
                     }
                 }
+
+    // ------------------------------------------------------- date and time
+
+    fn dt(y: u16, m: u8, d: u8, h: u8, mi: u8, s: u8) -> DateTime {
+        DateTime {
+            date: Date { y, m, d },
+            time: Time { h, m: mi, s },
+        }
+    }
+
+    #[test]
+    fn leap_years_and_month_lengths() {
+        assert!(is_leap(2000) && is_leap(2024) && !is_leap(1900) && !is_leap(2023));
+        assert_eq!(days_in_month(2024, 2), 29);
+        assert_eq!(days_in_month(2023, 2), 28);
+        assert_eq!(days_in_month(2023, 4), 30);
+        assert_eq!(days_in_month(2023, 12), 31);
+        assert_eq!(days_in_month(2023, 13), 0);
+    }
+
+    #[test]
+    fn epoch_known_values() {
+        assert_eq!(dt(1970, 1, 1, 0, 0, 0).to_epoch(), 0);
+        assert_eq!(dt(2000, 1, 1, 0, 0, 0).to_epoch(), 946_684_800);
+        assert_eq!(dt(2024, 2, 29, 12, 0, 0).to_epoch(), 1_709_208_000);
+        assert_eq!(
+            DateTime::from_epoch(1_709_208_000),
+            dt(2024, 2, 29, 12, 0, 0)
+        );
+        assert_eq!(DateTime::from_epoch(-1), dt(1969, 12, 31, 23, 59, 59));
+    }
+
+    #[test]
+    fn epoch_roundtrips_over_decades() {
+        let mut t = dt(1970, 1, 1, 0, 0, 0).to_epoch();
+        while t < dt(2100, 1, 1, 0, 0, 0).to_epoch() {
+            let d = DateTime::from_epoch(t);
+            assert_eq!(d.to_epoch(), t);
+            assert!(d.date.m >= 1 && d.date.m <= 12 && d.date.d >= 1);
+            assert!(d.date.d <= days_in_month(d.date.y, d.date.m));
+            t += 86_400 * 7 + 13;
+        }
+    }
+
+    #[test]
+    fn weekdays() {
+        assert_eq!(dt(1970, 1, 1, 0, 0, 0).weekday(), 4); // Thursday
+        assert_eq!(dt(2024, 2, 29, 0, 0, 0).weekday(), 4);
+        assert_eq!(dt(2000, 1, 1, 0, 0, 0).weekday(), 6); // Saturday
+        assert_eq!(dt(2026, 10, 7, 0, 0, 0).weekday(), 3); // Wednesday
+    }
+
+    #[test]
+    fn validity() {
+        assert!(dt(2024, 2, 29, 23, 59, 59).is_valid());
+        assert!(!dt(2023, 2, 29, 0, 0, 0).is_valid());
+        assert!(!dt(2024, 13, 1, 0, 0, 0).is_valid());
+        assert!(!dt(2024, 0, 1, 0, 0, 0).is_valid());
+        assert!(!dt(2024, 4, 31, 0, 0, 0).is_valid());
+        assert!(!dt(2024, 1, 1, 24, 0, 0).is_valid());
+        assert!(!dt(2024, 1, 1, 0, 60, 0).is_valid());
+        assert!(!dt(1969, 12, 31, 0, 0, 0).is_valid());
+        assert!(!dt(2100, 1, 1, 0, 0, 0).is_valid());
+    }
+
+    #[test]
+    fn timezone_carries_into_the_date() {
+        // 00:30 UTC on March 1st 2024 is still Feb 29th evening in Brasilia.
+        let local = utc_to_local(dt(2024, 3, 1, 0, 30, 0), -180);
+        assert_eq!(local, dt(2024, 2, 29, 21, 30, 0));
+        assert_eq!(local_to_utc(local, -180), dt(2024, 3, 1, 0, 30, 0));
+        // New year, half-hour zone (India).
+        assert_eq!(
+            utc_to_local(dt(2023, 12, 31, 20, 0, 0), 330),
+            dt(2024, 1, 1, 1, 30, 0)
+        );
+        // Out-of-range offsets are clamped.
+        assert_eq!(
+            utc_to_local(dt(2024, 1, 1, 0, 0, 0), 100_000),
+            dt(2024, 1, 1, 14, 0, 0)
+        );
+    }
+
+    #[test]
+    fn registers_roundtrip_in_every_mode() {
+        let samples = [
+            dt(2024, 2, 29, 0, 0, 0),
+            dt(2024, 2, 29, 12, 0, 0),
+            dt(2025, 12, 31, 23, 59, 59),
+            dt(2007, 7, 4, 9, 5, 7),
+            dt(2099, 1, 1, 13, 30, 15),
+            dt(1999, 12, 31, 1, 2, 3),
+        ];
+        for regb in [BIN24, BCD24, BCD12, BIN12] {
+            for s in samples {
+                let raw = encode_datetime(&s, regb);
+                assert_eq!(decode_datetime(raw, regb), s, "regb={regb:#x} {s:?}");
             }
         }
     }
@@ -295,6 +621,44 @@ mod tests {
     fn decode_unix_ignores_the_timezone_and_defaults_the_century() {
         // No century register (0) or garbage: 20xx.
         let mut raw = RawDateTime {
+
+    fn bcd_encoding_is_packed_decimal() {
+        let raw = encode_datetime(&dt(2024, 12, 31, 23, 59, 58), BCD24);
+        assert_eq!(
+            raw,
+            RawRtc {
+                sec: 0x58,
+                min: 0x59,
+                hour: 0x23,
+                day: 0x31,
+                month: 0x12,
+                year: 0x24,
+                century: 0x20
+            }
+        );
+    }
+
+    #[test]
+    fn twelve_hour_registers_carry_the_pm_flag() {
+        // 00:15 -> 12:15 AM, 12:15 -> 12:15 PM, 13:00 -> 1:00 PM.
+        assert_eq!(encode_datetime(&dt(2024, 1, 1, 0, 15, 0), BCD12).hour, 0x12);
+        assert_eq!(
+            encode_datetime(&dt(2024, 1, 1, 12, 15, 0), BCD12).hour,
+            0x12 | 0x80
+        );
+        assert_eq!(
+            encode_datetime(&dt(2024, 1, 1, 13, 0, 0), BCD12).hour,
+            0x01 | 0x80
+        );
+        assert_eq!(
+            encode_datetime(&dt(2024, 1, 1, 13, 0, 0), BIN12).hour,
+            1 | 0x80
+        );
+    }
+
+    #[test]
+    fn missing_century_reads_as_2000s() {
+        let raw = RawRtc {
             sec: 0,
             min: 0,
             hour: 0,
@@ -309,5 +673,53 @@ mod tests {
         // Garbage date: None.
         raw.month = 0x13;
         assert_eq!(decode_unix(raw, BCD24), None);
+
+            year: 0x24,
+            century: 0,
+        };
+        assert_eq!(decode_datetime(raw, BCD24).date.y, 2024);
+        let junk = RawRtc {
+            century: 0xFF,
+            ..raw
+        };
+        assert_eq!(decode_datetime(junk, BCD24).date.y, 2024);
+    }
+
+    #[test]
+    fn garbage_registers_never_panic_and_stay_in_range() {
+        for b in 0..=255u8 {
+            for regb in [BIN24, BCD24, BCD12, BIN12] {
+                let raw = RawRtc {
+                    sec: b,
+                    min: b,
+                    hour: b,
+                    day: b,
+                    month: b,
+                    year: b,
+                    century: b,
+                };
+                let d = decode_datetime(raw, regb);
+                assert!((1..=12).contains(&d.date.m));
+                assert!((1..=31).contains(&d.date.d));
+                assert!(d.time.h < 24);
+            }
+        }
+    }
+
+    #[test]
+    fn clock_text_24h_and_12h() {
+        let mut out = [0u8; CLOCK_LEN];
+        let n = format_clock(Time { h: 15, m: 4, s: 9 }, true, &mut out);
+        assert_eq!(&out[..n], b"15:04:09");
+        let n = format_clock(Time { h: 15, m: 4, s: 9 }, false, &mut out);
+        assert_eq!(&out[..n], b"03:04:09 PM");
+        let n = format_clock(Time { h: 0, m: 0, s: 0 }, false, &mut out);
+        assert_eq!(&out[..n], b"12:00:00 AM");
+        let n = format_clock(Time { h: 12, m: 30, s: 0 }, false, &mut out);
+        assert_eq!(&out[..n], b"12:30:00 PM");
+        let n = format_clock(Time { h: 9, m: 5, s: 1 }, false, &mut out);
+        assert_eq!(&out[..n], b"09:05:01 AM");
+        assert_eq!(clock_len(true), 8);
+        assert_eq!(clock_len(false), CLOCK_LEN);
     }
 }
