@@ -42,7 +42,14 @@ fn files(c: &mut Canvas, x: usize, y: usize, size: usize) {
     // Folder tab.
     c.fill_round_rect(x + pad, y + pad, fw / 2, size / 6, 3, theme::ACCENT_2);
     // White sheet peeking above the folder body.
-    c.fill_round_rect(x + pad + fw / 8, fy - size / 16, fw - fw / 4, fh, 3, theme::WHITE);
+    c.fill_round_rect(
+        x + pad + fw / 8,
+        fy - size / 16,
+        fw - fw / 4,
+        fh,
+        3,
+        theme::WHITE,
+    );
     // Folder body.
     c.fill_round_rect(x + pad, fy, fw, fh, 4, theme::ACCENT);
 }

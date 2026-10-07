@@ -182,7 +182,10 @@ pub fn identify(base: u16, ctrl: u16, slave: bool) -> Option<DiskInfo> {
         model[i * 2] = (w >> 8) as u8;
         model[i * 2 + 1] = (w & 0xFF) as u8;
     }
-    let model_len = model.iter().rposition(|&b| b != b' ' && b != 0).map_or(0, |p| p + 1);
+    let model_len = model
+        .iter()
+        .rposition(|&b| b != b' ' && b != 0)
+        .map_or(0, |p| p + 1);
 
     // Sector count: 48-bit (words 100..=103) if present, else 28-bit (words 60/61).
     let lba48 = (id[100] as u64)
@@ -195,7 +198,11 @@ pub fn identify(base: u16, ctrl: u16, slave: bool) -> Option<DiskInfo> {
     // Word 217: nominal media rotation rate. 1 = non-rotating (SSD).
     let rot = id[217];
     let ssd = rot == 1;
-    let rpm = if (0x0401..=0xFFFE).contains(&rot) { rot } else { 0 };
+    let rpm = if (0x0401..=0xFFFE).contains(&rot) {
+        rot
+    } else {
+        0
+    };
 
     Some(DiskInfo {
         model,

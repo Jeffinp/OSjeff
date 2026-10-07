@@ -214,7 +214,9 @@ impl Desktop {
         let read_ok = crate::ata::read_image(disk());
         if !read_ok {
             PERSIST.store(false, core::sync::atomic::Ordering::Relaxed);
-            crate::serial_println!("OJFS: disk read failed; RAM-only filesystem, disk left untouched");
+            crate::serial_println!(
+                "OJFS: disk read failed; RAM-only filesystem, disk left untouched"
+            );
         }
         if !read_ok || !fs::is_formatted(disk()) {
             fs::format(disk());
@@ -227,7 +229,12 @@ impl Desktop {
             );
             let _ = fs::write(disk(), b"notas.txt", b"Arquivo de exemplo do OSjeff.");
             if let Ok(d) = fs::mkdir(disk(), fs::ROOT, b"Documentos") {
-                let _ = fs::write_in(disk(), d as u8, b"projeto.txt", b"Arquivo dentro de uma pasta.");
+                let _ = fs::write_in(
+                    disk(),
+                    d as u8,
+                    b"projeto.txt",
+                    b"Arquivo dentro de uma pasta.",
+                );
             }
             flush_disk();
         }
@@ -683,7 +690,9 @@ impl Desktop {
                     .filter(|&i| fs::is_active(img, i) && fs::parent_at(img, i) == cwd)
                     .nth(n)
             }
-            1 => (0..fs::MAX_FILES).filter(|&i| fs::is_trashed(img, i)).nth(n),
+            1 => (0..fs::MAX_FILES)
+                .filter(|&i| fs::is_trashed(img, i))
+                .nth(n),
             _ => None,
         }
     }

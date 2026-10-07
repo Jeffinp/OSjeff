@@ -429,9 +429,9 @@ fn drain_input(app: &mut App) {
                 }
             }
             2 => {
-                if let Ok(f) =
-                    app.instance
-                        .get_typed_func::<(i32, i32, i32), ()>(&app.store, "on_pointer")
+                if let Ok(f) = app
+                    .instance
+                    .get_typed_func::<(i32, i32, i32), ()>(&app.store, "on_pointer")
                 {
                     let _ = f.call(&mut app.store, (ev.a, ev.b, ev.c));
                 }

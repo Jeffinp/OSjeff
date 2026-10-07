@@ -663,7 +663,11 @@ mod tests {
         for (off, val) in [(0usize, 6u8), (1, 2), (2, 0x86), (4, 8), (5, 16)] {
             let mut frame = arp_request(OUR_IP);
             frame[ETH_HDR + off] = val;
-            assert_eq!(respond(&frame, OUR_MAC, OUR_IP, &mut out), None, "off={off}");
+            assert_eq!(
+                respond(&frame, OUR_MAC, OUR_IP, &mut out),
+                None,
+                "off={off}"
+            );
         }
     }
 

@@ -52,7 +52,14 @@ fn glyph(c: &mut Canvas, id: u8, x: i32, y: i32, s: i32, col: Color) {
         2 => {
             // disk: rounded square + spindle hole
             c.fill_round_rect(x, y, s, s, s / 4, col);
-            c.fill_round_rect(x + s / 2 - s / 8, y + s / 2 - s / 8, s / 4, s / 4, s / 8, SIDEBAR);
+            c.fill_round_rect(
+                x + s / 2 - s / 8,
+                y + s / 2 - s / 8,
+                s / 4,
+                s / 4,
+                s / 8,
+                SIDEBAR,
+            );
         }
         _ => {
             // document: sheet + a couple of lines
@@ -122,7 +129,14 @@ impl Desktop {
         let tc = if selected { theme::WHITE } else { FG };
         let gc = if selected { theme::WHITE } else { BLUE };
         glyph(c, gid, sx + 2, y + (ROW - 16) / 2, 16, gc);
-        font::draw_bytes(c, (sx + 26) as usize, (y + (ROW - 14) / 2) as usize, label, tc, 2);
+        font::draw_bytes(
+            c,
+            (sx + 26) as usize,
+            (y + (ROW - 14) / 2) as usize,
+            label,
+            tc,
+            2,
+        );
         y + ROW + 2
     }
 
@@ -165,9 +179,18 @@ impl Desktop {
             }
             let sel = self.files_sel == n;
             if sel {
-                c.fill_round_rect((mx - 6) as usize, (ry - 1) as usize, (mw + 12) as usize, (ROW - 2) as usize, 6, BLUE);
+                c.fill_round_rect(
+                    (mx - 6) as usize,
+                    (ry - 1) as usize,
+                    (mw + 12) as usize,
+                    (ROW - 2) as usize,
+                    6,
+                    BLUE,
+                );
             }
-            let Some(slot) = self.files_slot(n) else { break };
+            let Some(slot) = self.files_slot(n) else {
+                break;
+            };
             let img = disk();
             let tc = if sel { theme::WHITE } else { FG };
             let is_dir = fs::is_dir(img, slot);
@@ -178,14 +201,35 @@ impl Desktop {
             } else {
                 MUTED
             };
-            glyph(c, if is_dir { 0 } else { 3 }, mx, ry + (ROW - 18) / 2, 18, gcol);
-            font::draw_bytes(c, (mx + 26) as usize, (ry + (ROW - 14) / 2) as usize, fs::name_at(img, slot), tc, 2);
+            glyph(
+                c,
+                if is_dir { 0 } else { 3 },
+                mx,
+                ry + (ROW - 18) / 2,
+                18,
+                gcol,
+            );
+            font::draw_bytes(
+                c,
+                (mx + 26) as usize,
+                (ry + (ROW - 14) / 2) as usize,
+                fs::name_at(img, slot),
+                tc,
+                2,
+            );
             let mut sz = [0u8; 12];
             let q = push_num(&mut sz, 0, fs::size_at(img, slot) as u32);
             let q2 = push(&mut sz, q, b" B");
             let sw = font::text_width(core::str::from_utf8(&sz[..q2]).unwrap_or(""), 2) as i32;
             let szc = if sel { theme::WHITE } else { MUTED };
-            font::draw_bytes(c, (right - sw) as usize, (ry + (ROW - 14) / 2) as usize, &sz[..q2], szc, 2);
+            font::draw_bytes(
+                c,
+                (right - sw) as usize,
+                (ry + (ROW - 14) / 2) as usize,
+                &sz[..q2],
+                szc,
+                2,
+            );
         }
 
         self.files_footer(c, r, mx, rows);
@@ -198,7 +242,14 @@ impl Desktop {
         let tx = mx + 72;
         let d = self.disks.get(idx).copied().flatten();
         match d {
-            Some(d) => font::draw_bytes(c, tx as usize, (my + 6) as usize, &d.model[..d.model_len], FG, 3),
+            Some(d) => font::draw_bytes(
+                c,
+                tx as usize,
+                (my + 6) as usize,
+                &d.model[..d.model_len],
+                FG,
+                3,
+            ),
             None => font::draw_text(c, tx as usize, (my + 6) as usize, "Disco ausente", FG, 3),
         }
         let role: &str = if idx == 0 {
@@ -208,7 +259,13 @@ impl Desktop {
         };
         font::draw_text(c, tx as usize, (my + 34) as usize, role, MUTED, 2);
         my += 80;
-        c.fill_rect(mx as usize, my as usize, (r.right() - 16 - mx) as usize, 1, SEP);
+        c.fill_rect(
+            mx as usize,
+            my as usize,
+            (r.right() - 16 - mx) as usize,
+            1,
+            SEP,
+        );
         my += 16;
 
         if let Some(d) = d {
@@ -246,7 +303,13 @@ impl Desktop {
     /// Bottom status bar: item count + key hints.
     fn files_footer(&self, c: &mut Canvas, r: Rect, mx: i32, rows: usize) {
         let by = r.bottom() - 26;
-        c.fill_rect((r.x + 1) as usize, (by - 8) as usize, (r.w - 2) as usize, 1, SEP);
+        c.fill_rect(
+            (r.x + 1) as usize,
+            (by - 8) as usize,
+            (r.w - 2) as usize,
+            1,
+            SEP,
+        );
         if self.files_view <= 1 {
             let mut s = [0u8; 16];
             let p = push_num(&mut s, 0, rows as u32);
@@ -255,6 +318,13 @@ impl Desktop {
         }
         let hint = "N pasta  Bksp volta  Del apaga";
         let hw = font::text_width(hint, 2) as i32;
-        font::draw_text(c, (r.right() - 16 - hw) as usize, by as usize, hint, MUTED, 2);
+        font::draw_text(
+            c,
+            (r.right() - 16 - hw) as usize,
+            by as usize,
+            hint,
+            MUTED,
+            2,
+        );
     }
 }

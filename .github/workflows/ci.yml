@@ -33,7 +33,6 @@ jobs:
       - run: cargo clippy -p osjeff_core --all-targets -- -D warnings
       - run: cargo clippy -p kernel --target x86_64-unknown-none -- -D warnings
       - run: cargo fmt --all -- --check
-        continue-on-error: true # not yet formatted once; drop after `cargo fmt`
 
   build-image:
     runs-on: ubuntu-latest

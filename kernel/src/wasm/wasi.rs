@@ -119,9 +119,9 @@ fn fd_seek(mut c: C, fd: i32, offset: i64, whence: i32, newoff: i32) -> i32 {
     let len = WAD.len() as i64;
     let cur = c.data().wad_pos as i64;
     let base = match whence {
-        0 => 0,    // SET
-        1 => cur,  // CUR
-        2 => len,  // END
+        0 => 0,   // SET
+        1 => cur, // CUR
+        2 => len, // END
         _ => return INVAL,
     };
     let np = (base + offset).clamp(0, len);
@@ -268,16 +268,27 @@ pub(super) fn install(linker: &mut Linker<HostState>) -> Result<(), &'static str
         };
     }
 
-    link!("fd_write", |c: C, fd: i32, i: i32, n: i32, w: i32| fd_write(c, fd, i, n, w));
-    link!("fd_read", |c: C, fd: i32, i: i32, n: i32, r: i32| fd_read(c, fd, i, n, r));
-    link!("fd_seek", |c: C, fd: i32, o: i64, wh: i32, n: i32| fd_seek(c, fd, o, wh, n));
+    link!(
+        "fd_write",
+        |c: C, fd: i32, i: i32, n: i32, w: i32| fd_write(c, fd, i, n, w)
+    );
+    link!("fd_read", |c: C, fd: i32, i: i32, n: i32, r: i32| fd_read(
+        c, fd, i, n, r
+    ));
+    link!("fd_seek", |c: C, fd: i32, o: i64, wh: i32, n: i32| fd_seek(
+        c, fd, o, wh, n
+    ));
     link!("fd_tell", |c: C, fd: i32, o: i32| fd_tell(c, fd, o));
     link!("fd_close", |c: C, fd: i32| fd_close(c, fd));
     link!("fd_sync", |_c: C, _fd: i32| OK);
     link!("fd_datasync", |_c: C, _fd: i32| OK);
-    link!("fd_fdstat_get", |c: C, fd: i32, b: i32| fd_fdstat_get(c, fd, b));
+    link!("fd_fdstat_get", |c: C, fd: i32, b: i32| fd_fdstat_get(
+        c, fd, b
+    ));
     link!("fd_fdstat_set_flags", |_c: C, _fd: i32, _f: i32| OK);
-    link!("fd_prestat_get", |c: C, fd: i32, b: i32| fd_prestat_get(c, fd, b));
+    link!("fd_prestat_get", |c: C, fd: i32, b: i32| fd_prestat_get(
+        c, fd, b
+    ));
     link!("fd_prestat_dir_name", |c: C, fd: i32, p: i32, l: i32| {
         fd_prestat_dir_name(c, fd, p, l)
     });
@@ -290,18 +301,31 @@ pub(super) fn install(linker: &mut Linker<HostState>) -> Result<(), &'static str
                         _rb: i64,
                         _ri: i64,
                         _ff: i32,
-                        o: i32| { path_open(c, d, df, p, pl, o) });
-    link!("path_filestat_get", |c: C, d: i32, _f: i32, p: i32, pl: i32, b: i32| {
-        path_filestat_get(c, d, p, pl, b)
+                        o: i32| {
+        path_open(c, d, df, p, pl, o)
     });
-    link!("clock_time_get", |c: C, id: i32, pr: i64, o: i32| clock_time_get(c, id, pr, o));
+    link!(
+        "path_filestat_get",
+        |c: C, d: i32, _f: i32, p: i32, pl: i32, b: i32| { path_filestat_get(c, d, p, pl, b) }
+    );
+    link!("clock_time_get", |c: C, id: i32, pr: i64, o: i32| {
+        clock_time_get(c, id, pr, o)
+    });
     link!("random_get", |c: C, b: i32, l: i32| random_get(c, b, l));
-    link!("args_sizes_get", |c: C, a: i32, b: i32| args_sizes_get(c, a, b));
+    link!("args_sizes_get", |c: C, a: i32, b: i32| args_sizes_get(
+        c, a, b
+    ));
     link!("args_get", |c: C, a: i32, b: i32| args_get(c, a, b));
-    link!("environ_sizes_get", |c: C, a: i32, b: i32| environ_sizes_get(c, a, b));
+    link!("environ_sizes_get", |c: C, a: i32, b: i32| {
+        environ_sizes_get(c, a, b)
+    });
     link!("environ_get", |_c: C, _a: i32, _b: i32| OK);
     // poll_oneoff: report no events fired (DOOM doesn't block on it here).
-    link!("poll_oneoff", |mut c: C, _i: i32, _o: i32, _n: i32, nev: i32| {
+    link!("poll_oneoff", |mut c: C,
+                          _i: i32,
+                          _o: i32,
+                          _n: i32,
+                          nev: i32| {
         if let Some(m) = mem(&c) {
             wu32(&mut c, m, nev, 0);
         }
@@ -310,10 +334,22 @@ pub(super) fn install(linker: &mut Linker<HostState>) -> Result<(), &'static str
     // Filesystem-mutating ops: we have no writable FS, so pretend success and
     // drop the change. DOOM only uses these for config/savegame dirs it can live
     // without; path_open for writing those returns NOENT anyway.
-    link!("path_create_directory", |_c: C, _fd: i32, _p: i32, _l: i32| OK);
-    link!("path_remove_directory", |_c: C, _fd: i32, _p: i32, _l: i32| OK);
+    link!(
+        "path_create_directory",
+        |_c: C, _fd: i32, _p: i32, _l: i32| OK
+    );
+    link!(
+        "path_remove_directory",
+        |_c: C, _fd: i32, _p: i32, _l: i32| OK
+    );
     link!("path_unlink_file", |_c: C, _fd: i32, _p: i32, _l: i32| OK);
-    link!("path_rename", |_c: C, _f: i32, _op: i32, _ol: i32, _nf: i32, _np: i32, _nl: i32| OK);
+    link!("path_rename", |_c: C,
+                          _f: i32,
+                          _op: i32,
+                          _ol: i32,
+                          _nf: i32,
+                          _np: i32,
+                          _nl: i32| OK);
     // proc_exit: log and return; the guest is exiting (only on a fatal I_Error).
     link!("proc_exit", |_c: C, code: i32| {
         crate::serial_println!("wasi: proc_exit({})", code);

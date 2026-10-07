@@ -40,7 +40,9 @@ fn main() {
     println!("cargo:rerun-if-env-changed=WASI_SDK_PATH");
     println!("cargo:rerun-if-env-changed=DOOM");
     let doom = std::env::var("DOOM").map(|v| v == "1").unwrap_or(false);
-    let sdk = std::env::var("WASI_SDK_PATH").ok().filter(|s| !s.is_empty());
+    let sdk = std::env::var("WASI_SDK_PATH")
+        .ok()
+        .filter(|s| !s.is_empty());
     match (doom, sdk) {
         (true, Some(sdk)) => build_doom(&out, &sdk),
         (false, Some(sdk)) => {
