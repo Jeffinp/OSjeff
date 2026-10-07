@@ -242,7 +242,7 @@ impl App {
     pub(crate) fn approx_bytes(&self) -> Option<usize> {
         use core::mem::size_of;
         let n = match self {
-            App::Terminal(_) => size_of::<Terminal>(),
+            App::Terminal(_) => size_of::<TermState>(),
             App::Editor(_) => size_of::<EditorState>(),
             App::Calculator(_) => size_of::<Calc>(),
             App::Browser(b) => {

@@ -18,10 +18,7 @@ pub(crate) use alloc::vec::Vec;
 pub(crate) use osjeff_core::clipboard::{self, Clipboard};
 pub(crate) use osjeff_core::window::{ResizeEdge, TITLE_H, WindowId};
 pub(crate) use osjeff_core::winman::{ClickTracker, Switcher, WindowManager, WindowSpec};
-pub(crate) use osjeff_core::{
-    Action, Calc, Editor, FileName, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Terminal,
-    Time,
-};
+pub(crate) use osjeff_core::{Calc, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Time};
 
 // Dock / menu / start-panel / keypad geometry lives in `osjeff_core::layout`.
 use osjeff_core::layout::{
@@ -131,6 +128,8 @@ pub(crate) enum DragMode {
     /// pointer position when the drag began.
     /// Dragging the image of a viewer window: last pointer position.
     Pan { last_x: i32, last_y: i32 },
+    /// Extending a text selection in an editor window.
+    Select,
     Resize {
         edge: ResizeEdge,
         start: Rect,
@@ -291,13 +290,7 @@ impl Desktop {
             )
         };
         let (min_w, min_h) = kind.min_size();
-        let mut title = String::from(kind.title());
-        if index > 1 {
-            // "OSJEFF SHELL 2": the same " N" suffix as the process name.
-            let mut tmp = [0u8; 16];
-            let k = numbered_name("", index, &mut tmp);
-            title.push_str(core::str::from_utf8(&tmp[..k]).unwrap_or(""));
-        }
+        let title = base_title(kind, index);
         let inst = Inst {
             app: App::new(kind),
             pid,
@@ -319,6 +312,10 @@ impl Desktop {
                     if let Some(f) = self.files_mut(id) {
                         f.view.select_first();
                     }
+                }
+                if kind == Kind::Editor {
+                    self.sync_editor(id);
+                    self.refresh_editor_title(id);
                 }
                 Some(id)
             }
@@ -373,20 +370,6 @@ impl Desktop {
         self.wm.get_mut(id).map(|w| &mut w.app.app)
     }
 
-    pub(crate) fn term_mut(&mut self, id: WindowId) -> Option<&mut Terminal> {
-        match self.app_mut(id) {
-            Some(App::Terminal(t)) => Some(t),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn editor_mut(&mut self, id: WindowId) -> Option<&mut EditorState> {
-        match self.app_mut(id) {
-            Some(App::Editor(e)) => Some(e),
-            _ => None,
-        }
-    }
-
     pub(crate) fn calc_mut(&mut self, id: WindowId) -> Option<&mut Calc> {
         match self.app_mut(id) {
             Some(App::Calculator(c)) => Some(c),
@@ -425,6 +408,10 @@ impl Desktop {
     }
 
     pub(crate) fn request_close(&mut self, id: WindowId) {
+        // An editor with unsaved changes asks before it goes.
+        if self.editor_holds_close(id) {
+            return;
+        }
         // A WASM app gets `on_close` (a chance to save) while the window animates away.
         if let Some(h) = self.wasm_handle(id) {
             crate::wasm::request_close(h);
@@ -458,6 +445,8 @@ impl Desktop {
     /// is still animating (the caller keeps rendering).
     pub fn animate(&mut self, dt: f32) -> bool {
         self.step_file_jobs();
+        self.step_shell_jobs();
+        self.sync_text_windows();
         let (active, gone) = self.wm.step(dt);
         for mut w in gone {
             if let App::Files(f) = &mut w.app.app
@@ -633,6 +622,7 @@ impl Desktop {
             // repainted through the per-frame damage path like an animation.
             || (w.shown() && w.app.kind() == Kind::WasmApp)
             || (w.shown() && matches!(&w.app.app, App::Files(f) if f.job.is_some()))
+            || (w.shown() && matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
     }
 
     /// True while any window is opening, closing, being dragged, or is a live
@@ -644,7 +634,8 @@ impl Desktop {
                 w.shown()
                     && (w.anim.is_some()
                         || w.app.kind() == Kind::WasmApp
-                        || matches!(&w.app.app, App::Files(f) if f.job.is_some()))
+                        || matches!(&w.app.app, App::Files(f) if f.job.is_some())
+                        || matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
             })
     }
 
@@ -950,6 +941,7 @@ fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
 }
 
 mod apps;
+mod edit;
 mod files;
 mod files_ui;
 mod input;
@@ -958,19 +950,24 @@ mod logview;
 mod monitor;
 mod render;
 mod settings_ui;
+mod shellhost;
 mod sysstore;
+mod term;
 mod toasts_ui;
 mod ui;
 mod vfs;
 mod viewer;
 mod wasmwin;
 mod widgets;
+pub(crate) use edit::EditorState;
 pub(crate) use input::Special;
 pub(crate) use instance::*;
 pub(crate) use logview::LogState;
 pub use monitor::SysInputs;
 pub(crate) use monitor::{MonitorState, SysMon};
 pub(crate) use settings_ui::SettingsState;
+pub use shellhost::{worker as shell_worker, worker2 as shell_worker2};
 pub(crate) use sysstore::*;
+pub(crate) use term::TermState;
 pub(crate) use wasmwin::*;
 pub(crate) use widgets::*;

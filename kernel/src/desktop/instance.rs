@@ -166,7 +166,7 @@ impl Kind {
     /// Position and size of the first instance (later ones cascade from it).
     pub(crate) const fn default_rect(self) -> Rect {
         match self {
-            Kind::Terminal => Rect::new(70, 80, 512, 320),
+            Kind::Terminal => Rect::new(70, 80, 600, 360),
             Kind::Editor => Rect::new(610, 110, 560, 350),
             Kind::TaskMgr => Rect::new(360, 200, 392, 300),
             Kind::Calculator => Rect::new(470, 150, 300, 420),
@@ -238,13 +238,6 @@ pub(crate) struct BrowserState {
 /// `osjeff_core::browser::BookmarkStore` and be returned here.
 fn new_bookmark_store() -> Box<dyn osjeff_core::browser::BookmarkStore> {
     Box::new(osjeff_core::browser::MemoryBookmarks::default())
-}
-
-/// An editor window: the buffer and the file it was opened from / saves to.
-pub(crate) struct EditorState {
-    pub editor: Editor,
-    /// Absolute path Ctrl+S writes to (`/notes.txt` for a fresh editor).
-    pub path: Vec<u8>,
 }
 
 /// What the inline name field of a file manager is for.
@@ -367,9 +360,21 @@ pub(crate) struct WasmWin {
     pub app_id: String,
 }
 
+/// Title-bar text of instance `index` of `kind` (`OSJEFF SHELL`, `OSJEFF SHELL 2`...).
+pub(crate) fn base_title(kind: Kind, index: u8) -> String {
+    let mut title = String::from(kind.title());
+    if index > 1 {
+        // The same " N" suffix as the process name.
+        let mut tmp = [0u8; 16];
+        let k = numbered_name("", index, &mut tmp);
+        title.push_str(core::str::from_utf8(&tmp[..k]).unwrap_or(""));
+    }
+    title
+}
+
 /// Per-window app state.
 pub(crate) enum App {
-    Terminal(Box<Terminal>),
+    Terminal(Box<TermState>),
     Editor(Box<EditorState>),
     TaskMgr,
     Calculator(Box<Calc>),
@@ -386,11 +391,8 @@ impl App {
     /// Fresh state for a new window of `kind`.
     pub(crate) fn new(kind: Kind) -> App {
         match kind {
-            Kind::Terminal => App::Terminal(Box::new(Terminal::new())),
-            Kind::Editor => App::Editor(Box::new(EditorState {
-                editor: Editor::new(),
-                path: b"/notes.txt".to_vec(),
-            })),
+            Kind::Terminal => App::Terminal(Box::new(TermState::new())),
+            Kind::Editor => App::Editor(Box::new(EditorState::new())),
             Kind::TaskMgr => App::TaskMgr,
             Kind::Calculator => App::Calculator(Box::new(Calc::new())),
             Kind::Browser => App::Browser(Box::new(BrowserState {

@@ -345,9 +345,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     wasm::init(info, tsc_khz);
     x86_64::instructions::interrupts::without_interrupts(|| {
         sched::spawn("appd", wasm::worker);
+        // The terminal's command thread: sleep, ping and curl wait here, not in the compositor.
+        sched::spawn("shelld", desktop::shell_worker);
+        sched::spawn("shelld2", desktop::shell_worker2);
     });
 
-    trace::mark("threads spawned (fetcher, appd)");
+    trace::mark("threads spawned (fetcher, appd, shelld x2)");
 
     // Storage service: detect/mount/migrate OJFS v3 on the filesystem disk (the desktop
     // still runs on the v2 image; see storage.rs). Runs with the scheduler up, so the

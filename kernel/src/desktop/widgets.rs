@@ -4,7 +4,7 @@
 use super::*;
 
 pub(crate) use osjeff_core::layout::{
-    BrowserChrome, browser_home_layout, calc_button_at, calc_layout, dock_layout, fit_scale,
+    BrowserChrome, browser_home_layout, calc_button_at, calc_layout, dock_layout,
 };
 
 /// Alt+Tab panel geometry.
@@ -251,11 +251,6 @@ pub(crate) fn draw_clock(c: &mut Canvas, t: Time) {
     c.fill_round_rect_alpha(px, py + 6, pw, ph, ph / 2, theme::SHADOW, 34);
     c.fill_round_rect(px, py, pw, ph, ph / 2, theme::DOCK);
     font::draw_text(c, px + pad, py + 9, clock, theme::HEADER_TEXT, 2);
-}
-
-pub(crate) fn two(buf: &mut [u8], idx: usize, val: u8) {
-    buf[idx] = b'0' + (val / 10) % 10;
-    buf[idx + 1] = b'0' + val % 10;
 }
 
 /// Mutable view of the window-compositing scratch buffer.

@@ -8,6 +8,7 @@ use super::*;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Special {
     F2,
+    F3,
     F5,
     PageUp,
     PageDown,
@@ -19,6 +20,7 @@ pub(crate) enum Special {
 fn special_of(scan: u8, extended: bool) -> Option<Special> {
     match (scan, extended) {
         (0x3C, false) => Some(Special::F2),
+        (0x3D, false) => Some(Special::F3),
         (0x3F, false) => Some(Special::F5),
         (0x49, true) => Some(Special::PageUp),
         (0x51, true) => Some(Special::PageDown),
@@ -39,11 +41,29 @@ impl Desktop {
         match self.kind_of(top) {
             Some(Kind::Files) => self.files_special(top, sp),
             Some(Kind::Viewer) => self.viewer_special(top, sp),
+            Some(k @ (Kind::Terminal | Kind::Editor)) => self.text_special(top, k, sp),
             _ => false,
         }
     }
 
-    pub fn handle_key(&mut self, scan: u8, extended: bool, pressed: bool, time: Time) -> bool {
+    /// PageUp, PageDown and F3 for a terminal (scrollback) or an editor.
+    fn text_special(&mut self, id: WindowId, kind: Kind, sp: Special) -> bool {
+        let code = match sp {
+            Special::PageUp => osjeff_core::input::KeyCode::PageUp,
+            Special::PageDown => osjeff_core::input::KeyCode::PageDown,
+            Special::F3 => osjeff_core::input::KeyCode::F(3),
+            _ => return false,
+        };
+        let ev = osjeff_core::input::KeyEvent::new(code, self.mods());
+        if kind == Kind::Terminal {
+            self.term_event(id, ev);
+        } else {
+            self.editor_event(id, ev);
+        }
+        true
+    }
+
+    pub fn handle_key(&mut self, scan: u8, extended: bool, pressed: bool, _time: Time) -> bool {
         let alt_before = self.keymap.alt();
         if pressed
             && !alt_before
@@ -98,6 +118,15 @@ impl Desktop {
                     }
                     return self.switcher.is_some();
                 }
+                // The editor's find bar uses Alt+A (replace all), Alt+R and Alt+C (case).
+                Key::Char(_) if self.switcher.is_none() => {
+                    if let Some(f) = self.focused()
+                        && self.kind_of(f) == Some(Kind::Editor)
+                    {
+                        return self.editor_key(f, key);
+                    }
+                    return false;
+                }
                 // Other Alt+key chords belong to no app: do not type them.
                 _ => return self.switcher.is_some(),
             }
@@ -115,16 +144,16 @@ impl Desktop {
             return true;
         }
         // An ABNT2 accent followed by a letter it cannot combine with types both.
-        let mut changed = self.dispatch_key(key, time);
+        let mut changed = self.dispatch_key(key);
         while let Some(k) = self.keymap.take_pending() {
-            changed |= self.dispatch_key(k, time);
+            changed |= self.dispatch_key(k);
         }
         changed
     }
 
     /// Deliver one logical key to the focused app (after the Alt+Tab handling):
     /// Ctrl shortcuts first, then the app's own key handler.
-    fn dispatch_key(&mut self, key: Key, time: Time) -> bool {
+    fn dispatch_key(&mut self, key: Key) -> bool {
         let (Some(top), Some(kind)) =
             (self.focused(), self.focused().and_then(|f| self.kind_of(f)))
         else {
@@ -144,21 +173,21 @@ impl Desktop {
             {
                 return true;
             }
+            // The editor does its own copy, paste and save (the text engine owns Ctrl+C/X/V/S);
+            // in the terminal Ctrl+C interrupts, Ctrl+Shift+C copies the typed line.
             match key {
-                Key::Char(b'c') | Key::Char(b'C') => {
+                Key::Char(b'c' | b'C')
+                    if kind != Kind::Editor && (kind != Kind::Terminal || self.keymap.shift()) =>
+                {
                     self.copy_from_focused();
                     return true;
                 }
-                Key::Char(b'v') | Key::Char(b'V') => {
-                    self.paste_into_focused(time);
+                Key::Char(b'v' | b'V') if kind != Kind::Editor => {
+                    self.paste_into_focused();
                     return true;
                 }
-                Key::Char(b's') | Key::Char(b'S') => {
-                    if kind == Kind::Viewer {
-                        self.viewer_save_prompt(top);
-                    } else {
-                        self.save_editor_file();
-                    }
+                Key::Char(b's' | b'S') if kind == Kind::Viewer => {
+                    self.viewer_save_prompt(top);
                     return true;
                 }
                 // Ctrl+N: another window of the focused app (single-instance
@@ -175,17 +204,10 @@ impl Desktop {
         }
         match kind {
             Kind::Terminal => {
-                let action = self
-                    .term_mut(top)
-                    .map_or(Action::None, |t| t.on_key(key, time));
-                self.handle_terminal_action(top, action);
+                self.term_key(top, key);
             }
             Kind::Editor => {
-                if key == Key::Esc {
-                    self.request_close(top);
-                } else if let Some(e) = self.editor_mut(top) {
-                    e.editor.on_key(key);
-                }
+                self.editor_key(top, key);
             }
             Kind::TaskMgr => self.task_key(top, key),
             Kind::Calculator => match key {
@@ -548,32 +570,8 @@ impl Desktop {
         }
     }
 
-    // ---- terminal actions ----
-
-    pub(crate) fn handle_terminal_action(&mut self, id: WindowId, action: Action) {
-        match action {
-            Action::OpenEditor => {
-                self.launch(Kind::Editor);
-            }
-            Action::OpenTasks => {
-                self.launch(Kind::TaskMgr);
-            }
-            Action::OpenCalc => {
-                self.launch(Kind::Calculator);
-            }
-            Action::Reboot => crate::power::reboot(),
-            Action::Shutdown => crate::power::shutdown(),
-            Action::List => self.fs_list(id),
-            Action::Save(f) => self.fs_save(id, f),
-            Action::Load(f) => self.fs_load(id, f),
-            Action::Cat(f) => self.fs_cat(id, f),
-            Action::Remove(f) => self.fs_remove(id, f),
-            Action::None => {}
-        }
-    }
-
-    /// Copy the focused app's current text (terminal input line / editor current
-    /// line / calculator display / browser URL) into the shared clipboard.
+    /// Copy the focused app's current text (terminal input line / calculator display /
+    /// browser URL; the editor copies its selection itself) into the shared clipboard.
     pub(crate) fn copy_from_focused(&mut self) {
         let Some(top) = self.focused() else {
             return;
@@ -593,13 +591,17 @@ impl Desktop {
             self.clipboard.set(&tmp[..n]);
             return;
         }
+        let typed;
         if let Some(w) = self.wm.get(top) {
             let text: &[u8] = match &w.app.app {
-                App::Terminal(t) => t.input(),
-                App::Editor(e) => e.editor.line(e.editor.cursor().1),
+                App::Terminal(t) => {
+                    typed = t.input().into_bytes();
+                    &typed
+                }
                 App::Calculator(c) => c.display(),
                 App::Browser(b) => b.browser.url(),
-                App::TaskMgr
+                App::Editor(_)
+                | App::TaskMgr
                 | App::Wasm(_)
                 | App::Files(_)
                 | App::Viewer(_)
@@ -615,7 +617,7 @@ impl Desktop {
 
     /// Paste the clipboard into the focused app by replaying its bytes through
     /// the app's normal key handler (so editor line breaks, etc. just work).
-    pub(crate) fn paste_into_focused(&mut self, time: Time) {
+    pub(crate) fn paste_into_focused(&mut self) {
         let Some(top) = self.focused() else {
             return;
         };
@@ -627,23 +629,11 @@ impl Desktop {
         tmp[..n].copy_from_slice(self.clipboard.get());
         let data = &tmp[..n];
 
+        if self.kind_of(top) == Some(Kind::Terminal) {
+            self.term_paste(top, data);
+            return;
+        }
         match self.app_mut(top) {
-            Some(App::Terminal(t)) => {
-                for &b in data {
-                    if b != b'\n' && b != b'\r' {
-                        let _ = t.on_key(Key::Char(b), time);
-                    }
-                }
-            }
-            Some(App::Editor(e)) => {
-                for &b in data {
-                    if b == b'\n' {
-                        e.editor.on_key(Key::Enter);
-                    } else if b != b'\r' {
-                        e.editor.on_key(Key::Char(b));
-                    }
-                }
-            }
             Some(App::Calculator(c)) => {
                 for &b in data {
                     c.input(b);
@@ -664,7 +654,9 @@ impl Desktop {
                 }
             }
             Some(
-                App::TaskMgr
+                App::Terminal(_)
+                | App::Editor(_)
+                | App::TaskMgr
                 | App::Wasm(_)
                 | App::Files(_)
                 | App::Viewer(_)
@@ -792,20 +784,17 @@ impl Desktop {
                 self.viewer_wheel(w, -notches);
                 true
             }
-            Kind::Editor => match self.editor_mut(w) {
-                Some(e) => {
-                    // Three lines per notch (the editor scrolls with its cursor).
-                    for _ in 0..notches.abs() * 3 {
-                        e.editor
-                            .on_key(if notches > 0 { Key::Down } else { Key::Up });
-                    }
-                    true
-                }
-                None => false,
-            },
-            // No scrollback / nothing to scroll (the WASM guest has no wheel ABI).
-            Kind::Terminal
-            | Kind::Calculator
+            Kind::Editor => {
+                self.editor_wheel(w, -notches);
+                true
+            }
+            Kind::Terminal => {
+                // Wheel away from the user scrolls back in time.
+                self.term_wheel(w, -notches);
+                true
+            }
+            // Nothing to scroll (the WASM guest has no wheel ABI).
+            Kind::Calculator
             | Kind::WasmApp
             | Kind::Monitor
             | Kind::Settings
@@ -911,7 +900,8 @@ impl Desktop {
             Kind::Monitor => self.monitor_click(w, rect, cx, cy),
             Kind::Settings => self.settings_click(w, rect, cx, cy),
             Kind::LogViewer => self.log_click(w, rect, cx, cy),
-            Kind::Terminal | Kind::Editor | Kind::TaskMgr => {}
+            Kind::Editor => self.editor_click(w, rect, cx, cy),
+            Kind::Terminal | Kind::TaskMgr => {}
         }
     }
 
@@ -1058,6 +1048,7 @@ impl Desktop {
                             },
                         });
                     }
+                    DragMode::Select => self.editor_drag(w, cx, cy),
                     DragMode::Move { grab_dx, grab_dy } => {
                         self.wm.move_to(w, cx - grab_dx, cy - grab_dy, sw, sh);
                     }
