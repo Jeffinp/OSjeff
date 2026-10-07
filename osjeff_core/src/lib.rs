@@ -26,6 +26,7 @@ pub mod fs;
 pub mod gfx;
 pub mod heap;
 pub mod hw;
+pub mod image;
 pub mod inflate;
 pub mod input;
 pub mod keymap;
