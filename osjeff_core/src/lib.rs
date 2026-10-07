@@ -21,6 +21,7 @@ pub mod editor;
 pub mod fs;
 pub mod gfx;
 pub mod heap;
+pub mod input;
 pub mod hw;
 pub mod keymap;
 pub mod layout;
