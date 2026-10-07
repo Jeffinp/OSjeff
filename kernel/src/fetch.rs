@@ -18,6 +18,19 @@
 //! answers either.
 //! The main loop turns later navigations into the same error via [`worker_dead`].
 //!
+//! # Two kinds of client
+//!
+//! The browser (compositor thread) and WASM apps (`net_http_get`, `appd` thread) share
+//! the one request slot. Whoever wins the `IDLE -> CLAIMED` compare-exchange owns the
+//! request until it is back to `IDLE` (`WHO` says which kind), so a result is only ever
+//! taken by the client that posted it. An app's request is **policed twice**: before it
+//! is posted (`appnet::authorize`, by the caller) and on the worker, which authorizes
+//! every redirect hop again, refuses a destination whose *resolved* address is not
+//! public, never allows the "continue despite the certificate" override and keeps TLS
+//! verification on (docs/SECURITY-MODEL.md). An app that gives up (timeout) abandons the
+//! slot: the worker drops the late result, and whoever sees it first (`reap_abandoned`)
+//! frees it.
+//!
 //! The worker thread is also the network owner: the NIC lives inside the `Net` it
 //! holds (a `nic::Port`, moved in by [`init`]), so nothing else can reach the
 //! hardware. Between fetches it wakes every few ticks to answer ARP and ping
@@ -26,8 +39,10 @@
 use crate::netd::Netd;
 use crate::sync::RacyCell;
 use crate::{netstack, serial_println};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use osjeff_core::appmanifest::NetPerm;
 use osjeff_core::browser::{Conn, FailReason, MAX_RESPONSE_BYTES};
 use osjeff_core::web::imgcache::{self, ImgFail, Loaded as ImgLoaded};
 
@@ -37,6 +52,26 @@ const RUNNING: u8 = 2;
 const DONE: u8 = 3;
 /// The worker thread died; terminal (nothing leaves this state).
 const WORKER_DEAD: u8 = 4;
+/// A client won the slot and is filling in the request (or freeing it).
+const CLAIMED: u8 = 5;
+
+/// Who owns the request in flight.
+const WHO_BROWSER: u8 = 0;
+const WHO_APP: u8 = 1;
+/// The app gave up; the worker's late result is to be dropped.
+const WHO_ABANDONED: u8 = 2;
+
+static WHO: AtomicU8 = AtomicU8::new(WHO_BROWSER);
+/// `appd`'s scheduler slot while it waits for an app's request (the worker wakes it).
+static APP_TID: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+/// What the worker enforces on an app's request (the poster fills it before `REQUESTED`).
+#[derive(Clone)]
+struct AppPolicy {
+    perm: NetPerm,
+    hosts: Vec<String>,
+}
+static APP_POLICY: RacyCell<Option<AppPolicy>> = RacyCell::new(None);
 
 const URL_CAP: usize = 512;
 
@@ -129,12 +164,21 @@ pub fn try_post_image(url: &[u8], insecure_host: &[u8], fit_w: usize) -> bool {
 }
 
 fn post(url: &[u8], insecure_host: &[u8], kind: u8, fit_w: usize) -> bool {
-    if STATE.load(Ordering::Acquire) != IDLE || worker_dead() {
+    if worker_dead() {
         return false;
     }
+    // The slot is shared with the apps: whoever wins this exchange owns the request.
+    if STATE
+        .compare_exchange(IDLE, CLAIMED, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return false;
+    }
+    WHO.store(WHO_BROWSER, Ordering::Release);
     if OFFLINE.load(Ordering::Acquire) {
         if kind == KIND_IMAGE {
-            // SAFETY: as below: IDLE and no worker; published by the Release store of DONE.
+            // SAFETY: this client holds the slot (CLAIMED, won above) and no worker exists (OFFLINE);
+            // published by the Release store of DONE.
             unsafe {
                 *IMG_RESULT.get() = Some(Err(ImgFail::Failed));
             }
@@ -143,8 +187,8 @@ fn post(url: &[u8], insecure_host: &[u8], kind: u8, fit_w: usize) -> bool {
             return true;
         }
         REQ_KIND.store(KIND_PAGE, Ordering::Relaxed);
-        // SAFETY: STATE is IDLE (checked above) and no worker exists (OFFLINE), so nothing else touches
-        // RESULT; the Release store of DONE below publishes it to `take_result`.
+        // SAFETY: this client holds the slot (CLAIMED, won above) and no worker exists (OFFLINE), so
+        // nothing else touches RESULT; the Release store of DONE below publishes it to `take_result`.
         unsafe {
             *RESULT.get() = Some(Err(FailReason::Network));
         }
@@ -153,8 +197,9 @@ fn post(url: &[u8], insecure_host: &[u8], kind: u8, fit_w: usize) -> bool {
     }
     let n = url.len().min(URL_CAP);
     let m = insecure_host.len().min(INSECURE_CAP);
-    // SAFETY: only the compositor posts, and only in IDLE (checked above), when the worker does not
-    // touch REQ_URL/REQ_LEN/REQ_INSECURE*; the Release store of REQUESTED below publishes them.
+    // SAFETY: this client holds the slot (CLAIMED, won above), so the worker does not touch
+    // REQ_URL/REQ_LEN/REQ_INSECURE* and no other poster can; the Release store of REQUESTED below
+    // publishes them.
     unsafe {
         let buf = &mut *REQ_URL.get();
         buf[..n].copy_from_slice(&url[..n]);
@@ -176,6 +221,11 @@ fn post(url: &[u8], insecure_host: &[u8], kind: u8, fit_w: usize) -> bool {
 /// If a fetch has finished, return its result and reset to idle. Yields `None`
 /// while nothing is ready.
 pub fn take_result() -> Option<FetchResult> {
+    reap_abandoned();
+    // Only the browser's own request is the browser's to take (an app's belongs to `appd`).
+    if WHO.load(Ordering::Acquire) != WHO_BROWSER {
+        return None;
+    }
     let state = STATE.load(Ordering::Acquire);
     let is_page = REQ_KIND.load(Ordering::Relaxed) == KIND_PAGE;
     if matches!(state, REQUESTED | RUNNING) && worker_dead() {
@@ -195,6 +245,9 @@ pub fn take_result() -> Option<FetchResult> {
 
 /// If a picture request has finished, return its outcome and reset to idle.
 pub fn take_image_result() -> Option<Result<ImgLoaded, ImgFail>> {
+    if WHO.load(Ordering::Acquire) != WHO_BROWSER {
+        return None;
+    }
     let state = STATE.load(Ordering::Acquire);
     if REQ_KIND.load(Ordering::Relaxed) != KIND_IMAGE {
         return None;
@@ -363,10 +416,12 @@ fn serve_job(net: &mut netstack::Net) {
                 _ => None,
             }))
         }
-        Some(NetJob::Get(url)) => match fetch_url(net, url.as_bytes(), b"", MAX_RESPONSE_BYTES) {
-            Ok(p) => NetJobResult::Page(p),
-            Err(e) => NetJobResult::Failed(e),
-        },
+        Some(NetJob::Get(url)) => {
+            match fetch_url(net, url.as_bytes(), b"", MAX_RESPONSE_BYTES, None) {
+                Ok(p) => NetJobResult::Page(p),
+                Err(e) => NetJobResult::Failed(e),
+            }
+        }
         None => NetJobResult::Failed(FailReason::Network),
     };
     // SAFETY: still RUNNING (or ABANDONED): the caller reads JRESULT only after DONE, stored below.
@@ -422,6 +477,14 @@ pub extern "C" fn worker() -> ! {
             };
             let kind = REQ_KIND.load(Ordering::Relaxed);
             let fit_w = REQ_FIT_W.load(Ordering::Relaxed);
+            let app = WHO.load(Ordering::Acquire) != WHO_BROWSER;
+            let policy = if app {
+                // SAFETY: written by the app's poster before the Release store of REQUESTED that this
+                // worker saw (Acquire) above; not touched again until the slot is back to IDLE.
+                unsafe { (*APP_POLICY.get()).clone() }
+            } else {
+                None
+            };
             // SAFETY: NET is set once, before this thread exists (`fetch::init`), and used only by this
             // worker, one request at a time, so the `&mut` is unique.
             let netd = unsafe { (*NET.get()).as_mut() };
@@ -435,18 +498,46 @@ pub extern "C" fn worker() -> ! {
                 unsafe {
                     *IMG_RESULT.get() = Some(result);
                 }
+                STATE.store(DONE, Ordering::Release);
             } else {
                 let result = match netd {
-                    Some(netd) => fetch_url(netd.net_mut(), &url, &insecure, MAX_RESPONSE_BYTES),
+                    Some(netd) => {
+                        let net = netd.net_mut();
+                        // An app only reaches public addresses, checked on what the name resolved to.
+                        net.set_public_only(app);
+                        let r = match (app, policy.as_ref()) {
+                            (false, _) => fetch_url(net, &url, &insecure, MAX_RESPONSE_BYTES, None),
+                            (true, Some(p)) => {
+                                fetch_url(net, &url, &[], MAX_RESPONSE_BYTES, Some(p))
+                            }
+                            // An app request without a policy cannot happen; refuse rather than guess.
+                            (true, None) => Err(FailReason::Network),
+                        };
+                        net.set_public_only(false);
+                        r
+                    }
                     None => Err(FailReason::Network),
                 };
-                // SAFETY: STATE is RUNNING here; the compositor only touches RESULT after seeing DONE, which is
-                // stored (Release) right after this write.
-                unsafe {
-                    *RESULT.get() = Some(result);
+                if WHO.load(Ordering::Acquire) == WHO_ABANDONED {
+                    // The app timed out and left: nobody wants this result.
+                    drop(result);
+                    WHO.store(WHO_BROWSER, Ordering::Release);
+                    STATE.store(IDLE, Ordering::Release);
+                } else {
+                    // SAFETY: STATE is RUNNING here; the poster only touches RESULT after seeing DONE,
+                    // which is stored (Release) right after this write.
+                    unsafe {
+                        *RESULT.get() = Some(result);
+                    }
+                    STATE.store(DONE, Ordering::Release);
+                    if app {
+                        let tid = APP_TID.load(Ordering::Acquire);
+                        if tid != usize::MAX {
+                            crate::sched::wake(tid);
+                        }
+                    }
                 }
             }
-            STATE.store(DONE, Ordering::Release);
         } else if job_pending() {
             // SAFETY: NET is used only by this worker thread.
             if let Some(netd) = unsafe { (*NET.get()).as_mut() } {
@@ -494,13 +585,27 @@ fn resync_clock_if_needed(net: &mut netstack::Net) {
 /// [`osjeff_core::redirect::MAX_REDIRECTS`] redirects. Returns the final page,
 /// or why the navigation failed. Redirect policy (scheme kept, https -> http
 /// refused, loops, bad `Location` values) lives in `osjeff_core::redirect`.
-fn fetch_url(net: &mut netstack::Net, url: &[u8], insecure_host: &[u8], cap: usize) -> FetchResult {
+fn fetch_url(
+    net: &mut netstack::Net,
+    url: &[u8],
+    insecure_host: &[u8],
+    cap: usize,
+    app: Option<&AppPolicy>,
+) -> FetchResult {
     use osjeff_core::browser::{header_value, parse_url, status_code};
     use osjeff_core::redirect::Redirects;
     let mut cur: Vec<u8> = url.to_vec();
     let mut chain: Option<Redirects> = None;
 
     loop {
+        // An app's request, and each redirect hop it is sent on to, passes the same gate:
+        // permission, destination filter and allow-list (`osjeff_core::appnet`).
+        if let Some(p) = app
+            && let Err(code) = osjeff_core::appnet::authorize(p.perm, &p.hosts, &cur)
+        {
+            serial_println!("fetch: app request refused ({})", code);
+            return Err(FailReason::Network);
+        }
         let u = parse_url(&cur).ok_or(FailReason::Network)?;
         let chain = chain.get_or_insert_with(|| Redirects::new(&u));
         let (Ok(host), Ok(path)) = (
@@ -521,7 +626,10 @@ fn fetch_url(net: &mut netstack::Net, url: &[u8], insecure_host: &[u8], cap: usi
             // succeed, try again (at most once a minute) before the handshake.
             resync_clock_if_needed(net);
             // Validation is skipped only for the one host the user allowed.
-            let allow = !insecure_host.is_empty() && u.host().eq_ignore_ascii_case(insecure_host);
+            // (Never for an app: `insecure_host` is empty for them.)
+            let allow = app.is_none()
+                && !insecure_host.is_empty()
+                && u.host().eq_ignore_ascii_case(insecure_host);
             net.https_get(host, path, u.port, allow, cap)?
         } else {
             (net.http_get(host, path, u.port, cap)?, Conn::Plain)
@@ -571,6 +679,7 @@ fn fetch_image(
         url,
         insecure_host,
         imgcache::MAX_IMAGE_BYTES + 8 * 1024,
+        None,
     ) {
         Ok(r) => r,
         Err(_) => return Err(ImgFail::Failed),
@@ -599,4 +708,130 @@ fn fetch_image(
         Err(e) => serial_println!("img: {} failed: {:?}", name, e),
     }
     out
+}
+
+// ---- apps ----
+
+/// Why an app's request produced no response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppFetchError {
+    /// No NIC.
+    NoNetwork,
+    /// The request slot stayed busy (browser or another app) for the whole budget.
+    Busy,
+    /// The request was too long for the mailbox.
+    TooLong,
+    /// Nothing came back within the budget; the late result will be dropped.
+    Timeout,
+    /// The fetcher thread died.
+    Died,
+    /// The transfer failed (DNS, refused, TLS or certificate error, redirect refused...).
+    Failed(FailReason),
+}
+
+/// Free a result nobody will collect (its app timed out).
+fn reap_abandoned() {
+    if STATE.load(Ordering::Acquire) == DONE
+        && WHO.load(Ordering::Acquire) == WHO_ABANDONED
+        && STATE
+            .compare_exchange(DONE, CLAIMED, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    {
+        // SAFETY: the DONE -> CLAIMED exchange above was won by this thread, so no other thread
+        // touches RESULT until the slot is IDLE again (stored below, after the take).
+        unsafe {
+            drop((*RESULT.get()).take());
+        }
+        WHO.store(WHO_BROWSER, Ordering::Release);
+        STATE.store(IDLE, Ordering::Release);
+    }
+}
+
+/// `GET url` for a WASM app and wait for it (called on the `appd` thread, which sleeps
+/// meanwhile: the compositor and the other threads keep running, the other apps wait).
+/// `perm` and `hosts` are the app's permission and allow-list: the caller already
+/// authorized `url`, the worker authorizes it again and every redirect hop. The raw
+/// HTTP response comes back (decode it with `appnet::app_response`). `budget_ms` bounds
+/// the wait for the slot **and** for the answer together.
+pub fn app_get(
+    url: &[u8],
+    perm: NetPerm,
+    hosts: &[String],
+    budget_ms: u64,
+) -> Result<Loaded, AppFetchError> {
+    if OFFLINE.load(Ordering::Acquire) {
+        return Err(AppFetchError::NoNetwork);
+    }
+    if url.len() > URL_CAP {
+        return Err(AppFetchError::TooLong);
+    }
+    let hz = u64::from(crate::interrupts::TIMER_HZ);
+    let end = crate::interrupts::ticks() + budget_ms * hz / 1000;
+    // 1. win the slot (the browser or another app may be using it).
+    loop {
+        if worker_dead() {
+            return Err(AppFetchError::Died);
+        }
+        reap_abandoned();
+        if STATE
+            .compare_exchange(IDLE, CLAIMED, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            break;
+        }
+        if crate::interrupts::ticks() >= end {
+            return Err(AppFetchError::Busy);
+        }
+        let until = (crate::interrupts::ticks() + 2).min(end);
+        crate::sched::block(until, || STATE.load(Ordering::Acquire) != IDLE);
+    }
+    WHO.store(WHO_APP, Ordering::Release);
+    REQ_KIND.store(KIND_PAGE, Ordering::Relaxed);
+    APP_TID.store(crate::sched::current(), Ordering::Release);
+    // SAFETY: this thread holds the slot (CLAIMED, won above): the worker does not touch these until
+    // the Release store of REQUESTED below, and no other poster can get past the exchange.
+    unsafe {
+        let buf = &mut *REQ_URL.get();
+        buf[..url.len()].copy_from_slice(url);
+        *REQ_LEN.get() = url.len();
+        *REQ_INSECURE_LEN.get() = 0;
+        *APP_POLICY.get() = Some(AppPolicy {
+            perm,
+            hosts: hosts.to_vec(),
+        });
+    }
+    STATE.store(REQUESTED, Ordering::Release);
+    wake_worker();
+    // 2. wait for the answer.
+    loop {
+        if STATE.load(Ordering::Acquire) == DONE && WHO.load(Ordering::Acquire) == WHO_APP {
+            // SAFETY: STATE == DONE (Acquire) means the worker finished writing RESULT and will not touch
+            // it again; this app owns the request (WHO_APP), so it alone takes it.
+            let r = unsafe { (*RESULT.get()).take() };
+            WHO.store(WHO_BROWSER, Ordering::Release);
+            STATE.store(IDLE, Ordering::Release);
+            return match r {
+                Some(Ok(l)) => Ok(l),
+                Some(Err(e)) => Err(AppFetchError::Failed(e)),
+                None => Err(AppFetchError::Failed(FailReason::Network)),
+            };
+        }
+        if worker_dead() {
+            return Err(AppFetchError::Died);
+        }
+        let now = crate::interrupts::ticks();
+        if now >= end {
+            // Give up. If the worker is still busy it will drop the result; if it just finished,
+            // take it back ourselves.
+            if WHO
+                .compare_exchange(WHO_APP, WHO_ABANDONED, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                reap_abandoned();
+            }
+            return Err(AppFetchError::Timeout);
+        }
+        let until = (now + 25).min(end);
+        crate::sched::block(until, || STATE.load(Ordering::Acquire) != DONE);
+    }
 }

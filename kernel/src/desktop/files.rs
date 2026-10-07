@@ -9,7 +9,6 @@
 use super::*;
 use osjeff_core::fileman::apps::{self as fapps, AppAction, AppItem, AppKey};
 use osjeff_core::fileman::{self, APPS_PATH, Activation, Cmd, FileClass, MenuCtx, TRASH_PATH};
-use osjeff_core::vfs::VfsError;
 
 /// Bytes copied per frame by a running copy job.
 const JOB_CHUNK: usize = 128 * 1024;

@@ -21,8 +21,10 @@ use alloc::vec::Vec;
 pub const MAX_URL: usize = 512;
 /// Largest response body handed to the guest.
 pub const MAX_BODY: usize = 256 * 1024;
-/// Total time budget for one request.
+/// Total time budget for one plain-HTTP request.
 pub const TIMEOUT_MS: u64 = 8_000;
+/// The same for HTTPS: the software TLS handshake alone can take seconds.
+pub const TIMEOUT_HTTPS_MS: u64 = 20_000;
 /// Minimum spacing between two requests of the same app.
 pub const MIN_INTERVAL_MS: u64 = 1_000;
 

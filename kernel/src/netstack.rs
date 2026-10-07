@@ -105,6 +105,10 @@ pub struct Net {
     tcp: SocketHandle,
     udp: SocketHandle,
     resolver: Resolver,
+    /// An app is fetching: a name (or literal) that resolves to a local, private or
+    /// reserved address is refused after resolution, whatever the app's URL said
+    /// (`osjeff_core::appnet::ipv4_allowed`).
+    public_only: bool,
 }
 
 /// Absolute tick by which the TLS handshake in progress must be done (0 = none).
@@ -152,6 +156,7 @@ impl Net {
             tcp,
             udp,
             resolver: Resolver::new(cfg.dns),
+            public_only: false,
         }
     }
 
@@ -309,9 +314,26 @@ impl Net {
         }
     }
 
+    /// Restrict the next fetches to public destinations (apps), or lift the
+    /// restriction (the browser). The name policy is `appnet::parse_url`; this repeats
+    /// the check on the *resolved* address, which a name can point anywhere.
+    pub fn set_public_only(&mut self, on: bool) {
+        self.public_only = on;
+    }
+
     /// Resolve for a fetch: [`FailReason::Dns`] when the name does not resolve.
     fn resolve_or_fail(&mut self, host: &str) -> Result<IpAddress, FailReason> {
-        self.resolve(host).ok_or(FailReason::Dns)
+        let ip = self.resolve(host).ok_or(FailReason::Dns)?;
+        let IpAddress::Ipv4(a) = ip;
+        if self.public_only && !osjeff_core::appnet::ipv4_allowed(a.octets()) {
+            crate::serial_println!(
+                "net: {} resolves to {}, a non-public address: refused",
+                host,
+                a
+            );
+            return Err(FailReason::Network);
+        }
+        Ok(ip)
     }
 
     /// Blocking HTTP/1.1 GET over plain TCP. Returns the raw response bytes,

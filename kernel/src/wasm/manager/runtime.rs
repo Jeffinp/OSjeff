@@ -28,6 +28,7 @@ pub(super) fn build_runtime(i: usize) -> Result<Box<Runtime>, String> {
         &manifest.id,
         sandbox,
         manifest.net,
+        manifest.net_hosts.clone(),
         manifest.clipboard,
         mono,
         wall_ms(),

@@ -10,6 +10,9 @@
 # Env: QEMU_MEM (default 128M, 512M for uefi), QEMU_EXTRA (e.g. "-icount shift=0"),
 # FS_SIZE (filesystem disk size, default 64M; 64K gives the old OJFS v2-only disk).
 # FS_IMG (a filesystem disk image to boot with instead of a blank one, to test persistence).
+# QEMU_NETDEV (default "user,id=n0"; the id must stay n0), e.g. to give the guest a fake
+# public-looking network (see tools/nettest-server.py):
+#   QEMU_NETDEV="user,id=n0,net=203.0.113.0/24,host=203.0.113.5,dhcpstart=203.0.113.15,dns=203.0.113.3"
 set -u
 img=$1; mode=$2; out=$3; secs=$4; scen=${5:-}
 rm -rf "$out"; mkdir -p "$out"
@@ -23,7 +26,7 @@ args=(-m "$mem" -display none -no-reboot -no-shutdown
   -monitor "unix:$MON_SOCK,server,nowait"
   -drive "format=raw,file=$img,file.locking=off"
   -drive "format=raw,file=$out/fs.img,if=ide,index=2"
-  -netdev user,id=n0 -device ne2k_isa,netdev=n0,mac=52:54:00:12:34:56)
+  -netdev "${QEMU_NETDEV:-user,id=n0}" -device ne2k_isa,netdev=n0,mac=52:54:00:12:34:56)
 if [ "$mode" = uefi ]; then
   cp /usr/share/OVMF/OVMF_VARS_4M.fd "$out/ovmf_vars.fd"
   args=(-drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd"

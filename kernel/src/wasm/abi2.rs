@@ -30,6 +30,8 @@ pub(crate) struct V2 {
     pub id: String,
     pub sandbox: Sandbox,
     pub net: NetPerm,
+    /// The manifest's `net_hosts` allow-list (empty: any public host).
+    pub net_hosts: Vec<String>,
     pub clip: ClipPerm,
     pub title: String,
     pub title_dirty: bool,
@@ -50,6 +52,7 @@ impl V2 {
         id: &str,
         sandbox: Sandbox,
         net: NetPerm,
+        net_hosts: Vec<String>,
         clip: ClipPerm,
         mono_ms: u64,
         wall_ms: u64,
@@ -63,6 +66,7 @@ impl V2 {
             id: String::from(id),
             sandbox,
             net,
+            net_hosts,
             clip,
             title: String::new(),
             title_dirty: false,
@@ -467,29 +471,61 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
         };
         range(&c, out, cap.clamp(0, appnet::MAX_BODY as i32))?;
         let st = v2(&mut c)?;
-        if !st.net.allows_http() {
-            return Ok(ERR_PERM);
-        }
-        let parsed = match appnet::parse_url(&bytes) {
+        // One gate for the request (and, on the fetcher, for every redirect hop):
+        // permission, destination filter, the manifest's allow-list.
+        let parsed = match appnet::authorize(st.net, &st.net_hosts, &bytes) {
             Ok(u) => u,
-            Err(appnet::NetError::TooLong) => return Ok(ERR_INVAL),
-            Err(_) => return Ok(ERR_NET),
+            Err(code) => return Ok(code),
         };
         if !st.limiter.allow(mono_ms()) {
             return Ok(ERR_NET);
         }
         crate::serial_println!(
-            "[app {}] net_http_get {}://{}:{}{} (policy ok)",
+            "[app {}] net_http_get {}://{}:{}{}",
             st.id,
             if parsed.https { "https" } else { "http" },
             parsed.host,
             parsed.port,
             parsed.path
         );
-        // Policy passed. The transport (the shared `fetch` worker, owned by the
-        // network front) cannot be driven from `appd` without racing the browser
-        // for its one request slot, so the request is not sent in this build.
-        Ok(ERR_NOSYS)
+        let (perm, hosts, id) = (st.net, st.net_hosts.clone(), st.id.clone());
+        // The transport is the fetcher thread (`fetch`, owned by netd): this thread sleeps until the
+        // answer, a timeout or the death of the fetcher, and holds no lock meanwhile. HTTPS gets a
+        // longer budget (a software TLS handshake). The other apps wait for this call (one `appd`
+        // thread); the compositor and everything else keep running.
+        let budget = if parsed.https {
+            appnet::TIMEOUT_HTTPS_MS
+        } else {
+            appnet::TIMEOUT_MS
+        };
+        let cap = cap.clamp(0, appnet::MAX_BODY as i32) as usize;
+        let loaded = match crate::fetch::app_get(&bytes, perm, &hosts, budget) {
+            Ok(l) => l,
+            Err(e) => {
+                crate::serial_println!("[app {}] net_http_get failed: {:?}", id, e);
+                return Ok(ERR_NET);
+            }
+        };
+        let (body, cut) = match appnet::app_response(&loaded.data, cap) {
+            Ok(r) => r,
+            Err(e) => {
+                crate::serial_println!("[app {}] net_http_get: response refused: {:?}", id, e);
+                return Ok(e.code());
+            }
+        };
+        write_guest(&mut c, out, &body)?;
+        charge(&mut c, 500 + body.len() as u64 / 16)?;
+        crate::serial_println!(
+            "[app {}] net_http_get: {} bytes{}",
+            id,
+            body.len(),
+            if cut || loaded.truncated {
+                " (cut)"
+            } else {
+                ""
+            }
+        );
+        Ok(body.len() as i32)
     });
     Ok(())
 }
