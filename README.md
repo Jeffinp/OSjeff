@@ -75,7 +75,7 @@ variantes (DOOM) e solução de problemas: [`docs/BUILDING.md`](docs/BUILDING.md
 | **Gráficos** | Compositor com damage tracking, double buffer, fonte 8×8 própria, sombras alpha, animações; HUD de desempenho | `fb.rs`, `desktop/` |
 | **Apps** | Terminal, Editor, Gerenciador de tarefas, Calculadora, Gerenciador de arquivos, Navegador, app WebAssembly | `desktop/`, `osjeff_core` |
 | **Armazenamento** | Filesystem **OJFS** próprio (48 arquivos, pastas, lixeira) sobre ATA PIO, persistente entre boots | `osjeff_core/src/fs.rs`, `ata.rs` |
-| **Rede** | NE2000 (ISA), ARP/IPv4/ICMP/DHCP próprios (responde a `ping`), `smoltcp` para TCP/DNS, **TLS 1.3** (`embedded-tls`) | `ne2000.rs`, `netstack.rs`, `osjeff_core/src/net.rs` |
+| **Rede** | `virtio-net` e NE2000 (trait `Nic`), ARP/IPv4/ICMP/DHCP próprios (renova o lease, responde e envia `ping`), DNS com cache e vários servidores, `smoltcp` para TCP, **TLS 1.3** (`embedded-tls`) | `nic.rs`, `virtio_net.rs`, `ne2000.rs`, `netd.rs`, `netstack.rs`, `osjeff_core/src/{net,lease,dns,icmp}.rs` |
 | **Navegador** | Parser HTML, CSS (cascata), layout, redirects, limites de recurso, indicador de conexão | `osjeff_core/src/{web,browser,redirect}` |
 | **WebAssembly** | Runtime `wasmi` como formato nativo de apps: ABI própria + subconjunto WASI, *fuel* por chamada, 24 MiB de memória, término real do app. Roda Snake; **DOOM** via `wasi-sdk` | `kernel/src/wasm/`, `wasm-apps/` |
 | **Dispositivos** | PS/2 (teclado, mouse), RTC, PCI, virtio-gpu (2D), ATA IDENTIFY | `ps2.rs`, `pci.rs`, `virtio*.rs` |
@@ -146,7 +146,7 @@ entre apps e kernel (ring 0 único) e verificação de certificado TLS. Detalhes
   evolução (WebAssembly como fronteira, ring 3 só com gatilho) está no
   [ADR de isolamento](docs/audit/adr-isolamento.md).
 - **HTTPS sem verificação de certificado.** A interface avisa ("Conexao nao verificada").
-- **Rede só com NE2000** (placa ISA rara, só no QEMU): o IP, o gateway e o DNS vêm do DHCP (testado em outra sub-rede), mas não há driver de NIC comum e o lease não é renovado.
+- **Rede só em QEMU/VMs** (`virtio-net` e NE2000 ISA): o IP, o gateway e os DNS vêm do DHCP, que é renovado (T1/T2/expiração, provado contra o servidor da SLIRP), mas não há driver para a NIC de um PC comum (`e1000`/`rtl8139`) e o DHCP e o DNS não são autenticados.
 - **Sem teste em hardware real.** BIOS entrega 1280×720 em 24 bpp e UEFI precisa de
   ≥ 192 MB de RAM (o BSS do kernel tem ~91 MiB).
 - Uma thread secundária que falha morre sozinha (o resto segue), mas **não é reiniciada** e seus recursos não são liberados; falha no compositor ou dentro de uma interrupção ainda para tudo.

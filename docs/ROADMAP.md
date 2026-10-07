@@ -8,7 +8,7 @@ depois o que limita o que ele consegue fazer, depois polimento.
 
 | Área | Entregue |
 |---|---|
-| Base | Boot BIOS e UEFI, compositor com damage tracking, window manager, 7 apps, scheduler preemptivo, heap com coalescência, OJFS com pastas e lixeira, ATA PIO, NE2000 + ARP/IPv4/ICMP/DHCP, TCP/IP (`smoltcp`) e TLS 1.3, navegador HTML/CSS, runtime WebAssembly (`wasmi`) |
+| Base | Boot BIOS e UEFI, compositor com damage tracking, window manager, 7 apps, scheduler preemptivo, heap com coalescência, OJFS com pastas e lixeira, ATA PIO, NE2000 e virtio-net + ARP/IPv4/ICMP/DHCP com renovação, DNS com cache e ping, TCP/IP (`smoltcp`) e TLS 1.3, navegador HTML/CSS, runtime WebAssembly (`wasmi`) |
 | Robustez | GDT/TSS com IST para #DF e #PF; todas as exceções tratadas; tela de erro e serial em panic/exceção/OOM; **thread secundária que falha morre sozinha**; **páginas de guarda nas pilhas**; IRQ espúria; recusa de framebuffer grande; disco intocado se a leitura falhar; editor não salva buffer truncado |
 | Parsers | 9 bugs achados por fuzzing/leitura e corrigidos (rede, disco, HTML/CSS, URL, `chunked`); limites de corpo, profundidade, nós e regras; redirect seguro |
 | Scheduler | Estado "bloqueada" (`sched::block/wake/idle`), compositor de 83 → 250 iterações/s em idle, latência tecla→captura de ~11 ms → ~0,4 ms, CPU real no gerenciador de tarefas |
@@ -34,8 +34,9 @@ Trust store, relógio confiável e verificação de cadeia com `embedded-tls`
 dizer "não verificada" apenas para cadeias válidas.
 
 ### 3. Rede que funciona fora do QEMU
-- ~~O DHCP alimenta o `netstack`~~ **feito** (`NetConfig`): o navegador carregou uma página numa sub-rede `192.168.77.0/24` com gateway e DNS do lease. Falta renovar o lease e usar mais de um DNS.
-- Um driver para uma NIC comum (`virtio-net`, depois `e1000` ou `rtl8139`); o NE2000 é ISA e raro.
+- ~~O DHCP alimenta o `netstack`~~ **feito** (`NetConfig`): o navegador carregou uma página numa sub-rede `192.168.77.0/24` com gateway e DNS do lease.
+- ~~Renovar o lease e usar mais de um DNS~~ **feito**: máquina de lease (T1 RENEW unicast, T2 REBIND, expiração, NAK, ACK com configuração nova), resolvedor com cache TTL e failover entre os servidores do lease, `netd` como dono único da NIC; RENEW, REBIND e expiração provados no pcap, failover provado com o primeiro DNS morto.
+- ~~`virtio-net`~~ **feito** (virtio 1.0, QEMU, BIOS e UEFI), atrás do trait `Nic`; também há cliente de ping e estatísticas por interface (`netd::stats`). Falta uma NIC de **hardware real** (`e1000` ou `rtl8139`), virtio só-legado, interrupções da NIC e `RELEASE` no desligamento.
 *Aceite:* o navegador carrega uma página usando uma NIC que existe em hardware real.
 
 ### 4. WebAssembly como fronteira de isolamento

@@ -49,7 +49,7 @@ dispositivos legados.
 |---|---|---|
 | **Teclado/mouse** | Pode **não funcionar** em notebooks modernos | Driver é **PS/2 (i8042)**. Muitos notebooks só têm USB HID (sem driver nosso) e não emulam PS/2. Desktops geralmente mantêm emulação legada e funcionam. |
 | **Resolução > 1080p** | Tela pode sair **corrompida** | Os buffers de composição são fixos em 1920×1080×4. Um painel 1440p/4K dá framebuffer maior que o buffer. Use saída 1080p (monitor externo) por enquanto. |
-| **Rede** | Sem rede | A NIC é **NE2000 ISA** (existe no QEMU, não no seu PC). O sistema boota sem rede normalmente. |
+| **Rede** | Sem rede | Os drivers são **virtio-net** (QEMU e VMs) e **NE2000 ISA** (só no QEMU); nenhum existe num PC comum. Sem NIC o sistema boota normalmente e o navegador mostra a falha na hora. |
 | **Disco/persistência** | Filesystem só em RAM (não persiste) | O FS usava um 2º disco IDE do QEMU. No metal, controladoras AHCI/NVMe não respondem nas portas IDE legadas → cai para FS em RAM. Não escreve no seu HD. |
 | **Tela congelada** | Trava com a tela parada | Exceções de CPU (#GP/#PF) param com `hlt` de propósito, em vez de reiniciar em silêncio — bug fica visível. |
 

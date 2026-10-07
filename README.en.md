@@ -75,7 +75,7 @@ variants (DOOM) and troubleshooting: [`docs/BUILDING.md`](docs/BUILDING.md) (Por
 | **Graphics** | Damage-tracking compositor, double buffering, own 8×8 font, alpha shadows, animations; performance HUD | `fb.rs`, `desktop/` |
 | **Apps** | Terminal, Editor, Task manager, Calculator, File manager, Browser, WebAssembly app | `desktop/`, `osjeff_core` |
 | **Storage** | Own **OJFS** filesystem (48 files, folders, trash) over ATA PIO, persistent across boots | `osjeff_core/src/fs.rs`, `ata.rs` |
-| **Network** | NE2000 (ISA), own ARP/IPv4/ICMP/DHCP (answers `ping`), `smoltcp` for TCP/DNS, **TLS 1.3** (`embedded-tls`) | `ne2000.rs`, `netstack.rs`, `osjeff_core/src/net.rs` |
+| **Network** | `virtio-net` and NE2000 (`Nic` trait), own ARP/IPv4/ICMP/DHCP (renews the lease, answers and sends `ping`), DNS with a cache and several servers, `smoltcp` for TCP, **TLS 1.3** (`embedded-tls`) | `nic.rs`, `virtio_net.rs`, `ne2000.rs`, `netd.rs`, `netstack.rs`, `osjeff_core/src/{net,lease,dns,icmp}.rs` |
 | **Browser** | HTML parser, CSS (cascade), layout, redirects, resource limits, connection indicator | `osjeff_core/src/{web,browser,redirect}` |
 | **WebAssembly** | `wasmi` as the native app format: own ABI + a WASI subset, per-call *fuel*, 24 MiB memory cap, real app termination. Runs Snake; **DOOM** via `wasi-sdk` | `kernel/src/wasm/`, `wasm-apps/` |
 | **Devices** | PS/2 (keyboard, mouse), RTC, PCI, virtio-gpu (2D), ATA IDENTIFY | `ps2.rs`, `pci.rs`, `virtio*.rs` |

@@ -33,9 +33,11 @@ o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
   #DF/NMI/#MC, qualquer falha com interrupções desligadas ou durante a morte de uma thread
   pinta uma tela de erro e para a **máquina inteira**. A thread morta não é reiniciada
   nem liberada.
-- **Rede, web e WASM:** NE2000 ISA, `smoltcp` configurado pelo DHCP do boot (IP, rota,
-  DNS; fallback estático do SLIRP), TLS 1.3 **sem verificação de certificado**, motor
-  HTML/CSS próprio, `wasmi` (um app por build).
+- **Rede, web e WASM:** `virtio-net` (PCI) ou NE2000 ISA atrás do trait `Nic`, um **dono
+  único** da NIC (`netd`, na thread `fetcher`), DHCP com renovação (T1/T2/expiração),
+  resolvedor próprio com cache e vários servidores, cliente de ping, estatísticas por
+  interface, `smoltcp` configurado pelo lease (fallback estático do SLIRP), TLS 1.3
+  **sem verificação de certificado**, motor HTML/CSS próprio, `wasmi` (um app por build).
 - **Boot [M]:** primeiro frame em ~5 s (BIOS e UEFI) após a entrada do kernel, quase tudo
   é o splash.
 
@@ -65,10 +67,10 @@ Quem fica de cada lado:
 | `osjeff_core` (testado no host) | `kernel` (ring 0) |
 |---|---|
 | `terminal`, `editor`, `calc`, `clipboard`, `keymap`, `process`, `anim` | `main.rs` (boot e laço do compositor), `gdt`, `interrupts`, `switch.s`, `sched`, `crash`, `vm` |
-| `fs` (OJFS), `net`, `redirect`, `rng` | `allocator`, `sync`, `io`, `serial` |
+| `fs` (OJFS), `net`, `lease`, `dns`, `icmp`, `netstats`, `redirect`, `rng` | `allocator`, `sync`, `io`, `serial` |
 | `web` (HTML, CSS, layout), `browser` | `fb`, `font`, `icons`, `desktop/*` |
-| `layout`, `wm`, `window`, `gfx`, `heap`, `paging`, `schedule` | drivers: `ps2`, `rtc`, `ata`, `ne2000`, `pci`, `virtio*`, `power` |
-| `hw::{ps2, rtc, ata, pci, virtio, perf}` | `netstack`, `fetch`, `wasm/*`, `perf`, `trace` |
+| `layout`, `wm`, `window`, `gfx`, `heap`, `paging`, `schedule` | drivers: `ps2`, `rtc`, `ata`, `ne2000`, `pci`, `virtio*` (gpu, net), `power` |
+| `hw::{ps2, rtc, ata, pci, virtio, virtio_net, perf}` | `nic`, `netd`, `netstack`, `fetch`, `wasm/*`, `perf`, `trace` |
 
 
 Regra do projeto: **decisão vai para o core com teste; o kernel liga o hardware a ela.**
@@ -111,8 +113,8 @@ tamanho, zera) -> BACK/BG/STATIC
 -> PCI + sonda virtio-gpu -> ata::detect -> gdt::init -> sched::init (acha a guard page
 da pilha de boot) -> ps2::init
 -> interrupts::init (IDT, PIC, PIT 250 Hz, sti) -> calibra TSC (25 ticks)
--> ne2000::init + DHCP (NetConfig) + ARP gratuito -> spawn fetcher (só com NIC, stack
-com guard page) e wasmapp
+-> nic::probe (virtio-net, senão NE2000) + Netd::boot (DHCP, NetConfig, ARP gratuito)
+-> spawn fetcher (só com NIC, stack com guard page; sem NIC, `fetch::init_offline`) e wasmapp
 -> splash -> wallpaper em BG -> Desktop::new (lê o FS do ATA) -> laço do compositor
 ```
 
@@ -314,7 +316,7 @@ dava `#GP` fatal sob WHPX não tem sustentação no código atual.
 | Slot | Thread | Existe quando | Pilha | Se falhar |
 |---|---|---|---|---|
 | 0 | `compositor` (`kernel_main`) | sempre, é o contexto de boot | 512 KiB do bootloader, guard page achada por `sched::init` | **fatal** (tela de erro) |
-| 1 | `fetcher` (`fetch::worker`) | só se `ne2000::init()` achou a placa | 128 KiB do heap + guard page | morre sozinha |
+| 1 | `fetcher` (`fetch::worker`), que também é o `netd` | só se `nic::probe()` achou uma NIC | 128 KiB do heap + guard page | morre sozinha |
 | 1 ou 2 | `wasmapp` (`wasm::worker`) | sempre, mesmo sem janela WASM | 128 KiB do heap + guard page | morre sozinha |
 
 `MAX_THREADS = 8` (`assert!` em `spawn`). Threads **nunca terminam por conta própria**: a
@@ -459,7 +461,8 @@ não verifica.
 | `WAKE`, `TICKS`, `IDLE`, `DEAD`, `KILLING`, `CURRENT`, `interrupts::TICKS`, `vm::PHYS_OFFSET` | ISR, threads e handlers de falha | atômicos |
 | input `RING`; `wasm::{EVENTS,EV_HEAD,EV_TAIL}` | produtor e consumidor distintos | SPSC com Acquire/Release |
 | `fetch::{NET, REQ_URL, REQ_LEN, RESULT}` | compositor posta, `fetcher` consome e devolve | máquina atômica `STATE` |
-| `ne2000::NEXT` e a NIC | compositor (boot, responder) **ou** `fetcher` | **só por protocolo**: o compositor só toca a NIC com `fetch::is_idle()`; sem lock |
+| a NIC (`nic::Port`, dentro de `netstack::Net` dentro de `Netd`) | só a thread `fetcher` (antes dela existir, o boot) | **pelo tipo**: o `Port` é movido para o `Netd`; ninguém mais tem um `&mut` |
+| caixas de ping (`netd::P_*`) | qualquer thread pede, o `fetcher` responde | `P_STATE` atômico (IDLE, CLAIMED, REQUESTED, RUNNING, DONE) |
 | `netstack::{TLS_RX,TLS_TX}`, `wasm::{APP,FB_INFO}`, `virtio_gpu::*` | só o worker dono (virtio: boot e DMA) | dono único |
 | `wasm::SURFACE` + `FRONT`/`READY` | worker escreve o buffer de trás, compositor lê o da frente | atômicos, **sem lock**: um compositor preemptado no meio de `blit_surface` pode copiar um quadro rasgado |
 
@@ -756,37 +759,92 @@ bloqueia o compositor (PIO síncrono, ~45 ms no TCG [A]); o disco de boot não �
 
 ### 9.1 Pilha
 
-Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → thread
-`fetcher` → `redirect` → `netstack` (`smoltcp`, DNS, TCP, TLS) → `ne2000`. Em paralelo, o
-compositor atende ARP e ping por `osjeff_core::net`, **só com `fetch::is_idle()`** (que também
-é falso para sempre se o `fetcher` morreu).
+Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → thread `fetcher`
+(que é também o **`netd`**) → `redirect` → `netstack` (`smoltcp`: TCP, UDP; DNS próprio) →
+`nic::Port` → `virtio_net` ou `ne2000`. O compositor **não toca a NIC**: só posta pedidos
+(página, ping) e lê estatísticas.
 
-- **NIC:** NE2000 (DP8390) ISA em `0x300`, MAC fixo `52:54:00:12:34:56` (tem de bater
-  com `-device ne2k_isa`). Transferência byte a byte por porta, anel de recepção nas
-  páginas `0x46..0x80` dos 16 KiB do chip, **polled** (IMR = 0). Esperas limitadas;
-  `init` devolve `false` sem placa e o SO boota sem rede.
+- **NIC (`nic.rs`).** O trait `Nic` (`kind`, `mac`, `send`, `poll`, `link_up`) é o que um
+  driver implementa; `Port` é o dono exclusivo de um `Box<dyn Nic>` e conta pacotes, bytes,
+  erros e descartes em `nic::STATS`. `nic::probe(phys_offset)` escolhe no boot: **virtio-net**
+  se há um no PCI, senão **NE2000** se a placa responde, senão **sem rede** (log
+  `net: no network interface found`; `fetch::init_offline` faz toda navegação falhar na hora
+  em vez de ficar em "Carregando"). O NE2000 deixou de aceitar um barramento ISA flutuante
+  (`0xFF`) como placa.
+- **virtio-net (`virtio_net.rs`, matemática em `osjeff_core::hw::virtio_net`).** PCI
+  `1af4:1000` (transitório, o padrão do QEMU) ou `1af4:1041`, pelas capabilities modernas
+  (um dispositivo só-legado, sem capabilities, é recusado com log). Negocia `VERSION_1`,
+  `MAC` e `STATUS` e mais nada (sem offloads, sem *mergeable buffers*, sem multiqueue): cada
+  quadro recebido é um descritor atrás de um cabeçalho de 12 bytes. Filas 0 (RX) e 1 (TX) de
+  até 16 entradas, uma página de anéis cada, um descritor por buffer de 2 KiB (nunca cruza
+  página, então cada endereço físico é uma tradução). RX é pré-postada e cada buffer volta ao
+  anel assim que é lido; TX copia o quadro num slot livre e recupera os concluídos sem pressa.
+  Tudo *polled*, MMIO volátil, janelas MMIO conferidas como mapeadas antes do uso (um BAR de
+  64 bits acima do que o bootloader mapeou não é tocado), índice `used` impossível
+  ressincroniza em vez de girar. Registrado [M] no QEMU (BIOS e UEFI): `virtio-net: up,
+  features 0x10020, rx/tx queue 16/16, link up`.
 - **`osjeff_core::net` (puro, fuzzado):** checksum RFC 1071, parse e montagem de
   Ethernet, ARP, IPv4, ICMP, UDP, BOOTP/DHCP. `respond(frame, mac, ip, out)` devolve a
   resposta (ARP reply e ICMP echo reply: o SO é "pingável"). No boot sai um ARP gratuito.
-  O compositor atende no máximo 32 frames por acordada.
-- **O DHCP configura a pilha inteira.** `main.rs` faz DISCOVER/REQUEST com cada espera
-  limitada a 75 ticks (~300 ms) e devolve um `osjeff_core::net::NetConfig` (IP, prefixo,
-  gateway, DNS, lease). O ACK é interpretado de forma total (máscara não contígua,
-  endereço inválido e lease 0 são recusados). `netstack::Net::new(&NetConfig)` usa esse
-  resultado para o endereço da interface `smoltcp`, a rota padrão e o DNS, e o responder
-  ARP/ping usa o mesmo IP. Sem servidor DHCP (ou sem NIC), uma oferta sem server id ou
-  um ACK recusado, cai para `NetConfig::STATIC_FALLBACK` (`10.0.2.15/24`, gateway
-  `10.0.2.2`, DNS `10.0.2.3`, os do SLIRP) e registra `net: static fallback (...)` na
-  serial. O lease **não é renovado** (só o DISCOVER/REQUEST do boot): ao expirar há apenas
-  um registro na serial e o endereço segue em uso. Literais IPv4 em URLs não consultam o
-  DNS (`parse_ipv4`). Medido [M]: no SLIRP padrão a serial mostra `net: DHCP lease
-  10.0.2.15/24 gw 10.0.2.2 dns 10.0.2.3` com lease de 86400 s, e com
-  `QEMU_NETDEV` numa sub-rede 192.168.77.0/24 o lease sai `192.168.77.15/24 gw
-  192.168.77.2 dns 192.168.77.3`; que a pilha de fato usou esse gateway e esse DNS numa
-  navegação foi mostrado pelos autores [A], eu não carreguei uma página.
-- **`smoltcp` 0.12:** um socket TCP (buffers de 8 KiB) e um DNS, **uma conexão por vez**;
-  prazos de 5 s (DNS), 8 s (conexão), 10 s (leitura HTTP), 12 s (cada operação TLS).
-  O pedido é `GET ... HTTP/1.0` com `Connection: close` (evita *chunked* e keep-alive).
+- **Dono único: `netd` (`netd.rs`).** `Netd` guarda `Net` (e dentro dele o `Port`), o cliente
+  DHCP e o cliente de ping, e vive na thread `fetcher`. A thread alterna dois trabalhos:
+  **uma busca** (acordada por `fetch::try_post`; o `smoltcp` é dono da NIC e responde ARP/eco
+  sozinho; os temporizadores DHCP esperam, e uma busca é limitada a dezenas de segundos
+  enquanto o menor temporizador é T1 = lease/2) e **o serviço** (`Netd::service`, a cada 4
+  ticks ocioso, a cada tick durante um ping): esvazia o anel de recepção despachando cada
+  quadro (resposta DHCP → máquina de lease; ARP reply e ICMP → ping; ARP/eco requests →
+  `respond`), dispara os temporizadores do lease e avança o ping. Não há corrida porque só
+  essa thread tem o `Port`: a exclusão que antes era `fetch::is_idle()` e um comentário agora
+  é o sistema de tipos. Custo assumido: se o `fetcher` morre, a máquina fica muda na rede.
+- **DHCP completo (`osjeff_core::lease`, puro, relógio injetado).** Estados INIT, SELECTING,
+  REQUESTING, BOUND, RENEWING, REBINDING. T1 = 50% e T2 = 87,5% do lease, contados do envio do
+  REQUEST que foi confirmado. Em T1 um REQUEST **unicast** (RENEW, `ciaddr` = nosso IP, MAC do
+  servidor aprendido do ACK, sem ARP) vai ao servidor que deu o lease; em T2 o REQUEST vira
+  **broadcast** (REBIND); na expiração o endereço é **removido** (`Lost`) e recomeça o DISCOVER.
+  Retransmissão: metade do tempo restante até o fim da etapa, no mínimo 60 s e nunca além dela;
+  DISCOVER/REQUEST com recuo exponencial de 1 a 64 s para sempre (uma rede que sobe tarde ainda
+  configura a interface); REQUEST desiste após 4 tentativas. NAK em qualquer estado derruba o
+  lease (e recomeça após 1 s). Um ACK de renovação com **configuração diferente** (IP, prefixo,
+  gateway ou DNS) é `Reconfigured`: o `netd` chama `Net::reconfigure` (endereço, rota, servidores
+  DNS, derruba a conexão TCP e esvazia o cache DNS), e anuncia com ARP gratuito. `RELEASE`
+  opcional existe na máquina e no construtor de quadros, mas nada o chama ainda (sem gancho de
+  desligamento). Lease infinito não tem temporizador. O `ciaddr`, a flag de broadcast e as
+  opções 50/54 seguem o RFC 2131 em cada tipo de mensagem (testado byte a byte).
+- **Boot do DHCP.** `Netd::boot` roda a mesma máquina até o fim com orçamento de 2 s; sem
+  resposta usa `NetConfig::STATIC_FALLBACK` (`10.0.2.15/24`, gateway `10.0.2.2`, DNS `10.0.2.3`)
+  e registra `net: static fallback (...)`, **mas a máquina continua tentando** em segundo plano:
+  um servidor que aparece depois configura a interface (`Bound`). O ACK é interpretado de
+  forma total (máscara não contígua, endereço inválido e lease 0 são recusados); a opção 6
+  inteira é mantida (até 3 servidores, sem duplicatas nem endereços inúteis).
+- **DNS (`osjeff_core::dns`, `netstack::Net::resolve`).** Não usa o socket DNS do `smoltcp`
+  (um servidor só): consulta A por um socket UDP, com **todos** os servidores do lease. A
+  tentativa *k* vai ao servidor `(preferido + k) mod n`, espera 1,5 s; SERVFAIL, REFUSED ou
+  mensagem inválida passam ao próximo na hora; NXDOMAIN e NODATA são finais; cada servidor é
+  tentado até 2 vezes dentro de 8 s. O servidor que respondeu vira o preferido. A resposta só
+  vale com id, pergunta e origem certos, e registros só contam se o dono é o nome ou o alvo de
+  um CNAME da cadeia; ponteiros de compressão só voltam; id e porta de origem vêm do TSC
+  (fracos, como o RNG do TLS). Cache com TTL (limitado a 1 h; TTL 0 não é guardado; NXDOMAIN
+  por 30 s; 32 entradas, sai a que expira primeiro); trocar de servidores esvazia o cache. O
+  socket é fechado e reaberto a cada tentativa: o `smoltcp` envia os datagramas de um socket em
+  ordem e um que espera ARP de um servidor morto travaria a consulta ao seguinte (visto num
+  pcap, corrigido). Literais IPv4 em URLs não consultam o DNS (`parse_ipv4`).
+- **Ping (`osjeff_core::icmp`, `netd::ping*`).** `netd::ping_start(ip, timeout_ms)` +
+  `netd::ping_poll()` (não bloqueantes, para o compositor e o terminal) e
+  `netd::ping(ip, timeout_ms) -> Result<u32 /*ms*/, PingError>` / `ping_us` (bloqueiam só a
+  thread que chama). O `netd` escolhe o próximo salto (`next_hop`), resolve o MAC por ARP (3
+  tentativas de 300 ms, cache de 4 saltos por 60 s), envia o eco e casa a resposta por id, seq e
+  origem; um ICMP *unreachable* ou *time exceeded* só encerra o ping se citar o nosso pedido.
+  Erros: `Timeout`, `Unreachable(código)`, `TimeExceeded`, `NoRoute`, `ArpFailed`, `BadTarget`,
+  `NoNetwork`, `Busy` (página em carga ou outro ping). Como não há IRQ da NIC, a resposta espera
+  o próximo tick (4 ms): o RTT medido inclui até um tick.
+- **Estatísticas (`osjeff_core::netstats`, `netd::stats()`).** `Snapshot` com pacotes e bytes
+  tx/rx, erros e descartes, link, driver, a `NetConfig` em vigor (IP, prefixo, gateway, DNS),
+  tempo de lease restante, estado do DHCP, contadores de RENEW/REBIND/perda, de DNS (consultas,
+  acertos de cache, failovers, falhas) e de ping. Com `perf-trace`, uma linha `[trace] net: ...`
+  por segundo na serial.
+- **`smoltcp` 0.12:** um socket TCP (buffers de 8 KiB) e um UDP (para o DNS), **uma conexão por
+  vez**; prazos de 8 s (conexão), 10 s (leitura HTTP), 12 s (cada operação TLS). O pedido é
+  `GET ... HTTP/1.0` com `Connection: close` (evita *chunked* e keep-alive).
 - **TLS:** `embedded-tls` 0.19, TLS 1.3, `Aes128GcmSha256`, SNI, cripto por software
   (o handshake é lento no TCG: o motivo da thread própria). **Sem verificação de
   certificado** (`UnsecureProvider`): o tráfego é cifrado, o servidor **não é
@@ -807,9 +865,9 @@ compositor atende ARP e ping por `osjeff_core::net`, **só com `fetch::is_idle()
 - **Limites:** `MAX_RESPONSE_BYTES = 256 KiB` (cabeçalhos mais corpo) **nos dois
   caminhos**; acima disso a resposta é cortada e a página marcada como truncada. URL do
   navegador 220 B, host 80 B.
-- Sem placa, `fetch::init` e o `spawn` do `fetcher` não ocorrem, mas o compositor ainda
-  posta o pedido: ele nunca é consumido e o navegador fica em "Carregando" [inferido da
-  leitura, não executado]; `WorkerDied` só vale para um `fetcher` que existiu.
+- Sem NIC, `fetch::init_offline` faz `try_post` responder `FailReason::Network` na hora
+  (o navegador mostra "Falha ao carregar a pagina", visto [M] com `QEMU_NIC=none`);
+  `WorkerDied` só vale para um `fetcher` que existiu.
 
 ### 9.2 Navegador e motor web
 
@@ -920,8 +978,8 @@ funções, que **não são fuzzadas**: um bug ali é fuga total.
 | Fatal total para o compositor, #DF, NMI, #MC e falhas com IF=0 | sem o desktop ou com estado de IRQ/lock incerto não há o que preservar | tela de erro e parada, como antes |
 | Buffers de render fixos de 1080p | sem alocação, custo zero | recusa telas maiores; em 24 bpp usa um terço do reservado |
 | Damage tracking e camada `STATIC` | animação proporcional à área do dano | vários caminhos de desenho e uma assinatura de cena que precisa invalidar certo (já colidiu com ≥ 9 janelas; corrigido) |
-| NE2000 ISA polled, `smoltcp`, DHCP próprio no boot (`NetConfig`) | NIC mais simples de programar; um único dono do endereço (sem socket DHCP do `smoltcp`) | só exercitado no QEMU (NE2000 é ISA rara); lease sem renovação |
-| Fetcher em thread própria, NIC com dono por protocolo | o handshake TLS por software não pode congelar a UI | exclusão da NIC é convenção (`STATE`, `is_idle`), não lock |
+| `Nic` trait + `Port`, virtio-net e NE2000 polled, `smoltcp`, DHCP e DNS próprios (`lease`, `dns`) | um único dono do endereço e do resolvedor (sem socket DHCP/DNS do `smoltcp`, que só tem um servidor); a lógica é pura e testada | só exercitado no QEMU (virtio-net existe em VMs, não em PCs; NE2000 é ISA rara); virtio só-legado não é suportado; DHCP sem autenticação |
+| Fetcher em thread própria que também é o `netd`, NIC movida para ele | o handshake TLS por software não pode congelar a UI; um dono só, garantido pelo tipo | se o `fetcher` morre a rede fica muda; um RENEW espera uma busca em curso terminar |
 | TLS 1.3 sem verificação de certificado | sem trust store nem relógio confiável | cifra sem autenticar; rótulo honesto na UI; RNG fraco sem `RDRAND` |
 | `wasmi` com combustível, teto de memória e término real | WebAssembly como formato nativo de apps (Rust e C) | interpretador 25-37x mais lento que nativo [A]; combustível não retomável; um app por build; `unsafe` do `wasmi` na TCB |
 | OJFS de registro fixo, imagem inteira regravada | simples, sem alocação, fuzzável | 48 entradas, nome de 16 B, 1 KiB por arquivo, sem journal; escrita não atômica e bloqueante |
@@ -941,11 +999,12 @@ funções, que **não são fuzzadas**: um bug ali é fuga total.
   convenção em `RacyCell` e nas 5 `fn` seguras `&'static mut`; `SURFACE` pode rasgar um
   quadro; a serial não tem lock.
 - **Rede e web.** HTTPS **não autentica o servidor**, e sem `RDRAND` (o caso do QEMU/TCG
-  padrão) o RNG do handshake é fraco. Só o QEMU/SLIRP foi exercitado, e o lease DHCP não é
-  renovado; uma conexão por vez,
-  HTTP/1.0, sem cookies, imagens nem JS. Sem NIC o navegador fica em "Carregando"
-  (inferido). `smoltcp` e o driver NE2000 não são fuzzados. A renderização de página roda
-  na thread do compositor.
+  padrão) o RNG do handshake é fraco. Só o QEMU/SLIRP foi exercitado (o lease é renovado,
+  mas só provado contra o servidor DHCP do SLIRP); uma conexão por vez, HTTP/1.0, sem
+  cookies, imagens nem JS. IPv6, `e1000`/`rtl8139`, virtio só-legado, MSI-X/interrupções da
+  NIC e RELEASE no desligamento não existem. `smoltcp` e os drivers de NIC não são fuzzados
+  (o fuzz cobre a máquina de lease, o DNS e o ICMP, que são puros). O DHCP e o DNS não são
+  autenticados. A renderização de página roda na thread do compositor.
 - **Armazenamento.** 48 entradas, 1 KiB por arquivo, nomes de 16 B; sem metadados,
   checksum nem journal; escrita de 99 setores não atômica e síncrona. O editor abre
   truncado um arquivo maior que sua grade de 44x18 e então se recusa a salvá-lo (`TRUNC`):

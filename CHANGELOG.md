@@ -3,6 +3,21 @@
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
 tem releases versionadas; as seções são marcos na `master`.
 
+## 2026-10 — Rede gerenciável
+
+- **NIC:** trait `Nic` e `Port` (dono exclusivo, com contadores); drivers `virtio-net`
+  (virtio 1.0, QEMU, BIOS e UEFI) e NE2000; escolha no boot, ou sem rede (a navegação falha
+  na hora, em vez de "Carregando").
+- **`netd`:** um dono único da NIC (a thread `fetcher`), garantido pelo tipo; o compositor
+  não toca mais o hardware.
+- **DHCP completo:** máquina de lease pura (T1 RENEW unicast, T2 REBIND, expiração, NAK, ACK
+  com configuração nova, RELEASE), DNS inteiro da opção 6, retransmissão com recuo.
+- **DNS:** resolvedor próprio com cache TTL e failover entre os servidores do lease.
+- **Ping:** `netd::ping_start/ping_poll` e `netd::ping`; **estatísticas** por interface
+  (`netd::stats`, linha `[trace] net:` com `perf-trace`).
+- Testes: 423 → 525; `fuzz/net_parse` cobre a máquina de lease, o DNS e o ICMP.
+- `tools/qemu-headless.sh` ganhou `QEMU_NIC` (`ne2k`, `virtio`, `none`); `tools/pcapsum.py`.
+
 ## 2026-10 — Window manager dinâmico
 
 O desktop deixou de ter 7 janelas fixas (uma por app) e passou a gerenciar qualquer

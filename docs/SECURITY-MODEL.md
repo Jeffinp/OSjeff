@@ -24,7 +24,7 @@ Quem controla o dado, quem o interpreta e o que impede o pior.
 
 | # | Fronteira | Quem controla o dado | Quem interpreta | Proteções | Risco residual |
 |---|---|---|---|---|---|
-| 1 | **Frames de rede** (NE2000) | qualquer host na rede | `osjeff_core::net` (ARP, IPv4, ICMP, UDP, DHCP) e `smoltcp` | `forbid(unsafe_code)` no `net`; fuzz de 38 M execuções sem crash; `respond` é total para qualquer buffer de saída; orçamento de 32 frames por acordada | `smoltcp` e o driver não são fuzzados; laço de recepção do NIC só limitado no responder; frame que cruza o fim do anel do DP8390 *(suposição, não provado)* |
+| 1 | **Frames de rede** (virtio-net, NE2000) | qualquer host na rede | `osjeff_core::{net, lease, dns, icmp}` (ARP, IPv4, ICMP, UDP, DHCP, DNS) e `smoltcp` | `forbid(unsafe_code)` nesses módulos; fuzz de `net_parse` cobre o parser e responder, a máquina de lease, a resposta DNS e o ICMP (38 M execuções sem crash antes da rodada de rede; 1,2 M, 90 s, depois dela); resposta DNS só vale com id, pergunta e origem certos e registros do dono certo; ICMP de erro só vale se citar o nosso pedido; orçamento de 32 frames por acordada | `smoltcp` e os drivers não são fuzzados; DHCP e DNS sem autenticação; id e porta de origem do DNS vêm do TSC (fracos); frame que cruza o fim do anel do DP8390 *(suposição, não provado)* |
 | 2 | **Respostas HTTP/HTTPS** | servidor remoto, ou quem estiver no caminho | `fetch` → `osjeff_core::browser` (cabeçalhos, `chunked`, redirect) | corpo limitado a 256 KiB (`MAX_RESPONSE_BYTES`) nos dois protocolos; `dechunk` sem panic; redirect sem rebaixar https→http, no máximo 5 saltos, rejeita caracteres de controle | **TLS sem verificação de certificado** (§3.1) |
 | 3 | **HTML e CSS** | página remota | `osjeff_core::web` | profundidade 40, 8 000 nós, 1 000 regras e 2 000 seletores; comprimentos CSS limitados; cores não-ASCII rejeitadas; fuzz de ~0,7 M execuções sem crash | cascata ainda é O(regras × elementos) dentro dos tetos; fuzz do `web` ainda ganhava cobertura quando parou |
 | 4 | **Disco (OJFS)** | quem fornecer a imagem | `osjeff_core::fs` | validação de `size`, `parent` (ciclos), imagem curta; fuzz de 1 M execuções sem crash; falha de leitura **não** reescreve o disco | disco com conteúdo desconhecido ainda é formatado (é o desenho do disco dedicado); sem permissões nem criptografia |
@@ -92,11 +92,18 @@ relógio confiável (o RTC não é verificado) e verificação de cadeia.
   inutilizáveis até o reboot (a interface mostra o motivo).
 
 ### 3.4 Rede
-- O IP, o gateway e o DNS do navegador vêm do lease DHCP (com fallback estático
-  `10.0.2.15/24` do SLIRP quando não há servidor); o lease **não é renovado**, só
-  registra quando expira. Só há um servidor DNS e o DHCP não é autenticado: quem
-  responder primeiro define o gateway e o DNS.
-- O driver NE2000 é de placa ISA rara; não há driver para NICs comuns.
+- O IP, o gateway e os DNS do navegador vêm do lease DHCP (com fallback estático
+  `10.0.2.15/24` do SLIRP quando não há servidor). O lease **é renovado** (RENEW unicast em
+  T1, REBIND em T2) e o endereço é **removido** ao expirar. O DHCP não é autenticado: quem
+  responder primeiro define o gateway e os DNS, e um servidor falso que responde a um RENEW
+  com outra configuração reconfigura a interface. O DNS tenta todos os servidores do lease, mas
+  também não é autenticado nem tem DNSSEC; o id da consulta e a porta de origem são fracos.
+- A NIC tem **um dono** (`netd`, no tipo) e o compositor não a toca. O virtio-net só faz DMA
+  nos próprios buffers estáticos (RX/TX de 2 KiB) e valida cada elemento do anel `used` (id
+  fora da fila, índice impossível, quadro curto ou longo) antes de usar; sem IOMMU, um
+  dispositivo virtio malicioso ainda lê e escreve a memória física.
+- Drivers: virtio-net (QEMU, VMs) e NE2000 (ISA, QEMU); não há `e1000`/`rtl8139` nem driver para
+  a NIC de um PC comum.
 
 ### 3.5 Dados
 - Não há criptografia, permissões nem usuários no OJFS. O disco dedicado é tratado

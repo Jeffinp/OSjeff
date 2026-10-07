@@ -6,7 +6,7 @@ diferente, e a lista abaixo diz **o que cada uma não cobre**.
 | Camada | Pergunta que responde | Comando | Cobre | Não cobre |
 |---|---|---|---|---|
 | Testes unitários | A lógica pura está certa? | `cargo test-core` | `osjeff_core` (terminal, shell, editor, editor2, calc, janelas, heap, FS v2/v3, blockdev/blockcache, rede, HTML/CSS, browser) | `kernel/` (hardware) |
-| Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net`, `fs` (v2 e v3), `web`, `shell`, `editor2` | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
+| Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net` (+ lease DHCP, DNS, ICMP), `fs` (v2 e v3), `web`, `shell`, `editor2` | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
 | Boot em QEMU | O kernel sobe e o desktop é o mesmo? | `tools/verify-boot.sh` | BIOS e UEFI, panic/exceção na serial, imagem do desktop | Hardware real, rede real |
 | Lint | Há `unsafe` sem justificativa, avisos? | `cargo lint-kernel`, `cargo lint-host` | Todo o código | Corretude |
 | Supply chain | Dependência vulnerável ou de licença ruim? | `cargo deny check`, `cargo audit` | `Cargo.lock` | Código das dependências |
@@ -45,7 +45,7 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 
 | Alvo | Entrada | Exercita |
 |---|---|---|
-| `net_parse` | bytes como frame Ethernet | `osjeff_core::net` (ARP, IPv4, ICMP, UDP, DHCP, `respond`) com buffers de saída de vários tamanhos |
+| `net_parse` | bytes como frame Ethernet; os mesmos bytes como mensagem DNS e como programa da máquina de lease | `osjeff_core::net` (ARP, IPv4, ICMP, UDP, DHCP, `respond`) com buffers de saída de vários tamanhos; `lease` (ticks e respostas em qualquer ordem: configuração só com lease em mãos); `dns` (resposta, cache, `Resolve` terminando dentro do limite); `icmp` (eventos, ping, `next_hop`, checksums do pedido) |
 | `ojfs_parse` | bytes como imagem de disco | todas as operações do OJFS v2 (`list/read/write/remove/mkdir/trash/purge`) |
 | `ojfs3_parse` | remendos sobre um OJFS v3 válido (com todos os CRC refeitos, para passar do checksum), bytes crus, ou dispositivo de tamanho qualquer | `detect`, `mount`, caminhada (`readdir/stat/read_at/path_of/trash_list`), `fsck`, 16 operações, `fsck` de novo (um FS são continua são) |
 | `ojfs3_ops` | sequência de operações, com queda de energia opcional (em ordem ou cache volátil) | escrita lida de volta, `fsck` limpo, remount idêntico, estado exatamente antes/depois da operação cortada |
@@ -145,6 +145,34 @@ diferir da baseline (o HUD e o relógio são mascarados porque mudam a cada exec
 Para tirar uma baseline, rode o script uma vez num commit bom e passe o `outdir`
 como segundo argumento nos seguintes.
 
+### Rede em QEMU
+
+`tools/qemu-headless.sh` captura o tráfego da NIC em `<outdir>/net.pcap` e aceita duas
+variáveis (documentadas no cabeçalho do script):
+
+```bash
+QEMU_NIC=virtio tools/qemu-headless.sh bios /tmp/osj 25     # virtio-net em vez do NE2000 (ne2k, padrão; none = sem NIC)
+QEMU_NIC=virtio QEMU_NETDEV="user,id=n0,net=192.168.77.0/24,host=192.168.77.2,dhcpstart=192.168.77.15,dns=192.168.77.3" \
+  tools/qemu-headless.sh bios /tmp/osj 25                   # outra sub-rede; o convidado vê o host em 192.168.77.2
+python3 -I tools/pcapsum.py /tmp/osj/net.pcap               # resumo: ARP, DHCP (tipo, unicast/broadcast), DNS, TCP, ICMP
+```
+
+O que cada prova mostra no resumo do pcap e na serial (todas feitas [M] com o commit que as
+introduziu; a serial tem `net:` e `dns:`):
+
+| Prova | Como | O que aparece |
+|---|---|---|
+| virtio-net, SLIRP padrão | `QEMU_NIC=virtio` | `net: using virtio-net`, `DHCP lease 10.0.2.15/24 ...`; pcap: DISCOVER, OFFER, REQUEST, ACK, ARP gratuito |
+| página por virtio-net | `python3 -m http.server 8077 --bind 127.0.0.1` no host + navegador em `http://192.168.77.2:8077/` | `fetch: 279 bytes (status 200)` e a página na tela |
+| NE2000 não regride | `tools/verify-boot.sh` (0 pixels diferentes) e a mesma página com `QEMU_NIC` padrão | idem |
+| sem NIC | `QEMU_NIC=none` | `net: no network interface found`; o navegador mostra a falha na hora |
+| RENEW / REBIND / expiração | gancho **temporário** que força `lease_secs = Some(20)` e, nas variantes, descarta as respostas durante RENEWING (e REBINDING) | pcap: REQUEST unicast `10.0.2.15 -> 10.0.2.2` em T1 (~10 s); com a resposta descartada, REQUEST broadcast em T2 (~17,5 s); descartando também essa, na expiração (20 s) DISCOVER e novo lease |
+| ping | gancho **temporário** no boot chamando `netd::ping_us` | `ping gateway (10.0.2.2): reply rtt 525 us = 1 ms`; pcap: ICMP tipo 8 e 0; alvo sem ARP: `host did not answer ARP`; o próprio IP: `invalid target address` |
+| failover do DNS | gancho temporário com DNS `10.0.2.250` (morto) e `10.0.2.3`, navegador em `http://example.com/` | `dns: no answer for example.com, trying 10.0.2.3`, `dns: example.com -> ... (2 attempts)`; pcap: ARP sem resposta para `.250`, depois a consulta para `.3` |
+
+Os ganchos são do padrão acima (remova antes de commitar); o lease de 20 s existe só para
+a prova (o mínimo de retransmissão do RFC é 60 s, mas é limitado pelo fim da etapa).
+
 ### Provando falhas (padrão usado na auditoria)
 
 Para provar que uma falha é reportada, use um gancho **temporário** de build, rode,
@@ -201,7 +229,8 @@ O kernel liga `#![warn(clippy::undocumented_unsafe_blocks)]`: com `-D warnings`,
 - O `kernel/` não tem testes automatizados. A migração de lógica pura para o core
   é contínua (ver [`ROADMAP.md`](ROADMAP.md)).
 - Nenhum teste em hardware real.
-- TLS real e DNS: o sandbox de QEMU não tem internet útil; os caminhos de rede
-  são testados por unidade e por boot.
+- TLS real: o sandbox de QEMU não tem internet útil; os caminhos de rede são
+  testados por unidade e por boot. A resolução DNS pela SLIRP funcionou neste ambiente
+  (`example.com`), mas o servidor DHCP/DNS testado é sempre o da SLIRP.
 - O CI (`ci.yml`) foi escrito mas ainda não rodou no GitHub; cada comando dele
   foi executado localmente.
