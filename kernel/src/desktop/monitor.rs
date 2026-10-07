@@ -864,11 +864,7 @@ impl Desktop {
                 }
                 line(c, b"Fabricante", b.as_bytes());
                 line(c, b"Recursos", si.features.as_bytes());
-                line(
-                    c,
-                    b"Ponto flut.",
-                    b"soft-float (kernel sem SSE, alvo x86_64-unknown-none)",
-                );
+                line(c, b"Ponto flut.", b"soft-float (o kernel nao usa SSE)");
                 let mut b = FixedBuf::<80>::new();
                 let _ = write!(b, "{} kHz (calibrado pelo PIT)", mon.tsc_khz);
                 line(c, b"TSC", b.as_bytes());
