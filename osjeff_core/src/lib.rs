@@ -45,6 +45,7 @@ pub mod layout;
 pub mod lease;
 pub mod net;
 pub mod netstats;
+pub mod notify;
 pub mod paging;
 pub mod png;
 pub mod ppm;
