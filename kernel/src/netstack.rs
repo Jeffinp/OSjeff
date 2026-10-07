@@ -2,8 +2,11 @@
 //! browser's transport: DNS resolution, TCP connections, and a blocking HTTP
 //! GET that drives the smoltcp poll loop until the request completes.
 //!
-//! The guest sits behind QEMU's user-mode (SLIRP) NAT: static IP 10.0.2.15/24,
-//! gateway 10.0.2.2, DNS 10.0.2.3 — so it reaches the real internet.
+//! The interface address, default route and DNS server come from the
+//! [`NetConfig`] the boot obtained over DHCP (or its static fallback, QEMU's
+//! user-mode/SLIRP defaults 10.0.2.15/24, gateway 10.0.2.2, DNS 10.0.2.3). The
+//! DHCP client is `osjeff_core::net` run once at boot; smoltcp's own DHCP socket
+//! is deliberately not used, so there is a single owner of the IP address.
 
 use crate::sync::RacyCell;
 use crate::{interrupts, io, ne2000};
@@ -16,11 +19,9 @@ use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
 use smoltcp::socket::{dns, tcp};
 use smoltcp::time::Instant;
-use smoltcp::wire::{DnsQueryType, EthernetAddress, IpAddress, IpCidr, Ipv4Address};
+use smoltcp::wire::{DnsQueryType, EthernetAddress, IpAddress, IpCidr};
 
-const IP: Ipv4Address = Ipv4Address::new(10, 0, 2, 15);
-const GATEWAY: Ipv4Address = Ipv4Address::new(10, 0, 2, 2);
-const DNS_SERVER: IpAddress = IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 3));
+use osjeff_core::net::NetConfig;
 
 /// smoltcp `Instant` from the monotonic timer tick (TIMER_HZ).
 fn now() -> Instant {
@@ -88,20 +89,29 @@ pub struct Net {
 }
 
 impl Net {
-    pub fn new() -> Net {
+    /// Build the stack for `cfg`: interface address with its prefix, a default
+    /// route through the gateway (if any) and the DNS server (if any).
+    pub fn new(cfg: &NetConfig) -> Net {
         let mut device = Nic;
         let config = Config::new(EthernetAddress(ne2000::MAC.0).into());
         let mut iface = Interface::new(config, &mut device, now());
         iface.update_ip_addrs(|addrs| {
-            let _ = addrs.push(IpCidr::new(IpAddress::Ipv4(IP), 24));
+            let _ = addrs.push(IpCidr::new(IpAddress::Ipv4(cfg.ip.0.into()), cfg.prefix));
         });
-        let _ = iface.routes_mut().add_default_ipv4_route(GATEWAY);
+        if let Some(gw) = cfg.gateway {
+            let _ = iface.routes_mut().add_default_ipv4_route(gw.0.into());
+        }
 
         let tcp_sock = tcp::Socket::new(
             tcp::SocketBuffer::new(vec![0u8; 8192]),
             tcp::SocketBuffer::new(vec![0u8; 8192]),
         );
-        let dns_sock = dns::Socket::new(&[DNS_SERVER], vec![]);
+        let dns_servers: Vec<IpAddress> = cfg
+            .dns
+            .map(|d| IpAddress::Ipv4(d.0.into()))
+            .into_iter()
+            .collect();
+        let dns_sock = dns::Socket::new(&dns_servers, vec![]);
 
         let mut sockets = SocketSet::new(vec![]);
         let tcp = sockets.add(tcp_sock);

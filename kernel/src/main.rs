@@ -291,6 +291,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         NetConfig::STATIC_FALLBACK
     };
     let net_ip = net_cfg.ip;
+    let lease_start = interrupts::ticks();
+    let mut lease_expiry_logged = false;
     trace::mark("dhcp done");
     if net_up {
         let mut frame = [0u8; 64];
@@ -304,7 +306,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // around `spawn` because it mutates the scheduler's thread list, which the
     // timer ISR also reads.
     if net_up {
-        fetch::init(netstack::Net::new());
+        fetch::init(netstack::Net::new(&net_cfg));
         x86_64::instructions::interrupts::without_interrupts(|| {
             sched::spawn("fetcher", fetch::worker);
         });
@@ -716,6 +718,21 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 Err(reason) => desk.browser_fail(reason),
             }
             browser_redraw = true;
+        }
+
+        // The lease is not renewed (the boot-time DHCP exchange is the only one;
+        // see `dhcp_acquire`): log once when it runs out. The address stays in
+        // use afterwards, best effort, as renewing would need a second party
+        // on the NIC while a fetch owns it.
+        if net_up && !lease_expiry_logged {
+            let secs = (interrupts::ticks() - lease_start) / interrupts::TIMER_HZ as u64;
+            if net_cfg.lease_expired(secs) {
+                lease_expiry_logged = true;
+                serial_println!(
+                    "net: DHCP lease for {} expired (not renewed; keeping the address)",
+                    net_cfg.ip
+                );
+            }
         }
 
         // Service the network: answer ARP/ping for received frames — but only
