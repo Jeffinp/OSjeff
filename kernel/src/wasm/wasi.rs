@@ -376,7 +376,9 @@ pub(super) fn install(linker: &mut Linker<HostState>) -> Result<(), &'static str
                           _nl: i32| OK);
     // proc_exit: the guest asked to terminate. Unwind out of it with an exit-status
     // error (it never resumes); the app worker sees it and ends the app.
-    link!("proc_exit", |_c: C, code: i32| -> Result<(), wasmi::Error> {
+    link!("proc_exit", |_c: C,
+                        code: i32|
+     -> Result<(), wasmi::Error> {
         crate::serial_println!("wasi: proc_exit({})", code);
         Err(wasmi::Error::i32_exit(code))
     });
