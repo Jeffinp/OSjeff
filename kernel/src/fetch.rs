@@ -12,8 +12,10 @@
 //! If the worker thread dies (panic, CPU fault: see `sched::kill_current`) the
 //! request in flight is answered with [`FailReason::WorkerDied`] by
 //! [`take_result`], the machine moves to `WORKER_DEAD`, and from then on
-//! [`is_idle`] is false for good, so nothing posts to the dead thread and the
-//! compositor stops polling the NIC the worker may have left half-programmed.
+//! [`is_idle`] is false for good, so nothing posts to the dead thread. The NIC
+//! stays with the dead worker's `Net` (nobody else may touch hardware it may have
+//! left half-programmed), so the machine goes silent on the wire: no ARP or ping
+//! answers either.
 //! The main loop turns later navigations into the same error via [`worker_dead`].
 //!
 //! The worker thread is also the network owner: the NIC lives inside the `Net` it
@@ -24,7 +26,7 @@
 use crate::sync::RacyCell;
 use crate::{netstack, serial_println};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use osjeff_core::browser::FailReason;
 
 const IDLE: u8 = 0;
@@ -45,6 +47,9 @@ static STATE: AtomicU8 = AtomicU8::new(IDLE);
 /// Scheduler slot of the worker thread (`usize::MAX` until it has started), so
 /// [`try_post`] can wake it from its idle block.
 static TID: AtomicUsize = AtomicUsize::new(usize::MAX);
+/// No NIC was found: every navigation fails at once with a network error instead of
+/// waiting for a worker that does not exist.
+static OFFLINE: AtomicBool = AtomicBool::new(false);
 static NET: RacyCell<Option<netstack::Net>> = RacyCell::new(None);
 static REQ_URL: RacyCell<[u8; URL_CAP]> = RacyCell::new([0; URL_CAP]);
 static REQ_LEN: RacyCell<usize> = RacyCell::new(0);
@@ -72,6 +77,12 @@ pub fn init(net: netstack::Net) {
     }
 }
 
+/// Record that there is no network interface: [`try_post`] then answers every request with
+/// [`FailReason::Network`] right away (the browser shows the error instead of "Carregando").
+pub fn init_offline() {
+    OFFLINE.store(true, Ordering::Release);
+}
+
 /// True when no fetch is in flight and the worker is alive, so a navigation
 /// request can be posted.
 pub fn is_idle() -> bool {
@@ -90,6 +101,15 @@ pub fn worker_dead() -> bool {
 pub fn try_post(url: &[u8]) -> bool {
     if STATE.load(Ordering::Acquire) != IDLE || worker_dead() {
         return false;
+    }
+    if OFFLINE.load(Ordering::Acquire) {
+        // SAFETY: STATE is IDLE (checked above) and no worker exists (OFFLINE), so nothing else touches
+        // RESULT; the Release store of DONE below publishes it to `take_result`.
+        unsafe {
+            *RESULT.get() = Some(Err(FailReason::Network));
+        }
+        STATE.store(DONE, Ordering::Release);
+        return true;
     }
     let n = url.len().min(URL_CAP);
     // SAFETY: only the compositor posts, and only in IDLE (checked above), when the worker does not

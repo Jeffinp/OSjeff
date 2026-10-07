@@ -15,6 +15,14 @@
 #   QEMU_NETDEV="user,id=n0,net=192.168.77.0/24,host=192.168.77.2,dhcpstart=192.168.77.15,dns=192.168.77.3" \
 #     tools/qemu-headless.sh bios out 25
 #
+# QEMU_NIC picks the guest NIC (default "ne2k": the ISA NE2000 at I/O 0x300, what the
+# verify-boot baseline uses). "virtio" gives a virtio-net PCI device instead
+# (`-device virtio-net-pci`), e.g. a lease on the 192.168.77.0/24 range through it:
+#   QEMU_NIC=virtio QEMU_NETDEV="user,id=n0,net=192.168.77.0/24,host=192.168.77.2,dhcpstart=192.168.77.15,dns=192.168.77.3" \
+#     tools/qemu-headless.sh bios out 25
+# QEMU_NIC=none attaches no NIC at all (the guest must report "no network interface").
+# Both NICs get the same MAC (52:54:00:12:34:56) and the capture sees the same wire.
+#
 # Extra monitor commands (sendkey, mouse_move, ...) can be sent while it runs
 # through the monitor socket, whose path is printed at start and is also
 # available as <outdir>/mon.path (the socket itself lives under /tmp because a
@@ -44,12 +52,19 @@ if [ -z "${KEEP_FS:-}" ] || [ ! -f "$fsimg" ]; then
   dd if=/dev/zero of="$fsimg" bs=1k count=64 status=none
 fi
 
+case "${QEMU_NIC:-ne2k}" in
+  ne2k)   nic_dev=(-device ne2k_isa,netdev=n0,mac=52:54:00:12:34:56) ;;
+  virtio) nic_dev=(-device virtio-net-pci,netdev=n0,mac=52:54:00:12:34:56) ;;
+  none)   nic_dev=() ;;
+  *) echo "unknown QEMU_NIC '${QEMU_NIC}' (use ne2k, virtio or none)" >&2; exit 2 ;;
+esac
+
 args=(-m "${QEMU_MEM:-128M}" -display none -no-reboot -no-shutdown
       -serial "file:$out/serial.log"
       -monitor "unix:$sock,server,nowait"
       -drive "format=raw,file=$img"
       -drive "format=raw,file=$fsimg,if=ide,index=2"
-      -netdev "${QEMU_NETDEV:-user,id=n0}" -device ne2k_isa,netdev=n0,mac=52:54:00:12:34:56
+      -netdev "${QEMU_NETDEV:-user,id=n0}" "${nic_dev[@]}"
       -object "filter-dump,id=dump,netdev=n0,file=$out/net.pcap")
 if [ "$mode" = uefi ]; then
   # Ubuntu's OVMF "4M" build is split into CODE + VARS and must be loaded as

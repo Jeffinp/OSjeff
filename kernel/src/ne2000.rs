@@ -116,7 +116,9 @@ fn init() -> bool {
     outb(RESET, inb(RESET));
     let mut ok = false;
     for _ in 0..SPIN {
-        if r(ISR) & ISR_RST != 0 {
+        let isr = r(ISR);
+        // An empty ISA slot reads as a floating bus (0xFF), which also has the reset bit set.
+        if isr & ISR_RST != 0 && isr != 0xFF {
             ok = true;
             break;
         }

@@ -33,6 +33,7 @@ mod theme;
 mod trace;
 mod virtio;
 mod virtio_gpu;
+mod virtio_net;
 mod vm;
 mod wasm;
 
@@ -310,6 +311,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         x86_64::instructions::interrupts::without_interrupts(|| {
             sched::spawn("fetcher", fetch::worker);
         });
+    } else {
+        fetch::init_offline();
     }
 
     // Hand the framebuffer layout to the WASM app engine and spawn its worker

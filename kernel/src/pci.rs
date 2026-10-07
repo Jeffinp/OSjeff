@@ -8,8 +8,8 @@ const CONFIG_ADDRESS: u16 = 0xCF8;
 const CONFIG_DATA: u16 = 0xCFC;
 
 use osjeff_core::hw::pci::{
-    VIRTIO_GPU_LEGACY, VIRTIO_GPU_MODERN, VIRTIO_VENDOR, bar_offset, cap_list_start,
-    config_address, extract_u16,
+    VIRTIO_GPU_LEGACY, VIRTIO_GPU_MODERN, VIRTIO_NET_LEGACY, VIRTIO_NET_MODERN, VIRTIO_VENDOR,
+    bar_offset, cap_list_start, config_address, extract_u16,
 };
 
 /// A located PCI function.
@@ -101,4 +101,9 @@ pub fn find(vendor: u16, device: u16) -> Option<PciDevice> {
 /// Locate a virtio-gpu device (modern, then transitional).
 pub fn find_virtio_gpu() -> Option<PciDevice> {
     find(VIRTIO_VENDOR, VIRTIO_GPU_MODERN).or_else(|| find(VIRTIO_VENDOR, VIRTIO_GPU_LEGACY))
+}
+
+/// Locate a virtio-net device (modern, then transitional).
+pub fn find_virtio_net() -> Option<PciDevice> {
+    find(VIRTIO_VENDOR, VIRTIO_NET_MODERN).or_else(|| find(VIRTIO_VENDOR, VIRTIO_NET_LEGACY))
 }

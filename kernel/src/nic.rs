@@ -8,10 +8,10 @@
 //! touches the hardware. Everything above the driver (the DHCP client, the ARP and
 //! ping responder, smoltcp) talks to `&mut Port` and never names a concrete NIC.
 //!
-//! Selection at boot: the NE2000 ISA card if one answers, else no network (a
-//! virtio-net driver is tried first once it exists).
+//! Selection at boot: virtio-net if the PCI bus has one, else the NE2000 ISA card
+//! if one answers, else no network.
 
-use crate::{ne2000, serial_println};
+use crate::{ne2000, serial_println, virtio_net};
 use alloc::boxed::Box;
 use osjeff_core::net::Mac;
 use osjeff_core::netstats::{NetStats, NicKind};
@@ -95,11 +95,16 @@ impl Port {
     }
 }
 
-/// Bring up the NIC: NE2000, else `None` (the OS runs without
+/// Bring up the NIC: virtio-net, then NE2000, else `None` (the OS runs without
 /// networking). `phys_offset` is the bootloader's physical-memory mapping (needed
 /// for DMA).
 pub fn probe(phys_offset: Option<u64>) -> Option<Port> {
-    let _ = phys_offset; // DMA-capable NICs (virtio-net) use it
+    if let Some(off) = phys_offset
+        && let Some(dev) = virtio_net::VirtioNet::probe(off)
+    {
+        serial_println!("net: using virtio-net, mac {}", MacFmt(dev.mac()));
+        return Some(Port::new(Box::new(dev)));
+    }
     if let Some(dev) = ne2000::Ne2000::probe() {
         serial_println!("net: using ne2000, mac {}", MacFmt(dev.mac()));
         return Some(Port::new(Box::new(dev)));

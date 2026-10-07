@@ -32,7 +32,7 @@ pub fn virt_to_phys(virt: u64, phys_offset: u64) -> Option<u64> {
 
 pub use osjeff_core::hw::virtio::{
     CapLoc, S_ACK, S_DRIVER, S_DRIVER_OK, S_FAILED, S_FEATURES_OK, VirtioCaps, discover, negotiate,
-    notify_doorbell_offset, validate_queue_size,
+    negotiate_features, notify_doorbell_offset, validate_queue_size,
 };
 use osjeff_core::hw::virtio::{CapSpace, CommonCfg};
 
@@ -190,4 +190,17 @@ pub fn bar_base(dev: &PciDevice, bar: u8) -> Option<u64> {
         0
     };
     osjeff_core::hw::pci::memory_bar_base(bar, lo, hi)
+}
+
+/// Virtual address (through the physical-memory map) of the start of a
+/// capability's MMIO structure: memory-BAR base + `phys_offset` + capability
+/// offset. `None` if the BAR is unusable, the sum overflows, or the address is
+/// not actually mapped (a 64-bit BAR placed above what the bootloader mapped
+/// must not be touched).
+pub fn cap_addr(dev: &PciDevice, loc: &CapLoc, phys_offset: u64) -> Option<u64> {
+    let addr = bar_base(dev, loc.bar)?
+        .checked_add(phys_offset)?
+        .checked_add(u64::from(loc.offset))?;
+    virt_to_phys(addr, phys_offset)?;
+    Some(addr)
 }
