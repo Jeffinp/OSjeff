@@ -1077,6 +1077,40 @@ fn random_scripts_with_loops_stay_bounded() {
     }
 }
 
+/// Run `f` on a thread with a small stack, as a kernel thread would have.
+fn on_small_stack(kib: usize, f: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(kib * 1024)
+        .spawn(f)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn worst_case_nesting_fits_a_256_kib_stack() {
+    on_small_stack(256, || {
+        let mut t = T::new();
+        // Deepest recursion the limits allow, then the deepest parse nesting.
+        let r = t.script("f() { f; }\nf", &[]);
+        assert!(r.text().contains("depth limit"));
+        let mut deep = String::new();
+        for _ in 0..22 {
+            deep.push_str("if true; then ");
+        }
+        deep.push_str("echo deep");
+        for _ in 0..22 {
+            deep.push_str("; fi");
+        }
+        assert_eq!(t.out(&deep), "deep\n");
+        let r = t.script(
+            "g() { if true; then for i in 1; do while true; do echo $(echo $(echo ok)); break; done; done; fi; g; }\ng",
+            &[],
+        );
+        assert!(r.text().starts_with("ok\n"));
+    });
+}
+
 #[test]
 fn arbitrary_bytes_never_panic_the_whole_pipeline() {
     let mut x: u64 = 7777;

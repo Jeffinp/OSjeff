@@ -1125,12 +1125,12 @@ impl Shell {
             "shift" => match num(1, 1) {
                 Some(n) if n >= 0 => {
                     let n = n as usize;
-                    let f = self.frames.last_mut().expect("frame");
-                    if n > f.args.len() {
-                        1
-                    } else {
-                        f.args.drain(..n);
-                        0
+                    match self.frames.last_mut() {
+                        Some(f) if n <= f.args.len() => {
+                            f.args.drain(..n);
+                            0
+                        }
+                        _ => 1,
                     }
                 }
                 _ => {
