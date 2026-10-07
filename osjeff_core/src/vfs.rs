@@ -255,6 +255,11 @@ pub trait Backend {
     fn create(&mut self, path: &[u8], now: u64) -> Result<()>;
     fn write_at(&mut self, path: &[u8], off: u64, data: &[u8], now: u64) -> Result<()>;
     fn append(&mut self, path: &[u8], data: &[u8], now: u64) -> Result<()>;
+    /// Set a file's size: shrinking frees blocks, growing leaves a hole of zeros.
+    fn truncate(&mut self, path: &[u8], size: u64, now: u64) -> Result<()>;
+    /// Names and kinds of a folder's entries (storage order); cheaper than
+    /// [`readdir`](Self::readdir) because it reads no inode.
+    fn names(&mut self, path: &[u8]) -> Result<Vec<(Vec<u8>, EntryKind)>>;
     fn mkdir(&mut self, path: &[u8], now: u64) -> Result<()>;
     /// Rename or move; an existing destination is an error.
     fn rename(&mut self, from: &[u8], to: &[u8], now: u64) -> Result<()>;
@@ -301,6 +306,16 @@ impl<D: BlockDevice> Backend for Fs3<D> {
     fn append(&mut self, path: &[u8], data: &[u8], now: u64) -> Result<()> {
         let ino = Fs3::open(self, path)?;
         Ok(Fs3::append(self, ino, data, now)?)
+    }
+    fn truncate(&mut self, path: &[u8], size: u64, now: u64) -> Result<()> {
+        let ino = Fs3::open(self, path)?;
+        Ok(Fs3::truncate(self, ino, size, now)?)
+    }
+    fn names(&mut self, path: &[u8]) -> Result<Vec<(Vec<u8>, EntryKind)>> {
+        Ok(Fs3::readdir_names(self, path)?
+            .into_iter()
+            .map(|(n, k)| (n, k.into()))
+            .collect())
     }
     fn mkdir(&mut self, path: &[u8], now: u64) -> Result<()> {
         Fs3::mkdir(self, path, now)?;

@@ -4,16 +4,18 @@
 //! The backend is a plain, stateless, path-addressed trait over **canonical
 //! absolute paths** (see [`path`]). Everything that makes it safe for untrusted
 //! code lives in [`Sandbox`], which is backend-agnostic: the kernel plugs in
-//! `MemFs` today and OJFS v3 when `kernel::storage` exists, changing nothing
-//! above this trait. See `docs/design/apps.md` §5.
+//! [`VolumeFs`] (OJFS v3 on the disk, or the desktop's RAM volume), [`MemFs`] is
+//! the in-memory implementation used by tests. See `docs/design/apps.md` §5.
 
 pub mod memfs;
 pub mod path;
 pub mod sandbox;
+pub mod volume;
 
 pub use memfs::MemFs;
 pub use path::PathError;
 pub use sandbox::Sandbox;
+pub use volume::VolumeFs;
 
 use alloc::string::String;
 use core::fmt;
@@ -142,3 +144,5 @@ pub trait AppFs {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod volume_tests;

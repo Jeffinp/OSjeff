@@ -286,6 +286,24 @@ impl<D: BlockDevice> Fs3<D> {
         Ok(out)
     }
 
+    /// Names and kinds of a directory's entries in storage order, without reading
+    /// the entries' inodes (much cheaper than [`readdir`](Self::readdir) for a big
+    /// folder). `.trash` is hidden at the root.
+    pub fn readdir_names<P: AsRef<[u8]> + ?Sized>(
+        &mut self,
+        path: &P,
+    ) -> Result<Vec<(Vec<u8>, Kind)>, FsError> {
+        self.ready()?;
+        let comps = split_path(path.as_ref())?;
+        let dir = self.walk(&comps)?.ino;
+        Ok(self
+            .dir_list(dir)?
+            .into_iter()
+            .filter(|&(_, ino, _)| !(dir == ROOT_INO && ino == TRASH_INO))
+            .map(|(name, _, kind)| (name, kind))
+            .collect())
+    }
+
     /// Free an inode and all of its blocks.
     fn release_inode(&mut self, ino: Ino) -> Result<(), FsError> {
         let n = self.read_child(ino)?;
