@@ -8,6 +8,13 @@
 # <outdir>/screen.png via the QEMU monitor. A packet capture of the NIC goes to
 # <outdir>/net.pcap. Exits 0 if the screenshot was taken.
 #
+# The guest network is QEMU user-mode (SLIRP) with the default 10.0.2.0/24 range.
+# Set QEMU_NETDEV (default "user,id=n0"; the id must stay n0, the NIC and the
+# capture refer to it) to test another range, e.g. the guest should then lease
+# 192.168.77.15 and use gateway .2 / DNS .3:
+#   QEMU_NETDEV="user,id=n0,net=192.168.77.0/24,host=192.168.77.2,dhcpstart=192.168.77.15,dns=192.168.77.3" \
+#     tools/qemu-headless.sh bios out 25
+#
 # Extra monitor commands (sendkey, mouse_move, ...) can be sent while it runs
 # through the monitor socket, whose path is printed at start and is also
 # available as <outdir>/mon.path (the socket itself lives under /tmp because a
@@ -42,7 +49,7 @@ args=(-m "${QEMU_MEM:-128M}" -display none -no-reboot -no-shutdown
       -monitor "unix:$sock,server,nowait"
       -drive "format=raw,file=$img"
       -drive "format=raw,file=$fsimg,if=ide,index=2"
-      -netdev user,id=n0 -device ne2k_isa,netdev=n0,mac=52:54:00:12:34:56
+      -netdev "${QEMU_NETDEV:-user,id=n0}" -device ne2k_isa,netdev=n0,mac=52:54:00:12:34:56
       -object "filter-dump,id=dump,netdev=n0,file=$out/net.pcap")
 if [ "$mode" = uefi ]; then
   # Ubuntu's OVMF "4M" build is split into CODE + VARS and must be loaded as
