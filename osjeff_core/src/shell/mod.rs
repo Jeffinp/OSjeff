@@ -32,7 +32,9 @@ pub mod line;
 pub mod netcmds;
 pub mod parse;
 pub mod regex;
+pub mod screen;
 pub mod sys;
+pub mod term;
 #[cfg(test)]
 mod tests;
 
@@ -41,4 +43,6 @@ pub use exec::{BuiltinFn, Builtins, CmdCtx, Host, Limits, Registry, RunResult, S
 pub use fs::{FsErr, MemFs, ShellFs};
 pub use history::History;
 pub use line::{Completer, LineEditor, LineEvent, ShellCompleter};
+pub use screen::Screen;
 pub use sys::{HttpResponse, MockSys, NetInfo, SysErr, SysInfo};
+pub use term::{Term, TermAction};
