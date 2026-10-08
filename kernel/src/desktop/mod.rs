@@ -840,6 +840,7 @@ fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
 }
 
 mod apps;
+mod calc_ui;
 mod chrome;
 mod cursor;
 mod dock;
@@ -859,6 +860,7 @@ mod settings_ui;
 mod shell;
 mod shellhost;
 mod sysstore;
+mod tarefas;
 mod term;
 mod toasts_ui;
 mod ui;
