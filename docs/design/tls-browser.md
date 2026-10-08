@@ -201,8 +201,10 @@ idêntico à baseline (`tools/verify-boot.sh`: 0 pixels, BIOS e UEFI).
   (uma seleção longa é cortada); acentos só no campo de formulário (a fonte é ASCII: a tela
   mostra a letra sem acento, o valor enviado é UTF-8 correto).
 - Revogação (CRL/OCSP), *pinning*, HSTS, Certificate Transparency.
-- Sem `RDRAND` o RNG do handshake continua sendo o fallback fraco (o servidor é
-  autenticado, mas a confidencialidade da sessão não é garantida nessa CPU).
+- O RNG do handshake (W21) é um DRBG ChaCha20 sobre um pool de entropia
+  ([`entropy.md`](entropy.md)). Sem `RDRAND`/`RDSEED` e sem virtio-rng ele vive de jitter de
+  temporização (nota "Mixed"): o handshake espera 128 bits creditados e **recusa** se não vierem;
+  numa VM totalmente determinística isso continua sendo uma estimativa, não uma garantia.
 - Ed25519 em certificados de servidor.
 - Reuso de conexão/sessão TLS (cada recurso abre um handshake novo).
 

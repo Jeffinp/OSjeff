@@ -20,7 +20,7 @@ e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espa�
 endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
 o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
 
-- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2331 testes
+- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2373 testes
   passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
 - **Multitarefa preemptiva** a 250 Hz, com bloqueio. Cinco threads: `compositor`,
@@ -70,9 +70,9 @@ Quem fica de cada lado:
 | `osjeff_core` (testado no host) | `kernel` (ring 0) |
 |---|---|
 | `shell` (motor de comandos, linha, histórico rolável, sessão), `editor2` (editor e diálogos), `calc`, `clipboard`, `keymap`, `process`, `anim` | `main.rs` (boot e laço do compositor), `gdt`, `interrupts`, `switch.s`, `sched`, `crash`, `vm` |
-| `fs` (OJFS), `net`, `lease`, `dns`, `icmp`, `netstats`, `redirect`, `rng` | `allocator`, `sync`, `io`, `serial` |
+| `fs` (OJFS), `net`, `lease`, `dns`, `icmp`, `netstats`, `redirect`, `rng`, `entropy` (pool, DRBG ChaCha20, qualidade) | `allocator`, `sync`, `io`, `serial`, `rng` (fontes, anel de amostras, política) |
 | `web` (HTML, CSS, layout), `browser` | `fb`, `font`, `icons`, `desktop/*` |
-| `layout`, `wm`, `window`, `gfx`, `heap`, `paging`, `schedule` | drivers: `ps2`, `rtc`, `ata`, `ne2000`, `pci`, `virtio*` (gpu, net), `power` |
+| `layout`, `wm`, `window`, `gfx`, `heap`, `paging`, `schedule` | drivers: `ps2`, `rtc`, `ata`, `ne2000`, `pci`, `virtio*` (gpu, net, rng), `power` |
 | `hw::{ps2, rtc, ata, pci, virtio, virtio_net, perf}` | `nic`, `netd`, `netstack`, `fetch`, `wasm/*`, `perf`, `trace` |
 
 
@@ -116,6 +116,7 @@ tamanho, zera) -> BACK/BG/STATIC
 -> PCI + sonda virtio-gpu -> ata::detect -> gdt::init -> sched::init (acha a guard page
 da pilha de boot) -> ps2::init
 -> interrupts::init (IDT, PIC, PIT 250 Hz, sti) -> calibra TSC (25 ticks)
+-> rng::init (RDSEED/RDRAND, virtio-rng, 1º reseed; o timer já amostra o TSC)
 -> nic::probe (virtio-net, senão NE2000) + Netd::boot (DHCP, NetConfig, ARP gratuito)
 -> spawn fetcher (só com NIC, stack com guard page; sem NIC, `fetch::init_offline`) e appd
 -> storage::init (OJFS v3: monta, migra ou formata; sempre antes de qualquer arquivo)
@@ -967,12 +968,17 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
   `CertificateVerify`, lógica em `osjeff_core::tlsverify` sobre `rustls-webpki`, trust store
   de 46 raízes em `osjeff_core/data/`), na hora de `kernel/src/clock.rs` (RTC + SNTP). Ver
   [`design/tls-browser.md`](design/tls-browser.md).
-- **RNG do handshake:** `RDRAND` se `CPUID.01H:ECX[30]` o anuncia e uma amostra de teste
-  funciona (até 10 tentativas por palavra); senão `WeakMixer` (hash de TSC e ticks),
-  **não criptográfico**, anunciado na serial (`RNG: weak fallback`). O `embedded-tls`
-  exige `CryptoRng`, então o tipo fraco implementa o marcador sem merecê-lo. **No
-  QEMU/TCG padrão o `RDRAND` não existe e o caminho fraco é o usado** [M: `RNG: weak
-  fallback (RDRAND not available)` nas duas execuções].
+- **Aleatoriedade** (W21, [`design/entropy.md`](design/entropy.md)): um só gerador, `rng::fill`
+  (`kernel/src/rng.rs`), para o TLS (*client random*, chave efêmera), ISN do TCP (semente do
+  `smoltcp`), DHCP, DNS, SNTP, portas locais e `random_get` dos apps. É um DRBG ChaCha20 de
+  apagamento rápido de chave (`osjeff_core::entropy`) sobre um pool SHA-256 alimentado por
+  `RDSEED`/`RDRAND` (CPUID, tentativas, valores sabidamente ruins rejeitados), pelo driver virtio-rng
+  (`virtio_rng.rs`, `-device virtio-rng-pci`) e por timestamps de timer, teclado, mouse e chegada de
+  quadros (anel sem trava preenchido pelas ISRs; só `rng::sample`, sem alocação nem lock) e, enquanto
+  um HTTPS espera, por jitter de CPU. Crédito conservador (<= 0,5 bit por amostra de timing).
+  Nota **Strong** (hardware), **Mixed** (>= 128 bits de timing) ou **Weak**: com Weak o handshake
+  espera até 5 s por 128 bits e depois recusa; Mixed só registra uma linha INFO. **Provado no QEMU**
+  [M] com `-device virtio-rng-pci` (`RNG: strong`) e sem ele (jitter chega a 128 bits em ~1,1 s).
 - **`fetch.rs`:** `STATE` (IDLE, REQUESTED, RUNNING, DONE) com caixas estáticas. Segue até
   `MAX_REDIRECTS = 5` redirects via `osjeff_core::redirect`: mantém o esquema, **bloqueia
   https para http**, rejeita controles, espaços e valores grandes, detecta ciclos. Devolve
@@ -1164,7 +1170,7 @@ código seguro em `osjeff_core`, testado e fuzzado, mas a cola em `abi2.rs` e `m
 | Damage tracking e camada `STATIC` | animação proporcional à área do dano | vários caminhos de desenho e uma assinatura de cena que precisa invalidar certo (já colidiu com ≥ 9 janelas; corrigido) |
 | `Nic` trait + `Port`, virtio-net e NE2000 polled, `smoltcp`, DHCP e DNS próprios (`lease`, `dns`) | um único dono do endereço e do resolvedor (sem socket DHCP/DNS do `smoltcp`, que só tem um servidor); a lógica é pura e testada | só exercitado no QEMU (virtio-net existe em VMs, não em PCs; NE2000 é ISA rara); virtio só-legado não é suportado; DHCP sem autenticação |
 | Fetcher em thread própria que também é o `netd`, NIC movida para ele | o handshake TLS por software não pode congelar a UI; um dono só, garantido pelo tipo | se o `fetcher` morre a rede fica muda; um RENEW espera uma busca em curso terminar |
-| TLS 1.3 sem verificação de certificado | sem trust store nem relógio confiável | cifra sem autenticar; rótulo honesto na UI; RNG fraco sem `RDRAND` |
+| TLS 1.3 sem verificação de certificado | sem trust store nem relógio confiável | cifra sem autenticar; rótulo honesto na UI; RNG: ver §9.1 (DRBG com pool; HTTPS recusa se Weak) |
 | `wasmi` com combustível, teto de memória e término real | WebAssembly como formato nativo de apps (Rust e C) | interpretador 25-37x mais lento que nativo [A]; combustível não retomável; um app por build; `unsafe` do `wasmi` na TCB |
 | OJFS de registro fixo, imagem inteira regravada | simples, sem alocação, fuzzável | 48 entradas, nome de 16 B, 1 KiB por arquivo, sem journal; escrita não atômica e bloqueante |
 | Toolchain nightly de data fixa | o `nightly` solto quebrou o build | atualizar de propósito, com o `Cargo.lock`; canário semanal no CI |
@@ -1183,7 +1189,7 @@ código seguro em `osjeff_core`, testado e fuzzado, mas a cola em `abi2.rs` e `m
   convenção em `RacyCell` e nas 5 `fn` seguras `&'static mut`; `SURFACE` pode rasgar um
   quadro; a serial não tem lock.
 - **Rede e web.** O HTTPS autentica o servidor (cadeia, nome e `CertificateVerify`; sem
-  revogação nem *pinning*), e sem `RDRAND` (o caso do QEMU/TCG padrão) o RNG do handshake é fraco.
+  revogação nem *pinning*), e o RNG do handshake é um DRBG com pool de entropia; sem `RDRAND` nem virtio-rng a nota é, no máximo, "Mixed" (jitter de temporização, sem garantia numa VM determinística; `design/entropy.md`).
   Uma chamada `net_http_get` de app bloqueia a thread `appd` (os outros apps) até 8 s (20 s em https). Só o QEMU/SLIRP foi exercitado (o lease é renovado,
   mas só provado contra o servidor DHCP do SLIRP); uma conexão por vez, HTTP/1.0, sem
   cookies, JPEG/GIF/WebP nem JS. IPv6, `e1000`/`rtl8139`, virtio só-legado, MSI-X/interrupções da

@@ -18,7 +18,7 @@ depois o que limita o que ele consegue fazer, depois polimento.
 | Plataforma de apps | Manifesto, ABI v2, sandbox de arquivos (`/data/<id>`), instalação em `/apps`, cotas de *fuel* e memória, `net_http_get` pela rede real com lista de hosts por app, dados persistentes no disco, vista "Apps" no gerenciador de arquivos |
 | Sistema | Configurações persistentes (cor, papel de parede, teclado ABNT2, fuso, relógio), log em anel + `/var/log`, monitor de recursos, notificações |
 | Desktop | Gerenciador de arquivos v2 (copiar/mover com progresso, lixeira), visualizador de imagens, terminal com shell completo e rede, editor com Abrir/Salvar e confirmação ao fechar, roda do mouse |
-| Qualidade | 2331 testes (de 189), cobertura de linhas 96,6% no `osjeff_core`, 13 alvos de fuzz; `unsafe` 100% documentado e imposto pelo lint; CI, `cargo deny`, `cargo audit`, harness de boot em QEMU, cenários de interface em `tools/perf/scen` |
+| Qualidade | 2373 testes (de 189), cobertura de linhas 96,6% no `osjeff_core` (medida antes da W21), 14 alvos de fuzz; `unsafe` 100% documentado e imposto pelo lint; CI, `cargo deny`, `cargo audit`, harness de boot em QEMU, cenários de interface em `tools/perf/scen` |
 
 ## Próximos passos, em ordem
 
@@ -37,7 +37,7 @@ embutidas com hash documentado, cadeia/nome/`CertificateVerify` verificados com
 `rustls-webpki`, SNTP para a hora, erro claro na página e "continuar mesmo assim" por
 origem e por sessão, `x509_parse` fuzzado (5 M de execuções sem crash). Detalhes e provas
 em [`design/tls-browser.md`](design/tls-browser.md). Ainda em aberto: revogação (CRL/OCSP),
-*pinning*, HSTS e, sem `RDRAND`, recusar em vez de usar o RNG fraco. O navegador ganhou links clicáveis, histórico (Alt+←/→), gzip/deflate, imagens PNG/BMP/PPM,
+*pinning* e HSTS. (Feito na W21: o gerador deixou de ser fraco e o HTTPS recusa, depois de esperar até 5 s, quando o pool tem menos de 128 bits creditados; ver [`design/entropy.md`](design/entropy.md).) O navegador ganhou links clicáveis, histórico (Alt+←/→), gzip/deflate, imagens PNG/BMP/PPM,
 formulários GET, favoritos persistentes, busca na página, zoom, seleção e roda do mouse (`osjeff://`);
 ainda não tem POST, `<select>`/`<textarea>`, JPEG/GIF nem reuso de conexão.
 *Aceite (cumprido):* servidor com certificado inválido falha e a barra só diz "Conexao

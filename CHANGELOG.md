@@ -17,6 +17,37 @@ tem releases versionadas; as seções são marcos na `master`.
   também mostram o que chegou. `Content-Encoding` em lista, deflate cru ou zlib e
   `Transfer-Encoding: gzip, chunked` entendidos; limites 1 MiB na rede e 4 MiB descompactado
   (orçamento de heap em `browser::MAX_RESPONSE_BYTES`). Novo alvo de fuzz `http_body`.
+## 2026-10 — Entropia de verdade (W21)
+
+- **Problema:** no QEMU com WHPX (Windows) a CPU do guest não tem `RDRAND` e o kernel caía num
+  misturador de 64 bits (TSC e ticks) para o *client random* e a chave efêmera do TLS, o ISN do TCP
+  (que era **zero**), o `xid` do DHCP, o id e a porta do DNS; o toast `RNG: weak fallback`
+  aparecia a cada boot.
+- **`osjeff_core::entropy`** (puro, `no_std`, `forbid(unsafe)`, sem dependência nova): ChaCha20
+  (RFC 8439), DRBG de apagamento rápido de chave com contadores de reseed, pool SHA-256 com crédito em
+  milibits e saúde por fonte, estimador de jitter (testes de "preso", variação e repetição) e a nota
+  `Quality` (Weak < Mixed < Strong; timing sozinho nunca é Strong). 40 testes novos (vetores da RFC,
+  respostas conhecidas calculadas à parte, determinismo, reseed, 1 MiB de saída com bit balance,
+  qui-quadrado e transições, varredura de invariantes), mais `rng` (RDSEED, valores sabidamente
+  ruins) e os ids PCI do virtio-rng. Novo alvo de fuzz `entropy_api` (14 no total).
+- **Kernel:** `rng.rs` (RDSEED/RDRAND com tentativas e checagem de 0/tudo-1/bloco constante; anel de
+  timestamps **sem alocação e sem trava** preenchido pelas ISRs do timer, teclado e mouse e pela
+  chegada de quadros; dobra em contexto de thread; reseed periódico) e `virtio_rng.rs` (driver virtio
+  1.x, `1af4:1005`/`1044`). Um só ponto, `rng::fill`, para TLS, ISN do TCP (semente do `smoltcp`),
+  DHCP, DNS, SNTP, portas locais e `random_get`/`random` dos apps WASM (antes um xorshift por app).
+- **Política:** Strong/Mixed seguem como antes e a mudança sai **uma vez** como linha INFO
+  (`RNG: pool seeded from timing jitter (N bits credited)`), sem toast. Só Weak (< 128 bits) faz o HTTPS
+  esperar até 5 s (coletando jitter de CPU) e depois **recusar**, com um aviso: acabou o caminho
+  "usa o gerador fraco mesmo assim" (item do ROADMAP).
+- **Scripts:** `tools/run.sh`, `tools/qemu-headless.sh`, `tools/perf/run.sh`, `run.ps1` e
+  `tools/qemu-up.ps1` passam `-device virtio-rng-pci` por padrão quando o QEMU o tem
+  (`QEMU_RNG=none` / `-NoRng` desligam, para exercitar o caminho de jitter).
+- **Provado em QEMU** (`design/entropy.md` §5): com virtio-rng `RNG: strong`; sem ele e com
+  `-cpu qemu64` o pool passa de 128 bits em ~1-2 s de ticks do timer e o HTTPS chega ao fim da
+  verificação de certificado; os *client randoms* capturados no `net.pcap` são todos diferentes entre
+  boots e entre conexões.
+- Documentação: `design/entropy.md` (novo), SECURITY-MODEL §3.7, ARCHITECTURE §9.1, ROADMAP, TESTING.
+- Testes: 2331 -> 2373 no `osjeff_core`; 14 alvos de fuzz.
 
 ## 2026-10 — Expansão do sistema: integração (W15–W19)
 

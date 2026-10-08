@@ -62,6 +62,7 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 
 | `http_body` | `[modo, corte(2 B), ...bytes]`: os bytes como resposta HTTP inteira, como corpo sob cabeçalhos hostis (`gzip, gzip, deflate`, `br`, `Content-Length` enorme...), em leitura parcial do `Inflater`, e (modo `0x10`) comprimidos por nosso codificador (gzip, zlib, deflate cru, gzip em cadeia, `chunked`), **cortados** em qualquer ponto | `browser::body_partial`/`page_body_partial`/`body_bytes`, `appnet::app_response`, `Inflater::read_partial`. Invariantes: nunca pânico, corpo <= `MAX_DECODED_BYTES`, um fluxo válido cortado decodifica para **prefixo do original** e inteiro decodifica exato e sem aviso (regressões: `fuzz/regressions/http_body/`) |
 | `app_manifest` | bytes como `.wasm` inteiro, como payload de `osjeff.manifest` ou de `osjeff.icon` (embrulhado numa seção válida), ou como manifesto/ícone soltos | `wasmsec` (cabeçalho, seções, LEB128), `appmanifest` (chaves, quotas, `net_hosts`, ícone PNG até 64x64) e as invariantes do manifesto aceito (inclui: `net_hosts` limitado, só com permissão de rede, nunca admite o que o filtro de destinos recusa) |
+| `entropy_api` | sequência de operações (`add` com id e crédito declarado quaisquer, timestamps, `fill` de qualquer tamanho, reseed, relógio) | `osjeff_core::entropy`: nunca pânico; crédito por fonte <= 8 bits por byte e nunca decrescente; nota nunca decrescente e timing sozinho nunca Strong; crédito na chave <= 256 por classe; nenhuma saída de 32 bytes se repete |
 | `app_sandbox` | sequência de operações com caminhos em bytes crus sobre dois apps que dividem um `MemFs` **ou** um `VolumeFs` sobre um OJFS v3 de 1 MiB em RAM (o primeiro bool escolhe; mais URLs) | `appfs` (normalização, `Sandbox`, `VolumeFs`, cota, descritores) e `appnet`: nada existe fora de `/data/<id>`, os arquivos do sistema e do usuário ficam intactos, a cota vale, `fsck` limpo, URL aceita nunca é local |
 
 ```bash
@@ -81,6 +82,7 @@ cargo fuzz run http_body -- -max_total_time=600 -print_final_stats=1
 
 cargo fuzz run app_manifest -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run app_sandbox -- -max_total_time=600 -print_final_stats=1
+cargo fuzz run entropy_api -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run html_img_form -- -max_total_time=600 -print_final_stats=1
 ```
 
@@ -255,8 +257,9 @@ uma faixa amarela diz por quê; "END OF PAGE" aparece só nas páginas decodific
 
 ### Rede em QEMU
 
-`tools/qemu-headless.sh` captura o tráfego da NIC em `<outdir>/net.pcap` e aceita duas
-variáveis (documentadas no cabeçalho do script):
+`tools/qemu-headless.sh` captura o tráfego da NIC em `<outdir>/net.pcap` e aceita estas
+variáveis (documentadas no cabeçalho do script; `QEMU_RNG=none` tira o `-device virtio-rng-pci`
+que os scripts passam por padrão):
 
 ```bash
 QEMU_NIC=virtio tools/qemu-headless.sh bios /tmp/osj 25     # virtio-net em vez do NE2000 (ne2k, padrão; none = sem NIC)
@@ -274,6 +277,9 @@ introduziu; a serial tem `net:` e `dns:`):
 | página por virtio-net | `python3 -m http.server 8077 --bind 127.0.0.1` no host + navegador em `http://192.168.77.2:8077/` | `fetch: 279 bytes (status 200)` e a página na tela |
 | NE2000 não regride | `tools/verify-boot.sh` (0 pixels diferentes) e a mesma página com `QEMU_NIC` padrão | idem |
 | sem NIC | `QEMU_NIC=none` | `net: no network interface found`; o navegador mostra a falha na hora |
+| entropia: com virtio-rng (padrão) | `tools/qemu-headless.sh bios /tmp/osj 22` | `virtio-rng @ pci ...`, `RNG: strong (256 bits from hardware ...)` |
+| entropia: só jitter de temporização | `QEMU_RNG=none tools/qemu-headless.sh bios /tmp/osj 25 -- -cpu qemu64` (sem RDRAND/RDSEED; `-cpu max` os liga) | `RNG: no hardware generator; collecting timing jitter`, depois `RNG: pool seeded from timing jitter (N bits credited)` (N >= 128, em ~1-2 s) |
+| *client random* do TLS | `openssl s_server -accept 4443 ...` no host + `tools/qemu-browse.sh <out> https://10.0.2.2:4443/` + `python3 -I tools/tls-hello.py <out>/net.pcap` | um *client random* por conexão, todos diferentes entre conexões e entre boots (`design/entropy.md` §5) |
 | RENEW / REBIND / expiração | gancho **temporário** que força `lease_secs = Some(20)` e, nas variantes, descarta as respostas durante RENEWING (e REBINDING) | pcap: REQUEST unicast `10.0.2.15 -> 10.0.2.2` em T1 (~10 s); com a resposta descartada, REQUEST broadcast em T2 (~17,5 s); descartando também essa, na expiração (20 s) DISCOVER e novo lease |
 | ping | gancho **temporário** no boot chamando `netd::ping_us` | `ping gateway (10.0.2.2): reply rtt 525 us = 1 ms`; pcap: ICMP tipo 8 e 0; alvo sem ARP: `host did not answer ARP`; o próprio IP: `invalid target address` |
 | failover do DNS | gancho temporário com DNS `10.0.2.250` (morto) e `10.0.2.3`, navegador em `http://example.com/` | `dns: no answer for example.com, trying 10.0.2.3`, `dns: example.com -> ... (2 attempts)`; pcap: ARP sem resposta para `.250`, depois a consulta para `.3` |

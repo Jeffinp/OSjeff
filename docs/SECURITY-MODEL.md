@@ -27,6 +27,8 @@ Quem controla o dado, quem o interpreta e o que impede o pior.
 |---|---|---|---|---|---|
 | 1 | **Frames de rede** (virtio-net, NE2000) | qualquer host na rede | `osjeff_core::{net, lease, dns, icmp}` (ARP, IPv4, ICMP, UDP, DHCP, DNS) e `smoltcp` | `forbid(unsafe_code)` nesses módulos; fuzz de `net_parse` cobre o parser e responder, a máquina de lease, a resposta DNS e o ICMP (38 M execuções sem crash antes da rodada de rede; 1,2 M, 90 s, depois dela); resposta DNS só vale com id, pergunta e origem certos e registros do dono certo; ICMP de erro só vale se citar o nosso pedido; orçamento de 32 frames por acordada | `smoltcp` e os drivers não são fuzzados; DHCP e DNS sem autenticação; id e porta de origem do DNS vêm do TSC (fracos); frame que cruza o fim do anel do DP8390 *(suposição, não provado)* |
 | 2 | **Respostas HTTP/HTTPS** | servidor remoto, ou quem estiver no caminho | `fetch` → `osjeff_core::browser` (cabeçalhos, `chunked`, redirect) | corpo limitado a 1 MiB (`MAX_RESPONSE_BYTES`, ainda compactado) nos dois protocolos e 4 MiB descompactado (gzip/deflate, também em cadeia até 4 codificações; `br`/`zstd` nunca são oferecidos nem aceitos); um corpo compactado cortado ou danificado mostra o que foi decodificado, com aviso, em vez de erro; `dechunk` sem panic; redirect sem rebaixar https→http, no máximo 5 saltos, rejeita caracteres de controle; **TLS com cadeia de certificado, nome e `CertificateVerify` verificados** contra uma trust store embutida (§3.1) | sem revogação (CRL/OCSP), *pinning* nem HSTS (§3.1) |
+| 1 | **Frames de rede** (virtio-net, NE2000) | qualquer host na rede | `osjeff_core::{net, lease, dns, icmp}` (ARP, IPv4, ICMP, UDP, DHCP, DNS) e `smoltcp` | `forbid(unsafe_code)` nesses módulos; fuzz de `net_parse` cobre o parser e responder, a máquina de lease, a resposta DNS e o ICMP (38 M execuções sem crash antes da rodada de rede; 1,2 M, 90 s, depois dela); resposta DNS só vale com id, pergunta e origem certos e registros do dono certo; ICMP de erro só vale se citar o nosso pedido; orçamento de 32 frames por acordada | `smoltcp` e os drivers não são fuzzados; DHCP e DNS sem autenticação; id e porta de origem do DNS (e o ISN do TCP) vêm do gerador do kernel (§3.7), tão bons quanto a nota dele; frame que cruza o fim do anel do DP8390 *(suposição, não provado)* |
+| 2 | **Respostas HTTP/HTTPS** | servidor remoto, ou quem estiver no caminho | `fetch` → `osjeff_core::browser` (cabeçalhos, `chunked`, redirect) | corpo limitado a 256 KiB (`MAX_RESPONSE_BYTES`) nos dois protocolos e 1 MiB descompactado (gzip/deflate); `dechunk` sem panic; redirect sem rebaixar https→http, no máximo 5 saltos, rejeita caracteres de controle; **TLS com cadeia de certificado, nome e `CertificateVerify` verificados** contra uma trust store embutida (§3.1) | sem revogação (CRL/OCSP), *pinning* nem HSTS (§3.1) |
 | 3 | **HTML e CSS** | página remota | `osjeff_core::web` | profundidade 40, 8 000 nós, 1 000 regras e 2 000 seletores; comprimentos CSS limitados; cores não-ASCII rejeitadas; fuzz de ~0,7 M execuções sem crash | cascata ainda é O(regras × elementos) dentro dos tetos; fuzz do `web` ainda ganhava cobertura quando parou |
 | 4 | **Disco (OJFS)** | quem fornecer a imagem | `osjeff_core::fs` | validação de `size`, `parent` (ciclos), imagem curta; fuzz de 1 M execuções sem crash; falha de leitura **não** reescreve o disco | disco com conteúdo desconhecido ainda é formatado (é o desenho do disco dedicado); sem permissões nem criptografia |
 | 5 | **Apps `.wasm`** | embutidos no build, **ou instalados pelo usuário** (um `.wasm` aberto no Arquivos; o manifesto pede permissões e cotas e o instalador recusa o que passa do teto) | `wasmi` + as host functions `host.*`/`osj.*`; `osjeff_core::{wasmsec, appmanifest, appfs, appnet, appinstall}` | combustível por chamada (20 M; 256 M na inicialização), memória de 24 MiB, tetos nas host functions, o app é encerrado e liberado em qualquer falha; arquivos só em `/data/<id>` ou `/home` conforme `fs=`, com cota; rede só com `net=http`, destinos públicos e `net_hosts` (§3.6) | o TCB inclui `wasmi` e as host functions: um bug ali é fuga total; não há *fuel* retomável (um quadro pesado legítimo é encerrado); sem assinatura de pacotes: quem instala um `.wasm` concede o que o manifesto pede |
@@ -50,6 +52,7 @@ Quem controla o dado, quem o interpreta e o que impede o pior.
 | Canário de pilha | só como reserva quando não há guarda | fraco: um teste forçado corrompeu o heap antes da detecção |
 | Recusa de framebuffer maior que os buffers | feito | "UNSUPPORTED SCREEN" (`docs/img/panic-oversize-*.png`) |
 | Disco intocado se a leitura falhar | feito (`PERSIST`) | hash do disco idêntico com falha injetada |
+| Gerador de números aleatórios real (DRBG ChaCha20 + pool SHA-256; HTTPS espera ou recusa se a entropia for fraca) | feito (`rng.rs`, `osjeff_core::entropy`) | 40 testes no core (RFC 8439, respostas conhecidas, estatística em 1 MiB), fuzz `entropy_api`, provas em QEMU em `design/entropy.md` §5 |
 
 ## 3. O que **não** é protegido
 
@@ -81,13 +84,10 @@ quando a checagem de data falha. **O SNTP não é autenticado**: quem controla a
 mentir a hora e, com um certificado expirado que ainda tenha a chave, fazê-lo parecer
 válido (o mesmo vale para quem controla o RTC e bloqueia o UDP/123).
 
-O gerador de números aleatórios do handshake usa `RDRAND` quando a CPU tem
-(checado por CPUID, com 10 tentativas). Sem `RDRAND`, cai para uma mistura de TSC e
-PIT e registra `RNG: weak fallback` na serial; como o `embedded-tls` exige o trait
-`CryptoRng`, esse fallback **também** o implementa, e por isso não deve ser
-considerado criptograficamente forte: o servidor continua autenticado, mas a
-confidencialidade da sessão não é garantida nessa CPU. No QEMU padrão (`qemu64`) o
-caminho fraco é o exercitado; com `-cpu max` o `RDRAND` é usado.
+O *client random* e a chave efêmera do handshake vêm do gerador do kernel (§3.7): um
+DRBG ChaCha20 alimentado por `RDSEED`/`RDRAND`, pelo virtio-rng e por jitter de temporização.
+O handshake **só começa** com pelo menos 128 bits de entropia creditados; sem eles espera até
+5 s e depois **recusa** (falha de TLS e um aviso), em vez de usar um gerador fraco como antes.
 
 **O que continua faltando:**
 - **Revogação**: não existe CRL, OCSP nem grampeamento; um certificado revogado e ainda
@@ -131,7 +131,7 @@ caminho fraco é o exercitado; com `-cpu max` o `RDRAND` é usado.
   T1, REBIND em T2) e o endereço é **removido** ao expirar. O DHCP não é autenticado: quem
   responder primeiro define o gateway e os DNS, e um servidor falso que responde a um RENEW
   com outra configuração reconfigura a interface. O DNS tenta todos os servidores do lease, mas
-  também não é autenticado nem tem DNSSEC; o id da consulta e a porta de origem são fracos.
+  também não é autenticado nem tem DNSSEC; o id da consulta e a porta de origem vêm do gerador do kernel (§3.7), então são tão imprevisíveis quanto ele.
 - A NIC tem **um dono** (`netd`, no tipo) e o compositor não a toca. O virtio-net só faz DMA
   nos próprios buffers estáticos (RX/TX de 2 KiB) e valida cada elemento do anel `used` (id
   fora da fila, índice impossível, quadro curto ou longo) antes de usar; sem IOMMU, um
@@ -178,6 +178,42 @@ Os apps passaram a ter **superfície persistente** (o disco) e **superfície de 
   O conteúdo de uma resposta é dado não confiável: o decodificador gzip é limitado (1 MiB) e o
   guest recebe bytes, nunca algo que o kernel interprete.
 
+### 3.7 Números aleatórios (W21)
+Tudo o que precisa ser imprevisível (*client random* e chave efêmera do TLS, ISN do TCP, `xid` do
+DHCP, id e porta do DNS, nonce do SNTP, porta local, `random_get` dos apps WASM) sai de
+**uma** função, `crate::rng::fill` (`kernel/src/rng.rs`), um DRBG ChaCha20 de apagamento rápido
+de chave sobre um pool SHA-256. Desenho completo, fontes e provas em
+[`design/entropy.md`](design/entropy.md). O que importa aqui:
+
+| Nota | Quando | O que se pode dizer |
+|---|---|---|
+| **Strong** | `RDSEED`, `RDRAND` ou virtio-rng deram >= 128 bits de crédito à chave | tão forte quanto o gerador de hardware (ou o hospedeiro, no virtio-rng) e o ChaCha20; confiança em caixa-preta mitigada porque nada é usado cru |
+| **Mixed** | sem hardware, >= 128 bits de crédito de temporização (timer, teclado, mouse, NIC, jitter de CPU) | bom contra um atacante que não vê os relógios da máquina; **sem garantia** contra quem vê |
+| **Weak** | menos de 128 bits | o DRBG responde (ids sem segredo), mas o HTTPS espera até 5 s e recusa |
+
+- **Crédito conservador:** amostra de interrupção vale **no máximo 0,5 bit** e só se passar nos
+  testes de "preso / variação mínima / repetição" sobre as três primeiras diferenças dos
+  timestamps; jitter de CPU vale 0,1 bit; RTC e TSC de boot entram no hash com crédito **zero**.
+  O crédito é uma afirmação, não uma medição.
+- **Numa VM totalmente determinística sem virtio-rng e sem `RDRAND` a qualidade é, no máximo,
+  "Mixed", e pode ser zero de verdade** (o estimador só enxerga timestamps: um relógio
+  perfeitamente regular é rejeitado e a nota fica Weak, mas um relógio determinístico com
+  variação sintética passaria). Por isso timing sozinho **nunca** chega a Strong. O caminho
+  honesto é dar entropia ao guest: os scripts e o `run.ps1` já passam `-device virtio-rng-pci`
+  por padrão (`QEMU_RNG=none` / `-NoRng` desligam, para testar o caminho de jitter).
+- **No QEMU com WHPX (o caso do dono):** o `RDRAND` fica escondido do guest; com virtio-rng a
+  nota é Strong, sem ele é Mixed depois de ~1-2 s de ticks do timer e o HTTPS funciona, com uma
+  linha INFO na serial (`RNG: pool seeded from timing jitter (N bits credited)`), sem toast.
+- **Confiança:** virtio-rng é a entropia do hospedeiro; o hipervisor já controla toda a memória
+  do guest, então isto não amplia o que ele pode fazer. `RDRAND`/`RDSEED` são caixas-pretas: ficam
+  atrás do pool e do DRBG, valores sabidamente ruins (0, todos os bits, `0xFFFF_FFFF`, bloco constante)
+  desligam a fonte depois de 3 blocos ruins seguidos.
+- **Interrupções:** as ISRs só chamam `rng::sample` (um `rdtsc` e dois acessos atômicos a um vetor
+  estático; sem alocação, sem lock, sem log). O estimador e o SHA-256 rodam em contexto de thread.
+- **Limites conhecidos:** sem semente persistente entre boots; estado protegido por interrupções
+  desligadas (um só núcleo); o apagamento de memória é o que Rust seguro permite (`fill(0)` +
+  `black_box`).
+
 ## 4. Cenários de ataque e resultado hoje
 
 | Cenário | O que acontecia antes da auditoria | Hoje |
@@ -198,11 +234,13 @@ Os apps passaram a ter **superfície persistente** (o disco) e **superfície de 
 | Servidor malicioso faz resposta de vários MiB | OOM mudo no `http_get` | truncado em 1 MiB (4 MiB já descompactado), avisado na página |
 | App tenta ler/escrever `/etc/osjeff.conf`, `/var/log`, `/.trash` ou os arquivos do usuário | (apps sem disco real) | `ERR_PERM` no `VolumeFs`, mesmo que o `Sandbox` falhasse (testes e fuzz sobre o volume) |
 | App pede uma URL que redireciona para `http://10.0.2.2/` ou para um nome público que resolve para `127.0.0.1` | — (`net_http_get` não transportava) | recusado no salto / depois do DNS; provado em QEMU (`w18-net.sh`) |
+| Sem `RDRAND` (QEMU com WHPX): *client random* e chave efêmera do TLS | de um misturador de 64 bits (TSC e ticks); toast `RNG: weak fallback` a cada boot | DRBG ChaCha20 semeado por virtio-rng ou, sem ele, por jitter (>= 128 bits creditados antes do handshake, senão recusa); provado em QEMU (`design/entropy.md` §5) |
+| ISN do TCP | zero (`smoltcp` com semente 0) | semente do gerador do kernel |
 | App contra um servidor HTTPS autoassinado | — | `tls: certificate check FAILED`, o app recebe `ERR_NET` e nenhum byte |
 
 ## 5. Como reproduzir as provas
 
-- Testes: `cargo test-core` (423 testes; regressões dos achados em `osjeff_core`).
+- Testes: `cargo test-core` (2373 testes; regressões dos achados em `osjeff_core`, 40 deles do gerador de entropia).
 - Fuzz: [`TESTING.md`](TESTING.md#2-fuzzing) — as entradas mínimas dos crashes estão em
   `fuzz/regressions/`.
 - Falhas visíveis e IST: [`TESTING.md`](TESTING.md#provando-falhas-padrão-usado-na-auditoria).
