@@ -69,6 +69,13 @@ pub(crate) struct SysMon {
     pub tx_rate: u64,
     pub net_rx: Series,
     pub net_tx: Series,
+    disk_r: RateMeter,
+    disk_w: RateMeter,
+    /// Disk traffic in bytes per second (read, write) and its 60 s history.
+    pub disk_rd_rate: u64,
+    pub disk_wr_rate: u64,
+    pub disk_rd: Series,
+    pub disk_wr: Series,
     pub draws: Series,
     pub frame_us: Series,
     pub frame_now_us: u64,
@@ -97,6 +104,12 @@ impl SysMon {
             tx_rate: 0,
             net_rx: Series::new(),
             net_tx: Series::new(),
+            disk_r: RateMeter::new(),
+            disk_w: RateMeter::new(),
+            disk_rd_rate: 0,
+            disk_wr_rate: 0,
+            disk_rd: Series::new(),
+            disk_wr: Series::new(),
             draws: Series::new(),
             frame_us: Series::new(),
             frame_now_us: 0,
@@ -131,6 +144,13 @@ impl SysMon {
         }
         self.net_rx.push(self.rx_rate.min(u32::MAX as u64) as u32);
         self.net_tx.push(self.tx_rate.min(u32::MAX as u64) as u32);
+        let (rd, wr) = crate::ata::io_bytes();
+        self.disk_rd_rate = self.disk_r.rate(rd, 1);
+        self.disk_wr_rate = self.disk_w.rate(wr, 1);
+        self.disk_rd
+            .push(self.disk_rd_rate.min(u32::MAX as u64) as u32);
+        self.disk_wr
+            .push(self.disk_wr_rate.min(u32::MAX as u64) as u32);
         self.draws.push(i.fps);
         self.frame_us.push(i.frame_us.min(u32::MAX as u64) as u32);
         self.frame_now_us = i.frame_us;

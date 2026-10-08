@@ -369,11 +369,26 @@ fn usage_reports_a_share() {
     assert_eq!(
         Usage {
             total: 100,
-            free: 0
+            free: 0,
+            ..Usage::default()
         }
         .used_permille(),
         1000
     );
+}
+
+#[test]
+fn usage_counts_files_and_folders() {
+    let mut fs = fresh(4);
+    let before = Backend::usage(&mut fs);
+    assert!(before.inodes_total > 0);
+    assert!(before.inodes_used() < before.inodes_total);
+    fs.mkdir(b"/contagem", 1).unwrap();
+    fs.write_file(b"/contagem/a.txt", b"x", 1).unwrap();
+    let after = Backend::usage(&mut fs);
+    assert_eq!(after.inodes_total, before.inodes_total);
+    assert_eq!(after.inodes_used(), before.inodes_used() + 2);
+    assert_eq!(Usage::default().inodes_used(), 0);
 }
 
 #[test]

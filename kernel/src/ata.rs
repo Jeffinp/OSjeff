@@ -23,7 +23,7 @@
 use crate::io::{inb, inw, outb};
 use crate::sync::YieldMutex;
 use core::arch::asm;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use osjeff_core::blockdev::{BlockDevice, IoError};
 
 const BASE: u16 = 0x170; // secondary channel I/O base
@@ -75,6 +75,20 @@ static PORTS: YieldMutex<()> = YieldMutex::new(());
 /// Consecutive transfer failures (timeouts, faults, absent drive); a success
 /// resets it. At [`MAX_FAILS`] calls fail without touching the hardware.
 static FAILS: AtomicU32 = AtomicU32::new(0);
+
+/// Bytes the driver moved since boot (successful transfers only), for the activity
+/// monitor. Plain relaxed counters: no lock, no allocation, safe to bump anywhere and
+/// to read from any thread.
+static READ_BYTES: AtomicU64 = AtomicU64::new(0);
+static WRITE_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// Cumulative `(bytes read, bytes written)` through [`AtaDisk`] since boot.
+pub fn io_bytes() -> (u64, u64) {
+    (
+        READ_BYTES.load(Ordering::Relaxed),
+        WRITE_BYTES.load(Ordering::Relaxed),
+    )
+}
 
 /// Why one controller step failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -325,6 +339,9 @@ impl BlockDevice for AtaDisk {
         let _ports = PORTS.lock().map_err(|_| IoError::Read)?;
         let r = settle_result(read_chunks(lba, buf, true));
         Self::account(true, t0);
+        if r.is_ok() {
+            READ_BYTES.fetch_add(buf.len() as u64, Ordering::Relaxed);
+        }
         r.map_err(|_| IoError::Read)
     }
 
@@ -339,6 +356,9 @@ impl BlockDevice for AtaDisk {
         let _ports = PORTS.lock().map_err(|_| IoError::Write)?;
         let r = settle_result(write_chunks(lba, buf, true));
         Self::account(false, t0);
+        if r.is_ok() {
+            WRITE_BYTES.fetch_add(buf.len() as u64, Ordering::Relaxed);
+        }
         r.map_err(|_| IoError::Write)
     }
 

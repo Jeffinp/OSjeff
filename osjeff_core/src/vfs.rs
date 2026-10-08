@@ -212,12 +212,21 @@ impl From<TrashEntry> for TrashItem {
 pub struct Usage {
     pub total: u64,
     pub free: u64,
+    /// Files and folders the volume can hold, and how many slots are still free
+    /// (both `0` when the backend does not know).
+    pub inodes_total: u32,
+    pub inodes_free: u32,
 }
 
 impl Usage {
     /// Used bytes.
     pub fn used(&self) -> u64 {
         self.total.saturating_sub(self.free)
+    }
+
+    /// Files and folders in use (the root folder and the system folders included).
+    pub fn inodes_used(&self) -> u32 {
+        self.inodes_total.saturating_sub(self.inodes_free)
     }
 
     /// Used share in permille (0..=1000).
@@ -234,6 +243,8 @@ impl From<StatFs> for Usage {
         Usage {
             total: s.data_bytes(),
             free: s.free_bytes(),
+            inodes_total: s.total_inodes,
+            inodes_free: s.free_inodes,
         }
     }
 }
