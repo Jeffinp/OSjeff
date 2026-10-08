@@ -122,7 +122,7 @@ impl Desktop {
         let fade = level(&a.t);
         // Everything below the menu bar, which stays crisp.
         let full = Rect::new(0, MENUBAR_H, self.sw, self.sh - MENUBAR_H);
-        a.backdrop.draw(c, full, 0, 28, fade);
+        a.backdrop.draw(c, full, 0, 64, fade);
         let (wash, wa) = if theme::dark() {
             (Color::rgb(0, 0, 0), 150u32)
         } else {
@@ -408,6 +408,9 @@ impl Desktop {
         let p = theme::pal();
         let fade = level(&s.t);
         let g = spotlight_geom(self.sw, self.sh, s.hits.len());
+        // The backdrop covers the tallest the panel gets (a full list of results).
+        let tallest = spotlight_geom(self.sw, self.sh, chrome::SPOT_MAX_ROWS).panel;
+        s.glass.ensure(c, tallest.union(&g.panel).inflated(2), 14);
         let mut r = g.panel;
         r.y -= ((256 - fade) as i32 * 8) / 256;
         let dy = r.y - g.panel.y;

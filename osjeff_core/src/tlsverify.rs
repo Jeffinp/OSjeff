@@ -96,23 +96,23 @@ impl CertError {
         }
     }
 
-    /// The line shown on the error page: `Certificado invalido: <reason>`.
+    /// The line shown on the error page: `Certificado inválido: <reason>`.
     pub fn page_message(self) -> &'static str {
         match self {
-            CertError::BadEncoding => "Certificado invalido: certificado malformado",
-            CertError::TooLarge => "Certificado invalido: certificado grande demais",
-            CertError::ChainTooLong => "Certificado invalido: cadeia longa demais",
-            CertError::Expired => "Certificado invalido: expirado",
-            CertError::NotYetValid => "Certificado invalido: ainda nao valido",
-            CertError::NameMismatch => "Certificado invalido: nome nao confere com o site",
-            CertError::SelfSigned => "Certificado invalido: autoassinado, cadeia nao confiavel",
-            CertError::UnknownIssuer => "Certificado invalido: cadeia nao confiavel",
-            CertError::BadSignature => "Certificado invalido: assinatura invalida",
-            CertError::NotCa => "Certificado invalido: autoridade invalida na cadeia",
-            CertError::Constraint => "Certificado invalido: restricao da cadeia violada",
-            CertError::Unsupported => "Certificado invalido: algoritmo nao suportado",
-            CertError::ClockUnset => "Certificado invalido: hora do sistema incorreta",
-            CertError::Other => "Certificado invalido: cadeia rejeitada",
+            CertError::BadEncoding => "Certificado inválido: certificado malformado",
+            CertError::TooLarge => "Certificado inválido: certificado grande demais",
+            CertError::ChainTooLong => "Certificado inválido: cadeia longa demais",
+            CertError::Expired => "Certificado inválido: expirado",
+            CertError::NotYetValid => "Certificado inválido: ainda nao valido",
+            CertError::NameMismatch => "Certificado inválido: nome nao confere com o site",
+            CertError::SelfSigned => "Certificado inválido: autoassinado, cadeia nao confiavel",
+            CertError::UnknownIssuer => "Certificado inválido: cadeia nao confiavel",
+            CertError::BadSignature => "Certificado inválido: assinatura invalida",
+            CertError::NotCa => "Certificado inválido: autoridade invalida na cadeia",
+            CertError::Constraint => "Certificado inválido: restricao da cadeia violada",
+            CertError::Unsupported => "Certificado inválido: algoritmo nao suportado",
+            CertError::ClockUnset => "Certificado inválido: hora do sistema incorreta",
+            CertError::Other => "Certificado inválido: cadeia rejeitada",
         }
     }
 

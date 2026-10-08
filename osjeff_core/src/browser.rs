@@ -65,8 +65,8 @@ impl Security {
         match self {
             Security::None => None,
             Security::Http => Some("Nao seguro"),
-            Security::HttpsVerified => Some("Conexao segura"),
-            Security::HttpsInvalid => Some("Certificado invalido"),
+            Security::HttpsVerified => Some("Conexão segura"),
+            Security::HttpsInvalid => Some("Certificado inválido"),
         }
     }
 }
@@ -115,7 +115,7 @@ impl FailReason {
         match self {
             FailReason::Network => "Falha ao carregar a pagina.",
             FailReason::Dns => "Nome nao encontrado: confira o endereco (DNS).",
-            FailReason::Refused => "Conexao recusada pelo servidor.",
+            FailReason::Refused => "Conexão recusada pelo servidor.",
             FailReason::Timeout => "Tempo esgotado: o servidor nao respondeu.",
             FailReason::Tls => "Falha na negociacao TLS (conexao segura).",
             FailReason::Cert(e) => e.page_message(),
@@ -2028,7 +2028,7 @@ mod tests {
         let _ = b.take_request();
         b.loaded_with(Conn::Verified, false);
         assert_eq!(b.security(), Security::HttpsVerified);
-        assert_eq!(b.security().label(), Some("Conexao segura"));
+        assert_eq!(b.security().label(), Some("Conexão segura"));
         assert!(!b.truncated());
         // A bare host is normalised to https: a new load drops the padlock at once.
         b.open(b"example.com");
@@ -2053,7 +2053,7 @@ mod tests {
         let _ = b.take_request();
         b.loaded_with(Conn::Insecure, false);
         assert_eq!(b.security(), Security::HttpsInvalid);
-        assert_eq!(b.security().label(), Some("Certificado invalido"));
+        assert_eq!(b.security().label(), Some("Certificado inválido"));
         // The page-load entry points that do not carry a connection state never
         // produce a padlock.
         b.loaded();
@@ -2082,7 +2082,7 @@ mod tests {
         assert_eq!(b.insecure_host(), None);
         b.fail_with(FailReason::Cert(CertError::Expired));
         assert!(b.can_continue_insecure());
-        assert_eq!(b.fail_reason().message(), "Certificado invalido: expirado");
+        assert_eq!(b.fail_reason().message(), "Certificado inválido: expirado");
         b.continue_insecure();
         assert_eq!(b.status(), Status::Loading);
         assert_eq!(
@@ -2143,7 +2143,7 @@ mod tests {
     }
 
     #[test]
-    fn every_failure_message_is_ascii_and_distinct_for_network_causes() {
+    fn every_failure_message_is_distinct_for_network_causes() {
         use crate::tlsverify::CertError;
         let causes = [
             FailReason::Network,
@@ -2154,7 +2154,8 @@ mod tests {
             FailReason::Cert(CertError::Expired),
         ];
         for (i, a) in causes.iter().enumerate() {
-            assert!(a.message().is_ascii());
+            // Latin-1 at most: the interface font covers Portuguese accents.
+            assert!(a.message().chars().all(|c| (c as u32) < 0x100));
             for b in &causes[i + 1..] {
                 assert_ne!(a.message(), b.message());
             }
@@ -2162,7 +2163,7 @@ mod tests {
         assert!(
             FailReason::Cert(CertError::NameMismatch)
                 .message()
-                .starts_with("Certificado invalido:")
+                .starts_with("Certificado inválido:")
         );
     }
 
@@ -2198,7 +2199,8 @@ mod tests {
             for b in &reasons[i + 1..] {
                 assert_ne!(a, b);
             }
-            assert!(a.message().is_ascii());
+            // Latin-1 at most: the interface font covers Portuguese accents.
+            assert!(a.message().chars().all(|c| (c as u32) < 0x100));
         }
         assert_eq!(
             FailReason::from_redirect(E::Downgrade),

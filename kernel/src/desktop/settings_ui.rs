@@ -707,7 +707,7 @@ impl Desktop {
             c,
             p,
             path_label_y,
-            b"Imagem do usuario (arquivo PNG/BMP/PPM)",
+            "Imagem do usuário (arquivo PNG/BMP/PPM)".as_bytes(),
         );
         input_box(
             c,
@@ -739,7 +739,7 @@ impl Desktop {
             name,
             theme::text(),
         );
-        self.heading(c, p, a.clock24.y - 24, b"Relogio");
+        self.heading(c, p, a.clock24.y - 24, "Relógio".as_bytes());
         button(
             c,
             a.clock24,
@@ -757,7 +757,7 @@ impl Desktop {
             a.toasts_on.x,
             a.clock24.y - 24,
             200,
-            b"Notificacoes",
+            "Notificações".as_bytes(),
             theme::text_muted(),
         );
         button(
@@ -801,7 +801,7 @@ impl Desktop {
             utc.time.h, utc.time.m, utc.time.s
         );
         text(c, p.x, p.y + 46, p.w, b.as_bytes(), theme::text_muted());
-        self.heading(c, p, t.tz_minus.y - 24, b"Fuso horario");
+        self.heading(c, p, t.tz_minus.y - 24, "Fuso horário".as_bytes());
         button(c, t.tz_minus, b"-", Btn::Normal);
         let tz = s.tz_minutes as i32;
         let mut b = FixedBuf::<16>::new();

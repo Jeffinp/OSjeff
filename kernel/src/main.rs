@@ -759,6 +759,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         icons::bytes() / 1024
                     ),
                 );
+                if trace::ON {
+                    serial_println!(
+                        "[trace] ui: memory after the first frame: glyph atlas {} bytes ({} glyphs), icon cache {} bytes",
+                        ts.arena_bytes,
+                        ts.glyphs,
+                        icons::bytes()
+                    );
+                }
                 klog::log_quiet(
                     klog::Level::Info,
                     format_args!("first desktop frame composed + blitted"),

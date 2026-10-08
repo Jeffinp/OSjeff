@@ -92,7 +92,7 @@ const fn blob(x: i16, y: i16, r: i16, color: u32, alpha: u8) -> Blob {
 /// night); the others keep one look.
 pub const PRESETS: [Preset; 5] = [
     Preset {
-        name: "Dinamico",
+        name: "Dinâmico",
         style: Style::Glow,
         top: 0xDCE6FF,
         bottom: 0xF3E8FF,
@@ -112,7 +112,7 @@ pub const PRESETS: [Preset; 5] = [
         }),
     },
     Preset {
-        name: "Ceu",
+        name: "Céu",
         style: Style::Glow,
         top: 0x8EC9FF,
         bottom: 0xE6F4FF,

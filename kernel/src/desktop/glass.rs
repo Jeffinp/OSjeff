@@ -68,6 +68,15 @@ impl BackdropSlot {
         }
     }
 
+    /// Capture `rect` now if nothing was captured yet: for a panel that grows (Busca), so
+    /// the backdrop covers the largest size it will take.
+    pub(crate) fn ensure(&self, c: &Canvas, rect: Rect, blur: usize) {
+        let mut slot = self.0.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(Backdrop::capture(c, rect, blur));
+        }
+    }
+
     pub(crate) fn clear(&self) {
         *self.0.borrow_mut() = None;
     }
