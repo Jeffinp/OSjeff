@@ -9,8 +9,8 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly--2026--10--05-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-2414%20passing-success?style=for-the-badge)
-![Fuzz](https://img.shields.io/badge/fuzz-13%20targets-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-2497%20passing-success?style=for-the-badge)
+![Fuzz](https://img.shields.io/badge/fuzz-15%20targets-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
 [🇧🇷 Português](README.md) · **🇺🇸 English**
@@ -97,7 +97,7 @@ builds with `std` under test. The kernel only wires hardware to it.
 
 ```mermaid
 flowchart LR
-    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2414 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2497 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · documented unsafe<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>BIOS/UEFI image builder"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -107,8 +107,8 @@ flowchart LR
 
 | Verification | Status |
 |---|---|
-| Unit tests | **2414** in `osjeff_core`; 96.6% line coverage (raw, includes the test modules; measured with `cargo llvm-cov`) |
-| Fuzzing | 13 targets (network, OJFS v2/v3 disks, HTML/CSS/images/forms, shell, editor, X.509 certificates, app manifest and sandbox); every bug found is fixed with a minimal input and a regression test |
+| Unit tests | **2497** in `osjeff_core`; 96.6% line coverage (raw, includes the test modules; measured with `cargo llvm-cov`) |
+| Fuzzing | 15 targets (network, OJFS v2/v3 disks, HTML/CSS/images/forms, shell, editor, X.509 certificates, app manifest and sandbox); every bug found is fixed with a minimal input and a regression test |
 | `unsafe` | **100%** of kernel blocks carry `// SAFETY:`, enforced by `clippy::undocumented_unsafe_blocks` |
 | QEMU boot | BIOS **and** UEFI on every kernel commit, desktop compared pixel by pixel to a baseline (`tools/verify-boot.sh`) |
 | Lint and format | `cargo lint-kernel`, `cargo lint-host`, `cargo fmt --check`, all `-D warnings` |
@@ -185,7 +185,7 @@ OSjeff/
 ├── osjeff_core/   # pure no_std logic, tested on the host (forbid(unsafe_code))
 ├── kernel/        # bare-metal x86_64-unknown-none: drivers, scheduler, compositor, wasm
 ├── os/            # builder: embeds the kernel and produces the BIOS/UEFI images
-├── fuzz/          # cargo-fuzz: 14 targets (entropy, network, OJFS, web, shell, editor, X.509, apps) + regressions
+├── fuzz/          # cargo-fuzz: 15 targets (entropy, network, OJFS, web, shell, editor, X.509, apps) + regressions
 ├── bench/         # microbenchmarks (criterion), outside the workspace
 ├── wasm-apps/     # WebAssembly apps (snake default; plasma; cdemo; doom)
 ├── tools/         # run.sh, qemu-headless.sh, verify-boot.sh, perf harness
