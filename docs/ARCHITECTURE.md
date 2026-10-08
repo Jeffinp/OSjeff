@@ -452,7 +452,7 @@ sequenceDiagram
   alinhamento de 4096 usa o mesmo caminho de `front`/`excess` acima.
 - Esgotado, `alloc` devolve `null`, que vira `panic!` (§3.4: fatal no compositor; num
   worker com IF=1 mata só a thread). Não há quota por consumidor; os tetos são por origem
-  (resposta HTTP 256 KiB, memória WASM 24 MiB).
+  (resposta HTTP 1 MiB, memória WASM 24 MiB).
 - `HEAP` é `[u8; 64 MiB]` com alinhamento 1 em Rust; `init` exige 8 B e só tem
   `debug_assert!` (o linker o põe alinhado a página). O boot roda um smoke test (alocar,
   crescer, fragmentar, exigir um bloco maior que qualquer pedaço).
@@ -980,8 +980,13 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
   se a thread `fetcher` morre (§3.4), `take_result` responde ao pedido em andamento com
   esse erro e o estado vira `WORKER_DEAD` (terminal), o laço do compositor falha toda
   navegação seguinte e deixa de varrer a NIC que o worker pode ter largado no meio.
-- **Limites:** `MAX_RESPONSE_BYTES = 256 KiB` (cabeçalhos mais corpo) **nos dois
-  caminhos**; acima disso a resposta é cortada e a página marcada como truncada. URL do
+- **Limites:** `MAX_RESPONSE_BYTES = 1 MiB` (cabeçalhos mais corpo, ainda compactado)
+  **nos dois caminhos**; acima disso a resposta é cortada e a página marcada como truncada
+  (eram 256 KiB: a home de uma CDN em gzip passa disso e o gzip cortado no meio virava
+  "Falha ao descompactar"). **Memória de um carregamento**, no pior caso, dos 64 MiB do
+  heap: resposta crua 1 MiB + cópia sem `chunked` 1 MiB + corpo descompactado até
+  `gzip::MAX_DECODED_BYTES = 4 MiB` (até 2x de folga do `Vec` durante o crescimento) ~ 12 MiB,
+  liberados quando o DOM existe; o DOM em si tem teto (`MAX_NODES`). URL do
   navegador 480 B, host 80 B. O teto é um parâmetro do pedido (`http_get`/`https_get`):
   **imagens** usam 512 KiB + cabeçalhos.
 - **Imagens (W17).** A mesma caixa de correio carrega um segundo tipo de pedido
@@ -1016,7 +1021,7 @@ flexbox, grid, float nem JavaScript; do seletor complexo só vale o composto mai
 Limites: `MAX_DEPTH = 40` (~550 B de pilha nativa por nível, ~22 KiB; o layout é
 recursivo), `MAX_NODES = 8.000` e `MAX_RULES = 1.000` / `MAX_SELECTORS = 2.000` (a cascata
 é O(regras x elementos); vencem as primeiras regras), comprimentos CSS limitados a
-4.096 px, resposta de 256 KiB (§9.1). O excesso **trunca a página, não a recusa**. Parse e layout rodam **na thread do
+4.096 px, resposta de 1 MiB (§9.1). O excesso **trunca a página, não a recusa**. Parse e layout rodam **na thread do
 compositor** (`browser_load`), nos 512 KiB da pilha de boot; páginas no teto ainda travam
 a UI durante a renderização (~0,2 s em release num host, segundo o teste do core [L]).
 

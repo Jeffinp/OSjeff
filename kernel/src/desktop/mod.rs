@@ -733,13 +733,16 @@ impl Desktop {
             return;
         };
         let content_w = BrowserChrome::of(rect).content.w;
-        let body = osjeff_core::browser::page_body(resp);
+        // A cut or damaged compressed body still renders what was decoded; the note says why
+        // the page is partial (shown as a banner).
+        let page = osjeff_core::browser::page_body_partial(resp, truncated);
+        let body = page.body;
         if let Some(b) = self.browser_state_mut(id) {
             b.doc = Some(osjeff_core::web::Doc::parse(&body));
             b.images.begin_page();
             b.img_inflight = None;
             b.scroll = 0;
-            b.browser.loaded_with(conn, truncated);
+            b.browser.loaded_with_note(conn, page.note);
             b.layout_w = content_w;
             layout_browser(b, content_w, true);
         }

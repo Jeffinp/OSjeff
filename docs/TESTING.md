@@ -242,6 +242,15 @@ O cenário varre bordas de janela, a barra de título, o dock e os cantos da tel
 o cursor no mesmo lugar. Os dois têm de ser idênticos fora do HUD e do relógio. Antes da
 correção: 181 pixels de diferença por rodada (setas fantasma); depois: 0.
 
+### Páginas compactadas (W20)
+
+`tools/nettest-pages.py` serve páginas gzip/deflate difíceis (maiores que o limite de
+resposta, `chunked`, deflate cru, CRC errado, cortada pelo servidor, `br`...);
+`tools/perf/scen/w20-browser.sh` abre cada uma no navegador (cabeçalho dos dois arquivos
+tem o comando, com a faixa SLIRP "pública" do `w18-net.sh`) e tira uma foto no topo e no
+fim da página. Esperado: a página aparece (nunca "Falha ao descompactar") e, se for parcial,
+uma faixa amarela diz por quê; "END OF PAGE" aparece só nas páginas decodificadas inteiras.
+
 ### Rede em QEMU
 
 `tools/qemu-headless.sh` captura o tráfego da NIC em `<outdir>/net.pcap` e aceita duas

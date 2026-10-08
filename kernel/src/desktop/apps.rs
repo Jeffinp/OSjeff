@@ -358,9 +358,17 @@ impl Desktop {
         };
         self.paint_web_page(c, page, content, bs.scroll, bs);
 
-        // The response hit the size cap: say so on the page instead of showing
-        // a silently cut document.
-        if bs.browser.truncated() && content.h > 24 {
+        // The page is only part of the document (cut at the size cap, connection dropped,
+        // damaged compressed data): say so instead of showing it as if it were whole.
+        if let Some(note) = bs.browser.note()
+            && content.h > 24
+        {
+            let label = note.label();
+            let scale = if font::text_width(label, 2) as i32 + 16 <= content.w {
+                2
+            } else {
+                1
+            };
             let h = 24;
             let y = (content.bottom() - h) as usize;
             c.fill_rect(
@@ -374,9 +382,9 @@ impl Desktop {
                 c,
                 (content.x + 8) as usize,
                 y + 5,
-                "Pagina truncada (resposta muito grande)",
+                label,
                 Color::rgb(0x6B, 0x3F, 0x00),
-                2,
+                scale,
             );
         }
 

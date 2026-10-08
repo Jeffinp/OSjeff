@@ -393,8 +393,9 @@ impl SysInfo for KSys {
             .windows(4)
             .position(|w| w == b"\r\n\r\n")
             .map_or(data.len(), |i| i + 4);
-        let mut body = osjeff_core::browser::page_body(&data);
-        let mut truncated = page.truncated;
+        let decoded = osjeff_core::browser::page_body_partial(&data, page.truncated);
+        let mut body = decoded.body;
+        let mut truncated = page.truncated || decoded.note.is_some();
         if body.len() > max_body {
             body.truncate(max_body);
             truncated = true;
