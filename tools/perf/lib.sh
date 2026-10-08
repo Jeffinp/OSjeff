@@ -6,6 +6,9 @@ wait_first_frame() {
 }
 move() { mon "mouse_move $1 $2"; }
 click() { mon "mouse_button 1"; sleep 0.08; mon "mouse_button 0"; sleep 0.08; }
+# click without the trailing settle sleep: the action starts on the press, so a snap right after
+# lands inside its animation
+tap() { mon "mouse_button 1"; sleep 0.03; mon "mouse_button 0"; }
 rclick() { mon "mouse_button 2"; sleep 0.08; mon "mouse_button 0"; sleep 0.08; }
 key() { mon "sendkey $1"; }
 # absolute cursor tracking (cursor starts at screen center)
@@ -18,6 +21,10 @@ dock() { goto "$1" "$DOCKY"; }
 dock_to() { move "$1" "$DY"; sleep 0.3; }
 shot() { mon "screendump $OUT/$1.ppm"; sleep 1.2; convert "$OUT/$1.ppm" "$OUT/$1.png" 2>/dev/null; rm -f "$OUT/$1.ppm"; }
 finish() { touch "$OUT/done"; }
+# instant screendump (no wait): fire it a few tens of ms after an action to catch an animation
+# mid-flight; convert them all with flush_snaps before finish.
+snap() { mon "screendump $OUT/$1.ppm"; }
+flush_snaps() { sleep 2; for f in "$OUT"/*.ppm; do [ -f "$f" ] && convert "$f" "${f%.ppm}.png" 2>/dev/null && rm -f "$f"; done; }
 # type a string key by key (US layout): letters, digits and the usual punctuation
 typestr() {
   local s="$1" i c k

@@ -4,6 +4,7 @@ use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 
 pub use osjeff_core::gfx::Color;
 
+mod scale;
 mod shapes;
 // The shape / shadow / surface toolkit (`Canvas` methods live in `shapes.rs`).
 use osjeff_core::gfx::{
@@ -522,73 +523,6 @@ impl<'a> Canvas<'a> {
             let inset = corner_inset(r, y, h);
             if w > 2 * inset {
                 self.fill_rect(x0 + inset, y0 + y, w - 2 * inset, 1, c);
-            }
-        }
-    }
-
-    /// Copy a `w x h` region of the canvas into a tightly-packed buffer
-    /// (`w*bpp` stride). Used to snapshot what is behind a window before it is
-    /// composited, so a fade blends toward the real backdrop, not the wallpaper.
-    pub fn snapshot_region(&self, dst: &mut [u8], x0: usize, y0: usize, w: usize, h: usize) {
-        let t0 = crate::trace::t();
-        self.snapshot_region_inner(dst, x0, y0, w, h);
-        crate::trace::prim(crate::trace::Prim::Fade, t0);
-    }
-
-    fn snapshot_region_inner(&self, dst: &mut [u8], x0: usize, y0: usize, w: usize, h: usize) {
-        let bpp = self.info.bytes_per_pixel;
-        let stride = self.info.stride;
-        let x_end = (x0 + w).min(self.info.width);
-        let y_end = (y0 + h).min(self.info.height);
-        for y in y0..y_end {
-            for x in x0..x_end {
-                let o = (y * stride + x) * bpp;
-                let d = ((y - y0) * w + (x - x0)) * bpp;
-                dst[d..d + bpp].copy_from_slice(&self.buf[o..o + bpp]);
-            }
-        }
-    }
-
-    /// Blend the canvas toward a packed region buffer (`w*bpp` stride) at
-    /// `alpha` (0..=256). `alpha=0` shows `src` (the backdrop), `256` keeps the
-    /// canvas (the window). Inverse of [`snapshot_region`].
-    pub fn blend_from_local(
-        &mut self,
-        src: &[u8],
-        x0: usize,
-        y0: usize,
-        w: usize,
-        h: usize,
-        alpha: u16,
-    ) {
-        let t0 = crate::trace::t();
-        self.blend_from_local_inner(src, x0, y0, w, h, alpha);
-        crate::trace::prim(crate::trace::Prim::Fade, t0);
-    }
-
-    fn blend_from_local_inner(
-        &mut self,
-        src: &[u8],
-        x0: usize,
-        y0: usize,
-        w: usize,
-        h: usize,
-        alpha: u16,
-    ) {
-        let bpp = self.info.bytes_per_pixel;
-        let stride = self.info.stride;
-        let a = alpha.min(256);
-        let ia = 256 - a;
-        let x_end = (x0 + w).min(self.info.width);
-        let y_end = (y0 + h).min(self.info.height);
-        for y in y0..y_end {
-            for x in x0..x_end {
-                let o = (y * stride + x) * bpp;
-                let s = ((y - y0) * w + (x - x0)) * bpp;
-                for k in 0..bpp {
-                    self.buf[o + k] =
-                        ((src[s + k] as u16 * ia + self.buf[o + k] as u16 * a) / 256) as u8;
-                }
             }
         }
     }

@@ -253,12 +253,31 @@ pub(crate) fn draw_clock(c: &mut Canvas, t: Time) {
     font::draw_text(c, px + pad, py + 9, clock, theme::HEADER_TEXT, 2);
 }
 
-/// Mutable view of the window-compositing scratch buffer.
-pub(crate) fn scratch_slice() -> &'static mut [u8] {
-    // SAFETY: SCRATCH is `SCRATCH_BYTES` long; the only caller is `draw_animating` (compositor
+/// The two shadow layers of a window (ambient + key), stronger when focused, scaled
+/// by `alpha256` (0..=256) while the window fades.
+pub(crate) fn window_shadow(focused: bool, alpha256: u32) -> [Shadow; 2] {
+    let (a1, a2) = if focused { (74, 62) } else { (44, 38) };
+    let s = |v: u32| v * alpha256.min(256) / 256;
+    [
+        Shadow {
+            blur: if focused { 20 } else { 14 },
+            dy: if focused { 14 } else { 8 },
+            alpha: s(a1),
+        },
+        Shadow {
+            blur: if focused { 6 } else { 4 },
+            dy: if focused { 3 } else { 2 },
+            alpha: s(a2),
+        },
+    ]
+}
+
+/// Mutable view of the window-animation texture buffer.
+pub(crate) fn texture_slice() -> &'static mut [u8] {
+    // SAFETY: TEXTURE is `TEXTURE_BYTES` long; the only caller is `draw_animating` (compositor
     // thread), one use at a time.
     // NOTE: not guaranteed by the type: safe fn returning `&'static mut`; a second caller would alias.
-    unsafe { core::slice::from_raw_parts_mut(SCRATCH.get() as *mut u8, SCRATCH_BYTES) }
+    unsafe { core::slice::from_raw_parts_mut(TEXTURE.get() as *mut u8, TEXTURE_BYTES) }
 }
 
 /// Copy the rectangle `r` from `src` into `dst` (identical framebuffer layout).

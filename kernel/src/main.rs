@@ -434,9 +434,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // page (the fetch itself blocks, so it can't render in its own frame).
     let mut browser_redraw = false;
 
-    // Wall-clock animation speed, independent of how often the GUI thread is
-    // scheduled (the timer preempts round-robin across all threads).
-    const DT_PER_TICK: f32 = 0.03;
+    // Animations run on real time: seconds per timer tick (250 Hz), independent of how
+    // often the GUI thread is scheduled (the timer preempts round-robin across threads).
+    const DT_PER_TICK: f32 = 1.0 / interrupts::TIMER_HZ as f32;
     let mut first_frame = true;
     // Screen area the toasts covered at the last repaint (to restore it).
     let mut prev_toast_rect = Rect::new(0, 0, 0, 0);

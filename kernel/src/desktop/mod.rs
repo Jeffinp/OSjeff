@@ -26,18 +26,24 @@ use osjeff_core::layout::{
     START_W,
 };
 
-const SLIDE_PX: f32 = 28.0;
-
 /// Longest gap between the two presses of a double click, in timer ticks
 /// (250 Hz): 500 ms.
 const DOUBLE_CLICK_TICKS: u64 = 125;
 
-// Scratch buffer to snapshot the area behind an animating window (largest
-// window + margin). Lets fades composite over real content, not the wallpaper.
-const SCRATCH_BYTES: usize = 640 * 440 * 4;
+// Offscreen texture of a window while it opens / closes / minimises / zooms: the
+// window is drawn once at its resting size, then resampled into the animated
+// rectangle every frame (see `draw_animating`). Windows larger than this animate
+// without the scale effect.
+pub(crate) const TEXTURE_BYTES: usize = 1280 * 720 * 4;
 #[repr(C, align(64))]
-struct AlignedScratch([u8; SCRATCH_BYTES]);
-static SCRATCH: RacyCell<AlignedScratch> = RacyCell::new(AlignedScratch([0; SCRATCH_BYTES]));
+struct AlignedTexture([u8; TEXTURE_BYTES]);
+static TEXTURE: RacyCell<AlignedTexture> = RacyCell::new(AlignedTexture([0; TEXTURE_BYTES]));
+
+/// The rectangle a window and its shadow cover (the damage of a moving window):
+/// the ambient layer reaches 20 px sideways, 20 above (shifted down 14) and 34 below.
+pub(crate) fn shadow_box(r: Rect) -> Rect {
+    Rect::new(r.x - 22, r.y - 8, r.w + 44, r.h + 44)
+}
 
 /// Cursor sprite bounding box: the area `osjeff_core::cursor::CursorTrack` restores from the back
 /// buffer before every frame. Every sprite (`widgets::CURSOR`, `widgets::HAND`) must fit in it;
@@ -192,6 +198,8 @@ pub struct Desktop {
     switcher: Option<Switcher>,
     /// Window under the cursor (its title-bar buttons are shown).
     hover: Option<WindowId>,
+    /// Which window (and size) the offscreen texture currently holds.
+    tex_key: core::cell::Cell<Option<(WindowId, i32, i32)>>,
     clicks: ClickTracker,
     /// Set by operations that change pixels outside the focused window (maximize,
     /// restore, ...); makes the next steady frame upload the whole screen.
@@ -245,6 +253,7 @@ impl Desktop {
             start_open: false,
             switcher: None,
             hover: None,
+            tex_key: core::cell::Cell::new(None),
             clicks: ClickTracker::new(DOUBLE_CLICK_TICKS),
             force_full: false,
             extra_dirty: Rect::new(0, 0, 0, 0),
@@ -476,6 +485,10 @@ impl Desktop {
         self.step_shell_jobs();
         self.sync_text_windows();
         let (active, gone) = self.wm.step(dt);
+        if !active {
+            // Nothing animates any more: the next animation re-captures its window.
+            self.tex_key.set(None);
+        }
         for mut w in gone {
             if let App::Files(f) = &mut w.app.app
                 && let Some(mut job) = f.job.take()
@@ -619,13 +632,24 @@ impl Desktop {
         }
     }
 
-    /// On-screen rect of window `w`, including its current animation slide.
+    /// On-screen rect of window `w` right now: its resting rectangle, the in-flight
+    /// rectangle of a zoom, or the scaled/moved one of an open / close / minimise.
     pub(crate) fn window_box(&self, w: &Win) -> Rect {
-        let mut r = w.rect;
         if let Some(a) = w.anim {
-            r.y += a.slide(SLIDE_PX) as i32;
+            return a.frame(w.rect, self.dock_target(w)).rect;
         }
-        r
+        w.visual_rect()
+    }
+
+    /// Screen rectangle of the dock icon a window flies to / from when it is
+    /// minimised or restored; `None` for apps without a dock icon.
+    pub(crate) fn dock_target(&self, w: &Win) -> Option<Rect> {
+        let kind = w.app.kind();
+        if !kind.in_dock() {
+            return None;
+        }
+        let (_, icons) = dock_layout(self.sw, self.sh);
+        icons.get(kind.index() + 1).copied()
     }
 
     /// On-screen rect of the focused window, or `None` if none is focused. Lets
@@ -644,6 +668,7 @@ impl Desktop {
     /// the whole desktop + an 8 MiB blit on every mouse step.
     pub(crate) fn is_dynamic(&self, w: &Win) -> bool {
         w.anim.is_some()
+            || w.zoom.is_some()
             || self.drag.as_ref().is_some_and(|d| d.win == w.id)
             // A visible WASM app renders a fresh frame every tick (it may animate
             // on its own clock), so it is kept out of the cached static layer and
@@ -661,6 +686,7 @@ impl Desktop {
             || self.wm.windows().iter().any(|w| {
                 w.shown()
                     && (w.anim.is_some()
+                        || w.zoom.is_some()
                         || w.app.kind() == Kind::WasmApp
                         || matches!(&w.app.app, App::Files(f) if f.job.is_some())
                         || matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))

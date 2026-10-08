@@ -14,7 +14,7 @@
 
 use alloc::vec::Vec;
 
-use crate::anim::Anim;
+use crate::anim::{Anim, Zoom};
 use crate::window::{Rect, ResizeEdge, WindowId};
 
 /// Default cap on simultaneously open windows.
@@ -61,6 +61,9 @@ pub struct Window<A> {
     pub minimized: bool,
     pub maximized: bool,
     pub anim: Option<Anim>,
+    /// A maximise / restore in flight: the rectangle to draw travels from the old
+    /// one to `rect` (see [`Zoom`]).
+    pub zoom: Option<Zoom>,
     pub leaving: Leaving,
     pub min_w: i32,
     pub min_h: i32,
@@ -97,6 +100,24 @@ impl<A> Window<A> {
     /// Accepts focus and clicks: shown and not animating out.
     pub fn active(&self) -> bool {
         self.shown() && !self.is_leaving()
+    }
+
+    /// The rectangle the window occupies on screen right now: `rect`, or the
+    /// in-flight rectangle of a maximise / restore.
+    pub fn visual_rect(&self) -> Rect {
+        self.zoom.as_ref().map_or(self.rect, Zoom::rect)
+    }
+
+    /// Begin (or redirect) the maximise / restore travel from `from` to `rect`.
+    fn start_zoom(&mut self, from: Rect) {
+        if !self.shown() || from == self.rect {
+            self.zoom = None;
+            return;
+        }
+        match self.zoom.as_mut() {
+            Some(z) => z.retarget(self.rect),
+            None => self.zoom = Some(Zoom::new(from, self.rect)),
+        }
     }
 }
 
@@ -177,6 +198,7 @@ impl<A> WindowManager<A> {
             minimized: false,
             maximized: false,
             anim: Some(Anim::open()),
+            zoom: None,
             leaving: Leaving::Destroy,
             min_w: spec.min_w,
             min_h: spec.min_h,
@@ -219,6 +241,13 @@ impl<A> WindowManager<A> {
         let mut active = false;
         let mut gone: Vec<WindowId> = Vec::new();
         for w in self.wins.iter_mut() {
+            if let Some(z) = w.zoom.as_mut() {
+                if z.step(dt) {
+                    active = true;
+                } else {
+                    w.zoom = None;
+                }
+            }
             let Some(a) = w.anim.as_mut() else { continue };
             a.step(dt);
             if !a.finished() {
@@ -276,7 +305,7 @@ impl<A> WindowManager<A> {
         };
         if w.minimized {
             w.minimized = false;
-            w.anim = Some(Anim::open());
+            w.anim = Some(Anim::restore());
         } else if w.is_leaving() {
             w.anim = Some(Anim::open());
         }
@@ -322,7 +351,7 @@ impl<A> WindowManager<A> {
             return false;
         }
         w.leaving = Leaving::Minimize;
-        w.anim = Some(Anim::close());
+        w.anim = Some(Anim::minimize());
         true
     }
 
@@ -336,8 +365,10 @@ impl<A> WindowManager<A> {
             return false;
         }
         w.restore = w.rect;
+        let from = w.visual_rect();
         w.rect = work;
         w.maximized = true;
+        w.start_zoom(from);
         true
     }
 
@@ -349,8 +380,10 @@ impl<A> WindowManager<A> {
         if !w.maximized {
             return false;
         }
+        let from = w.visual_rect();
         w.rect = w.restore;
         w.maximized = false;
+        w.start_zoom(from);
         true
     }
 
@@ -430,7 +463,8 @@ impl<A> WindowManager<A> {
                 (w.shown() as u32)
                     | ((w.anim.is_some() as u32) << 1)
                     | ((w.is_leaving() as u32) << 2)
-                    | ((w.maximized as u32) << 3),
+                    | ((w.maximized as u32) << 3)
+                    | ((w.zoom.is_some() as u32) << 4),
             );
         }
         // +1 so "no drag" and "dragging window 0" differ.
@@ -581,7 +615,7 @@ impl ClickTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anim::Anim;
+    use crate::anim::{Anim, Zoom};
 
     const WORK: Rect = Rect::new(12, 76, 1256, 552);
 
@@ -1111,6 +1145,83 @@ mod tests {
         }
         assert!(m.is_empty());
         assert!(m.switch_list().is_empty());
+    }
+
+    #[test]
+    fn maximize_zooms_the_rect_and_settles() {
+        let (mut m, [a, ..]) = table();
+        settle(&mut m);
+        let before = m.get(a).unwrap().rect;
+        assert!(m.maximize(a, WORK));
+        let w = m.get(a).unwrap();
+        // The final rect is set at once (hit testing, layout); the drawn one travels.
+        assert_eq!(w.rect, WORK);
+        assert_eq!(w.visual_rect(), before);
+        assert!(w.zoom.is_some());
+        let (active, _) = m.step(0.03);
+        assert!(active);
+        let mid = m.get(a).unwrap().visual_rect();
+        assert!(mid != before && mid != WORK, "{mid:?}");
+        let mut n = 0;
+        while m.step(0.016).0 {
+            n += 1;
+            assert!(n < 400);
+        }
+        let w = m.get(a).unwrap();
+        assert!(w.zoom.is_none());
+        assert_eq!(w.visual_rect(), WORK);
+        // Restoring zooms back.
+        assert!(m.unmaximize(a));
+        assert_eq!(m.get(a).unwrap().visual_rect(), WORK);
+        settle(&mut m);
+        assert_eq!(m.get(a).unwrap().visual_rect(), before);
+    }
+
+    #[test]
+    fn zoom_is_interruptible_and_changes_the_signature_only_while_it_runs() {
+        let (mut m, [a, ..]) = table();
+        settle(&mut m);
+        let idle = sig(&m, None);
+        m.maximize(a, WORK);
+        let running = sig(&m, None);
+        assert_ne!(idle, running);
+        m.step(0.02);
+        let now = m.get(a).unwrap().visual_rect();
+        m.unmaximize(a); // change of mind mid-flight
+        assert_eq!(m.get(a).unwrap().visual_rect(), now);
+        settle(&mut m);
+        assert_eq!(sig(&m, None), idle);
+    }
+
+    #[test]
+    fn minimize_and_restore_fly_to_and_from_the_dock() {
+        use crate::anim::Flavor;
+        let (mut m, [a, ..]) = table();
+        settle(&mut m);
+        assert!(m.minimize(a));
+        assert_eq!(m.get(a).unwrap().anim.unwrap().flavor(), Flavor::Dock);
+        settle(&mut m);
+        assert!(m.get(a).unwrap().minimized);
+        assert!(m.activate(a));
+        let an = m.get(a).unwrap().anim.unwrap();
+        assert_eq!(an.flavor(), Flavor::Dock);
+        assert!(!an.is_closing());
+        // A plain close is a pop, not a dock trip.
+        let (mut m, [a, ..]) = table();
+        settle(&mut m);
+        m.request_close(a);
+        assert_eq!(m.get(a).unwrap().anim.unwrap().flavor(), Flavor::Pop);
+    }
+
+    #[test]
+    fn reduce_motion_skips_the_zoom() {
+        let (mut m, [a, ..]) = table();
+        settle(&mut m);
+        crate::anim::set_reduce_motion(true);
+        m.maximize(a, WORK);
+        let done = m.get(a).unwrap().zoom.is_none_or(|z| z.finished());
+        crate::anim::set_reduce_motion(false);
+        assert!(done);
     }
 
     #[test]

@@ -18,12 +18,10 @@ impl Desktop {
             }
             let is_focus = focused == Some(w.id);
             let rect = self.window_box(w);
-            match w.anim {
-                Some(_) => self.draw_animating(&mut c, w, rect, is_focus),
-                None => {
-                    let shadow = self.drag.is_none() && !w.maximized;
-                    self.draw_window(&mut c, w, rect, is_focus, shadow);
-                }
+            if w.anim.is_some() || w.zoom.is_some() {
+                self.draw_animating(&mut c, w, is_focus);
+            } else {
+                self.draw_window(&mut c, w, rect, is_focus, !w.maximized);
             }
         }
         draw_clock(&mut c, time);
@@ -77,24 +75,61 @@ impl Desktop {
         }
     }
 
-    /// Draws an animating window: snapshot the backdrop, draw the window (no
-    /// shadow), then fade toward the snapshot so lower windows show through.
-    pub(crate) fn draw_animating(&self, c: &mut Canvas, w: &Win, rect: Rect, focused: bool) {
-        let alpha = match w.anim {
-            Some(a) => (a.alpha() * 256.0) as u16,
-            None => return,
+    /// Draws a window that is opening, closing, minimising or zooming: the window
+    /// is rendered once at its resting size into the offscreen texture, then
+    /// resampled into this frame's rectangle with its fade and rounded corners
+    /// (`Canvas::blit_scaled`), under a shadow that fades with it.
+    pub(crate) fn draw_animating(&self, c: &mut Canvas, w: &Win, focused: bool) {
+        let r = w.rect;
+        let (dest, alpha) = match (&w.anim, &w.zoom) {
+            (Some(a), _) => {
+                let f = a.frame(r, self.dock_target(w));
+                (f.rect, f.alpha as u32)
+            }
+            (None, Some(z)) => {
+                // A zoom draws the real window at the in-flight rectangle (its content
+                // is clipped to it), so the layout is never a squeezed bitmap.
+                self.draw_window(c, w, z.rect(), focused, true);
+                return;
+            }
+            _ => (r, 256),
         };
-        let scratch = scratch_slice();
-        let x = rect.x.max(0) as usize;
-        let y = rect.y.max(0) as usize;
-        let (rw, rh) = (rect.w as usize, rect.h as usize);
-        if rw * rh * c.bpp() <= scratch.len() {
-            c.snapshot_region(scratch, x, y, rw, rh);
-            self.draw_window(c, w, rect, focused, false);
-            c.blend_from_local(scratch, x, y, rw, rh, alpha);
-        } else {
-            self.draw_window(c, w, rect, focused, false);
+        let bpp = c.bpp();
+        let need = (r.w.max(0) * r.h.max(0)) as usize * bpp;
+        if need == 0 || need > TEXTURE_BYTES {
+            // Too big for the texture: no scale effect, just the window.
+            self.draw_window(c, w, r, focused, true);
+            return;
         }
+        let tex = &mut texture_slice()[..need];
+        let key = (w.id, r.w, r.h);
+        if self.tex_key.get() != Some(key) {
+            let mut info = c.fb_info();
+            info.width = r.w as usize;
+            info.height = r.h as usize;
+            info.stride = r.w as usize;
+            info.byte_len = need;
+            let mut tc = Canvas::new(tex, info);
+            // The corner pixels blend with this colour before the corner mask hides them.
+            tc.fill_rect(0, 0, r.w as usize, r.h as usize, theme::WINDOW_BODY);
+            self.draw_window(&mut tc, w, Rect::new(0, 0, r.w, r.h), focused, false);
+            self.tex_key.set(Some(key));
+        }
+        if alpha > 0 {
+            let rr = 12.min(dest.w / 2).min(dest.h / 2);
+            let hole = Rect::new(dest.x, dest.y + rr, dest.w, (dest.h - 2 * rr).max(0));
+            for sh in window_shadow(focused, alpha) {
+                c.draw_shadow(dest, sh, hole);
+            }
+        }
+        c.blit_scaled(
+            &texture_slice()[..need],
+            r.w as usize,
+            r.h as usize,
+            dest,
+            alpha,
+            12,
+        );
     }
 
     /// Compact signature of the *static* scene (which windows are visible /
@@ -142,7 +177,7 @@ impl Desktop {
         let mut lowest_anim_z = wins.len();
         for (i, w) in wins.iter().enumerate() {
             if w.shown() && self.is_dynamic(w) {
-                damage = damage.union(&self.window_box(w));
+                damage = damage.union(&shadow_box(self.window_box(w)));
                 lowest_anim_z = lowest_anim_z.min(i);
             }
         }
@@ -161,12 +196,11 @@ impl Desktop {
             for w in wins {
                 if w.shown() && self.is_dynamic(w) {
                     let is_focus = focused == Some(w.id);
-                    if w.anim.is_some() {
-                        self.draw_animating(&mut c, w, self.window_box(w), is_focus);
+                    if w.anim.is_some() || w.zoom.is_some() {
+                        self.draw_animating(&mut c, w, is_focus);
                     } else {
-                        // Dragged window: opaque, no shadow (matches the steady
-                        // drag look and keeps the damage rect tight to the body).
-                        self.draw_window(&mut c, w, self.window_box(w), is_focus, false);
+                        // Dragged / live window: drawn over the cached layer with its shadow.
+                        self.draw_window(&mut c, w, self.window_box(w), is_focus, !w.maximized);
                     }
                 }
             }
@@ -295,6 +329,14 @@ impl Desktop {
         }
 
         let cost_t0 = crate::io::rdtsc();
+        // While zooming, the app is laid out for the final size: keep it inside the
+        // rectangle being drawn.
+        let saved_clip = win.zoom.is_some().then(|| {
+            let clip = r
+                .intersection(&c.clip_rect())
+                .unwrap_or(Rect::new(0, 0, 0, 0));
+            c.set_clip(clip)
+        });
         match &win.app.app {
             App::Terminal(t) => self.draw_terminal(c, r, t, focused),
             App::Editor(e) => self.draw_editor(c, r, e, focused),
@@ -307,6 +349,9 @@ impl Desktop {
             App::Settings(s) => self.draw_settings(c, r, s),
             App::Log(l) => self.draw_log(c, r, l),
             App::Viewer(v) => self.draw_viewer(c, r, v),
+        }
+        if let Some(cs) = saved_clip {
+            c.restore_clip(cs);
         }
         // What this window cost to draw (the monitor's per-app CPU figure).
         win.app
