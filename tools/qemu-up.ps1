@@ -27,6 +27,8 @@ $qargs = @(
     '-serial', "file:$serialLog",
     '-qmp', 'tcp:127.0.0.1:4444,server,nowait'
 )
+# Host entropy for the kernel's RNG (virtio-rng-pci); see run.ps1 -NoRng.
+if ((& $qemu -device help 2>&1 | Out-String) -match 'name "virtio-rng-pci"') { $qargs += @('-device', 'virtio-rng-pci') }
 # virtio-vga keeps VBE compatibility (so the bootloader still gets a framebuffer)
 # while exposing a virtio-gpu PCI device for the accelerated driver to drive.
 if ($VirtioGpu) { $qargs += @('-vga', 'none', '-device', 'virtio-vga') }

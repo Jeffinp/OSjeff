@@ -14,6 +14,10 @@
 #   .\run.ps1 -Native       # build with the Rust installed on Windows itself (no WSL).
 #                            #   Used automatically when `cargo` is on the Windows PATH.
 #   .\run.ps1 -Wsl          # force the WSL build even if Windows has cargo
+#   .\run.ps1 -NoRng        # do NOT add the virtio-rng entropy device (tests the
+#                            #   timing-jitter path; by default `-device virtio-rng-pci` is
+#                            #   added when this QEMU build has it, so the kernel logs
+#                            #   "RNG: strong" even under WHPX, where RDRAND is hidden)
 #   .\run.ps1 -Usb           # build the UEFI image + copy it out for USB flashing
 #                            #   (real hardware boot; does NOT launch QEMU)
 param(
@@ -24,7 +28,8 @@ param(
     [switch]$Usb,
     [switch]$Native,
     [switch]$Wsl,
-    [switch]$Doom
+    [switch]$Doom,
+    [switch]$NoRng
 )
 
 $ErrorActionPreference = 'Stop'
@@ -117,6 +122,18 @@ $qargs = @('-m', $mem, '-drive', "format=raw,file=$img",
     '-device', 'ne2k_isa,netdev=n0,mac=52:54:00:12:34:56',
     '-object', "filter-dump,id=dump,netdev=n0,file=$pcap")
 if (-not $NoAccel) { $qargs = @('-accel', 'whpx') + $qargs }
+
+# Host entropy for the kernel's RNG (virtio-rng-pci). WHPX hides RDRAND/RDSEED from the guest,
+# so without this device the kernel falls back to timing jitter ("RNG: pool seeded from timing
+# jitter"). Skipped if this QEMU build lacks the device or -NoRng was given.
+if (-not $NoRng) {
+    $devs = (& $qemu -device help 2>&1 | Out-String)
+    if ($devs -match 'name "virtio-rng-pci"') {
+        $qargs += @('-device', 'virtio-rng-pci')
+    } else {
+        Write-Host "Este QEMU nao tem virtio-rng-pci; o RNG usara jitter de temporizacao." -ForegroundColor Yellow
+    }
+}
 
 # Display. The kernel paints a full 1920x1080x4 (~8 MiB) linear framebuffer each
 # dirty frame; QEMU's default Windows display (GTK/Cairo) re-uploads that surface

@@ -23,6 +23,10 @@
 # QEMU_NIC=none attaches no NIC at all (the guest must report "no network interface").
 # Both NICs get the same MAC (52:54:00:12:34:56) and the capture sees the same wire.
 #
+# QEMU_RNG picks the entropy source: "virtio" (default) adds `-device virtio-rng-pci`,
+# "none" omits it so the kernel has to build its seed from timing jitter (the default
+# CPU, qemu64, has no RDRAND/RDSEED; pass `-- -cpu max` to give it both).
+#
 # Extra monitor commands (sendkey, mouse_move, ...) can be sent while it runs
 # through the monitor socket, whose path is printed at start and is also
 # available as <outdir>/mon.path (the socket itself lives under /tmp because a
@@ -63,12 +67,25 @@ case "${QEMU_NIC:-ne2k}" in
   *) echo "unknown QEMU_NIC '${QEMU_NIC}' (use ne2k, virtio or none)" >&2; exit 2 ;;
 esac
 
+# Entropy device: QEMU_RNG=virtio (default) adds `-device virtio-rng-pci` so the kernel
+# has a host entropy source (RNG: strong); QEMU_RNG=none leaves it out to exercise the
+# timing-jitter path (the default CPU, qemu64, has no RDRAND/RDSEED either; `-- -cpu max`
+# adds them). Skipped silently on a QEMU build without the device.
+rng_dev=()
+case "${QEMU_RNG:-virtio}" in
+  virtio) if qemu-system-x86_64 -device help 2>&1 | grep -q 'name "virtio-rng-pci"'; then
+            rng_dev=(-device virtio-rng-pci)
+          fi ;;
+  none)   ;;
+  *) echo "unknown QEMU_RNG '${QEMU_RNG}' (use virtio or none)" >&2; exit 2 ;;
+esac
+
 args=(-m "${QEMU_MEM:-128M}" -display none -no-reboot -no-shutdown
       -serial "file:$out/serial.log"
       -monitor "unix:$sock,server,nowait"
       -drive "format=raw,file=$img"
       -drive "format=raw,file=$fsimg,if=ide,index=2"
-      -netdev "${QEMU_NETDEV:-user,id=n0}" "${nic_dev[@]}"
+      -netdev "${QEMU_NETDEV:-user,id=n0}" "${nic_dev[@]}" "${rng_dev[@]}"
       -object "filter-dump,id=dump,netdev=n0,file=$out/net.pcap")
 if [ "$mode" = uefi ]; then
   # Ubuntu's OVMF "4M" build is split into CODE + VARS and must be loaded as
