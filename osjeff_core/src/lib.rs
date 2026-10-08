@@ -30,6 +30,7 @@ pub mod cursor;
 pub mod deflate;
 pub mod dns;
 pub mod editor2;
+pub mod entropy;
 pub mod fileman;
 pub mod fs;
 pub mod fs3;
