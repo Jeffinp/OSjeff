@@ -3,6 +3,21 @@
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
 tem releases versionadas; as seções são marcos na `master`.
 
+## 2026-10 — Correções do uso real (W20)
+
+- **Cursor sem rastro.** O sprite do cursor vive só no framebuffer; os caminhos de desenho que
+  subiam retângulos sem tratar `cursor_moved` (hover, clique, tecla) deixavam o sprite antigo na
+  tela, um rastro de setas sob as janelas. Agora todo quadro que renderiza algo apaga o sprite
+  no início e o pinta por último (`osjeff_core::cursor::CursorTrack`, modelo testado no host;
+  invariante em `docs/ARCHITECTURE.md` 6.2). Prova no QEMU: 181 pixels fantasma por rodada antes,
+  0 depois, em vários ritmos de mouse (`tools/perf/scen/w20-cursor.sh`).
+- **Sites reais.** Uma página gzip maior que o limite de resposta ficava cortada no meio do fluxo e
+  virava "Falha ao descompactar a pagina". Agora o prefixo decodificado é mostrado com uma faixa
+  ("Pagina cortada no limite de tamanho"); CRC errado, conexão interrompida e dados corrompidos
+  também mostram o que chegou. `Content-Encoding` em lista, deflate cru ou zlib e
+  `Transfer-Encoding: gzip, chunked` entendidos; limites 1 MiB na rede e 4 MiB descompactado
+  (orçamento de heap em `browser::MAX_RESPONSE_BYTES`). Novo alvo de fuzz `http_body`.
+
 ## 2026-10 — Expansão do sistema: integração (W15–W19)
 
 - Os quatro blocos (arquivos/VFS, editor e terminal, navegador completo, apps e sistema em disco) foram

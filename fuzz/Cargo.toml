@@ -115,3 +115,10 @@ path = "fuzz_targets/html_img_form.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "http_body"
+path = "fuzz_targets/http_body.rs"
+test = false
+doc = false
+bench = false
