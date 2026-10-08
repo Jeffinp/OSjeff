@@ -124,8 +124,6 @@ pub(crate) struct HostState {
     /// whole session). `-1` when closed. `wad_pos` is the read cursor.
     wad_fd: i32,
     wad_pos: usize,
-    /// Seed for `random_get` (reseeded from the clock on first use).
-    rng: u32,
     /// Memory/table/instance caps, enforced by the `Store`'s resource limiter.
     limits: StoreLimits,
     /// ABI v2 state (`None` for the console demo).
@@ -149,7 +147,6 @@ impl HostState {
             ch: 0,
             wad_fd: -1,
             wad_pos: 0,
-            rng: 0,
             limits,
             v2: None,
         }

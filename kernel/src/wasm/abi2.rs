@@ -37,7 +37,6 @@ pub(crate) struct V2 {
     pub title_dirty: bool,
     /// The guest asked for a redraw (`request_redraw`).
     pub redraw: bool,
-    pub rng: u32,
     pub log_left: usize,
     pub limiter: appnet::Limiter,
     /// Monotonic ms at start, and the wall clock (ms since local midnight) then.
@@ -57,11 +56,6 @@ impl V2 {
         mono_ms: u64,
         wall_ms: u64,
     ) -> V2 {
-        // xorshift32 must not start at 0; mix the id and the clock.
-        let mut seed = (mono_ms as u32) ^ 0x9E37_79B9;
-        for b in id.bytes() {
-            seed = seed.rotate_left(5) ^ (b as u32).wrapping_mul(0x85EB_CA6B);
-        }
         V2 {
             id: String::from(id),
             sandbox,
@@ -71,7 +65,6 @@ impl V2 {
             title: String::new(),
             title_dirty: false,
             redraw: false,
-            rng: if seed == 0 { 0x1234_5678 } else { seed },
             log_left: LOG_BUDGET,
             limiter: appnet::Limiter::new(),
             mono0_ms: mono_ms,
@@ -238,15 +231,8 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
         Ok((st.wall0_ms + mono_ms().saturating_sub(st.mono0_ms)) as i64)
     });
     reg!(l, "monotonic_ms", |_: C| -> i64 { mono_ms() as i64 });
-    reg!(l, "random", |mut c: C| -> R<i32> {
-        let st = v2(&mut c)?;
-        let mut x = st.rng;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        st.rng = x;
-        Ok(x as i32)
-    });
+    // Random bits come from the kernel generator (`crate::rng`), not a per-app xorshift.
+    reg!(l, "random", |_: C| -> i32 { crate::rng::u32() as i32 });
     reg!(l, "log", |mut c: C, ptr: i32, len: i32| -> R<i32> {
         let bytes = match read_capped(&c, ptr, len, MAX_LOG)? {
             Ok(b) => b,

@@ -237,28 +237,19 @@ fn random_get(mut c: C, buf: i32, len: i32) -> i32 {
         return INVAL;
     }
     let Some(m) = mem(&c) else { return BADF };
-    let mut x = c.data().rng;
-    if x == 0 {
-        x = (crate::interrupts::ticks() as u32) | 1;
-    }
-    // Fill in 256-byte chunks (one guest-memory write each, not one per byte).
+    // Fill in 256-byte chunks (one guest-memory write each) from the kernel generator
+    // (`crate::rng`: ChaCha20 DRBG seeded from hardware / timing entropy), not from a
+    // per-app xorshift: apps use `random_get` for keys and tokens.
     let mut chunk = [0u8; 256];
     let mut done = 0i32;
     while done < len {
         let take = (len - done).min(256) as usize;
-        for b in &mut chunk[..take] {
-            x ^= x << 13;
-            x ^= x >> 17;
-            x ^= x << 5;
-            *b = x as u8;
-        }
+        crate::rng::fill(&mut chunk[..take]);
         if !wr(&mut c, m, buf.wrapping_add(done), &chunk[..take]) {
-            c.data_mut().rng = x;
             return INVAL;
         }
         done += take as i32;
     }
-    c.data_mut().rng = x;
     OK
 }
 

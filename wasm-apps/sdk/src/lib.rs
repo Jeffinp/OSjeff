@@ -279,7 +279,9 @@ pub fn monotonic_ms() -> i64 {
     unsafe { sys::monotonic_ms() }
 }
 
-/// A pseudo-random number (xorshift; **not** cryptographic).
+/// A random number from the kernel's generator (a ChaCha20 DRBG seeded from hardware and timing
+/// entropy, `docs/design/entropy.md`). Fit for keys and tokens when the machine has a hardware source
+/// or enough timing entropy (the kernel logs `RNG:` lines on the serial port); best effort otherwise.
 pub fn random() -> u32 {
     unsafe { sys::random() as u32 }
 }
