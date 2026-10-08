@@ -16,16 +16,15 @@
 //! a TTL cache, every DHCP-supplied server, and failover with a timeout, over a
 //! plain smoltcp UDP socket.
 
+use crate::interrupts;
 use crate::netd::now_ms;
 use crate::nic::{Port, STATS};
 use crate::sync::RacyCell;
-use crate::{interrupts, io};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 use embedded_tls::blocking::*;
 use osjeff_core::browser::{Conn, FailReason, append_capped};
-use osjeff_core::rng::WeakMixer;
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
 use smoltcp::socket::{tcp, udp};
@@ -121,7 +120,11 @@ impl Net {
     /// route through the gateway (if any) and the DNS server (if any).
     pub fn new(port: Port, cfg: &NetConfig) -> Net {
         let mut device = Phy { port };
-        let config = Config::new(EthernetAddress(device.port.mac().0).into());
+        let mut config = Config::new(EthernetAddress(device.port.mac().0).into());
+        // smoltcp derives TCP initial sequence numbers and ephemeral choices from this seed; a
+        // zero seed would make them guessable. Weak entropy here only costs predictability, and
+        // the seed is replaced by the kernel generator's output, not a timestamp.
+        config.random_seed = crate::rng::u64();
         let mut iface = Interface::new(config, &mut device, now());
         iface.update_ip_addrs(|addrs| {
             let _ = addrs.push(IpCidr::new(IpAddress::Ipv4(cfg.ip.0.into()), cfg.prefix));
@@ -143,10 +146,6 @@ impl Net {
         let mut sockets = SocketSet::new(vec![]);
         let tcp = sockets.add(tcp_sock);
         let udp = sockets.add(udp_sock);
-
-        // Probe the TLS random source now so the serial log records which
-        // generator (RDRAND or the weak fallback) this machine will use.
-        let _ = TlsRng::new();
 
         Net {
             iface,
@@ -233,9 +232,10 @@ impl Net {
 
         // An unpredictable id and source port are the only defense against a
         // forged answer from a host that cannot see our packets.
-        let mix = io::rdtsc() ^ interrupts::ticks().rotate_left(29);
-        let id = (mix ^ (mix >> 16) ^ (mix >> 32)) as u16;
-        let local_port = 32768 + (mix % 28000) as u16;
+        let mut r = [0u8; 4];
+        crate::rng::fill(&mut r);
+        let id = u16::from_le_bytes([r[0], r[1]]);
+        let local_port = 32768 + (u16::from_le_bytes([r[2], r[3]]) % 28000);
         let mut query = [0u8; 300];
         let qlen = dns::build_query(&mut query, id, host)?;
         {
@@ -404,7 +404,7 @@ impl Net {
     /// and TLS paths. An RST during the handshake is [`FailReason::Refused`], no
     /// answer within 8 s is [`FailReason::Timeout`].
     fn connect(&mut self, ip: IpAddress, port: u16) -> Result<(), FailReason> {
-        let local_port = 49152 + (interrupts::ticks() as u16 & 0x3FFF);
+        let local_port = 49152 + (crate::rng::u32() as u16 & 0x3FFF);
         {
             let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
             s.abort();
@@ -447,6 +447,12 @@ impl Net {
         allow_insecure: bool,
         cap: usize,
     ) -> Result<(Fetched, Conn), FailReason> {
+        // No handshake without a seeded generator: wait (bounded) for 128 credited bits first, and
+        // refuse rather than draw the client random and the ephemeral key from a weak generator.
+        // Before the DNS lookup and the TCP connect, so no half-open connection waits on us.
+        if !crate::rng::wait_ready(crate::rng::TLS_WAIT_MS) {
+            return Err(FailReason::Tls);
+        }
         let ip = self.resolve_or_fail(host)?;
         self.connect(ip, port)?;
 
@@ -476,7 +482,7 @@ impl Net {
             TlsConnection::new(stream, rx_rec, tx_rec);
 
         let provider = crate::tlsv::Provider {
-            rng: TlsRng::new(),
+            rng: crate::rng::KernelRng,
             verifier: &mut verifier,
         };
         let opened = tls.open(TlsContext::new(&config, provider));
@@ -578,9 +584,10 @@ impl Net {
         timeout_ms: u64,
     ) -> Option<osjeff_core::sntp::Measurement> {
         use osjeff_core::sntp;
-        let mix = io::rdtsc() ^ interrupts::ticks().rotate_left(17);
-        let local_port = 32768 + ((mix >> 3) % 28000) as u16;
-        let nonce = (mix ^ (mix >> 16) ^ (mix >> 32)) as u16;
+        let mut r = [0u8; 4];
+        crate::rng::fill(&mut r);
+        let local_port = 32768 + (u16::from_le_bytes([r[0], r[1]]) % 28000);
+        let nonce = u16::from_le_bytes([r[2], r[3]]);
         {
             let s = self.sockets.get_mut::<udp::Socket>(self.udp);
             s.close();
@@ -774,118 +781,3 @@ impl embedded_io::Write for Stream<'_> {
         Ok(())
     }
 }
-
-/// Random source for the TLS handshake (ephemeral key share, client random).
-///
-/// * With `RDRAND` (`CPUID.01H:ECX[30]`) every word comes from the hardware
-///   generator, retried up to [`osjeff_core::rng::RDRAND_RETRIES`] times.
-/// * Without it (or if the hardware keeps failing) it falls back to
-///   [`WeakMixer`]: a hash of TSC / timer ticks / RTC. That is best effort and
-///   NOT cryptographically secure; the first use is announced on the serial
-///   console as `RNG: weak fallback`.
-///
-/// LIMITATION: `embedded-tls` bounds its provider's RNG by `CryptoRng`, so the
-/// fallback path has to implement that marker trait too even though it does
-/// not deserve it. The type system cannot separate the two here; the serial
-/// message is the honest signal: the ephemeral key share and client random
-/// are only as unpredictable as that fallback, so a passive observer who can
-/// guess the mixer state could read the session. The server is authenticated
-/// regardless (certificate chain + CertificateVerify), but confidentiality is
-/// not guaranteed on CPUs without RDRAND. Replace the fallback by refusing TLS
-/// if this ever carries real secrets.
-struct TlsRng {
-    hw: bool,
-    weak: WeakMixer,
-    warned: bool,
-}
-
-impl TlsRng {
-    fn new() -> Self {
-        let mut hw = osjeff_core::rng::has_rdrand(cpuid_01h_ecx());
-        // Advertised is not the same as working: draw one word to prove it.
-        let hw_dead = hw && osjeff_core::rng::retry_hw(rdrand64).is_none();
-        if hw_dead {
-            hw = false;
-        }
-        // Noise: cycle counter + PIT tick count. (The CMOS RTC is deliberately
-        // not read: its index/data port pair is shared with the compositor's
-        // clock and a context switch between the two accesses would corrupt it.)
-        let weak = WeakMixer::new(&[io::rdtsc(), interrupts::ticks()]);
-        let mut rng = Self {
-            hw,
-            weak,
-            warned: false,
-        };
-        if hw {
-            crate::serial_println!("RNG: RDRAND");
-        } else if hw_dead {
-            rng.warn_weak("RDRAND advertised but failed");
-        } else {
-            rng.warn_weak("RDRAND not available");
-        }
-        rng
-    }
-
-    fn warn_weak(&mut self, why: &str) {
-        if !self.warned {
-            self.warned = true;
-            crate::serial_println!("RNG: weak fallback ({})", why);
-        }
-    }
-
-    fn next_word(&mut self) -> u64 {
-        if self.hw {
-            if let Some(v) = osjeff_core::rng::retry_hw(rdrand64) {
-                return v;
-            }
-            self.warn_weak("RDRAND failed");
-        }
-        self.weak.next(io::rdtsc())
-    }
-}
-
-/// `CPUID.01H:ECX`.
-fn cpuid_01h_ecx() -> u32 {
-    // CPUID leaf 1 exists on every x86_64 CPU and has no side effects.
-    core::arch::x86_64::__cpuid(1).ecx
-}
-
-/// One `RDRAND` attempt: `Some` on success, `None` if the hardware was not
-/// ready (carry flag clear). Only call after CPUID reported RDRAND.
-fn rdrand64() -> Option<u64> {
-    #[target_feature(enable = "rdrand")]
-    fn step() -> Option<u64> {
-        let mut v = 0u64;
-        // (Safe to call here: the `rdrand` target feature is enabled on `step`.)
-        let ok = core::arch::x86_64::_rdrand64_step(&mut v);
-        (ok == 1).then_some(v)
-    }
-    // SAFETY: only reached when CPUID.01H:ECX[30] is set (`TlsRng::hw`), so the
-    // instruction exists on this CPU.
-    unsafe { step() }
-}
-
-impl rand_core::RngCore for TlsRng {
-    fn next_u32(&mut self) -> u32 {
-        self.next_u64() as u32
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        self.next_word()
-    }
-
-    fn fill_bytes(&mut self, dst: &mut [u8]) {
-        for chunk in dst.chunks_mut(8) {
-            let v = self.next_word().to_le_bytes();
-            chunk.copy_from_slice(&v[..chunk.len()]);
-        }
-    }
-
-    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), rand_core::Error> {
-        self.fill_bytes(dst);
-        Ok(())
-    }
-}
-
-// Required by `embedded-tls` (see the LIMITATION note on `TlsRng`).
-impl rand_core::CryptoRng for TlsRng {}

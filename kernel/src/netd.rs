@@ -336,7 +336,7 @@ impl Netd {
     /// The DHCP client keeps running afterwards (see the module docs).
     pub fn boot(mut port: Port) -> Netd {
         let mac = port.mac();
-        let seed = io::rdtsc() as u32;
+        let seed = crate::rng::u32();
         let mut lease = Lease::new(mac, seed);
         let t0 = now_ms();
         lease.start(t0);

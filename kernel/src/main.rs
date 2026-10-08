@@ -30,6 +30,7 @@ mod pci;
 mod perf;
 mod power;
 mod ps2;
+mod rng;
 mod rtc;
 mod sched;
 mod serial;
@@ -43,6 +44,7 @@ mod trace;
 mod virtio;
 mod virtio_gpu;
 mod virtio_net;
+mod virtio_rng;
 mod vm;
 mod wasm;
 
@@ -300,6 +302,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let tsc_khz = perf::calibrate_khz();
     klog!(Info, "TSC calibrated: {} kHz", tsc_khz);
     netd::set_tsc_khz(tsc_khz);
+    // Entropy before the first consumer (DHCP transaction ids, TCP sequence numbers): probes
+    // RDSEED/RDRAND and virtio-rng, and starts crediting the timer-interrupt samples.
+    rng::init(phys_offset);
     trace::mark("tsc calibrated (25 PIT ticks)");
     trace::calibrated(tsc_khz);
     trace::bench_prims(back, info, tsc_khz);

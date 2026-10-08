@@ -12,6 +12,16 @@ pub const VIRTIO_GPU_LEGACY: u16 = 0x1010;
 pub const VIRTIO_NET_LEGACY: u16 = 0x1000;
 pub const VIRTIO_NET_MODERN: u16 = 0x1041;
 
+/// virtio-rng (entropy source) device ids: transitional (QEMU's default `virtio-rng-pci`)
+/// and modern (0x1040 + device type 4).
+pub const VIRTIO_RNG_LEGACY: u16 = 0x1005;
+pub const VIRTIO_RNG_MODERN: u16 = 0x1044;
+
+/// `true` for a modern or transitional virtio-rng `vendor:device` pair.
+pub fn is_virtio_rng(vendor: u16, device: u16) -> bool {
+    vendor == VIRTIO_VENDOR && (device == VIRTIO_RNG_MODERN || device == VIRTIO_RNG_LEGACY)
+}
+
 /// `true` for a modern or transitional virtio-net `vendor:device` pair.
 pub fn is_virtio_net(vendor: u16, device: u16) -> bool {
     vendor == VIRTIO_VENDOR && (device == VIRTIO_NET_MODERN || device == VIRTIO_NET_LEGACY)
@@ -206,6 +216,15 @@ mod tests {
         assert!(is_virtio_net(0x1AF4, 0x1041));
         assert!(!is_virtio_net(0x1AF4, 0x1050)); // virtio-gpu
         assert!(!is_virtio_net(0x10EC, 0x1000)); // wrong vendor
+    }
+
+    #[test]
+    fn virtio_rng_ids() {
+        assert!(is_virtio_rng(0x1AF4, 0x1005)); // QEMU's default virtio-rng-pci (transitional)
+        assert!(is_virtio_rng(0x1AF4, 0x1044)); // modern-only (disable-legacy=on)
+        assert!(!is_virtio_rng(0x1AF4, 0x1000)); // virtio-net
+        assert!(!is_virtio_rng(0x1AF4, 0x1045)); // virtio-balloon
+        assert!(!is_virtio_rng(0x8086, 0x1005)); // wrong vendor
     }
 
     #[test]

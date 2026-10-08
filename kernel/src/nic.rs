@@ -107,6 +107,9 @@ impl Port {
     /// Receive the next frame, if any.
     pub fn poll(&mut self, buf: &mut [u8]) -> Option<usize> {
         let n = self.nic.poll(buf)?;
+        // Entropy: frame arrival time (the NIC is polled, so this is thread context; the call is the
+        // same lock-free one the ISRs use: one TSC read + one atomic store).
+        crate::rng::sample(crate::rng::NIC);
         STATS.on_rx(n);
         Some(n)
     }

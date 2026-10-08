@@ -192,6 +192,8 @@ unsafe extern "C" {
 /// Rust half of the timer ISR: advance the clock, round-robin to the next
 /// thread, and acknowledge the interrupt. Returns the next thread's `rsp`.
 extern "C" fn timer_schedule(rsp: u64) -> u64 {
+    // Entropy: one TSC read + one atomic store into a static ring (no allocation, no lock).
+    crate::rng::sample(crate::rng::TIMER);
     let t0 = crate::trace::t();
     TICKS.fetch_add(1, Ordering::Relaxed);
     crate::trace::timer_sample(rsp, crate::sched::current());
@@ -214,6 +216,8 @@ extern "C" fn yield_schedule(rsp: u64) -> u64 {
 
 extern "x86-interrupt" fn keyboard(_f: InterruptStackFrame) {
     let byte = inb(PS2_DATA);
+    // Entropy: key timing; one TSC read + one atomic store (no allocation, no lock).
+    crate::rng::sample(crate::rng::KEYBOARD);
     crate::trace::input_irq();
     ring_push((SRC_KEYBOARD << 8) | byte as u16);
     outb(PIC1_CMD, PIC_EOI);
@@ -221,6 +225,8 @@ extern "x86-interrupt" fn keyboard(_f: InterruptStackFrame) {
 
 extern "x86-interrupt" fn mouse(_f: InterruptStackFrame) {
     let byte = inb(PS2_DATA);
+    // Entropy: mouse packet timing; one TSC read + one atomic store (no allocation, no lock).
+    crate::rng::sample(crate::rng::MOUSE);
     crate::trace::input_irq();
     ring_push((SRC_MOUSE << 8) | byte as u16);
     // IRQ12 is on the slave PIC: EOI to both slave and master.

@@ -549,6 +549,8 @@ pub extern "C" fn worker() -> ! {
             // `ping_start` wake us) or the service interval ends. The scheduler
             // re-checks the condition after announcing the block, so a request posted
             // in between is not missed.
+            // Fold the entropy sample ring into the pool and reseed when due (cheap when idle).
+            crate::rng::service();
             // SAFETY: as above: NET is used only by this worker thread.
             let sleep = match unsafe { (*NET.get()).as_mut() } {
                 Some(netd) => netd.service(),
