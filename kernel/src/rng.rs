@@ -77,9 +77,10 @@ struct State {
     rdseed: bool,
     rdrand: bool,
     vrng: Option<VirtioRng>,
-    /// Hardware sources that produced nothing usable (so we stop trying).
-    rdseed_dead: bool,
-    rdrand_dead: bool,
+    /// Consecutive blocks each instruction failed to deliver a usable block (retries exhausted, or
+    /// the block failed the sanity check); the source is dropped after `MAX_HW_FAILS` in a row.
+    rdseed_fails: u8,
+    rdrand_fails: u8,
     /// Last time hardware sources were pulled (ms), and whether a virtio request is out.
     last_pull_ms: u64,
     /// Highest rating already announced in the log.
@@ -87,6 +88,9 @@ struct State {
 }
 
 static STATE: RacyCell<Option<State>> = RacyCell::new(None);
+
+/// Failed blocks in a row after which `RDSEED` / `RDRAND` is no longer asked.
+const MAX_HW_FAILS: u8 = 3;
 
 fn now_ms() -> u64 {
     interrupts::ticks() * 1000 / u64::from(interrupts::TIMER_HZ)
@@ -114,12 +118,14 @@ impl State {
         noise[16..24].copy_from_slice(&(core::ptr::addr_of!(STATE) as u64).to_le_bytes());
         State {
             ent: Entropy::new(&noise),
-            tail: HEAD.load(Ordering::Acquire),
+            // From the start: samples the timer ISR stored before the generator existed count too
+            // (`fold` skips empty slots and clamps to the last `RING_N`).
+            tail: 0,
             rdseed: false,
             rdrand: false,
             vrng: None,
-            rdseed_dead: false,
-            rdrand_dead: false,
+            rdseed_fails: 0,
+            rdrand_fails: 0,
             last_pull_ms: 0,
             announced: Quality::Weak,
         }
@@ -148,22 +154,33 @@ impl State {
     /// Draw hardware entropy into the pool; refreshes `last_pull_ms`.
     fn pull_hardware(&mut self, now: u64) {
         self.last_pull_ms = now;
-        if self.rdseed && !self.rdseed_dead {
-            match rdseed_block() {
-                Some(b) => self.ent.add(source::RDSEED, &b, 256),
-                None => self.rdseed_dead = true,
-            }
-        }
-        if self.rdrand && !self.rdrand_dead {
-            // RDRAND is a DRBG reseeded from the DRNG at a ratio: read 512 bits, credit 256.
-            match rdrand_block() {
-                Some(b) => self.ent.add(source::RDRAND, &b, 256),
-                None => self.rdrand_dead = true,
-            }
-        }
+        self.pull_cpu();
         self.drain_virtio();
         if let Some(v) = self.vrng.as_mut() {
             v.request();
+        }
+    }
+
+    /// One block each from `RDSEED` and `RDRAND` (when present and not dropped).
+    fn pull_cpu(&mut self) {
+        if self.rdseed && self.rdseed_fails < MAX_HW_FAILS {
+            match rdseed_block() {
+                Some(b) => {
+                    self.rdseed_fails = 0;
+                    self.ent.add(source::RDSEED, &b, 256);
+                }
+                None => self.rdseed_fails += 1,
+            }
+        }
+        if self.rdrand && self.rdrand_fails < MAX_HW_FAILS {
+            // RDRAND is a DRBG reseeded from the DRNG at a ratio: read 512 bits, credit 256.
+            match rdrand_block() {
+                Some(b) => {
+                    self.rdrand_fails = 0;
+                    self.ent.add(source::RDRAND, &b, 256);
+                }
+                None => self.rdrand_fails += 1,
+            }
         }
     }
 
@@ -356,26 +373,15 @@ pub fn init(phys_offset: Option<u64>) {
             }
         }
         st.last_pull_ms = now;
-        if st.rdseed {
-            match rdseed_block() {
-                Some(b) => st.ent.add(source::RDSEED, &b, 256),
-                None => st.rdseed_dead = true,
-            }
-        }
-        if st.rdrand {
-            match rdrand_block() {
-                Some(b) => st.ent.add(source::RDRAND, &b, 256),
-                None => st.rdrand_dead = true,
-            }
-        }
+        st.pull_cpu();
         let a = st.step(now);
-        let yn = |present: bool, dead: bool| if present && !dead { "yes" } else { "no" };
+        let yn = |present: bool, fails: u8| if present && fails == 0 { "yes" } else { "no" };
         (
             a,
             [
-                yn(st.rdseed, st.rdseed_dead),
-                yn(st.rdrand, st.rdrand_dead),
-                yn(st.vrng.is_some(), false),
+                yn(st.rdseed, st.rdseed_fails),
+                yn(st.rdrand, st.rdrand_fails),
+                yn(st.vrng.is_some(), 0),
             ],
         )
     });
