@@ -11,6 +11,9 @@
 #   .\run.ps1 -SoftwareGfx   # keep QEMU's default display (escape hatch if the
 #                            #   SDL/GL path misbehaves on this machine)
 #   .\run.ps1 -SkipBuild     # skip cargo build, just boot the existing image
+#   .\run.ps1 -Native       # build with the Rust installed on Windows itself (no WSL).
+#                            #   Used automatically when `cargo` is on the Windows PATH.
+#   .\run.ps1 -Wsl          # force the WSL build even if Windows has cargo
 #   .\run.ps1 -Usb           # build the UEFI image + copy it out for USB flashing
 #                            #   (real hardware boot; does NOT launch QEMU)
 param(
@@ -19,6 +22,8 @@ param(
     [switch]$Gl,
     [switch]$SoftwareGfx,
     [switch]$Usb,
+    [switch]$Native,
+    [switch]$Wsl,
     [switch]$Doom
 )
 
@@ -29,13 +34,28 @@ $img = Join-Path $PSScriptRoot 'osjeff-bios.img'
 # Build the project's `os` package (release) inside WSL. Returns nothing; throws
 # on failure. Factored out so both the QEMU and USB paths share it.
 function Build-OSjeff {
+    # Native Windows build when asked for, or when cargo is on the Windows PATH
+    # (and -Wsl did not force WSL). DOOM needs wasi-sdk, which only the WSL path supports.
+    $useNative = $Native -or ((Get-Command cargo -ErrorAction SilentlyContinue) -and -not $Wsl -and -not $Doom)
+    if ($useNative) {
+        if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+            throw "cargo nao encontrado no Windows. Instale o Rust: https://rustup.rs (rustup-init.exe)"
+        }
+        Write-Host "Compilando OSjeff (release) no Windows ..." -ForegroundColor Cyan
+        Push-Location $PSScriptRoot
+        try {
+            cargo build --package os --release
+            if ($LASTEXITCODE -ne 0) { throw "cargo build falhou (exit $LASTEXITCODE)" }
+        } finally { Pop-Location }
+        return
+    }
     $drive = $PSScriptRoot.Substring(0, 1).ToLower()
     $rest = ($PSScriptRoot.Substring(2)) -replace '\\', '/'
     $wslDir = "/mnt/$drive$rest"
     # -Doom builds the DOOM app variant (C→wasm32-wasi + embedded IWAD). Needs
     # wasi-sdk at ~/wasi-sdk and the IWAD at wasm-apps/doom/doom1.wad in WSL.
     $envPrefix = if ($Doom) { 'DOOM=1 WASI_SDK_PATH=$HOME/wasi-sdk ' } else { '' }
-    Write-Host "Compilando OSjeff (release) em $wslDir ..." -ForegroundColor Cyan
+    Write-Host "Compilando OSjeff (release) no WSL em $wslDir ..." -ForegroundColor Cyan
     wsl -e bash -lc "cd '$wslDir' && ${envPrefix}cargo build --package os --release"
     if ($LASTEXITCODE -ne 0) { throw "cargo build falhou (exit $LASTEXITCODE)" }
 }

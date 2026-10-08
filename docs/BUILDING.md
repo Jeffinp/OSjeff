@@ -54,6 +54,14 @@ primeiros 64 KiB é migrada para o v3 no boot seguinte e esses 64 KiB não são 
 > **único** (`OVMF.fd`). O Ubuntu moderno distribui o OVMF dividido em
 > `CODE`+`VARS`, que exige `pflash`; o `tools/run.sh` já cuida disso.
 
+### Windows nativo (sem WSL)
+
+Instale o Rust para Windows ([rustup-init.exe](https://rustup.rs), com as ferramentas C++ do
+Visual Studio Build Tools se o instalador pedir) e o QEMU em `C:\Program Files\qemu`. Com
+`cargo` no PATH do Windows, `.\run.ps1` compila direto no Windows (`-Native` força, `-Wsl`
+volta ao WSL). O `rust-toolchain.toml` baixa o nightly fixado sozinho. Este caminho ainda não
+foi exercitado em uma máquina Windows real: se falhar, o WSL continua sendo o caminho testado.
+
 ### Windows (aceleração WHPX)
 
 ```powershell
