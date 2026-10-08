@@ -1,14 +1,19 @@
 //! Window geometry & hit-testing. Pure integer math, no rendering.
 
-/// Title bar height in pixels.
-pub const TITLE_H: i32 = 30;
-/// Close-button square side.
-pub const CLOSE: i32 = 18;
-/// Inset of the close button from the title bar's top-right corner.
-pub const CLOSE_INSET: i32 = 8;
-const CLOSE_TOP: i32 = 6;
-/// Horizontal gap between adjacent title-bar buttons.
-pub const BTN_GAP: i32 = 6;
+/// Title bar height in pixels (unified title bar: same colour as the body).
+pub const TITLE_H: i32 = 32;
+/// Menu bar height: no window may cover it.
+pub const MENUBAR_H: i32 = 28;
+/// Traffic-light diameter.
+pub const CLOSE: i32 = 12;
+/// Inset of the first (close) light from the window's left edge.
+pub const LIGHT_INSET: i32 = 12;
+/// Distance between the left edges of adjacent lights.
+pub const LIGHT_PITCH: i32 = 20;
+/// Top of the lights inside the title bar (centres them: (32 - 12) / 2 - 0).
+const LIGHT_TOP: i32 = 10;
+/// How far the clickable area of a light extends past its disc.
+pub const LIGHT_SLOP: i32 = 2;
 /// Thickness of the invisible resize band along a window's border.
 pub const RESIZE_BAND: i32 = 5;
 /// Length of the corner zone along each border (a bit larger than the band so
@@ -94,43 +99,49 @@ impl Rect {
         px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
     }
 
-    /// The close button rectangle for this window.
+    /// The close light (red), top-left of the title bar.
     pub fn close_rect(&self) -> Rect {
+        Rect::new(self.x + LIGHT_INSET, self.y + LIGHT_TOP, CLOSE, CLOSE)
+    }
+
+    /// The minimise light (yellow), right of the close light.
+    pub fn min_rect(&self) -> Rect {
+        let c = self.close_rect();
+        Rect::new(c.x + LIGHT_PITCH, c.y, CLOSE, CLOSE)
+    }
+
+    /// The zoom light (green): maximise / restore.
+    pub fn max_rect(&self) -> Rect {
+        let m = self.min_rect();
+        Rect::new(m.x + LIGHT_PITCH, m.y, CLOSE, CLOSE)
+    }
+
+    /// The three lights together (hovering any of them shows all their glyphs).
+    pub fn lights_rect(&self) -> Rect {
+        let c = self.close_rect();
         Rect::new(
-            self.x + self.w - CLOSE - CLOSE_INSET,
-            self.y + CLOSE_TOP,
-            CLOSE,
-            CLOSE,
+            c.x - LIGHT_SLOP,
+            c.y - LIGHT_SLOP,
+            2 * LIGHT_PITCH + CLOSE + 2 * LIGHT_SLOP,
+            CLOSE + 2 * LIGHT_SLOP,
         )
     }
 
-    /// True when the point is on the close button.
+    /// True when the point is on the close light (disc plus a little slop).
     pub fn on_close(&self, px: i32, py: i32) -> bool {
-        self.close_rect().contains(px, py)
-    }
-
-    /// The maximize/restore button: left of the close button.
-    pub fn max_rect(&self) -> Rect {
-        let c = self.close_rect();
-        Rect::new(c.x - CLOSE - BTN_GAP, c.y, CLOSE, CLOSE)
-    }
-
-    /// The minimize button: left of the maximize button.
-    pub fn min_rect(&self) -> Rect {
-        let m = self.max_rect();
-        Rect::new(m.x - CLOSE - BTN_GAP, m.y, CLOSE, CLOSE)
+        self.close_rect().inflated(LIGHT_SLOP).contains(px, py)
     }
 
     pub fn on_max(&self, px: i32, py: i32) -> bool {
-        self.max_rect().contains(px, py)
+        self.max_rect().inflated(LIGHT_SLOP).contains(px, py)
     }
 
     pub fn on_min(&self, px: i32, py: i32) -> bool {
-        self.min_rect().contains(px, py)
+        self.min_rect().inflated(LIGHT_SLOP).contains(px, py)
     }
 
     /// True when the point is on the draggable title area (excludes the three
-    /// title-bar buttons).
+    /// lights).
     pub fn on_title(&self, px: i32, py: i32) -> bool {
         px >= self.x
             && px < self.x + self.w
@@ -204,7 +215,7 @@ impl Rect {
             right = (right + dx).clamp(left + min_w, sw.max(left + min_w));
         }
         if ay < 0 {
-            top = (top + dy).clamp(0, bottom - min_h);
+            top = (top + dy).clamp(MENUBAR_H, (bottom - min_h).max(MENUBAR_H));
         } else if ay > 0 {
             bottom = (bottom + dy).clamp(top + min_h, sh.max(top + min_h));
         }
@@ -216,10 +227,11 @@ impl Rect {
         Rect::new(self.x, self.y + TITLE_H, self.w, (self.h - TITLE_H).max(0))
     }
 
-    /// Clamp a proposed top-left so the title bar stays on a `sw × sh` screen.
+    /// Clamp a proposed top-left so the title bar stays on a `sw × sh` screen and
+    /// below the menu bar.
     pub fn clamped_pos(&self, sw: i32, sh: i32) -> (i32, i32) {
         let x = self.x.clamp(0, (sw - self.w).max(0));
-        let y = self.y.clamp(0, (sh - TITLE_H).max(0));
+        let y = self.y.clamp(MENUBAR_H, (sh - TITLE_H).max(MENUBAR_H));
         (x, y)
     }
 
@@ -297,18 +309,23 @@ mod tests {
     }
 
     #[test]
-    fn close_button_top_right() {
+    fn close_light_top_left() {
         let r = win();
         let c = r.close_rect();
-        assert_eq!(c, Rect::new(100 + 400 - 18 - 8, 106, 18, 18));
+        assert_eq!(c, Rect::new(100 + 12, 100 + 10, 12, 12));
         assert!(r.on_close(c.x + 1, c.y + 1));
-        assert!(!r.on_close(r.x + 5, r.y + 5));
+        // A little slop around the disc, none far away.
+        assert!(r.on_close(c.x - 2, c.y + 6));
+        assert!(!r.on_close(c.x - 4, c.y + 6));
+        assert!(!r.on_close(r.x + 2, r.y + 2));
+        // The light is vertically centred in the 32 px bar.
+        assert_eq!(c.y - r.y, TITLE_H - (c.bottom() - r.y));
     }
 
     #[test]
     fn title_excludes_close_button() {
         let r = win();
-        assert!(r.on_title(r.x + 10, r.y + 10));
+        assert!(r.on_title(r.x + 100, r.y + 10));
         let c = r.close_rect();
         assert!(!r.on_title(c.x + 1, c.y + 1));
     }
@@ -324,13 +341,13 @@ mod tests {
     fn body_is_below_title() {
         let r = win();
         let b = r.body();
-        assert_eq!(b, Rect::new(100, 130, 400, 270));
+        assert_eq!(b, Rect::new(100, 100 + TITLE_H, 400, 300 - TITLE_H));
     }
 
     #[test]
     fn clamp_keeps_window_on_screen() {
         let r = Rect::new(-50, -20, 400, 300);
-        assert_eq!(r.clamped_pos(1280, 800), (0, 0));
+        assert_eq!(r.clamped_pos(1280, 800), (0, MENUBAR_H));
         let r2 = Rect::new(2000, 2000, 400, 300);
         assert_eq!(r2.clamped_pos(1280, 800), (1280 - 400, 800 - TITLE_H));
     }
@@ -393,15 +410,22 @@ mod tests {
     }
 
     #[test]
-    fn buttons_sit_left_of_close_without_overlap() {
+    fn lights_run_left_to_right_close_minimise_zoom() {
         let r = win();
-        let (c, m, n) = (r.close_rect(), r.max_rect(), r.min_rect());
-        assert_eq!(m.right() + BTN_GAP, c.x);
-        assert_eq!(n.right() + BTN_GAP, m.x);
+        let (c, n, m) = (r.close_rect(), r.min_rect(), r.max_rect());
+        assert_eq!(n.x - c.x, LIGHT_PITCH);
+        assert_eq!(m.x - n.x, LIGHT_PITCH);
         assert!(r.on_max(m.x + 1, m.y + 1));
         assert!(r.on_min(n.x + 1, n.y + 1));
         assert!(!r.on_max(c.x + 1, c.y + 1));
         assert!(!r.on_min(m.x + 1, m.y + 1));
+        // Hit areas of neighbours do not overlap (4 px gap between 16 px areas).
+        assert!(!r.on_close(n.x - 3, n.y + 6) || !r.on_min(n.x - 3, n.y + 6));
+        // The group rectangle covers all three.
+        let g = r.lights_rect();
+        for b in [c, n, m] {
+            assert!(g.contains(b.x, b.y) && g.contains(b.right() - 1, b.bottom() - 1));
+        }
     }
 
     #[test]
@@ -410,8 +434,9 @@ mod tests {
         for b in [r.close_rect(), r.max_rect(), r.min_rect()] {
             assert!(!r.on_title(b.x + 2, b.y + 2));
         }
-        // The stretch between the title text and the buttons is still title.
-        assert!(r.on_title(r.min_rect().x - 3, r.y + 10));
+        // The stretch right of the lights is still title.
+        assert!(r.on_title(r.max_rect().right() + 6, r.y + 10));
+        assert!(r.on_title(r.right() - 20, r.y + 10));
     }
 
     #[test]
@@ -464,7 +489,8 @@ mod tests {
         assert_eq!(big.right(), 1280);
         assert_eq!(big.bottom(), 720);
         let nw = r.resized(ResizeEdge::NW, (-5000, -5000), (100, 100), SCREEN);
-        assert_eq!((nw.x, nw.y), (0, 0));
+        // The top edge stops under the menu bar.
+        assert_eq!((nw.x, nw.y), (0, MENUBAR_H));
         assert_eq!((nw.right(), nw.bottom()), (500, 400));
     }
 
@@ -479,7 +505,7 @@ mod tests {
     fn clamp_handles_oversized_window() {
         // Width exceeds screen -> x pinned to 0. Height never constrains y
         // (only the title bar must stay visible), so y is unchanged.
-        let r = Rect::new(10, 10, 2000, 2000);
-        assert_eq!(r.clamped_pos(1280, 800), (0, 10));
+        let r = Rect::new(10, 40, 2000, 2000);
+        assert_eq!(r.clamped_pos(1280, 800), (0, 40));
     }
 }

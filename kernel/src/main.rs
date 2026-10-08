@@ -15,12 +15,12 @@ mod fb;
 mod fetch;
 mod font;
 mod gdt;
+mod glyphs;
 mod icons;
 mod interrupts;
 mod io;
 mod klog;
 mod logd;
-mod logo;
 mod ne2000;
 mod netd;
 mod netstack;
@@ -430,6 +430,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // also repaint the window that just lost focus (its title de-highlights).
     let mut prev_focused: Option<Rect> = None;
     let mut last_hud = 0u64; // tick of the last perf-HUD refresh
+    let mut hud_was_on = false;
     // Set after a browser fetch completes so the next iteration repaints the
     // page (the fetch itself blocks, so it can't render in its own frame).
     let mut browser_redraw = false;
@@ -541,6 +542,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // packets since the last frame, clamped at an edge or not), or it turned into a hand
         // over a link without moving. Anything else that renders also repaints the sprite.
         cursor_moved |= cursor.is_stale(desk.pointer());
+        // Switching the HUD on or off repaints its corner, and the frame must end with the cursor.
+        cursor_moved |= desk.hud_visible() != hud_was_on;
 
         // Did this iteration do real rendering work? (Used to time frames.)
         let work = any_anim || scene_dirty || clock_tick || cursor_moved || was_anim;
@@ -629,7 +632,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 blit_rect(back, static_buf, info, ov.x, ov.y, ov.w, ov.h, n);
                 {
                     let mut c = Canvas::new(back, info);
-                    desk.draw_overlay(&mut c);
+                    desk.draw_overlay_dirty(&mut c);
                 }
                 trace::stage(trace::Stage::Compose, tc);
                 fb_blit_rect(
@@ -685,6 +688,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         up(r);
                     }
                     up(desk.clock_rect());
+                    up(desk.menubar_rect());
                 }
             } else if clock_tick {
                 let tc = trace::t();
@@ -745,6 +749,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             if first_frame {
                 first_frame = false;
                 trace::mark("first desktop frame composed + blitted");
+                let ts = text::stats();
+                klog::log_quiet(
+                    klog::Level::Info,
+                    format_args!(
+                        "ui memory: glyph atlas {} KiB ({} glyphs), icon cache {} KiB",
+                        ts.arena_bytes / 1024,
+                        ts.glyphs,
+                        icons::bytes() / 1024
+                    ),
+                );
                 klog::log_quiet(
                     klog::Level::Info,
                     format_args!("first desktop frame composed + blitted"),
@@ -781,8 +795,28 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Perf HUD: refresh ~10x/s as a framebuffer overlay restored from `back`,
         // so it never pollutes the cached scene. Drawn outside the timed window.
         // (Also when erasing the old cursor box just wiped part of it.)
+        let hud_on = desk.hud_visible();
         let mut hud_drawn = false;
-        if tick.saturating_sub(last_hud) >= 25 || erased_hud {
+        if hud_on != hud_was_on {
+            // Switched on or off: the next refresh draws it, or restores what it covered
+            // (the cursor is painted last by the frame's own final step).
+            hud_was_on = hud_on;
+            last_hud = 0;
+            if !hud_on {
+                let hr = perf::Perf::rect(info.width as i32);
+                fb_blit_rect(
+                    framebuffer.buffer_mut(),
+                    back,
+                    info,
+                    hr.x,
+                    hr.y,
+                    hr.w,
+                    hr.h,
+                    n,
+                );
+            }
+        }
+        if hud_on && (tick.saturating_sub(last_hud) >= 25 || erased_hud) {
             last_hud = tick;
             hud_drawn = true;
             let used = HEAP_SIZE - ALLOCATOR.free_bytes().min(HEAP_SIZE);

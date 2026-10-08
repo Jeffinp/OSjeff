@@ -21,7 +21,7 @@
 //! syscalls no-ops.
 
 use crate::fb::{Canvas, Color};
-use crate::{font, serial_print};
+use crate::serial_print;
 use bootloader_api::info::FrameBufferInfo;
 use wasmi::{
     Caller, Config, Engine, Extern, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
@@ -212,7 +212,7 @@ fn host_fill(st: &HostState, x: i32, y: i32, w: i32, h: i32, color: i32) {
 fn host_text(st: &HostState, s: &str, x: i32, y: i32, color: i32, scale: i32) {
     let Some(mut c) = st.canvas() else { return };
     let scale = scale.clamp(1, 16) as usize;
-    let cw = font::cell_w(scale) as i64;
+    let cw = crate::text::guest::cell_w(scale) as i64;
     let gh = (8 * scale) as i64; // glyph cell height
     let (bx, by, bw, bh) = (st.ox as i64, st.oy as i64, st.cw as i64, st.ch as i64);
     let py = st.oy as i64 + y as i64;
@@ -228,7 +228,7 @@ fn host_text(st: &HostState, s: &str, x: i32, y: i32, color: i32, scale: i32) {
         }
         // Only draw glyphs wholly inside the box horizontally.
         if px >= bx && px + cw <= bx + bw {
-            font::draw_char(&mut c, px as usize, py as usize, ch, col, scale);
+            crate::text::guest::draw_char(&mut c, px as usize, py as usize, ch, col, scale);
         }
         px += cw;
     }

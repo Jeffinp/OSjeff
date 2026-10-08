@@ -34,7 +34,7 @@ use super::{
     install_all,
 };
 use crate::sync::RacyCell;
-use crate::{font, io, serial_println};
+use crate::{io, serial_println};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::string::String;
@@ -562,12 +562,12 @@ fn message(c: &mut crate::fb::Canvas, cx: i32, cy: i32, cw: i32, ch: i32, text: 
     c.fill_rect(x, y, cw.max(0) as usize, ch.max(0) as usize, BG);
     let col = if err { ERR } else { FG };
     // word-wrap at the box width, scale 2 (16 px cells)
-    let per_line = ((cw - 32).max(16) as usize / font::cell_w(2)).max(8);
+    let per_line = ((cw - 32).max(16) as usize / crate::text::guest::cell_w(2)).max(8);
     let mut line = String::new();
     let mut ty = cy + 16;
     for word in text.split(' ') {
         if !line.is_empty() && line.len() + 1 + word.len() > per_line {
-            font::draw_text(
+            crate::text::guest::draw_text(
                 c,
                 (cx + 16).max(0) as usize,
                 ty.max(0) as usize,
@@ -584,7 +584,7 @@ fn message(c: &mut crate::fb::Canvas, cx: i32, cy: i32, cw: i32, ch: i32, text: 
         line.push_str(word);
     }
     if !line.is_empty() && ty + 16 <= cy + ch {
-        font::draw_text(
+        crate::text::guest::draw_text(
             c,
             (cx + 16).max(0) as usize,
             ty.max(0) as usize,

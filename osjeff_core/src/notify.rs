@@ -1,7 +1,7 @@
 //! Toast notifications: the pure model behind the corner overlay.
 //!
-//! [`Toasts`] shows at most [`MAX_VISIBLE`] messages stacked above the clock
-//! pill, each for [`LIFETIME_MS`]; more wait in a short queue and take a slot as
+//! [`Toasts`] shows at most [`MAX_VISIBLE`] banners stacked down from the top-right
+//! corner (under the menu bar), each for [`LIFETIME_MS`]; more wait in a short queue and take a slot as
 //! soon as one frees up. A repeat of a message already on screen only restarts
 //! its timer and bumps a counter, so a loop that logs the same warning cannot
 //! flood the desktop. A click on a toast dismisses it.
@@ -22,13 +22,11 @@ pub const QUEUE_CAP: usize = 8;
 pub const LIFETIME_MS: u32 = 4000;
 /// Longest message (bytes); the rest is cut.
 pub const TEXT_CAP: usize = 64;
-pub const TOAST_W: i32 = 420;
-pub const TOAST_H: i32 = 50;
-pub const GAP: i32 = 8;
-/// Distance from the right screen edge.
-pub const MARGIN_X: i32 = 16;
-/// Distance from the bottom edge to the lowest toast: clears the clock pill.
-pub const MARGIN_BOTTOM: i32 = 72;
+pub use crate::chrome::{TOAST_GAP as GAP, TOAST_H, TOAST_W};
+/// Milliseconds a banner takes to slide in from the right edge, and to slide out
+/// again before it expires.
+pub const SLIDE_IN_MS: u32 = 260;
+pub const SLIDE_OUT_MS: u32 = 220;
 
 /// One notification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +59,29 @@ impl Toast {
 
     fn expired(&self, now_ms: u32) -> bool {
         now_ms.wrapping_sub(self.born_ms) >= LIFETIME_MS
+    }
+
+    /// Milliseconds since it appeared (or was last repeated).
+    pub fn age_ms(&self, now_ms: u32) -> u32 {
+        now_ms.wrapping_sub(self.born_ms)
+    }
+
+    /// How far off its resting place the banner is, 0..=256 (256 = fully outside the
+    /// screen to the right): it slides in when it appears and out before it expires.
+    pub fn slide(&self, now_ms: u32) -> u32 {
+        let age = self.age_ms(now_ms);
+        let left = LIFETIME_MS.saturating_sub(age);
+        if age < SLIDE_IN_MS {
+            // Ease-out cubic.
+            let t = 256 - age * 256 / SLIDE_IN_MS;
+            t * t / 256 * t / 256
+        } else if left < SLIDE_OUT_MS {
+            // Ease-in.
+            let t = 256 - left * 256 / SLIDE_OUT_MS;
+            t * t / 256
+        } else {
+            0
+        }
     }
 }
 
@@ -97,7 +118,7 @@ impl Toasts {
         self.vis.iter().flatten().count()
     }
 
-    /// The visible toasts, bottom of the stack first.
+    /// The visible toasts, top of the stack first.
     pub fn iter(&self) -> impl Iterator<Item = &Toast> {
         self.vis.iter().flatten()
     }
@@ -183,22 +204,28 @@ impl Toasts {
         self.queue = [None; QUEUE_CAP];
     }
 
-    /// Screen rect of visible slot `i` (0 = lowest).
-    pub fn rect(i: usize, sw: i32, sh: i32) -> Rect {
-        let y = sh - MARGIN_BOTTOM - TOAST_H - i as i32 * (TOAST_H + GAP);
-        Rect::new(sw - MARGIN_X - TOAST_W, y, TOAST_W, TOAST_H)
+    /// Screen rect of visible slot `i` (0 = topmost), at rest.
+    pub fn rect(i: usize, sw: i32, _sh: i32) -> Rect {
+        crate::chrome::toast_rect(i, sw)
     }
 
-    /// Everything the toasts may touch (all slots, with the drop shadow), for
-    /// restoring the scene under them; empty when idle.
+    /// Does any banner move (slide in or out) at `now_ms`? It then needs a frame.
+    pub fn sliding(&self, now_ms: u32) -> bool {
+        self.iter().any(|t| t.slide(now_ms) != 0)
+    }
+
+    /// Everything the toasts may touch (all slots, the drop shadow and the strip
+    /// they slide across), for restoring the scene under them; empty when idle.
     pub fn bounds(&self, sw: i32, sh: i32) -> Rect {
         let n = self.visible_count();
         if n == 0 {
             return Rect::new(0, 0, 0, 0);
         }
-        Self::rect(0, sw, sh)
+        let r = Self::rect(0, sw, sh)
             .union(&Self::rect(n - 1, sw, sh))
-            .inflated(14)
+            .inflated(14);
+        // Banners come from beyond the right edge: the strip reaches it.
+        Rect::new(r.x, r.y, (sw - r.x).max(r.w), r.h).clamped_to(sw, sh)
     }
 
     /// A left click at `(px, py)`: dismiss the toast under it. Returns whether
@@ -317,19 +344,46 @@ mod tests {
     }
 
     #[test]
-    fn geometry_stacks_upwards_above_the_clock() {
+    fn geometry_stacks_down_from_the_top_right() {
         let r0 = Toasts::rect(0, SW, SH);
         let r1 = Toasts::rect(1, SW, SH);
-        assert_eq!(r0.x, SW - MARGIN_X - TOAST_W);
-        assert_eq!(r0.bottom(), SH - MARGIN_BOTTOM);
-        assert_eq!(r1.bottom() + GAP, r0.y);
-        // The lowest toast clears the clock pill (34 px + 16 px margin).
-        assert!(r0.bottom() <= SH - 50);
+        assert_eq!(r0.right() + crate::chrome::TOAST_MARGIN, SW);
+        // Under the menu bar, the next one below with a gap.
+        assert!(r0.y > crate::style::MENUBAR_H);
+        assert_eq!(r0.bottom() + GAP, r1.y);
         let mut t = Toasts::new();
         t.push(Level::Warn, b"a", 0);
         t.push(Level::Warn, b"b", 0);
         let b = t.bounds(SW, SH);
         assert!(b.contains(r0.x, r0.y) && b.contains(r1.x, r1.y));
+        // The strip reaches the screen edge for the slide.
+        assert_eq!(b.right(), SW);
+    }
+
+    #[test]
+    fn slide_comes_in_from_the_right_and_leaves_before_expiring() {
+        let mut t = Toasts::new();
+        t.push(Level::Info, b"hello", 1000);
+        let toast = *t.iter().next().unwrap();
+        // Starts fully outside, ends at rest, and only ever eases one way.
+        assert_eq!(toast.slide(1000), 256);
+        let mut last = 256;
+        for ms in (0..=SLIDE_IN_MS).step_by(10) {
+            let v = toast.slide(1000 + ms);
+            assert!(v <= last);
+            last = v;
+        }
+        assert_eq!(toast.slide(1000 + SLIDE_IN_MS), 0);
+        assert_eq!(toast.slide(1000 + 2000), 0);
+        // The exit starts SLIDE_OUT_MS before the end and grows.
+        let mut last = 0;
+        for ms in (LIFETIME_MS - SLIDE_OUT_MS..LIFETIME_MS).step_by(10) {
+            let v = toast.slide(1000 + ms);
+            assert!(v >= last);
+            last = v;
+        }
+        assert!(last > 200);
+        assert!(t.sliding(1000) && !t.sliding(2500) && t.sliding(1000 + LIFETIME_MS - 50));
     }
 
     #[test]

@@ -224,8 +224,3 @@ pub fn draw_bytes(c: &mut Canvas, x: usize, y: usize, bytes: &[u8], color: Color
 pub const fn cell_w(scale: usize) -> usize {
     6 * scale
 }
-
-/// Width in pixels a string will occupy at the given scale.
-pub fn text_width(text: &str, scale: usize) -> usize {
-    text.len() * 6 * scale
-}

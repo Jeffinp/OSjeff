@@ -5,7 +5,7 @@
 //! Everything else is cheap counters updated from the compositor loop.
 
 use crate::fb::{Canvas, Color};
-use crate::{font, interrupts, io, theme};
+use crate::{interrupts, io, theme};
 use osjeff_core::hw::perf::{LINE_LEN, Perf as CorePerf, heap_line, khz_from_calibration};
 
 /// Measure the TSC frequency (in kHz = cycles/ms) by counting cycles across a
@@ -45,50 +45,65 @@ impl Perf {
         (self.0.fps, self.0.frame_us, self.0.max_us)
     }
 
-    /// Screen rect of the HUD panel (top-right corner).
-    pub fn rect(width: i32) -> osjeff_core::Rect {
-        osjeff_core::Rect::new(width - HUD_W - 12, 12, HUD_W, HUD_H)
+    /// Screen rect of the HUD panel (top-left, under the menu bar).
+    pub fn rect(_width: i32) -> osjeff_core::Rect {
+        osjeff_core::Rect::new(
+            12,
+            osjeff_core::window::MENUBAR_H + 10,
+            HUD_W + 16,
+            HUD_H + 16,
+        )
     }
 
     /// Draw the HUD panel and its metric lines. `heap_pct` is heap usage 0..100.
     pub fn draw(&self, c: &mut Canvas, heap_pct: u32, threads: usize) {
+        use crate::fb::Corner;
         let r = Self::rect(c.width() as i32);
-        let (x, y) = (r.x as usize, r.y as usize);
-        c.fill_round_rect_alpha(
-            x,
-            y + 4,
-            HUD_W as usize,
-            HUD_H as usize,
-            8,
-            theme::SHADOW,
-            60,
+        let panel = osjeff_core::Rect::new(r.x + 8, r.y + 4, HUD_W, HUD_H);
+        let hole = osjeff_core::Rect::new(panel.x, panel.y + 10, panel.w, panel.h - 20);
+        c.draw_shadow(
+            panel,
+            crate::fb::Shadow {
+                blur: 8,
+                dy: 4,
+                alpha: 70,
+            },
+            hole,
         );
-        c.fill_round_rect(x, y, HUD_W as usize, HUD_H as usize, 8, theme::DOCK);
+        c.fill_rrect(panel, 10, Corner::Circle, Color::rgb(0x16, 0x16, 0x1A), 235);
+        c.stroke_rrect(panel, 10, Corner::Circle, Color::rgb(0xFF, 0xFF, 0xFF), 30);
+        let (x, y) = (panel.x + 12, panel.y + 8);
 
         let mut line = [0u8; LINE_LEN];
         // "0.2ms  ~5000fps" — frame time is the real smoothness metric; the
         // "possible fps" (1000/ms) shows the headroom even when idle.
         let n = self.0.frame_line(&mut line);
-        text(c, x + 10, y + 8, &line[..n], theme::accent());
+        text(
+            c,
+            x,
+            y,
+            &line[..n],
+            theme::accent().lerp(Color::rgb(255, 255, 255), 90),
+        );
 
         // "draws/s 60 0.4ms" — how often we actually redraw (= activity,
         // low when idle by design) and the worst frame this second.
         let n = self.0.draws_line(&mut line);
-        text(c, x + 10, y + 24, &line[..n], theme::HEADER_TEXT);
+        text(c, x, y + 20, &line[..n], Color::rgb(0xF5, 0xF5, 0xF7));
 
         // "heap 12%  thr 3"
         let n = heap_line(&mut line, heap_pct, threads);
-        text(c, x + 10, y + 40, &line[..n], theme::TEXT_MUTED);
+        text(c, x, y + 40, &line[..n], Color::rgb(0xA1, 0xA1, 0xA6));
     }
 }
 
-const HUD_W: i32 = 212;
-const HUD_H: i32 = 60;
+const HUD_W: i32 = 232;
+const HUD_H: i32 = 68;
 
-fn text(c: &mut Canvas, x: usize, y: usize, bytes: &[u8], color: Color) {
+fn text(c: &mut Canvas, x: i32, y: i32, bytes: &[u8], color: Color) {
     // The buffer is always ASCII we built ourselves.
     // SAFETY: `bytes` is a prefix of `line`, built only from ASCII literals and decimal digits
     // (`put`/`put_u32`/`put_ms`); truncation cannot split a multi-byte char, so it is valid UTF-8.
     let s = unsafe { core::str::from_utf8_unchecked(bytes) };
-    font::draw_text(c, x, y, s, color, 2);
+    crate::text::draw_mono(c, x, y, s, 13, color);
 }

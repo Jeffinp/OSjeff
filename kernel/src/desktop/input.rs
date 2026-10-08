@@ -2,6 +2,7 @@
 //! global shortcuts (Ctrl+C/V/S/N, Alt+Tab), mouse hit-testing, window drag /
 //! resize / maximize / minimize and the dock and context menus.
 
+use super::shell::Cmd;
 use super::*;
 
 /// Keys the [`Keymap`] has no `Key` for; read from the raw scancode.
@@ -81,14 +82,39 @@ impl Desktop {
             && !alt_now
             && let Some(sw) = self.switcher.take()
         {
+            self.shell.switcher_glass.clear();
             self.wm.activate(sw.selected());
+            self.force_full = true;
             return true;
         }
         let Some(key) = key else {
             return false;
         };
-        if !alt_now {
-            self.switcher = None;
+        if !alt_now && self.switcher.take().is_some() {
+            self.shell.switcher_glass.clear();
+            self.force_full = true;
+        }
+
+        // System shortcuts that work everywhere.
+        if self.keymap.ctrl() {
+            match key {
+                // Ctrl+Alt+H: the performance HUD. Ctrl+Alt+G: the component gallery.
+                Key::Char(b'h' | b'H') if alt_now => {
+                    self.shell.hud = !self.shell.hud;
+                    self.force_full = true;
+                    return true;
+                }
+                Key::Char(b'g' | b'G') if alt_now => {
+                    self.execute(Cmd::Gallery);
+                    return true;
+                }
+                // Ctrl+Space: Busca.
+                Key::Char(b' ') if !alt_now => {
+                    self.open_search();
+                    return true;
+                }
+                _ => {}
+            }
         }
 
         if alt_now {
@@ -98,11 +124,20 @@ impl Desktop {
                     let back = self.keymap.shift();
                     match self.switcher.as_mut() {
                         Some(s) => s.advance(back),
-                        None => self.switcher = Switcher::start(self.wm.switch_list(), back),
+                        None => {
+                            self.close_transients();
+                            self.shell.switcher_glass.clear();
+                            self.switcher = Switcher::start(self.wm.switch_list(), back);
+                        }
                     }
+                    self.force_full = true;
                     return true;
                 }
-                Key::Esc if self.switcher.take().is_some() => return true,
+                Key::Esc if self.switcher.take().is_some() => {
+                    self.shell.switcher_glass.clear();
+                    self.force_full = true;
+                    return true;
+                }
                 // Alt+Left / Alt+Right: back / forward in the focused browser.
                 Key::Left | Key::Right => {
                     if let Some(f) = self.focused()
@@ -132,15 +167,8 @@ impl Desktop {
             }
         }
 
-        // The open start panel owns the arrow keys (scrolling its app list) and Esc.
-        if self.start_open && matches!(key, Key::Up | Key::Down | Key::Home | Key::End | Key::Esc) {
-            match key {
-                Key::Up => self.scroll_start(-1),
-                Key::Down => self.scroll_start(1),
-                Key::Home => self.scroll_start(-1000),
-                Key::End => self.scroll_start(1000),
-                _ => self.start_open = false,
-            }
+        // Menus, popovers, sheets, Apps and Busca own the keyboard while they are up.
+        if self.shell_key(key) {
             return true;
         }
         // An ABNT2 accent followed by a letter it cannot combine with types both.
@@ -194,9 +222,18 @@ impl Desktop {
                 // apps only re-focus; the WASM guest and the task manager keep
                 // the key).
                 Key::Char(b'n') | Key::Char(b'N')
-                    if !matches!(kind, Kind::WasmApp | Kind::TaskMgr) =>
+                    if !matches!(kind, Kind::WasmApp | Kind::TaskMgr | Kind::Gallery) =>
                 {
                     self.new_window(kind);
+                    return true;
+                }
+                // Ctrl+W closes the window, Ctrl+M minimises it.
+                Key::Char(b'w' | b'W') => {
+                    self.request_close(top);
+                    return true;
+                }
+                Key::Char(b'm' | b'M') => {
+                    self.wm.minimize(top);
                     return true;
                 }
                 _ => {}
@@ -236,6 +273,7 @@ impl Desktop {
             Kind::Settings => self.settings_key(top, key),
             Kind::LogViewer => self.log_key(top, key),
             Kind::Viewer => self.viewer_key(top, key),
+            Kind::Gallery => self.gallery_key(top, key),
         }
         true
     }
@@ -357,6 +395,13 @@ impl Desktop {
                 b.browser.set_bar_focus(true);
                 b.browser.on_key(key);
             }
+        }
+    }
+
+    /// A Ctrl chord from the menu bar for browser window `id`.
+    pub(crate) fn browser_ctrl_chord(&mut self, id: WindowId, c: char) {
+        if c.is_ascii() {
+            self.browser_ctrl_key(id, Key::Char(c as u8));
         }
     }
 
@@ -607,6 +652,7 @@ impl Desktop {
                 | App::Viewer(_)
                 | App::Monitor(_)
                 | App::Settings(_)
+                | App::Gallery(_)
                 | App::Log(_) => &[],
             };
             n = text.len().min(clipboard::CAP);
@@ -662,6 +708,7 @@ impl Desktop {
                 | App::Viewer(_)
                 | App::Monitor(_)
                 | App::Settings(_)
+                | App::Gallery(_)
                 | App::Log(_),
             )
             | None => {}
@@ -752,6 +799,9 @@ impl Desktop {
     /// change focus. Returns whether anything changed (the caller repaints). Ignored while a menu,
     /// the start panel or the Alt+Tab switcher is up, or a window is being dragged.
     pub fn handle_wheel(&mut self, dz: i32) -> bool {
+        if dz != 0 && self.shell.apps.is_some() {
+            return self.shell_wheel(dz);
+        }
         if dz == 0 || self.overlay_open() || self.drag.is_some() {
             return false;
         }
@@ -794,9 +844,12 @@ impl Desktop {
                 true
             }
             // Nothing to scroll (the WASM guest has no wheel ABI).
-            Kind::Calculator | Kind::WasmApp | Kind::Monitor | Kind::Settings | Kind::LogViewer => {
-                false
-            }
+            Kind::Calculator
+            | Kind::WasmApp
+            | Kind::Monitor
+            | Kind::Settings
+            | Kind::LogViewer
+            | Kind::Gallery => false,
         };
         if changed && let Some(r) = self.wm.get(w).map(|win| self.window_box(win)) {
             // The target may not be the focused window: make sure it is uploaded.
@@ -897,6 +950,7 @@ impl Desktop {
             Kind::Viewer => self.viewer_click(w, rect, cx, cy),
             Kind::Monitor => self.monitor_click(w, rect, cx, cy),
             Kind::Settings => self.settings_click(w, rect, cx, cy),
+            Kind::Gallery => self.gallery_click(w, rect, cx, cy),
             Kind::LogViewer => self.log_click(w, rect, cx, cy),
             Kind::Editor => self.editor_click(w, rect, cx, cy),
             Kind::Terminal | Kind::TaskMgr => {}
@@ -914,38 +968,42 @@ impl Desktop {
         let right_pressed = right && !self.prev_right;
         let released = !left && self.prev_left;
 
-        // Right click opens a context menu at the cursor: the app menu on a dock
-        // icon ("Nova janela"), the launcher elsewhere.
-        let files_right = right_pressed
-            && self.menu.is_none()
-            && !self.start_open
-            && self.topmost_at(cx, cy).is_some_and(|w| {
-                self.kind_of(w) == Some(Kind::Files)
-                    && self.wm.get(w).is_some_and(|win| !win.rect.on_title(cx, cy))
-            });
-        if files_right && let Some(w) = self.topmost_at(cx, cy) {
-            self.wm.raise(w);
-            if let Some(rect) = self.wm.get(w).map(|win| win.rect) {
-                self.files_click(w, rect, cx, cy, true);
+        // Hover of the shell layers (menu bar, menus, Apps, Busca) and the app bar.
+        if cursor_moved {
+            if self.shell_pointer(cx, cy) {
+                scene = true;
             }
-            scene = true;
-        } else if right_pressed && self.wasm_pointer_target(cx, cy).is_none() {
-            let kind = match self.dock_hit(cx, cy) {
-                Some(DockAction::Open(k)) => MenuKind::Dock(k),
-                _ => MenuKind::Desktop,
-            };
-            let (mx, my) = match kind {
-                // A dock icon's menu pops up above the icon, centered on it.
-                MenuKind::Dock(k) => {
-                    let (_, icons) = dock_layout(self.sw, self.sh);
-                    let r = icons[k.index() + 1];
-                    let h = osjeff_core::layout::menu_height(kind.len());
-                    self.clamp_menu(r.x + r.w / 2 - MENU_W / 2, r.y - h - 14, kind.len())
+            self.dock_pointer(cx, cy);
+        }
+
+        // Right click: an app-bar icon's menu, the file manager's own menu, or the
+        // desktop menu on empty space.
+        if right_pressed {
+            let files_right = !self.overlay_open()
+                && self.topmost_at(cx, cy).is_some_and(|w| {
+                    self.kind_of(w) == Some(Kind::Files)
+                        && self.wm.get(w).is_some_and(|win| !win.rect.on_title(cx, cy))
+                });
+            if let Some(i) = self.dock_item_at(cx, cy).filter(|_| !self.modal_open()) {
+                self.close_transients();
+                self.dock_context(i, cx, cy);
+                scene = true;
+            } else if self.overlay_open() {
+                self.close_transients();
+                scene = true;
+            } else if files_right && let Some(w) = self.topmost_at(cx, cy) {
+                self.wm.raise(w);
+                if let Some(rect) = self.wm.get(w).map(|win| win.rect) {
+                    self.files_click(w, rect, cx, cy, true);
                 }
-                MenuKind::Desktop => self.clamp_menu(cx, cy, kind.len()),
-            };
-            self.menu = Some(MenuState { x: mx, y: my, kind });
-            scene = true;
+                scene = true;
+            } else if self.wasm_pointer_target(cx, cy).is_none()
+                && self.topmost_at(cx, cy).is_none()
+                && cy >= MENUBAR_H
+            {
+                self.desktop_context(cx, cy);
+                scene = true;
+            }
         }
 
         if left_pressed {
@@ -955,70 +1013,13 @@ impl Desktop {
             {
                 // A click on a toast only dismisses it.
                 self.toast_dirty = true;
-            } else if self.start_open {
-                // Resolve a click on the open start panel (app / power / dismiss).
-                let rows = self.start_rows();
-                let (psx, psy) = start_origin(self.sw, self.sh, rows);
-                let on_bar = cx >= psx + START_W - START_PAD
-                    && cx < psx + START_W
-                    && cy >= psy + START_PAD
-                    && cy < psy + START_PAD + rows as i32 * START_ROW_H;
-                if on_bar && self.start_max_scroll() > 0 {
-                    // the scroll strip: upper half scrolls up, lower half down
-                    let mid = psy + START_PAD + rows as i32 * START_ROW_H / 2;
-                    self.scroll_start(if cy < mid { -3 } else { 3 });
-                    return MouseResult {
-                        scene_dirty: true,
-                        cursor_moved,
-                    };
-                }
-                match start_item_at(self.sw, self.sh, rows, self.start_scroll, cx, cy) {
-                    Some(StartItem::App(k)) => {
-                        self.start_open = false;
-                        self.launch(k);
-                    }
-                    Some(StartItem::Wasm(i)) => {
-                        self.start_open = false;
-                        if let Some(id) = self.apps.get(i).map(|a| a.id.clone()) {
-                            self.launch_wasm_app(&id);
-                        }
-                    }
-                    Some(StartItem::Reboot) => crate::power::reboot(),
-                    Some(StartItem::Shutdown) => crate::power::shutdown(),
-                    None => self.start_open = false,
-                }
+            } else if self.shell_click(cx, cy) {
                 scene = true;
-            } else if let Some(m) = self.menu {
-                // A click while the menu is open selects an item or dismisses it.
-                if let Some(i) = menu_item_at(m.x, m.y, cx, cy, m.kind.len())
-                    && let Some((_, _, action)) = m.kind.entry(i)
-                {
-                    match action {
-                        MenuAction::Launch(k) => {
-                            self.launch(k);
-                        }
-                        MenuAction::NewWindow(k) => {
-                            self.new_window(k);
-                        }
-                    }
-                }
-                self.menu = None;
+            } else if let Some(i) = self.dock_item_at(cx, cy) {
+                self.dock_click(i);
                 scene = true;
             } else if let Some(w) = self.topmost_at(cx, cy) {
                 self.click_window(w, cx, cy);
-                scene = true;
-            } else if let Some(action) = self.dock_hit(cx, cy) {
-                match action {
-                    DockAction::Start => {
-                        self.start_open = !self.start_open;
-                        // the app list always opens at its top
-                        self.start_scroll = 0;
-                    }
-                    // Focus (or restore) the app's window; open one if none.
-                    DockAction::Open(k) => {
-                        self.launch(k);
-                    }
-                }
                 scene = true;
             }
         }

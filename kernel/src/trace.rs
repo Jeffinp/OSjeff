@@ -211,7 +211,7 @@ pub static ATA_R_CYC: AtomicU64 = AtomicU64::new(0);
 /// Drawing primitive classes for [`prim`].
 #[derive(Clone, Copy)]
 pub enum Prim {
-    /// `font::draw_char` (includes its `fill_rect`s).
+    /// `crate::text::legacy::draw_char` (includes its `fill_rect`s).
     Glyph,
     /// `Canvas::fill_rect`, every call (also the nested ones).
     FillRect,
@@ -653,7 +653,7 @@ pub fn bench_prims(back: &mut [u8], info: bootloader_api::info::FrameBufferInfo,
     let rr = best(&mut || c.fill_round_rect(100, 100, w, h, 12, col));
     let al = best(&mut || c.fill_round_rect_alpha(100, 100, w, h, 12, col, 28));
     let al_small = best(&mut || c.fill_round_rect_alpha(100, 100, 60, 30, 8, col, 28));
-    let txt = best(&mut || crate::font::draw_text(&mut c, 100, 100, s, col, 2));
+    let txt = best(&mut || crate::text::legacy::draw_text(&mut c, 100, 100, s, col, 2));
     crate::serial_println!(
         "[trace] bench ({}x{} px, bpp {}): fill_rect {} cyc ({}/px) | round_rect {} ({}/px) | alpha {} ({}/px) | alpha 60x30 {} ({}/px) | text {} chars {} cyc ({}/char) | khz {}",
         w,
@@ -729,7 +729,7 @@ fn bench_ui(c: &mut crate::fb::Canvas, best: impl Fn(&mut dyn FnMut()) -> u64, k
     let t13 = best(&mut || {
         text::draw(c, 100, 100, s, 13, Weight::Regular, col);
     });
-    let masks = crate::fb::masks_for_bench();
+    let masks = crate::fb::masks();
     let mut icon = Surface::new(128, 128);
     icon.fill_rrect(
         0,

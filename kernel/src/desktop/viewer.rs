@@ -464,7 +464,7 @@ impl Desktop {
                     );
                     for (i, l) in lines.iter().enumerate() {
                         let cols = ((w - 20) / 12) as usize;
-                        font::draw_bytes(
+                        crate::text::legacy::draw_bytes(
                             c,
                             (x + 10) as usize,
                             (y + 10 + i as i32 * 20) as usize,
@@ -490,7 +490,7 @@ impl Desktop {
                     } else {
                         theme::HEADER_TEXT
                     };
-                    font::draw_bytes(
+                    crate::text::legacy::draw_bytes(
                         c,
                         x.max(0) as usize,
                         (mid - 14 + i as i32 * 24) as usize,
@@ -516,19 +516,19 @@ impl Desktop {
         let cols = (vpw / 12 - 2).max(8) as usize;
         let ty = (sy + (STATUS_H - 14) / 2) as usize;
         let lt = fileman::ellipsize(&left, cols / 2);
-        font::draw_bytes(c, (bx + 10) as usize, ty, &lt, theme::HEADER_TEXT, 2);
+        crate::text::legacy::draw_bytes(c, (bx + 10) as usize, ty, &lt, theme::HEADER_TEXT, 2);
         let (right, col): (String, Color) = match &v.msg {
             Some((m, true)) => (m.clone(), theme::CLOSE),
             Some((m, false)) => (m.clone(), theme::accent()),
             None => (
                 String::from("+/- zoom  0 ajusta  1 real  R girar  I info  S salvar"),
-                theme::TEXT_MUTED,
+                theme::text_muted(),
             ),
         };
         let room = cols.saturating_sub(lt.len() + 2);
         let rt = fileman::ellipsize(right.as_bytes(), room);
         let rx = bx + vpw - 10 - rt.len() as i32 * 12;
-        font::draw_bytes(c, rx.max(0) as usize, ty, &rt, col, 2);
+        crate::text::legacy::draw_bytes(c, rx.max(0) as usize, ty, &rt, col, 2);
 
         if let Some(input) = &v.save {
             let w = (r.w - 80).clamp(260, 460);
@@ -547,14 +547,14 @@ impl Desktop {
                 w as usize,
                 96,
                 10,
-                theme::WINDOW_BODY,
+                theme::window_body(),
             );
-            font::draw_text(
+            crate::text::legacy::draw_text(
                 c,
                 (x + 14) as usize,
                 (y + 10) as usize,
                 "Salvar como (png, bmp, ppm)",
-                theme::TEXT,
+                theme::text(),
                 2,
             );
             c.fill_round_rect(
@@ -578,12 +578,12 @@ impl Desktop {
             let caret = input.caret_column();
             let start = (caret + 1).saturating_sub(cols);
             let end = disp.len().min(start + cols);
-            font::draw_bytes(
+            crate::text::legacy::draw_bytes(
                 c,
                 (x + 22) as usize,
                 (y + 40) as usize,
                 &disp[start.min(disp.len())..end],
-                theme::TEXT,
+                theme::text(),
                 2,
             );
             c.fill_rect(
@@ -593,12 +593,12 @@ impl Desktop {
                 16,
                 theme::ACCENT_2,
             );
-            font::draw_text(
+            crate::text::legacy::draw_text(
                 c,
                 (x + 14) as usize,
                 (y + 70) as usize,
                 "Enter salva   Esc cancela",
-                theme::TEXT_MUTED,
+                theme::text_muted(),
                 2,
             );
         }

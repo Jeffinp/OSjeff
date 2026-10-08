@@ -6,88 +6,10 @@
 
 use crate::window::{Rect, TITLE_H};
 
-// ---- floating dock ----
-pub const DOCK_ICON: i32 = 40;
-pub const DOCK_GAP: i32 = 14;
-pub const DOCK_PAD: i32 = 12;
-/// brand + terminal + editor + taskmgr + calculator + browser + wasm + files
-pub const DOCK_COUNT: i32 = 8;
-/// Gap from the screen bottom.
-pub const DOCK_MARGIN: i32 = 16;
-
-// ---- right-click context menu ----
-pub const MENU_W: i32 = 220;
-pub const MENU_ITEM_H: i32 = 32;
-pub const MENU_PAD: i32 = 6;
-
-// ---- start panel ----
-pub const START_W: i32 = 240;
-pub const START_ROW_H: i32 = 38;
-pub const START_PAD: i32 = 10;
-/// Divider gap before the power rows.
-pub const START_GAP: i32 = 12;
-/// Rows after the app list: reboot + shutdown.
-const START_POWER_ROWS: i32 = 2;
-
 /// Calculator keypad: the input byte for each cell (`0x08` = backspace).
 /// Duplicate cells (`0` spanning two columns, `=` spanning two rows) map to the
 /// same byte; the draw code merges them visually.
 pub const CALC_KEYS: [[u8; 4]; 5] = [*b"C\x08/*", *b"789-", *b"456+", *b"123=", *b"00.="];
-
-// ---------------------------------------------------------------- context menu
-
-/// Total height of a context menu with `items` entries.
-pub fn menu_height(items: usize) -> i32 {
-    MENU_PAD * 2 + items as i32 * MENU_ITEM_H
-}
-
-/// Top-left of a menu opened at `(x, y)`, shifted so it stays on a `sw x sh`
-/// screen (the top-left corner wins when the screen is smaller than the menu).
-pub fn clamp_menu(sw: i32, sh: i32, x: i32, y: i32, items: usize) -> (i32, i32) {
-    let mx = x.min(sw - MENU_W).max(0);
-    let my = y.min(sh - menu_height(items)).max(0);
-    (mx, my)
-}
-
-/// Index of the context-menu item under `(px, py)` for a menu at `(mx, my)`
-/// with `items` entries.
-pub fn menu_item_at(mx: i32, my: i32, px: i32, py: i32, items: usize) -> Option<usize> {
-    if px < mx + MENU_PAD || px >= mx + MENU_W - MENU_PAD {
-        return None;
-    }
-    let rel = py - (my + MENU_PAD);
-    if rel < 0 {
-        return None;
-    }
-    let i = (rel / MENU_ITEM_H) as usize;
-    (i < items).then_some(i)
-}
-
-// ------------------------------------------------------------------------ dock
-
-/// The floating dock panel rect and its `DOCK_COUNT` icon slots.
-pub fn dock_layout(sw: i32, sh: i32) -> (Rect, [Rect; DOCK_COUNT as usize]) {
-    let inner = DOCK_COUNT * DOCK_ICON + (DOCK_COUNT - 1) * DOCK_GAP;
-    let dock_w = inner + DOCK_PAD * 2;
-    let dock_h = DOCK_ICON + DOCK_PAD * 2;
-    let dock_x = sw / 2 - dock_w / 2;
-    let dock_y = sh - dock_h - DOCK_MARGIN;
-    let dock = Rect::new(dock_x, dock_y, dock_w, dock_h);
-
-    let mut icons = [Rect::new(0, 0, DOCK_ICON, DOCK_ICON); DOCK_COUNT as usize];
-    let mut x = dock_x + DOCK_PAD;
-    for slot in icons.iter_mut() {
-        *slot = Rect::new(x, dock_y + DOCK_PAD, DOCK_ICON, DOCK_ICON);
-        x += DOCK_ICON + DOCK_GAP;
-    }
-    (dock, icons)
-}
-
-/// Index of the dock icon under `(px, py)`, if any (slot 0 is the brand icon).
-pub fn dock_slot_at(sw: i32, sh: i32, px: i32, py: i32) -> Option<usize> {
-    let (_, icons) = dock_layout(sw, sh);
-    icons.iter().position(|r| r.contains(px, py))
-}
 
 // ------------------------------------------------------------------ calculator
 
@@ -211,76 +133,17 @@ pub fn browser_home_layout(content: Rect) -> (Rect, [Rect; 4]) {
     (logo, tiles)
 }
 
-// ----------------------------------------------------------------- start panel
-
-/// Height of the start panel listing `apps` applications plus the power rows.
-pub fn start_height(apps: usize) -> i32 {
-    START_PAD * 2 + (apps as i32 + START_POWER_ROWS) * START_ROW_H + START_GAP
-}
-
-/// Top-left of the start panel, centered above the dock's system icon and
-/// clamped to the screen.
-pub fn start_origin(sw: i32, sh: i32, apps: usize) -> (i32, i32) {
-    let (_dock, icons) = dock_layout(sw, sh);
-    let brand = icons[0];
-    let x = (brand.x + DOCK_ICON / 2 - START_W / 2).clamp(8, (sw - START_W - 8).max(8));
-    let y = brand.y - start_height(apps) - 12;
-    (x, y)
-}
-
-/// An entry in the start panel; `App` carries the row index in the app list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StartHit {
-    App(usize),
-    Reboot,
-    Shutdown,
-}
-
-/// The start-panel item under `(px, py)` for a panel listing `apps` apps.
-pub fn start_item_at(sw: i32, sh: i32, apps: usize, px: i32, py: i32) -> Option<StartHit> {
-    let (sx, sy) = start_origin(sw, sh, apps);
-    if px < sx + START_PAD || px >= sx + START_W - START_PAD {
-        return None;
-    }
-    let top = sy + START_PAD;
-    for i in 0..apps {
-        let ry = top + i as i32 * START_ROW_H;
-        if py >= ry && py < ry + START_ROW_H {
-            return Some(StartHit::App(i));
-        }
-    }
-    let pwr_top = top + apps as i32 * START_ROW_H + START_GAP;
-    for (i, item) in [StartHit::Reboot, StartHit::Shutdown].iter().enumerate() {
-        let ry = pwr_top + i as i32 * START_ROW_H;
-        if py >= ry && py < ry + START_ROW_H {
-            return Some(*item);
-        }
-    }
-    None
-}
-
 // ------------------------------------------------------------- work area & fit
 
-/// Bottom of the perf HUD (top-right corner, 12 px margin + 60 px panel) plus a
-/// little air. Maximized windows start below it so their title-bar buttons are
-/// never hidden under the HUD.
-pub const WORK_TOP: i32 = 76;
-/// Side margin of the work area.
-pub const WORK_SIDE: i32 = 12;
-/// Gap kept between the work area and the floating dock.
-pub const WORK_DOCK_GAP: i32 = 12;
+/// Gap kept between the work area and the floating dock panel.
+pub const WORK_DOCK_GAP: i32 = 8;
 
-/// The rectangle windows maximize into: the screen minus the HUD band on top,
-/// a thin side margin and the floating dock at the bottom.
+/// The rectangle windows maximize into: the screen below the menu bar, edge to
+/// edge, down to the dock panel (plus a small gap).
 pub fn work_area(sw: i32, sh: i32) -> Rect {
-    let (dock, _) = dock_layout(sw, sh);
-    let bottom = dock.y - WORK_DOCK_GAP;
-    Rect::new(
-        WORK_SIDE,
-        WORK_TOP,
-        (sw - 2 * WORK_SIDE).max(0),
-        (bottom - WORK_TOP).max(0),
-    )
+    let dock_top = sh - crate::chrome::DOCK_BOTTOM - crate::chrome::DOCK_H;
+    let top = crate::window::MENUBAR_H;
+    Rect::new(0, top, sw.max(0), (dock_top - WORK_DOCK_GAP - top).max(0))
 }
 
 /// Largest integer text scale in `base..=max` at which a text grid fits an
@@ -355,12 +218,12 @@ mod tests {
     // ---- work area & fit ----
 
     #[test]
-    fn work_area_clears_the_hud_and_the_dock() {
+    fn work_area_sits_between_the_menu_bar_and_the_dock() {
         let w = work_area(SW, SH);
-        let (dock, _) = dock_layout(SW, SH);
-        assert_eq!(w.y, WORK_TOP);
+        let (dock, _) = crate::chrome::dock_rest(SW, SH, 9, None);
+        assert_eq!(w.y, crate::window::MENUBAR_H);
         assert!(w.bottom() + WORK_DOCK_GAP <= dock.y);
-        assert_eq!((w.x, w.right()), (WORK_SIDE, SW - WORK_SIDE));
+        assert_eq!((w.x, w.right()), (0, SW));
         // BIOS 1280x720 too.
         let b = work_area(1280, 720);
         assert!(b.h > 400);
@@ -390,100 +253,7 @@ mod tests {
 
     // ---- context menu ----
 
-    #[test]
-    fn menu_height_counts_padding_and_rows() {
-        assert_eq!(menu_height(0), 12);
-        assert_eq!(menu_height(7), 12 + 7 * 32);
-    }
-
-    #[test]
-    fn clamp_menu_keeps_menu_on_screen() {
-        assert_eq!(clamp_menu(SW, SH, 100, 100, 7), (100, 100));
-        assert_eq!(
-            clamp_menu(SW, SH, SW - 1, SH - 1, 7),
-            (SW - MENU_W, SH - menu_height(7))
-        );
-        assert_eq!(clamp_menu(SW, SH, -50, -50, 7), (0, 0));
-    }
-
-    #[test]
-    fn clamp_menu_on_tiny_screen_pins_to_origin() {
-        assert_eq!(clamp_menu(100, 100, 50, 50, 7), (0, 0));
-    }
-
-    #[test]
-    fn menu_item_hit_rows_and_edges() {
-        let (mx, my) = (100, 100);
-        let first_y = my + MENU_PAD;
-        assert_eq!(menu_item_at(mx, my, mx + MENU_PAD, first_y, 7), Some(0));
-        assert_eq!(
-            menu_item_at(mx, my, mx + 50, first_y + MENU_ITEM_H - 1, 7),
-            Some(0)
-        );
-        assert_eq!(
-            menu_item_at(mx, my, mx + 50, first_y + MENU_ITEM_H, 7),
-            Some(1)
-        );
-        assert_eq!(
-            menu_item_at(mx, my, mx + 50, first_y + 6 * MENU_ITEM_H, 7),
-            Some(6)
-        );
-        // Past the last item, above the first, and in the side padding: miss.
-        assert_eq!(
-            menu_item_at(mx, my, mx + 50, first_y + 7 * MENU_ITEM_H, 7),
-            None
-        );
-        assert_eq!(menu_item_at(mx, my, mx + 50, first_y - 1, 7), None);
-        assert_eq!(menu_item_at(mx, my, mx + MENU_PAD - 1, first_y, 7), None);
-        assert_eq!(
-            menu_item_at(mx, my, mx + MENU_W - MENU_PAD, first_y, 7),
-            None
-        );
-        assert_eq!(
-            menu_item_at(mx, my, mx + MENU_W - MENU_PAD - 1, first_y, 7),
-            Some(0)
-        );
-    }
-
-    #[test]
-    fn menu_with_no_items_never_hits() {
-        assert_eq!(menu_item_at(0, 0, 50, 10, 0), None);
-    }
-
     // ---- dock ----
-
-    #[test]
-    fn dock_is_centered_above_the_bottom_margin() {
-        let (dock, icons) = dock_layout(SW, SH);
-        assert_eq!(dock.w, 8 * 40 + 7 * 14 + 24);
-        assert_eq!(dock.x + dock.w / 2, SW / 2);
-        assert_eq!(dock.bottom(), SH - DOCK_MARGIN);
-        for r in icons {
-            assert!(dock.contains(r.x, r.y) && dock.contains(r.right() - 1, r.bottom() - 1));
-        }
-    }
-
-    #[test]
-    fn dock_icons_are_ordered_and_do_not_overlap() {
-        let (_, icons) = dock_layout(SW, SH);
-        for pair in icons.windows(2) {
-            assert_eq!(pair[1].x - pair[0].right(), DOCK_GAP);
-            assert_eq!(pair[0].y, pair[1].y);
-        }
-    }
-
-    #[test]
-    fn dock_slot_hit_testing() {
-        let (_, icons) = dock_layout(SW, SH);
-        for (i, r) in icons.iter().enumerate() {
-            assert_eq!(dock_slot_at(SW, SH, r.x, r.y), Some(i));
-            assert_eq!(dock_slot_at(SW, SH, r.right() - 1, r.bottom() - 1), Some(i));
-            // The gap after the icon is not part of any slot.
-            assert_eq!(dock_slot_at(SW, SH, r.right(), r.y), None);
-        }
-        assert_eq!(dock_slot_at(SW, SH, 0, 0), None);
-        assert_eq!(dock_slot_at(SW, SH, -5, -5), None);
-    }
 
     // ---- calculator ----
 
@@ -599,64 +369,6 @@ mod tests {
     }
 
     // ---- start panel ----
-
-    #[test]
-    fn start_height_grows_with_apps() {
-        assert_eq!(start_height(7), 20 + 9 * 38 + 12);
-        assert_eq!(start_height(0), 20 + 2 * 38 + 12);
-    }
-
-    #[test]
-    fn start_panel_is_above_the_dock_and_on_screen() {
-        let (sx, sy) = start_origin(SW, SH, 7);
-        let (dock, _) = dock_layout(SW, SH);
-        assert!(sx >= 8 && sx + START_W <= SW - 8);
-        assert_eq!(sy + start_height(7) + 12, dock.y + DOCK_PAD);
-    }
-
-    #[test]
-    fn start_origin_clamps_horizontally_on_narrow_screens() {
-        // 200 px wide: the dock overflows, and the panel pins to x = 8.
-        let (sx, _) = start_origin(200, SH, 7);
-        assert_eq!(sx, 8);
-    }
-
-    #[test]
-    fn start_hits_apps_then_power_rows() {
-        let (sx, sy) = start_origin(SW, SH, 7);
-        let x = sx + START_W / 2;
-        let top = sy + START_PAD;
-        for i in 0..7 {
-            let y = top + i * START_ROW_H + 1;
-            assert_eq!(
-                start_item_at(SW, SH, 7, x, y),
-                Some(StartHit::App(i as usize))
-            );
-        }
-        let pwr = top + 7 * START_ROW_H + START_GAP;
-        assert_eq!(start_item_at(SW, SH, 7, x, pwr), Some(StartHit::Reboot));
-        assert_eq!(
-            start_item_at(SW, SH, 7, x, pwr + START_ROW_H),
-            Some(StartHit::Shutdown)
-        );
-    }
-
-    #[test]
-    fn start_divider_and_margins_are_misses() {
-        let (sx, sy) = start_origin(SW, SH, 7);
-        let x = sx + START_W / 2;
-        let top = sy + START_PAD;
-        let divider = top + 7 * START_ROW_H + START_GAP / 2;
-        assert_eq!(start_item_at(SW, SH, 7, x, divider), None);
-        assert_eq!(start_item_at(SW, SH, 7, x, top - 1), None);
-        assert_eq!(start_item_at(SW, SH, 7, sx + START_PAD - 1, top), None);
-        assert_eq!(
-            start_item_at(SW, SH, 7, sx + START_W - START_PAD, top),
-            None
-        );
-        let below = top + 7 * START_ROW_H + START_GAP + 2 * START_ROW_H;
-        assert_eq!(start_item_at(SW, SH, 7, x, below), None);
-    }
 
     // ---- file manager ----
 

@@ -3,86 +3,42 @@
 use super::*;
 
 impl Desktop {
-    pub(crate) fn draw_menu(&self, c: &mut Canvas, m: MenuState) {
-        let (mx, my) = (m.x, m.y);
-        let count = m.kind.len() as i32;
-        let h = MENU_PAD * 2 + count * MENU_ITEM_H;
-
-        // Drop shadow + panel.
-        c.fill_round_rect_alpha(
-            (mx + 4) as usize,
-            (my + 6) as usize,
-            MENU_W as usize,
-            h as usize,
-            12,
-            theme::SHADOW,
-            34,
-        );
-        c.fill_round_rect(
-            mx as usize,
-            my as usize,
-            MENU_W as usize,
-            h as usize,
-            10,
-            theme::WINDOW_BODY,
-        );
-
-        for i in 0..m.kind.len() {
-            let Some((label, kind, _)) = m.kind.entry(i) else {
-                continue;
-            };
-            let iy = my + MENU_PAD + i as i32 * MENU_ITEM_H;
-            if menu_item_at(mx, my, self.cursor_x, self.cursor_y, m.kind.len()) == Some(i) {
-                c.fill_round_rect_alpha(
-                    (mx + 4) as usize,
-                    (iy + 2) as usize,
-                    (MENU_W - 8) as usize,
-                    (MENU_ITEM_H - 4) as usize,
-                    6,
-                    theme::accent(),
-                    36,
-                );
-            }
-            let isz = 20usize;
-            let iyc = (iy + (MENU_ITEM_H - isz as i32) / 2) as usize;
-            icons::draw(c, kind.icon(), (mx + 10) as usize, iyc, isz);
-            font::draw_text(
-                c,
-                (mx + 40) as usize,
-                (iy + 8) as usize,
-                label,
-                theme::TEXT,
-                2,
-            );
-        }
-    }
-
     pub(crate) fn draw_calculator(&self, c: &mut Canvas, r: Rect, calc: &Calc) {
-        let x = r.x.max(0) as usize;
-        let y = r.y.max(0) as usize;
-        let w = r.w as usize;
-        let pad = 14usize;
-
-        // Display panel: dark box, result right-aligned in accent.
-        let dx = x + pad;
-        let dy = y + TITLE_H as usize + 12;
-        let dw = w - pad * 2;
-        let dh = 48usize;
-        c.fill_round_rect(dx, dy, dw, dh, 8, Color::rgb(0x0E, 0x16, 0x28));
-        let disp = calc.display();
-        let dscale = 3usize;
-        let tw = disp.len() * font::cell_w(dscale);
-        let tx = if tw + 16 < dw {
-            dx + dw - tw - 16
+        use crate::text::{self, TITLE1, TITLE3, Weight};
+        let p = theme::pal();
+        let body = r.body();
+        c.fill_rect(
+            body.x.max(0) as usize,
+            body.y.max(0) as usize,
+            body.w.max(0) as usize,
+            body.h.max(0) as usize,
+            theme::window_body(),
+        );
+        let pad = 14;
+        // Display: the result right-aligned in a large size (smaller when it is long).
+        let disp = Rect::new(r.x + pad, r.y + TITLE_H + 12, r.w - pad * 2, 52);
+        let shown = text::from_bytes(calc.display()).into_owned();
+        let px = if text::measure(&shown, TITLE1, Weight::Regular) > disp.w - 8 {
+            TITLE3
         } else {
-            dx + 10
+            TITLE1
         };
-        let color = if calc.is_error() {
-            theme::CLOSE
+        let col = if calc.is_error() {
+            theme::danger()
         } else {
-            theme::accent()
+            theme::solid(p.text)
         };
-        font::draw_bytes(c, tx, dy + (dh - 7 * dscale) / 2, disp, color, dscale);
+        let w = text::measure(&shown, px, Weight::Regular);
+        let ty = text::center_y(disp.y, disp.h, px, Weight::Regular);
+        text::draw(
+            c,
+            (disp.right() - 8 - w).max(disp.x),
+            ty,
+            &shown,
+            px,
+            Weight::Regular,
+            col,
+        );
 
         // Keypad.
         let (gx, gy, cw, ch, gap) = calc_layout(r);
@@ -101,16 +57,31 @@ impl Desktop {
                 if row == 3 && col == 3 {
                     bh = ch * 2 + gap; // tall "="
                 }
-                let bx = gx + col as i32 * (cw + gap);
-                let by = gy + row as i32 * (ch + gap);
+                let b = Rect::new(
+                    gx + col as i32 * (cw + gap),
+                    gy + row as i32 * (ch + gap),
+                    bw,
+                    bh,
+                );
                 let (bg, fg) = key_style(k, pending);
-                c.fill_round_rect(bx as usize, by as usize, bw as usize, bh as usize, 8, bg);
-                let label = key_label(&k);
-                let lscale = 3usize;
-                let lw = label.len() * font::cell_w(lscale);
-                let lx = bx as usize + (bw as usize).saturating_sub(lw) / 2;
-                let ly = by as usize + (bh as usize).saturating_sub(7 * lscale) / 2;
-                font::draw_bytes(c, lx, ly, label, fg, lscale);
+                let pressed = self.prev_left && b.contains(self.cursor_x, self.cursor_y);
+                let bg = if pressed {
+                    bg.lerp(Color::rgb(0x80, 0x80, 0x88), 50)
+                } else {
+                    bg
+                };
+                c.fill_rrect(b, 10, Corner::Circle, bg, 256);
+                if matches!(k, b'0'..=b'9' | b'.') {
+                    ui::stroke_token(c, b, 10, p.separator);
+                }
+                let label = match k {
+                    0x08 => "⌫",
+                    b'*' => "×",
+                    b'/' => "÷",
+                    b'-' => "−",
+                    _ => core::str::from_utf8(core::slice::from_ref(&k)).unwrap_or("?"),
+                };
+                text::draw_centered(c, b, label, TITLE3, Weight::Medium, fg);
             }
         }
     }
@@ -141,9 +112,9 @@ impl Desktop {
                 h as usize,
                 bg,
             );
-            let room = ((content.w - 16).max(0) as usize) / font::cell_w(2);
+            let room = ((content.w - 16).max(0) as usize) / crate::text::legacy::cell_w(2);
             let t: String = text.chars().take(room).collect();
-            font::draw_text(
+            crate::text::legacy::draw_text(
                 c,
                 (content.x + 8) as usize,
                 (y + 6).max(0) as usize,
@@ -168,7 +139,7 @@ impl Desktop {
             }
             let count = alloc::format!("   {}/{}", bs.find.position(), bs.find.count());
             t.push_str(&count);
-            bar_line(c, Color::rgb(0xE3, 0xE9, 0xF5), theme::TEXT, &t);
+            bar_line(c, theme::toolbar(), theme::text(), &t);
         }
         // Suggestions under the address bar.
         let sugg = bs.browser.suggestions();
@@ -191,7 +162,7 @@ impl Desktop {
                 first.w as usize,
                 total as usize,
                 8,
-                theme::WHITE,
+                theme::button_bg(),
             );
             for (i, s) in sugg.iter().enumerate() {
                 let row = osjeff_core::layout::browser_suggestion_row(ch.bar, i);
@@ -209,15 +180,15 @@ impl Desktop {
                 if s.bookmark {
                     glyph_star(c, Rect::new(row.x + 8, row.y + 3, 20, 20), true);
                 }
-                let room = ((row.w - 44).max(0) as usize) / font::cell_w(2);
+                let room = ((row.w - 44).max(0) as usize) / crate::text::legacy::cell_w(2);
                 let label: String = s.label.chars().take(room).collect();
                 let label = osjeff_core::web::fold_for_display(&label);
-                font::draw_text(
+                crate::text::legacy::draw_text(
                     c,
                     (row.x + 36) as usize,
                     (row.y + 6) as usize,
                     &label,
-                    theme::TEXT,
+                    theme::text(),
                     2,
                 );
             }
@@ -228,102 +199,132 @@ impl Desktop {
         let ch = BrowserChrome::of(r);
 
         // ---- toolbar: nav buttons + address bar + search button ----
-        let tool_bg = Color::rgb(0xEC, 0xEF, 0xF5);
-        let dim = Color::rgb(0xB8, 0xC0, 0xCE);
-        draw_tool_button(c, ch.back, tool_bg, theme::HEADER);
-        let on = |yes: bool| if yes { theme::HEADER } else { dim };
+        use crate::text::{self, BODY, FOOTNOTE, Weight};
+        let p = theme::pal();
+        let tool_bg = theme::tool_bg();
+        let (ink, dim) = (theme::ink(), theme::ink_dim());
+        c.fill_rect(
+            r.x.max(0) as usize,
+            (r.y + TITLE_H).max(0) as usize,
+            r.w.max(0) as usize,
+            (ch.content.y - r.y - TITLE_H).max(0) as usize,
+            theme::toolbar(),
+        );
+        draw_tool_button(c, ch.back, tool_bg, ink);
+        let on = |yes: bool| if yes { ink } else { dim };
         glyph_arrow(c, ch.back, on(bs.browser.can_back()), true);
-        draw_tool_button(c, ch.forward, tool_bg, theme::HEADER);
+        draw_tool_button(c, ch.forward, tool_bg, ink);
         glyph_arrow(c, ch.forward, on(bs.browser.can_forward()), false);
-        draw_tool_button(c, ch.reload, tool_bg, theme::HEADER);
-        glyph_reload(c, ch.reload, theme::HEADER, tool_bg);
-        draw_tool_button(c, ch.home, tool_bg, theme::HEADER);
-        glyph_home(c, ch.home, theme::HEADER);
+        draw_tool_button(c, ch.reload, tool_bg, ink);
+        glyph_reload(c, ch.reload, ink, tool_bg);
+        draw_tool_button(c, ch.home, tool_bg, ink);
+        glyph_home(c, ch.home, ink);
 
-        // Address bar: white pill with a 1px border, a leading globe, the URL
-        // (or a muted placeholder) and a caret when focused.
+        // Address bar: a pill with a hairline (an accent ring while it has the focus), a
+        // leading globe, the URL (or a placeholder), a caret and the connection badge.
         let bar = ch.bar;
-        c.fill_round_rect(
-            bar.x as usize,
-            bar.y as usize,
-            bar.w as usize,
-            bar.h as usize,
-            bar.h as usize / 2,
-            Color::rgb(0xCE, 0xD6, 0xE6),
-        );
-        c.fill_round_rect(
-            (bar.x + 1) as usize,
-            (bar.y + 1) as usize,
-            (bar.w - 2) as usize,
-            (bar.h - 2) as usize,
-            (bar.h as usize - 2) / 2,
-            theme::WHITE,
-        );
+        ui::text_field_frame(c, bar, bar.h / 2, focused && bs.browser.bar_focus());
         glyph_globe(c, Rect::new(bar.x + 10, bar.y + (bar.h - 18) / 2, 18, 18));
         glyph_star(c, ch.star, bs.browser.is_bookmarked());
 
-        // Connection badge, right-aligned inside the bar. The padlock ("Conexao
-        // segura", green) is shown only for a connection whose certificate chain
-        // was verified by the TLS client; an https page the user chose to open
-        // despite a certificate error says "Certificado invalido" in red, and
-        // plain http says it is not encrypted. Text is ASCII (bitmap font).
+        // Connection badge, right-aligned inside the bar: the padlock ("Conexão
+        // segura", green) only for a chain the TLS client verified; an https page the
+        // user opened despite a certificate error says so in red, plain http says it is
+        // not encrypted.
         let mut badge_reserved = 34;
         if let Some(label) = bs.browser.security().label() {
             use osjeff_core::browser::Security;
             let (bg, fg) = match bs.browser.security() {
                 Security::HttpsVerified => {
-                    (Color::rgb(0xDC, 0xF2, 0xDD), Color::rgb(0x1B, 0x5E, 0x20))
+                    if theme::dark() {
+                        (Color::rgb(0x1E, 0x3B, 0x2A), Color::rgb(0x6E, 0xE7, 0x9A))
+                    } else {
+                        (Color::rgb(0xDC, 0xF2, 0xDD), Color::rgb(0x1B, 0x5E, 0x20))
+                    }
                 }
                 Security::HttpsInvalid => (Color::rgb(0xC6, 0x28, 0x28), theme::WHITE),
-                _ => (Color::rgb(0xFF, 0xD9, 0xD9), Color::rgb(0xA3, 0x1D, 0x1D)),
+                _ => {
+                    if theme::dark() {
+                        (Color::rgb(0x4A, 0x24, 0x24), Color::rgb(0xFF, 0xA3, 0xA3))
+                    } else {
+                        (Color::rgb(0xFF, 0xD9, 0xD9), Color::rgb(0xA3, 0x1D, 0x1D))
+                    }
+                }
             };
-            let scale = if bar.w >= 520 { 2 } else { 1 };
-            let tw = font::text_width(label, scale) as i32;
-            let ph = 7 * scale as i32 + 8;
-            let pw = tw + 16;
+            let label = crate::text::from_bytes(label.as_bytes()).into_owned();
+            let tw = text::measure(&label, FOOTNOTE, Weight::Medium);
+            let (pw, ph) = (tw + 20, 20);
             let px = bar.x + bar.w - pw - 42;
             let py = bar.y + (bar.h - ph) / 2;
-            c.fill_round_rect(
-                px as usize,
-                py as usize,
-                pw as usize,
-                ph as usize,
-                ph as usize / 2,
-                bg,
+            c.fill_rrect(Rect::new(px, py, pw, ph), ph / 2, Corner::Circle, bg, 256);
+            text::draw_centered(
+                c,
+                Rect::new(px, py, pw, ph),
+                &label,
+                FOOTNOTE,
+                Weight::Medium,
+                fg,
             );
-            font::draw_text(c, (px + 8) as usize, (py + 4) as usize, label, fg, scale);
             badge_reserved = pw + 46;
         }
 
-        let tx = (bar.x + 36) as usize;
-        let ty = (bar.y + (bar.h - 14) / 2) as usize;
+        let tx = bar.x + 36;
+        let room = (bar.w - 48 - badge_reserved).max(8);
+        let ty = text::center_y(bar.y, bar.h, BODY, Weight::Regular);
         let url = bs.browser.url();
-        let bar_cols = (((bar.w - 48 - badge_reserved).max(0)) as usize / font::cell_w(2)).max(1);
         if url.is_empty() {
-            font::draw_text(
+            text::draw(
                 c,
                 tx,
                 ty,
-                "Pesquisar ou digitar um endereco",
-                theme::TEXT_MUTED,
-                2,
+                "Pesquisar ou digitar um endereço",
+                BODY,
+                Weight::Regular,
+                theme::solid(p.text_tertiary),
             );
         } else {
-            let shown = &url[url.len().saturating_sub(bar_cols)..];
+            let full = crate::text::from_bytes(url).into_owned();
+            // Show the tail of an address wider than the field.
+            let mut start = 0usize;
+            while start < full.len() && text::measure(&full[start..], BODY, Weight::Regular) > room
+            {
+                start += full[start..].chars().next().map_or(1, char::len_utf8);
+            }
+            let shown = &full[start..];
             if focused && bs.browser.bar_selected() {
-                c.fill_rect(
-                    tx.saturating_sub(2),
-                    ty - 2,
-                    shown.len() * font::cell_w(2) + 4,
-                    18,
-                    Color::rgb(0xA8, 0xCB, 0xFF),
+                let w = text::measure(shown, BODY, Weight::Regular);
+                c.fill_rrect(
+                    Rect::new(tx - 2, bar.y + 5, w + 4, bar.h - 10),
+                    4,
+                    Corner::Circle,
+                    theme::accent(),
+                    90,
                 );
             }
-            font::draw_bytes(c, tx, ty, shown, theme::TEXT, 2);
+            text::draw(
+                c,
+                tx,
+                ty,
+                shown,
+                BODY,
+                Weight::Regular,
+                theme::solid(p.text),
+            );
             if focused && bs.browser.bar_focus() {
-                let caret = bs.browser.caret().min(shown.len());
-                let cx = tx + caret * font::cell_w(2);
-                c.fill_rect(cx, ty - 1, 2, 16, theme::accent());
+                let caret = bs
+                    .browser
+                    .caret()
+                    .min(full.len())
+                    .saturating_sub(start)
+                    .min(shown.len());
+                let cx = tx + text::measure(&shown[..caret], BODY, Weight::Regular);
+                c.fill_rect(
+                    cx.max(0) as usize,
+                    (bar.y + 6).max(0) as usize,
+                    1,
+                    (bar.h - 12).max(0) as usize,
+                    theme::accent(),
+                );
             }
         }
 
@@ -339,13 +340,13 @@ impl Desktop {
         }
         if bs.browser.status() == Status::Loading {
             let msg = "Carregando...";
-            let w = font::text_width(msg, 2);
-            font::draw_text(
+            let w = crate::text::legacy::text_width(msg, 2);
+            crate::text::legacy::draw_text(
                 c,
                 (ch.content.x + (ch.content.w - w as i32) / 2) as usize,
                 (ch.content.y + 40) as usize,
                 msg,
-                theme::TEXT_MUTED,
+                theme::text_muted(),
                 2,
             );
             return;
@@ -364,27 +365,25 @@ impl Desktop {
             && content.h > 24
         {
             let label = note.label();
-            let scale = if font::text_width(label, 2) as i32 + 16 <= content.w {
-                2
-            } else {
-                1
-            };
-            let h = 24;
-            let y = (content.bottom() - h) as usize;
+            let h = 28;
+            let y = content.bottom() - h;
             c.fill_rect(
                 content.x as usize,
-                y,
+                y as usize,
                 content.w as usize,
                 h as usize,
                 Color::rgb(0xFF, 0xE6, 0x9C),
             );
-            font::draw_text(
+            let ty = text::center_y(y, h, FOOTNOTE, Weight::Medium);
+            text::draw_ellipsis(
                 c,
-                (content.x + 8) as usize,
-                y + 5,
+                content.x + 10,
+                ty,
+                content.w - 20,
                 label,
+                FOOTNOTE,
+                Weight::Medium,
                 Color::rgb(0x6B, 0x3F, 0x00),
-                scale,
             );
         }
 
@@ -493,12 +492,19 @@ impl Desktop {
                     // Clip to the content box on the right (a page laid out for a
                     // wider window while it is being resized).
                     let room = ((content.right() - (ox + *x)).max(0) as usize)
-                        / font::cell_w(*scale as usize);
+                        / crate::text::legacy::cell_w(*scale as usize);
                     let bytes = text.as_bytes();
                     let bytes = &bytes[..bytes.len().min(room)];
-                    font::draw_bytes(c, px, py, bytes, rgb(*color), *scale as usize);
+                    crate::text::legacy::draw_bytes(c, px, py, bytes, rgb(*color), *scale as usize);
                     if *bold {
-                        font::draw_bytes(c, px + 1, py, bytes, rgb(*color), *scale as usize);
+                        crate::text::legacy::draw_bytes(
+                            c,
+                            px + 1,
+                            py,
+                            bytes,
+                            rgb(*color),
+                            *scale as usize,
+                        );
                     }
                 }
             }
@@ -511,19 +517,19 @@ impl Desktop {
             }
             let (fx, fy) = (ox + f.x, oy + f.y);
             if f.kind.is_text() {
-                let cw = font::cell_w(f.scale as usize);
+                let cw = crate::text::legacy::cell_w(f.scale as usize);
                 let cols = ((f.w - 2 * f.pad_x).max(0) as usize / cw).max(1);
                 let (shown, caret_col) = bs.forms.visible(&page.forms, f.form, f.field, cols);
                 let ty = (fy + f.pad_y).max(content.y);
                 if fy + f.pad_y >= content.y
                     && fy + f.pad_y + 9 * f.scale as i32 <= content.bottom()
                 {
-                    font::draw_text(
+                    crate::text::legacy::draw_text(
                         c,
                         (fx + f.pad_x) as usize,
                         ty as usize,
                         &shown,
-                        theme::TEXT,
+                        theme::text(),
                         f.scale as usize,
                     );
                     if focus == Some((f.form, f.field)) {
@@ -553,169 +559,135 @@ impl Desktop {
     /// explanation, the clock hint (when the time was not confirmed over SNTP) and
     /// the explicit "continue anyway (insecure)" button.
     fn draw_browser_error(&self, c: &mut Canvas, content: Rect, bs: &BrowserState) {
+        use crate::text::{self, BODY, FOOTNOTE, TITLE3, Weight};
         use osjeff_core::browser::FailReason;
+        let p = theme::pal();
         let reason = bs.browser.fail_reason();
-        font::draw_text(
+        let x = content.x + 24;
+        text::draw(
             c,
-            (content.x + 8) as usize,
-            (content.y + 10) as usize,
+            x,
+            content.y + 22,
             reason.message(),
-            theme::CLOSE,
-            2,
+            TITLE3,
+            Weight::Semibold,
+            theme::danger(),
         );
         if let FailReason::Cert(e) = reason {
-            font::draw_text(
+            text::draw(
                 c,
-                (content.x + 8) as usize,
-                (content.y + 38) as usize,
-                "A identidade do servidor nao foi comprovada: a conexao pode ser interceptada.",
-                theme::TEXT,
-                1,
+                x,
+                content.y + 54,
+                "A identidade do servidor não foi comprovada: a conexão pode ser interceptada.",
+                BODY,
+                Weight::Regular,
+                theme::solid(p.text),
             );
             if e.clock_may_be_to_blame() && !crate::clock::confirmed() {
-                font::draw_text(
+                text::draw(
                     c,
-                    (content.x + 8) as usize,
-                    (content.y + 56) as usize,
-                    "Hora do sistema nao confirmada: confira o relogio (sem resposta de servidor de hora).",
-                    Color::rgb(0x6B, 0x3F, 0x00),
-                    1,
+                    x,
+                    content.y + 76,
+                    "Hora do sistema não confirmada: confira o relógio (sem resposta de servidor de hora).",
+                    BODY,
+                    Weight::Regular,
+                    if theme::dark() {
+                        Color::rgb(0xFB, 0xBF, 0x24)
+                    } else {
+                        Color::rgb(0x8A, 0x4B, 0x00)
+                    },
                 );
             }
             if bs.browser.can_continue_insecure() {
                 let b = osjeff_core::layout::browser_continue_button(content);
-                c.fill_round_rect(
-                    b.x as usize,
-                    b.y as usize,
-                    b.w as usize,
-                    b.h as usize,
-                    8,
-                    Color::rgb(0xC6, 0x28, 0x28),
-                );
-                let label = "Continuar mesmo assim (inseguro)";
-                let tw = font::text_width(label, 2) as i32;
-                font::draw_text(
+                ui::push_button(
                     c,
-                    (b.x + (b.w - tw).max(0) / 2) as usize,
-                    (b.y + (b.h - 14) / 2) as usize,
-                    label,
-                    theme::WHITE,
-                    2,
+                    b,
+                    "Continuar mesmo assim (inseguro)",
+                    ui::ButtonKind::Destructive,
+                    ui::Control::Normal,
                 );
-                font::draw_text(
+                text::draw(
                     c,
-                    (content.x + 8) as usize,
-                    (b.bottom() + 8) as usize,
-                    "Vale so para este site, nesta sessao.",
-                    theme::TEXT_MUTED,
-                    1,
+                    x,
+                    b.bottom() + 10,
+                    "Vale só para este site, nesta sessão.",
+                    FOOTNOTE,
+                    Weight::Regular,
+                    theme::solid(p.text_secondary),
                 );
             }
         }
     }
 
     pub(crate) fn draw_browser_home(&self, c: &mut Canvas, content: Rect) {
+        use crate::text::{self, BODY, TITLE2, TITLE3, Weight};
+        let p = theme::pal();
         let (logo, tiles) = browser_home_layout(content);
-
-        // Brand globe + wordmark + tagline, centered.
-        icons::draw(
-            c,
-            Icon::Browser,
-            logo.x as usize,
-            logo.y as usize,
-            logo.w as usize,
+        c.fill_rect(
+            content.x.max(0) as usize,
+            content.y.max(0) as usize,
+            content.w.max(0) as usize,
+            content.h.max(0) as usize,
+            theme::window_body(),
         );
+
+        // Brand globe, name and hint, centred.
+        icons::blit(c, Icon::Browser, logo.x, logo.y, logo.w, 256);
         let cx = content.x + content.w / 2;
-        let wm = "OSjeff";
-        let wmw = font::text_width(wm, 5) as i32;
-        font::draw_text(
+        let line = |y: i32, h: i32| Rect::new(cx - content.w / 2, y, content.w, h);
+        text::draw_centered(
             c,
-            (cx - wmw / 2) as usize,
-            (logo.bottom() + 16) as usize,
-            wm,
-            theme::HEADER,
-            5,
+            line(logo.bottom() + 14, 30),
+            "Navegador",
+            TITLE2,
+            Weight::Semibold,
+            theme::solid(p.text),
         );
-        let sub = "Navegador";
-        let sw = font::text_width(sub, 2) as i32;
-        font::draw_text(
+        text::draw_centered(
             c,
-            (cx - sw / 2) as usize,
-            (logo.bottom() + 60) as usize,
-            sub,
-            theme::accent(),
-            2,
-        );
-        let hint = "Pesquise ou digite um endereco na barra acima";
-        let hw = font::text_width(hint, 2) as i32;
-        font::draw_text(
-            c,
-            (cx - hw / 2) as usize,
-            (logo.bottom() + 84) as usize,
-            hint,
-            theme::TEXT_MUTED,
-            2,
+            line(logo.bottom() + 46, 22),
+            "Pesquise ou digite um endereço na barra acima",
+            BODY,
+            Weight::Regular,
+            theme::solid(p.text_secondary),
         );
 
-        // Shortcut tiles: a colored monogram chip over a centered label.
+        // Shortcut cards: a colour monogram over the name.
         let accents = [
             theme::accent(),
             theme::ACCENT_2,
             Color::rgb(0xF5, 0x9E, 0x0B),
-            Color::rgb(0x4C, 0xC2, 0xFF),
+            Color::rgb(0x14, 0xB8, 0xC4),
         ];
         for (i, t) in tiles.iter().enumerate() {
             let (label, _url) = osjeff_core::browser::QUICK_LINKS[i];
-            let accent = accents[i];
-            // Card with a soft shadow.
-            c.fill_round_rect_alpha(
-                (t.x + 3) as usize,
-                (t.y + 5) as usize,
-                t.w as usize,
-                t.h as usize,
-                12,
-                theme::SHADOW,
-                26,
+            let hole = Rect::new(t.x, t.y + 12, t.w, (t.h - 24).max(0));
+            c.draw_shadow(
+                *t,
+                Shadow {
+                    blur: 8,
+                    dy: 3,
+                    alpha: if theme::dark() { 90 } else { 34 },
+                },
+                hole,
             );
-            c.fill_round_rect(
-                t.x as usize,
-                t.y as usize,
-                t.w as usize,
-                t.h as usize,
-                12,
-                theme::WHITE,
+            ui::fill_token(c, *t, 12, p.content_bg);
+            ui::stroke_token(c, *t, 12, p.separator);
+            let chip = Rect::new(t.x + (t.w - 36) / 2, t.y + 16, 36, 36);
+            c.fill_rrect(chip, 11, Corner::Squircle, accents[i], 256);
+            let initial = alloc::format!(
+                "{}",
+                label.chars().next().unwrap_or('?').to_ascii_uppercase()
             );
-            // Monogram chip (first letter of the label).
-            let chip = 34;
-            let chx = t.x + (t.w - chip) / 2;
-            let chy = t.y + 16;
-            c.fill_round_rect(
-                chx as usize,
-                chy as usize,
-                chip as usize,
-                chip as usize,
-                10,
-                accent,
-            );
-            let initial = [label.as_bytes()[0].to_ascii_uppercase()];
-            let iw = font::cell_w(3);
-            font::draw_bytes(
+            text::draw_centered(c, chip, &initial, TITLE3, Weight::Semibold, theme::WHITE);
+            text::draw_centered(
                 c,
-                (chx + (chip - iw as i32) / 2) as usize,
-                (chy + (chip - 7 * 3) / 2) as usize,
-                &initial,
-                theme::WHITE,
-                3,
-            );
-            // Label.
-            let lw = font::text_width(label, 2) as i32;
-            font::draw_text(
-                c,
-                (t.x + (t.w - lw) / 2) as usize,
-                (t.y + t.h - 24) as usize,
+                Rect::new(t.x + 4, t.bottom() - 34, t.w - 8, 24),
                 label,
-                theme::TEXT,
-                2,
+                BODY,
+                Weight::Medium,
+                theme::solid(p.text),
             );
         }
     }
@@ -731,129 +703,6 @@ impl Desktop {
         crate::wasm::blit(w.id, c, cr.x, cr.y, cr.w, cr.h);
     }
 
-    pub(crate) fn draw_start(&self, c: &mut Canvas) {
-        let rows = self.start_rows();
-        let (sx, sy) = start_origin(self.sw, self.sh, rows);
-        let h = start_height(rows);
-        // Shadow + panel.
-        c.fill_round_rect_alpha(
-            (sx + 5) as usize,
-            (sy + 10) as usize,
-            START_W as usize,
-            h as usize,
-            16,
-            theme::SHADOW,
-            40,
-        );
-        c.fill_round_rect(
-            sx as usize,
-            sy as usize,
-            START_W as usize,
-            h as usize,
-            14,
-            theme::DOCK,
-        );
-
-        let hovered = start_item_at(
-            self.sw,
-            self.sh,
-            rows,
-            self.start_scroll,
-            self.cursor_x,
-            self.cursor_y,
-        );
-        let top = sy + START_PAD;
-        let max_chars = ((START_W - START_PAD * 2 - 44) as usize / font::cell_w(2)).max(4);
-        for i in 0..rows {
-            let n = self.start_scroll + i;
-            let ry = top + i as i32 * START_ROW_H;
-            let (item, label): (StartItem, &str) = match Kind::ALL.get(n) {
-                Some(&k) => (StartItem::App(k), k.label()),
-                None => match self.apps.get(n - Kind::ALL.len()) {
-                    Some(a) => (StartItem::Wasm(n - Kind::ALL.len()), a.name.as_str()),
-                    None => continue,
-                },
-            };
-            if hovered == Some(item) {
-                start_row_highlight(c, sx, ry, theme::accent());
-            }
-            let (ix, iy) = (
-                (sx + START_PAD) as usize,
-                (ry + (START_ROW_H - 24) / 2) as usize,
-            );
-            match item {
-                StartItem::App(k) => icons::draw(c, k.icon(), ix, iy, 24),
-                StartItem::Wasm(j) => match self.apps.get(j).and_then(|a| a.icon.as_deref()) {
-                    Some(rgba) => c.draw_rgba(rgba, 24, 24, ix, iy),
-                    None => icons::draw(c, Icon::WasmApp, ix, iy, 24),
-                },
-                _ => {}
-            }
-            let shown = &label[..label.len().min(max_chars)];
-            font::draw_text(
-                c,
-                (sx + START_PAD + 36) as usize,
-                (ry + (START_ROW_H - 14) / 2) as usize,
-                shown,
-                theme::HEADER_TEXT,
-                2,
-            );
-        }
-        // Scroll bar when the list does not fit.
-        let total = self.start_total();
-        if total > rows {
-            let track_h = rows as i32 * START_ROW_H;
-            let thumb_h = (track_h * rows as i32 / total as i32).max(16);
-            let max_scroll = (total - rows) as i32;
-            let thumb_y = top + (track_h - thumb_h) * self.start_scroll as i32 / max_scroll.max(1);
-            let bx = (sx + START_W - 8) as usize;
-            c.fill_rect(bx, top as usize, 3, track_h as usize, theme::DOCK_EDGE);
-            c.fill_round_rect(
-                bx,
-                thumb_y as usize,
-                3,
-                thumb_h as usize,
-                1,
-                theme::accent(),
-            );
-        }
-
-        // Divider, then power actions.
-        let pwr_top = top + rows as i32 * START_ROW_H + START_GAP;
-        c.fill_rect(
-            (sx + START_PAD) as usize,
-            (pwr_top - START_GAP / 2) as usize,
-            (START_W - START_PAD * 2) as usize,
-            1,
-            theme::DOCK_EDGE,
-        );
-        let power = [
-            (StartItem::Reboot, "Reiniciar"),
-            (StartItem::Shutdown, "Desligar"),
-        ];
-        for (i, (item, label)) in power.iter().enumerate() {
-            let ry = pwr_top + i as i32 * START_ROW_H;
-            if hovered == Some(*item) {
-                start_row_highlight(c, sx, ry, theme::CLOSE);
-            }
-            icons::draw(
-                c,
-                Icon::Power,
-                (sx + START_PAD) as usize,
-                (ry + (START_ROW_H - 24) / 2) as usize,
-                24,
-            );
-            font::draw_text(
-                c,
-                (sx + START_PAD + 36) as usize,
-                (ry + (START_ROW_H - 14) / 2) as usize,
-                label,
-                theme::HEADER_TEXT,
-                2,
-            );
-        }
-    }
-
     /// Process list (scrolls to keep the selection visible), the real kernel
     /// threads and a footer pinned to the window's bottom edge.
     pub(crate) fn draw_taskmgr(&self, c: &mut Canvas, r: Rect) {
@@ -863,7 +712,14 @@ impl Desktop {
         let tx = x + pad;
         let mut ty = y + TITLE_H as usize + 6;
 
-        font::draw_text(c, tx, ty, "PID NAME        ST   UP", theme::TEXT_MUTED, 2);
+        crate::text::legacy::draw_text(
+            c,
+            tx,
+            ty,
+            "PID NAME        ST   UP",
+            theme::text_muted(),
+            2,
+        );
         ty += line_h + 2;
 
         // Rows that fit between the header and the thread block + footer.
@@ -892,7 +748,7 @@ impl Desktop {
                 c.fill_round_rect_alpha(
                     tx - 4,
                     ty - 2,
-                    24 * font::cell_w(2),
+                    24 * crate::text::legacy::cell_w(2),
                     line_h,
                     4,
                     theme::accent(),
@@ -911,14 +767,14 @@ impl Desktop {
             };
             line[17..20].copy_from_slice(st);
             write_uint(&mut line, 21, 6, p.ticks);
-            font::draw_bytes(c, tx, ty, &line, theme::TEXT, 2);
+            crate::text::legacy::draw_bytes(c, tx, ty, &line, theme::text(), 2);
             ty += line_h;
         }
 
         // Real kernel threads from the scheduler, with live CPU time.
         let footer_y = (r.bottom() - 24).max(0) as usize;
         ty += 6;
-        font::draw_text(c, tx, ty, "KERNEL THREADS   CPU", theme::ACCENT_2, 2);
+        crate::text::legacy::draw_text(c, tx, ty, "KERNEL THREADS   CPU", theme::ACCENT_2, 2);
         ty += line_h + 2;
         for i in 0..threads {
             if ty + line_h > footer_y {
@@ -934,14 +790,21 @@ impl Desktop {
             } else {
                 write_uint(&mut line, 17, 6, sched::thread_ticks(i) as u32);
             }
-            font::draw_bytes(c, tx, ty, &line, theme::TEXT, 2);
+            crate::text::legacy::draw_bytes(c, tx, ty, &line, theme::text(), 2);
             ty += line_h;
         }
 
         // WASM apps: state, CPU over the last second (wall time of their slices) and memory.
         if !apps.is_empty() {
             ty += 6;
-            font::draw_text(c, tx, ty, "APPS         ST CPU%  MEM", theme::ACCENT_2, 2);
+            crate::text::legacy::draw_text(
+                c,
+                tx,
+                ty,
+                "APPS         ST CPU%  MEM",
+                theme::ACCENT_2,
+                2,
+            );
             ty += line_h + 2;
             for a in &apps {
                 if ty + line_h > footer_y {
@@ -956,13 +819,13 @@ impl Desktop {
                 write_uint(&mut line, 17, 3, a.cpu_pct as u32);
                 write_uint(&mut line, 22, 5, a.mem_kib);
                 line[27] = b'K';
-                font::draw_bytes(c, tx, ty, &line, theme::TEXT, 2);
+                crate::text::legacy::draw_bytes(c, tx, ty, &line, theme::text(), 2);
                 ty += line_h;
             }
         }
 
         let footer = "ENTER:open DEL:end R:restart";
-        font::draw_text(c, tx, footer_y, footer, theme::TEXT_MUTED, 2);
+        crate::text::legacy::draw_text(c, tx, footer_y, footer, theme::text_muted(), 2);
     }
 
     /// Alt+Tab panel geometry for a list of `n` windows: centered, `SWITCH_ROWS`
@@ -978,91 +841,71 @@ impl Desktop {
         )
     }
 
-    /// The Alt+Tab overlay: every window in most-recently-used order, the
-    /// selection highlighted; minimized windows are tagged.
+    /// The Alt+Tab overlay: every window in most-recently-used order on a glass
+    /// panel, the selection highlighted; minimized windows are tagged.
     pub(crate) fn draw_switcher(&self, c: &mut Canvas, sw: &Switcher) {
+        use crate::text::{self, BODY, FOOTNOTE, Weight};
+        let p = theme::pal();
         let list = sw.list();
         let r = self.switcher_rect(list.len());
-        c.fill_round_rect_alpha(
-            (r.x + 5) as usize,
-            (r.y + 10) as usize,
-            r.w as usize,
-            r.h as usize,
-            16,
-            theme::SHADOW,
-            40,
+        let hole = Rect::new(r.x, r.y + 16, r.w, r.h - 32);
+        c.draw_shadow(
+            r,
+            Shadow {
+                blur: 24,
+                dy: 14,
+                alpha: 90,
+            },
+            hole,
         );
-        c.fill_round_rect(
-            r.x as usize,
-            r.y as usize,
-            r.w as usize,
-            r.h as usize,
-            14,
-            theme::DOCK,
-        );
+        self.shell.switcher_glass.draw(c, r, 16, 14, 256);
+        ui::fill_token(c, r, 16, p.menu_tint);
+        ui::stroke_token(c, r, 16, p.separator);
         let sel = sw.selected_index();
         let first = (sel + 1).saturating_sub(SWITCH_ROWS);
         for (row, idx) in (first..list.len().min(first + SWITCH_ROWS)).enumerate() {
             let ry = r.y + SWITCH_PAD + row as i32 * SWITCH_ROW_H;
-            if idx == sel {
-                c.fill_round_rect_alpha(
-                    (r.x + 6) as usize,
-                    (ry + 2) as usize,
-                    (r.w - 12) as usize,
-                    (SWITCH_ROW_H - 4) as usize,
-                    8,
-                    theme::accent(),
-                    48,
-                );
-            }
+            let rr = Rect::new(r.x + 8, ry, r.w - 16, SWITCH_ROW_H);
             let Some(w) = self.wm.get(list[idx]) else {
                 continue;
             };
-            icons::draw(
+            let fg = if idx == sel {
+                c.fill_rrect(rr, 8, Corner::Circle, theme::accent(), 256);
+                theme::ACCENT_TEXT
+            } else {
+                theme::solid(p.text)
+            };
+            icons::blit(
                 c,
                 w.app.kind().icon(),
-                (r.x + 14) as usize,
-                (ry + (SWITCH_ROW_H - 24) / 2) as usize,
-                24,
+                rr.x + 8,
+                ry + (SWITCH_ROW_H - 28) / 2,
+                28,
+                256,
             );
-            let max_chars = ((r.w - 56 - 70) as usize) / font::cell_w(2);
-            let title = w.app.title.as_bytes();
-            let title = &title[..title.len().min(max_chars)];
-            let ty = (ry + (SWITCH_ROW_H - 14) / 2) as usize;
-            font::draw_bytes(c, (r.x + 50) as usize, ty, title, theme::HEADER_TEXT, 2);
+            let tag_w = if w.minimized { 56 } else { 0 };
+            text::draw_left(
+                c,
+                Rect::new(rr.x + 48, ry, rr.w - 48 - 12 - tag_w, SWITCH_ROW_H),
+                &w.app.title,
+                BODY,
+                Weight::Medium,
+                fg,
+            );
             if w.minimized {
-                let tag = "min";
-                let tw = font::text_width(tag, 2) as i32;
-                font::draw_text(
-                    c,
-                    (r.right() - 16 - tw) as usize,
-                    ty,
-                    tag,
-                    theme::TEXT_MUTED,
-                    2,
-                );
-            }
-        }
-    }
-
-    pub(crate) fn draw_cursor(&self, c: &mut Canvas) {
-        let px = self.cursor_x as usize;
-        let py = self.cursor_y as usize;
-        let outline = Color::rgb(0x10, 0x10, 0x10);
-        let fill = Color::rgb(0xFF, 0xFF, 0xFF);
-        let sprite: &[&str] = if self.cursor_is_hand() {
-            &HAND
-        } else {
-            &CURSOR
-        };
-        for (row, line) in sprite.iter().enumerate() {
-            for (col, ch) in line.bytes().enumerate() {
-                let color = match ch {
-                    b'#' => outline,
-                    b'.' => fill,
-                    _ => continue,
+                let tag = if idx == sel {
+                    Color::rgb(0xE6, 0xE6, 0xFF)
+                } else {
+                    theme::solid(p.text_secondary)
                 };
-                c.put(px + col, py + row, color);
+                text::draw_right(
+                    c,
+                    Rect::new(rr.x, ry, rr.w - 12, SWITCH_ROW_H),
+                    "oculta",
+                    FOOTNOTE,
+                    Weight::Regular,
+                    tag,
+                );
             }
         }
     }

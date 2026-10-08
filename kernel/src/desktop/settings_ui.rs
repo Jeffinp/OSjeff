@@ -21,8 +21,8 @@ use osjeff_core::wallpaper::{self, PRESETS, Style};
 
 const SIDE_W: i32 = 200;
 const SECTIONS: [&[u8]; 7] = [
-    b"Aparencia",
-    b"Hora e regiao",
+    "Aparência".as_bytes(),
+    "Hora e região".as_bytes(),
     b"Teclado",
     b"Rede",
     b"Armazenamento",
@@ -53,6 +53,11 @@ pub(crate) struct SettingsState {
 }
 
 impl SettingsState {
+    /// Show section `i` (the system menu's "About" opens the last one).
+    pub(crate) fn select_section(&mut self, i: u8) {
+        self.section = i.min(6);
+    }
+
     pub(crate) fn new() -> Self {
         let s = crate::settings::get();
         let mut st = Self {
@@ -116,6 +121,11 @@ impl Pane {
 }
 
 struct Appearance {
+    /// Light / dark / automatic (segmented control).
+    mode: Rect,
+    /// "Reduzir movimento": label area and the switch.
+    motion: Rect,
+    motion_switch: Rect,
     chips: [Rect; 6],
     path: Rect,
     apply: Rect,
@@ -129,12 +139,16 @@ struct Appearance {
 
 impl Appearance {
     fn of(p: Rect) -> Appearance {
+        let mode = Rect::new(p.x, p.y + 24, 320.min(p.w), 28);
+        let motion = Rect::new(p.x, mode.bottom() + 12, p.w - 60, 24);
+        let motion_switch = crate::desktop::wlogic::switch_rect(p.right() - 44, motion.y + 1);
+        let top = p.y + 96;
         let mut chips = [Rect::new(0, 0, 0, 0); 6];
         let cw = ((p.w - 5 * 8) / 6).clamp(60, 92);
         for (i, c) in chips.iter_mut().enumerate() {
-            *c = Rect::new(p.x + i as i32 * (cw + 8), p.y + 26, cw, 50);
+            *c = Rect::new(p.x + i as i32 * (cw + 8), top + 26, cw, 50);
         }
-        let path_y = p.y + 26 + 50 + 20 + 26 + 6;
+        let path_y = top + 26 + 50 + 20 + 26 + 6;
         let apply = Rect::new(p.right() - 100, path_y, 100, 28);
         let path = Rect::new(p.x, path_y, apply.x - 8 - p.x, 28);
         let sw_y = path_y + 28 + 12 + 26;
@@ -145,6 +159,9 @@ impl Appearance {
         }
         let row_y = sw_y + 30 + 14 + 26;
         Appearance {
+            mode,
+            motion,
+            motion_switch,
             chips,
             path,
             apply,
@@ -267,6 +284,10 @@ impl Desktop {
         {
             self.bg_dirty = true;
         }
+        if new.appearance != old.appearance {
+            // Re-resolve the look now (Auto follows the clock, the others are fixed).
+            self.poll_appearance(crate::rtc::now().h);
+        }
         // Everything on screen may change (clock text, accent colours).
         self.force_full = true;
         VfsStore.save(&new.to_text())
@@ -287,6 +308,10 @@ impl Desktop {
             }
             None => crate::settings::set(Settings::default()),
         }
+        // The first wallpaper is painted in the look the clock asks for.
+        let hour = crate::rtc::now().h;
+        crate::theme::set_appearance(crate::settings::get().appearance.resolve(hour));
+        self.shell.last_hour = hour;
     }
 
     /// Use the image at `path` as the wallpaper (file manager, viewer). `Some(message)`
@@ -423,7 +448,15 @@ impl Desktop {
             SEC_APPEARANCE => {
                 let a = Appearance::of(lay.pane);
                 st.path_focus = a.path.contains(px, py);
-                if let Some(i) = a.chips.iter().position(|c| c.contains(px, py)) {
+                if let Some(i) = crate::desktop::wlogic::segmented_hit(a.mode, 3, px, py) {
+                    use osjeff_core::style::AppearanceSetting as A;
+                    s.appearance = [A::Auto, A::Light, A::Dark][i];
+                    let _ = self.settings_apply(s);
+                } else if a.motion.contains(px, py) || a.motion_switch.inflated(4).contains(px, py)
+                {
+                    s.reduce_motion = !s.reduce_motion;
+                    let _ = self.settings_apply(s);
+                } else if let Some(i) = a.chips.iter().position(|c| c.contains(px, py)) {
                     if i < PRESETS.len() {
                         s.wallpaper = WallpaperChoice::Preset(i as u8);
                         st.set_msg(b"");
@@ -545,7 +578,7 @@ impl Desktop {
         fill(
             c,
             Rect::new(r.x, r.y + TITLE_H, SIDE_W, r.h - TITLE_H),
-            SIDEBAR,
+            theme::sidebar(),
         );
         for (i, rect) in lay.side.iter().enumerate() {
             if st.section as usize == i {
@@ -556,7 +589,7 @@ impl Desktop {
                     rect.y + 10,
                     rect.w - 14,
                     SECTIONS[i],
-                    Color::rgb(0x08, 0x12, 0x1E),
+                    theme::WHITE,
                 );
             } else {
                 text(
@@ -565,7 +598,7 @@ impl Desktop {
                     rect.y + 10,
                     rect.w - 14,
                     SECTIONS[i],
-                    SIDEBAR_TEXT,
+                    theme::text(),
                 );
             }
         }
@@ -583,7 +616,7 @@ impl Desktop {
     }
 
     fn heading(&self, c: &mut Canvas, p: Rect, y: i32, t: &[u8]) {
-        text(c, p.x, y, p.w, t, theme::TEXT_MUTED);
+        text(c, p.x, y, p.w, t, theme::text_muted());
     }
 
     fn status(&self, c: &mut Canvas, r: Rect, st: &SettingsState) {
@@ -593,13 +626,37 @@ impl Desktop {
             r.y + 2,
             r.w,
             &st.msg[..st.msg_len],
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
     }
 
     fn draw_appearance(&self, c: &mut Canvas, p: Rect, st: &SettingsState, s: &Settings) {
         let a = Appearance::of(p);
-        self.heading(c, p, p.y, b"Papel de parede");
+        self.heading(c, p, p.y, "Aparência".as_bytes());
+        {
+            use osjeff_core::style::AppearanceSetting as A;
+            let sel = match s.appearance {
+                A::Auto => 0,
+                A::Light => 1,
+                A::Dark => 2,
+            };
+            segmented(c, a.mode, &["Automática", "Clara", "Escura"], sel);
+            text(
+                c,
+                a.motion.x,
+                a.motion.y + 5,
+                a.motion.w,
+                "Reduzir movimento".as_bytes(),
+                theme::text(),
+            );
+            switch(
+                c,
+                a.motion_switch,
+                if s.reduce_motion { 256 } else { 0 },
+                true,
+            );
+        }
+        self.heading(c, p, a.chips[0].y - 26, b"Papel de parede");
         for (i, rect) in a.chips.iter().enumerate() {
             let selected = match s.wallpaper {
                 WallpaperChoice::Preset(n) => i == n as usize,
@@ -610,9 +667,16 @@ impl Desktop {
             }
             let prev = Rect::new(rect.x, rect.y, rect.w, rect.h);
             if let Some(pr) = PRESETS.get(i) {
-                preview(c, prev, pr.style, pr.top, pr.bottom);
+                preview(c, prev, pr);
                 let name = pr.name.as_bytes();
-                text(c, rect.x, rect.bottom() + 4, rect.w + 8, name, theme::TEXT);
+                text(
+                    c,
+                    rect.x,
+                    rect.bottom() + 4,
+                    rect.w + 8,
+                    name,
+                    theme::text(),
+                );
             } else {
                 fill_round(c, prev, 8, Color::rgb(0x1E, 0x2A, 0x44));
                 // A tiny "picture": sun and hills.
@@ -634,7 +698,7 @@ impl Desktop {
                     rect.bottom() + 4,
                     rect.w + 8,
                     b"Imagem",
-                    theme::TEXT,
+                    theme::text(),
                 );
             }
         }
@@ -656,7 +720,7 @@ impl Desktop {
         self.heading(c, p, a.swatches[0].y - 24, b"Cor de destaque");
         for (i, rect) in a.swatches.iter().enumerate() {
             if s.accent as usize == i {
-                fill_round(c, rect.inflated(3), 9, theme::TEXT);
+                fill_round(c, rect.inflated(3), 9, theme::text());
             }
             let rgb = ACCENTS[i];
             fill_round(
@@ -673,7 +737,7 @@ impl Desktop {
             a.swatches[0].y - 24,
             8 * CELL_W,
             name,
-            theme::TEXT,
+            theme::text(),
         );
         self.heading(c, p, a.clock24.y - 24, b"Relogio");
         button(
@@ -694,7 +758,7 @@ impl Desktop {
             a.clock24.y - 24,
             200,
             b"Notificacoes",
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
         button(
             c,
@@ -728,7 +792,7 @@ impl Desktop {
             now.time.s,
             WD[now.weekday() as usize % 7]
         );
-        text(c, p.x, p.y + 24, p.w, b.as_bytes(), theme::TEXT);
+        text(c, p.x, p.y + 24, p.w, b.as_bytes(), theme::text());
         let utc = now.shifted(-(s.tz_minutes as i32));
         let mut b = FixedBuf::<48>::new();
         let _ = write!(
@@ -736,7 +800,7 @@ impl Desktop {
             "UTC {:02}:{:02}:{:02}",
             utc.time.h, utc.time.m, utc.time.s
         );
-        text(c, p.x, p.y + 46, p.w, b.as_bytes(), theme::TEXT_MUTED);
+        text(c, p.x, p.y + 46, p.w, b.as_bytes(), theme::text_muted());
         self.heading(c, p, t.tz_minus.y - 24, b"Fuso horario");
         button(c, t.tz_minus, b"-", Btn::Normal);
         let tz = s.tz_minutes as i32;
@@ -748,8 +812,8 @@ impl Desktop {
             tz.abs() / 60,
             tz.abs() % 60
         );
-        fill_round(c, t.tz_value, 8, theme::WHITE);
-        text_center(c, t.tz_value, b.as_bytes(), theme::TEXT);
+        fill_round(c, t.tz_value, 8, theme::button_bg());
+        text_center(c, t.tz_value, b.as_bytes(), theme::text());
         button(c, t.tz_plus, b"+", Btn::Normal);
         button(c, t.tz_reset, b"Brasilia (UTC-3)", Btn::Normal);
         self.heading(
@@ -769,14 +833,14 @@ impl Desktop {
         ];
         for i in 0..6 {
             button(c, t.up[i], b"+", Btn::Normal);
-            fill_round(c, t.val[i], 8, theme::WHITE);
+            fill_round(c, t.val[i], 8, theme::button_bg());
             let mut b = FixedBuf::<8>::new();
             if FIELDS[i].1 > 70 {
                 let _ = write!(b, "{:04}", vals[i]);
             } else {
                 let _ = write!(b, "{:02}", vals[i]);
             }
-            text_center(c, t.val[i], b.as_bytes(), theme::TEXT);
+            text_center(c, t.val[i], b.as_bytes(), theme::text());
             button(c, t.down[i], b"-", Btn::Normal);
         }
         button(c, t.apply, b"Ajustar", Btn::On);
@@ -787,7 +851,7 @@ impl Desktop {
             t.apply.bottom() + 12,
             p.w,
             &st.msg[..st.msg_len],
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
     }
 
@@ -828,7 +892,14 @@ impl Desktop {
             ]
         };
         for (i, l) in lines.iter().enumerate() {
-            text(c, p.x, p.y + 76 + i as i32 * 20, p.w, l, theme::TEXT_MUTED);
+            text(
+                c,
+                p.x,
+                p.y + 76 + i as i32 * 20,
+                p.w,
+                l,
+                theme::text_muted(),
+            );
         }
         self.heading(c, p, k.test.y - 24, b"Teste de digitacao");
         input_box(c, k.test, &st.kbd_test[..st.kbd_len], b"digite aqui", true);
@@ -941,7 +1012,7 @@ impl Desktop {
             renew_btn(p).bottom() + 10,
             p.w,
             &st.msg[..st.msg_len],
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
     }
 
@@ -951,7 +1022,7 @@ impl Desktop {
         let u = usage.usage();
         let mut lbl = FixedBuf::<40>::new();
         let _ = write!(lbl, "{}", usage.label());
-        text(c, p.x, p.y + 30, p.w, lbl.as_bytes(), theme::TEXT);
+        text(c, p.x, p.y + 30, p.w, lbl.as_bytes(), theme::text());
         match (u.used_bytes, u.total_bytes, u.used_permille()) {
             (Some(used), Some(total), Some(pm)) => {
                 usage_bar(
@@ -968,18 +1039,18 @@ impl Desktop {
                     fmt_bytes(total),
                     fmt_pct10(pm)
                 );
-                text(c, p.x, p.y + 80, p.w, b.as_bytes(), theme::TEXT);
+                text(c, p.x, p.y + 80, p.w, b.as_bytes(), theme::text());
                 if let (Some(a), Some(t)) = (u.items_used, u.items_total) {
                     let mut b = FixedBuf::<40>::new();
                     let _ = write!(b, "{a} de {t} entradas usadas");
-                    text(c, p.x, p.y + 102, p.w, b.as_bytes(), theme::TEXT_MUTED);
+                    text(c, p.x, p.y + 102, p.w, b.as_bytes(), theme::text_muted());
                 }
             }
-            _ => text(c, p.x, p.y + 56, p.w, b"n/d", theme::TEXT_MUTED),
+            _ => text(c, p.x, p.y + 56, p.w, b"n/d", theme::text_muted()),
         }
         let mut y = p.y + 140;
         for (i, label) in [&b"Disco 0 (boot)"[..], b"Disco 1 (FS)"].iter().enumerate() {
-            text(c, p.x, y, p.w, label, theme::TEXT_MUTED);
+            text(c, p.x, y, p.w, label, theme::text_muted());
             let mut b = FixedBuf::<56>::new();
             match self.disks.get(i).copied().flatten() {
                 Some(d) => {
@@ -998,7 +1069,7 @@ impl Desktop {
                 y,
                 p.w - 16 * CELL_W,
                 b.as_bytes(),
-                theme::TEXT,
+                theme::text(),
             );
             y += 26;
         }
@@ -1029,7 +1100,7 @@ impl Desktop {
             p.y + 84,
             p.w,
             b"Clique duas vezes para confirmar.",
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
         text(
             c,
@@ -1037,17 +1108,24 @@ impl Desktop {
             p.y + 120,
             p.w,
             b"Bateria: n/d (sem ACPI)",
-            theme::TEXT,
+            theme::text(),
         );
-        text(c, p.x, p.y + 144, p.w, b"Fonte: n/d", theme::TEXT_MUTED);
+        text(c, p.x, p.y + 144, p.w, b"Fonte: n/d", theme::text_muted());
     }
 
     fn draw_about(&self, c: &mut Canvas, p: Rect) {
         icons::draw(c, Icon::Brand, p.x as usize, p.y as usize, 64);
-        text(c, p.x + 84, p.y + 6, p.w, b"OSjeff", theme::TEXT);
+        text(c, p.x + 84, p.y + 6, p.w, b"OSjeff", theme::text());
         let mut b = FixedBuf::<48>::new();
         let _ = write!(b, "versao {}", env!("CARGO_PKG_VERSION"));
-        text(c, p.x + 84, p.y + 30, p.w, b.as_bytes(), theme::TEXT_MUTED);
+        text(
+            c,
+            p.x + 84,
+            p.y + 30,
+            p.w,
+            b.as_bytes(),
+            theme::text_muted(),
+        );
         let lines: [&[u8]; 5] = [
             b"Sistema operacional de 64 bits.",
             b"Licenca MIT.",
@@ -1056,7 +1134,7 @@ impl Desktop {
             b"",
         ];
         for (i, l) in lines.iter().enumerate() {
-            text(c, p.x, p.y + 90 + i as i32 * 22, p.w, l, theme::TEXT);
+            text(c, p.x, p.y + 90 + i as i32 * 22, p.w, l, theme::text());
         }
         let mut b = FixedBuf::<48>::new();
         let _ = write!(b, "ligado ha {}", fmt_uptime(self.sysmon.uptime_s));
@@ -1066,7 +1144,7 @@ impl Desktop {
             p.y + 90 + 5 * 22,
             p.w,
             b.as_bytes(),
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
         if let Some(si) = crate::sysinfo::get() {
             let mut b = FixedBuf::<60>::new();
@@ -1077,55 +1155,61 @@ impl Desktop {
                 p.y + 90 + 6 * 22,
                 p.w,
                 b.as_bytes(),
-                theme::TEXT_MUTED,
+                theme::text_muted(),
             );
         }
     }
 }
 
-const SIDEBAR: Color = Color::rgb(0x18, 0x1D, 0x27);
-const SIDEBAR_TEXT: Color = Color::rgb(0xE6, 0xEA, 0xF2);
-
-/// A wallpaper thumbnail: the gradient / solid colour the preset paints.
-fn preview(c: &mut Canvas, r: Rect, style: Style, top: u32, bottom: u32) {
+/// A wallpaper thumbnail: the gradient / solid colour and glows the preset paints.
+fn preview(c: &mut Canvas, r: Rect, pr: &wallpaper::Preset) {
     let rgb = |v: u32| Color::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
-    fill_round(c, r, 8, rgb(top));
-    match style {
-        Style::Solid => {}
-        Style::Gradient | Style::Indigo => {
-            // Bands, clipped by the rounded top/bottom rows being drawn first.
-            let inner = Rect::new(r.x, r.y + 6, r.w, r.h - 12);
-            for i in 0..inner.h {
-                let t = (i * 255 / inner.h.max(1)) as u32;
-                fill(
-                    c,
-                    Rect::new(inner.x, inner.y + i, inner.w, 1),
-                    rgb(wallpaper::lerp_rgb(top, bottom, t)),
-                );
-            }
-            fill_round(c, Rect::new(r.x, r.bottom() - 12, r.w, 12), 8, rgb(bottom));
+    let sc = pr.scheme(theme::dark());
+    fill_round(c, r, 8, rgb(sc.top));
+    if pr.style != Style::Solid {
+        // Bands, clipped by the rounded top/bottom rows being drawn first.
+        let inner = Rect::new(r.x, r.y + 6, r.w, r.h - 12);
+        for i in 0..inner.h {
+            let t = (i * 255 / inner.h.max(1)) as u32;
+            fill(
+                c,
+                Rect::new(inner.x, inner.y + i, inner.w, 1),
+                rgb(wallpaper::lerp_rgb(sc.top, sc.bottom, t)),
+            );
         }
-    }
-    if style == Style::Indigo {
-        // The two soft glows of the original wallpaper.
         fill_round(
             c,
-            Rect::new(r.x + 4, r.y + 4, 16, 16),
+            Rect::new(r.x, r.bottom() - 12, r.w, 12),
             8,
-            Color::rgb(0x16, 0x32, 0x3C),
+            rgb(sc.bottom),
         );
-        fill_round(
-            c,
-            Rect::new(r.right() - 22, r.bottom() - 22, 18, 18),
-            9,
-            Color::rgb(0x28, 0x2E, 0x58),
+    }
+    if pr.style == Style::Glow {
+        let saved = c.set_clip(
+            r.intersection(&c.clip_rect())
+                .unwrap_or(Rect::new(0, 0, 0, 0)),
         );
+        let lut = osjeff_core::raster::glow_lut();
+        for b in sc.blobs.iter().filter(|b| b.alpha > 0 && b.r > 0) {
+            let cx = r.x + (r.w as i64 * b.x as i64 / 1000) as i32;
+            let cy = r.y + (r.h as i64 * b.y as i64 / 1000) as i32;
+            let rad = (r.w as i64 * b.r as i64 / 1000) as i32;
+            c.glow(cx, cy, rad, rgb(b.color), b.alpha as u32, &lut);
+        }
+        c.restore_clip(saved);
     }
 }
 
 /// One "key  value" line of a read-only page at `*y`; advances `*y`.
 fn kv_row(c: &mut Canvas, p: Rect, y: &mut i32, k: &[u8], v: &[u8]) {
-    text(c, p.x, *y, 12 * CELL_W, k, theme::TEXT_MUTED);
-    text(c, p.x + 12 * CELL_W, *y, p.w - 12 * CELL_W, v, theme::TEXT);
+    text(c, p.x, *y, 12 * CELL_W, k, theme::text_muted());
+    text(
+        c,
+        p.x + 12 * CELL_W,
+        *y,
+        p.w - 12 * CELL_W,
+        v,
+        theme::text(),
+    );
     *y += 26;
 }

@@ -4,7 +4,7 @@
 use super::*;
 
 pub(crate) use osjeff_core::layout::{
-    BrowserChrome, browser_home_layout, calc_button_at, calc_layout, dock_layout,
+    BrowserChrome, browser_home_layout, calc_button_at, calc_layout,
 };
 
 /// Alt+Tab panel geometry.
@@ -14,130 +14,75 @@ pub(crate) const SWITCH_ROW_H: i32 = 38;
 /// Most rows shown at once (the list scrolls with the selection).
 pub(crate) const SWITCH_ROWS: usize = 8;
 
-/// Index of the context-menu item under `(px, py)` in a menu of `items` entries.
-pub(crate) fn menu_item_at(mx: i32, my: i32, px: i32, py: i32, items: usize) -> Option<usize> {
-    osjeff_core::layout::menu_item_at(mx, my, px, py, items)
-}
-
-/// Label bytes for a keypad cell (`<` for the backspace sentinel).
-pub(crate) fn key_label(k: &u8) -> &[u8] {
-    if *k == 0x08 {
-        b"<"
-    } else {
-        core::slice::from_ref(k)
-    }
-}
-
 /// Background/foreground for a keypad button; the pending operator is inverted.
 pub(crate) fn key_style(k: u8, pending: Option<u8>) -> (Color, Color) {
     match k {
-        b'=' => (theme::ACCENT_2, theme::WHITE),
-        b'C' => (theme::CLOSE, theme::WHITE),
-        0x08 => (theme::HEADER, theme::HEADER_TEXT),
+        b'=' => (theme::accent(), theme::WHITE),
+        b'C' => (
+            theme::danger().lerp(theme::window_body(), if theme::dark() { 110 } else { 70 }),
+            if theme::dark() {
+                Color::rgb(0xFF, 0xB4, 0xAE)
+            } else {
+                Color::rgb(0xB4, 0x23, 0x18)
+            },
+        ),
+        0x08 => (theme::tool_bg(), theme::text()),
         b'+' | b'-' | b'*' | b'/' => {
             if pending == Some(k) {
-                (theme::WHITE, theme::accent())
-            } else {
                 (theme::accent(), theme::WHITE)
+            } else {
+                (
+                    theme::accent()
+                        .lerp(theme::window_body(), if theme::dark() { 120 } else { 150 }),
+                    if theme::dark() {
+                        Color::rgb(0xFF, 0xFF, 0xFF)
+                    } else {
+                        theme::accent().lerp(Color::rgb(0, 0, 0), 60)
+                    },
+                )
             }
         }
-        _ => (theme::WINDOW_BODY, theme::TEXT), // digits + dot
+        _ => (theme::button_bg(), theme::text()), // digits + dot
     }
 }
 
-/// Height of the start panel showing `rows` app rows.
-pub(crate) fn start_height(rows: usize) -> i32 {
-    osjeff_core::layout::start_height(rows)
+/// Backdrop of the app bar (dock): the wallpaper under its resting zone, blurred, taken
+/// when the wallpaper is painted so the bar never blurs anything per frame.
+static DOCK_BACKDROP: RacyCell<Option<super::glass::Backdrop>> = RacyCell::new(None);
+
+/// Draw the blurred wallpaper behind the dock `panel` (rounded by `radius`).
+pub(crate) fn dock_glass(c: &mut Canvas, panel: Rect, radius: i32) {
+    // SAFETY: only the compositor thread reads or replaces the backdrop; the borrow ends here.
+    // NOTE: not guaranteed by the type: the cell hands out a raw pointer.
+    let slot = unsafe { &*DOCK_BACKDROP.get() };
+    if let Some(b) = slot {
+        b.draw(c, panel, radius, 256);
+    }
 }
 
-/// Top-left of the start panel, centered above the dock's system icon.
-pub(crate) fn start_origin(sw: i32, sh: i32, rows: usize) -> (i32, i32) {
-    osjeff_core::layout::start_origin(sw, sh, rows)
-}
-
-/// The start-panel item under `(px, py)`, if any. `rows` is the number of app rows
-/// shown and `scroll` the index of the first one.
-pub(crate) fn start_item_at(
-    sw: i32,
-    sh: i32,
-    rows: usize,
-    scroll: usize,
-    px: i32,
-    py: i32,
-) -> Option<StartItem> {
-    use osjeff_core::layout::StartHit;
-    Some(
-        match osjeff_core::layout::start_item_at(sw, sh, rows, px, py)? {
-            StartHit::App(i) => {
-                let n = scroll + i;
-                match Kind::ALL.get(n) {
-                    Some(&k) => StartItem::App(k),
-                    None => StartItem::Wasm(n - Kind::ALL.len()),
-                }
-            }
-            StartHit::Reboot => StartItem::Reboot,
-            StartHit::Shutdown => StartItem::Shutdown,
-        },
-    )
-}
-
-pub(crate) fn start_row_highlight(c: &mut Canvas, sx: i32, ry: i32, color: Color) {
-    c.fill_round_rect_alpha(
-        (sx + 5) as usize,
-        (ry + 2) as usize,
-        (START_W - 10) as usize,
-        (START_ROW_H - 4) as usize,
-        8,
-        color,
-        36,
-    );
-}
-
+/// Paint the wallpaper into `c` (the cached background) and bake what depends only on
+/// it: the glass menu bar and the blurred strip behind the app bar.
 pub fn paint_background(c: &mut Canvas) {
     paint_wallpaper(c, &crate::settings::get());
-    let w = c.width();
-    let h = c.height();
+    let (w, h) = (c.width() as i32, c.height() as i32);
+    let p = theme::pal();
 
-    // Brand wordmark top-left.
-    font::draw_text(c, 20, 18, "OSJEFF", theme::HEADER_TEXT, 2);
+    // Menu bar: the (blurred) wallpaper strip, a tint and a hairline.
+    let bar = Rect::new(0, 0, w, MENUBAR_H);
+    let strip = super::glass::Backdrop::capture(c, bar, 8);
+    strip.draw(c, bar, 0, 256);
+    let (tc, ta) = theme::tint(p.menubar_tint);
+    c.blend_rect(bar, tc, ta);
+    let (sc, sa) = theme::tint(p.separator);
+    c.blend_rect(Rect::new(0, MENUBAR_H - 1, w, 1), sc, sa);
 
-    // Floating dock: shadow, panel, icons.
-    let (dock, icons) = dock_layout(w as i32, h as i32);
-    let (dx, dy, dw, dh) = (
-        dock.x as usize,
-        dock.y as usize,
-        dock.w as usize,
-        dock.h as usize,
-    );
-    let radius = dh / 2;
-    c.fill_round_rect_alpha(dx, dy + 8, dw, dh, radius, theme::SHADOW, 38);
-    c.fill_round_rect(dx, dy, dw, dh, radius, theme::DOCK);
-
-    // Slot 0 = real OSJeff logo; the rest are vector app icons.
-    let kinds = [
-        Icon::Brand,
-        Icon::Terminal,
-        Icon::Editor,
-        Icon::TaskMgr,
-        Icon::Calculator,
-        Icon::Browser,
-        Icon::WasmApp,
-        Icon::Files,
-    ];
-    for (i, kind) in kinds.iter().enumerate() {
-        let r = icons[i];
-        if i == 0 && r.w as usize == logo::SIZE_40 {
-            c.draw_rgba(
-                logo::ICON_40,
-                logo::SIZE_40,
-                logo::SIZE_40,
-                r.x as usize,
-                r.y as usize,
-            );
-        } else {
-            icons::draw(c, *kind, r.x as usize, r.y as usize, r.w as usize);
-        }
-    }
+    // App bar backdrop: a blurred copy of the wallpaper around its resting position.
+    let (rest, _) = osjeff_core::chrome::dock_rest(w, h, shell::DOCK_ITEMS.len(), Some(0));
+    let zone = Rect::new(rest.x - 140, rest.y - 4, rest.w + 280, rest.h + 12).clamped_to(w, h);
+    let backdrop = super::glass::Backdrop::capture(c, zone, 16);
+    // SAFETY: compositor thread only; no reference to the old value is live.
+    // NOTE: not guaranteed by the type: the cell hands out a raw pointer.
+    unsafe { *DOCK_BACKDROP.get() = Some(backdrop) };
 }
 
 /// 24-bit `0xRRGGBB` to a framebuffer colour.
@@ -145,55 +90,44 @@ fn rgb24(v: u32) -> Color {
     Color::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
 
-/// The original wallpaper (preset 0): indigo gradient plus two soft glows.
-fn paint_indigo(c: &mut Canvas) {
-    let w = c.width();
-    let h = c.height();
-
-    // Indigo gradient backdrop.
-    for yy in 0..h {
-        let t = ((yy * 255) / h.max(1)) as u16;
-        c.fill_rect(0, yy, w, 1, theme::BG_TOP.lerp(theme::BG_BOTTOM, t));
-    }
-    // Two soft accent "mesh" blobs (teal top-left, violet bottom-right).
-    let blob = (w / 3).max(360);
-    c.fill_round_rect_alpha(0, 0, blob, blob, blob / 2, theme::GLOW_TEAL, 16);
-    c.fill_round_rect_alpha(
-        w - blob,
-        h - blob,
-        blob,
-        blob,
-        blob / 2,
-        theme::GLOW_VIOLET,
-        16,
-    );
-}
-
-/// Paint the wallpaper `s` selects: a preset or the user's image, falling back to
-/// the original look when the image cannot be used.
+/// Paint the wallpaper `s` selects: a preset (in the scheme of the current
+/// appearance) or the user's image, falling back to the default preset when the
+/// image cannot be used.
 fn paint_wallpaper(c: &mut Canvas, s: &osjeff_core::settings::Settings) {
     use osjeff_core::settings::WallpaperChoice;
-    use osjeff_core::wallpaper::{PRESETS, Style};
+    use osjeff_core::wallpaper::PRESETS;
     match s.wallpaper {
         WallpaperChoice::Image => {
             if !paint_image(c, s.image_path()) {
-                paint_indigo(c);
+                paint_preset(c, &PRESETS[0]);
             }
         }
         WallpaperChoice::Preset(n) => {
-            let p = PRESETS.get(n as usize).unwrap_or(&PRESETS[0]);
-            let (w, h) = (c.width(), c.height());
-            match p.style {
-                Style::Indigo => paint_indigo(c),
-                Style::Solid => c.fill_rect(0, 0, w, h, rgb24(p.top)),
-                Style::Gradient => {
-                    for yy in 0..h {
-                        let t = ((yy * 255) / h.max(1)) as u32;
-                        let col = osjeff_core::wallpaper::lerp_rgb(p.top, p.bottom, t);
-                        c.fill_rect(0, yy, w, 1, rgb24(col));
-                    }
-                }
+            paint_preset(c, PRESETS.get(n as usize).unwrap_or(&PRESETS[0]))
+        }
+    }
+}
+
+fn paint_preset(c: &mut Canvas, p: &osjeff_core::wallpaper::Preset) {
+    use osjeff_core::wallpaper::{Style, lerp_rgb};
+    let (w, h) = (c.width(), c.height());
+    let sc = p.scheme(theme::dark());
+    match p.style {
+        Style::Solid => c.fill_rect(0, 0, w, h, rgb24(sc.top)),
+        Style::Gradient | Style::Glow => {
+            for yy in 0..h {
+                let t = ((yy * 255) / h.max(1)) as u32;
+                c.fill_rect(0, yy, w, 1, rgb24(lerp_rgb(sc.top, sc.bottom, t)));
             }
+        }
+    }
+    if p.style == Style::Glow {
+        let lut = osjeff_core::raster::glow_lut();
+        for b in sc.blobs.iter().filter(|b| b.alpha > 0 && b.r > 0) {
+            let cx = (w as i64 * b.x as i64 / 1000) as i32;
+            let cy = (h as i64 * b.y as i64 / 1000) as i32;
+            let rad = (w as i64 * b.r as i64 / 1000) as i32;
+            c.glow(cx, cy, rad, rgb24(b.color), b.alpha as u32, &lut);
         }
     }
 }
@@ -226,31 +160,6 @@ fn paint_image(c: &mut Canvas, path: &[u8]) -> bool {
         core::str::from_utf8(path).unwrap_or("?")
     );
     true
-}
-
-pub(crate) fn draw_clock(c: &mut Canvas, t: Time) {
-    let w = c.width();
-    let h = c.height();
-    let mut buf = [0u8; osjeff_core::hw::rtc::CLOCK_LEN];
-    let t = osjeff_core::hw::rtc::Time {
-        h: t.h,
-        m: t.m,
-        s: t.s,
-    };
-    let n = osjeff_core::hw::rtc::format_clock(t, crate::settings::clock24(), &mut buf);
-    // `format_clock` writes only ASCII digits, ':', ' ', 'A', 'P' and 'M'.
-    let clock = core::str::from_utf8(&buf[..n]).unwrap_or("");
-
-    // Pill in the bottom-right corner.
-    let tw = font::text_width(clock, 2);
-    let pad = 14usize;
-    let pw = tw + pad * 2;
-    let ph = 34usize;
-    let px = w - pw - DOCK_MARGIN as usize;
-    let py = h - ph - DOCK_MARGIN as usize;
-    c.fill_round_rect_alpha(px, py + 6, pw, ph, ph / 2, theme::SHADOW, 34);
-    c.fill_round_rect(px, py, pw, ph, ph / 2, theme::DOCK);
-    font::draw_text(c, px + pad, py + 9, clock, theme::HEADER_TEXT, 2);
 }
 
 /// The two shadow layers of a window (ambient + key), stronger when focused, scaled
@@ -318,41 +227,3 @@ pub(crate) fn write_uint(buf: &mut [u8], start: usize, width: usize, mut v: u32)
         }
     }
 }
-
-/// The pointing hand over links and buttons (same 10x16 box and hot spot as [`CURSOR`]).
-pub(crate) const HAND: [&str; 15] = [
-    "##        ",
-    "#.#       ",
-    "#.#       ",
-    "#.#       ",
-    "#.####    ",
-    "#.#..###  ",
-    "#.#..#.## ",
-    "#.#..#..# ",
-    "#.......# ",
-    "##......# ",
-    " #......# ",
-    " #.....#  ",
-    "  #....#  ",
-    "  #....#  ",
-    "  ######  ",
-];
-
-pub(crate) const CURSOR: [&str; 16] = [
-    "#         ",
-    "##        ",
-    "#.#       ",
-    "#..#      ",
-    "#...#     ",
-    "#....#    ",
-    "#.....#   ",
-    "#......#  ",
-    "#.......# ",
-    "#....#####",
-    "#..#.#    ",
-    "#.# #.#   ",
-    "##  #.#   ",
-    "#    #.#  ",
-    "     #.#  ",
-    "      #   ",
-];

@@ -321,9 +321,14 @@ impl Desktop {
             lay.status.y,
             lay.status.w,
             &st[..n],
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
-        text_right(c, lay.status, &l.status[..l.status_len], theme::TEXT_MUTED);
+        text_right(
+            c,
+            lay.status,
+            &l.status[..l.status_len],
+            theme::text_muted(),
+        );
     }
 }
 

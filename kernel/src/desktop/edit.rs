@@ -24,14 +24,10 @@ use osjeff_core::vfs::VfsError;
 /// Largest file the editor opens (the gap buffer, undo and a copy for saving all live in the heap).
 pub(crate) const MAX_OPEN: u64 = 16 * 1024 * 1024;
 
-const GUTTER: Color = Color::rgb(0xEE, 0xF1, 0xF8);
-const ERR: Color = Color::rgb(0xC0, 0x2B, 0x2B);
-const OKC: Color = Color::rgb(0x1B, 0x7F, 0x5F);
-const BLUE: Color = Color::rgb(0x25, 0x63, 0xEB);
-
 const PAD: i32 = 10;
-const CELL_W: i32 = 12;
-const LINE_H: i32 = 18;
+/// Character cell of the monospace face (9 px pitch at 15 px).
+const CELL_W: i32 = 9;
+const LINE_H: i32 = 20;
 const STATUS_H: i32 = 24;
 const PROMPT_H: i32 = 26;
 const TOP: i32 = TITLE_H + 6;
@@ -748,7 +744,7 @@ impl Desktop {
                     (gutter as i32) * CELL_W + 2,
                     rows as i32 * LINE_H,
                 ),
-                GUTTER,
+                theme::toolbar(),
             );
         }
         for (i, row) in ed.visible_rows().enumerate().take(rows) {
@@ -756,25 +752,33 @@ impl Desktop {
             if let Some(n) = row.line_number {
                 let s = alloc::format!("{n}");
                 let w = s.len().min(gutter.saturating_sub(1));
-                font::draw_bytes(
+                crate::text::draw_mono(
                     c,
-                    tx + (gutter - 1 - w) * CELL_W as usize,
-                    y + 2,
-                    &s.as_bytes()[s.len() - w..],
-                    theme::TEXT_MUTED,
-                    2,
+                    (tx + (gutter - 1 - w) * CELL_W as usize) as i32,
+                    y as i32,
+                    &s[s.len() - w..],
+                    crate::text::MONO_PX,
+                    theme::text_muted(),
                 );
             }
-            let mut x = tx + gutter * CELL_W as usize;
+            let x0 = tx + gutter * CELL_W as usize;
+            let mut x = x0;
+            let mut line = String::new();
             for cell in row.cells().take(cols - gutter) {
                 if cell.selected {
                     c.fill_rect(x, y, CELL_W as usize, LINE_H as usize, sel_bg);
                 }
-                if cell.ch != ' ' {
-                    font::draw_char(c, x, y + 2, latin1(cell.ch), theme::TEXT, 2);
-                }
+                line.push(cell.ch);
                 x += CELL_W as usize;
             }
+            crate::text::draw_mono(
+                c,
+                x0 as i32,
+                y as i32,
+                &line,
+                crate::text::MONO_PX,
+                theme::text(),
+            );
         }
         if focused
             && e.modal.is_none()
@@ -784,9 +788,9 @@ impl Desktop {
         {
             c.fill_rect(
                 tx + col * CELL_W as usize,
-                ty + row * LINE_H as usize + 1,
+                ty + row * LINE_H as usize + 2,
                 2,
-                16,
+                LINE_H as usize - 4,
                 theme::accent(),
             );
         }
@@ -803,33 +807,32 @@ impl Desktop {
     }
 
     fn draw_editor_status(&self, c: &mut Canvas, st: Rect, e: &EditorState) {
-        ui::fill(c, st, GUTTER);
+        ui::fill(c, st, theme::toolbar());
         let (text, color): (String, Color) = match &e.msg {
-            Some((m, err)) => (m.clone(), if *err { ERR } else { OKC }),
-            None => (status_line(&e.ed.status(), false), theme::TEXT_MUTED),
+            Some((m, err)) => (m.clone(), if *err { theme::danger() } else { theme::ok() }),
+            None => (status_line(&e.ed.status(), false), theme::text_muted()),
         };
-        let bytes: Vec<u8> = text.chars().map(latin1).collect();
         let room = (st.w - 2 * PAD).max(0);
-        // Scale 2 when it fits, else the small font, else cut.
-        let (scale, cell) = if bytes.len() as i32 * CELL_W <= room {
-            (2, CELL_W)
-        } else {
-            (1, 6)
-        };
-        let n = bytes.len().min((room / cell).max(0) as usize);
-        let h = if scale == 2 { 14 } else { 7 };
-        font::draw_bytes(
+        let ty = crate::text::center_y(
+            st.y,
+            st.h,
+            crate::text::FOOTNOTE,
+            crate::text::Weight::Regular,
+        );
+        crate::text::draw_ellipsis(
             c,
-            (st.x + PAD).max(0) as usize,
-            (st.y + (st.h - h) / 2).max(0) as usize,
-            &bytes[..n],
+            st.x + PAD,
+            ty,
+            room,
+            &text,
+            crate::text::FOOTNOTE,
+            crate::text::Weight::Regular,
             color,
-            scale,
         );
     }
 
     fn draw_find_bar(&self, c: &mut Canvas, r: Rect, p: &PromptView<'_>) {
-        ui::fill_round(c, r, 6, GUTTER);
+        ui::fill_round(c, r, 6, theme::toolbar());
         let y = r.y + (r.h - 14) / 2;
         let mut x = r.x + 8;
         // The fields share what the labels and the notice (right edge) leave.
@@ -842,7 +845,7 @@ impl Desktop {
         let avail = r.w - 16 - notice_w - labels as i32 * CELL_W - nfields * 12;
         let field_w = (avail / nfields).max(CELL_W * 4);
         let label = |active: bool, s: &str, x: &mut i32, c: &mut Canvas, v: &str| {
-            ui::text(c, *x, y, 200, s.as_bytes(), theme::TEXT_MUTED);
+            ui::text(c, *x, y, 200, s.as_bytes(), theme::text_muted());
             *x += s.len() as i32 * CELL_W;
             let w = field_w;
             let box_r = Rect::new(*x - 2, r.y + 2, w + 4, r.h - 4);
@@ -850,7 +853,11 @@ impl Desktop {
                 c,
                 box_r,
                 5,
-                if active { theme::accent() } else { ui::BORDER },
+                if active {
+                    theme::accent()
+                } else {
+                    theme::line()
+                },
             );
             ui::fill_round(
                 c,
@@ -859,18 +866,11 @@ impl Desktop {
                 theme::WHITE,
             );
             let chars = ((w / CELL_W) as usize).max(1);
-            let bytes: Vec<u8> = v.chars().map(latin1).collect();
-            let tail = &bytes[bytes.len().saturating_sub(chars)..];
-            font::draw_bytes(
-                c,
-                (*x).max(0) as usize,
-                y.max(0) as usize,
-                tail,
-                theme::TEXT,
-                2,
-            );
+            let skip = v.chars().count().saturating_sub(chars);
+            let tail: String = v.chars().skip(skip).collect();
+            crate::text::draw_mono(c, *x, y - 3, &tail, crate::text::MONO_PX, theme::text());
             if active {
-                let cx = *x + tail.len() as i32 * CELL_W;
+                let cx = *x + tail.chars().count() as i32 * CELL_W;
                 ui::fill(c, Rect::new(cx, y, 2, 14), theme::accent());
             }
             *x += w + 12;
@@ -899,12 +899,12 @@ impl Desktop {
             tail.push_str("Aa");
         }
         let color = if p.notice == Notice::NotFound || p.notice == Notice::InvalidLine {
-            ERR
+            theme::danger()
         } else {
-            theme::TEXT_MUTED
+            theme::text_muted()
         };
         let w = tail.len() as i32 * 6;
-        font::draw_text(
+        crate::text::legacy::draw_text(
             c,
             (r.right() - w - 8).max(x).max(0) as usize,
             (r.y + (r.h - 7) / 2).max(0) as usize,
@@ -920,16 +920,16 @@ impl Desktop {
             c,
             Rect::new(frame.x - 3, frame.y - 3, frame.w + 6, frame.h + 6),
             12,
-            ERR,
+            theme::danger(),
         );
-        ui::fill_round(c, frame, 10, theme::WINDOW_BODY);
+        ui::fill_round(c, frame, 10, theme::window_body());
         ui::text(
             c,
             frame.x + 14,
             frame.y + 12,
             frame.w - 28,
             b"Salvar alteracoes?",
-            theme::TEXT,
+            theme::text(),
         );
         let mut name: Vec<u8> = e.name().chars().map(latin1).collect();
         // "Ha alteracoes em " takes 17 cells of the line.
@@ -945,7 +945,7 @@ impl Desktop {
             frame.y + 40,
             frame.w - 28,
             &line,
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
         for (i, (choice, label)) in CloseAsk::LABELS.iter().enumerate() {
             let state = if *choice == ask.selected() {
@@ -964,16 +964,16 @@ impl Desktop {
             c,
             Rect::new(f.x - 3, f.y - 3, f.w + 6, f.h + 6),
             12,
-            ui::BORDER,
+            theme::line(),
         );
-        ui::fill_round(c, f, 10, theme::WINDOW_BODY);
+        ui::fill_round(c, f, 10, theme::window_body());
         ui::text(
             c,
             f.x + 12,
             f.y + 10,
             f.w - 24,
             title.as_bytes(),
-            theme::TEXT,
+            theme::text(),
         );
         // Folder shown, cut from the left when long.
         let dir: Vec<u8> = p.dir().chars().map(latin1).collect();
@@ -991,7 +991,7 @@ impl Desktop {
             lay.path.y,
             lay.path.w,
             &shown,
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
         // The list.
         ui::fill_round(
@@ -1003,9 +1003,9 @@ impl Desktop {
                 lay.list.h + 4,
             ),
             6,
-            ui::BORDER,
+            theme::line(),
         );
-        ui::fill_round(c, lay.list, 5, theme::WHITE);
+        ui::fill_round(c, lay.list, 5, theme::surface());
         let first = p.scroll();
         for (k, row) in p.rows().iter().skip(first).take(lay.rows).enumerate() {
             let y = lay.list.y + k as i32 * PICK_ROW_H;
@@ -1033,13 +1033,17 @@ impl Desktop {
                 y + 3,
                 lay.list.w,
                 &name,
-                if row.dir { BLUE } else { theme::TEXT },
+                if row.dir {
+                    theme::accent()
+                } else {
+                    theme::text()
+                },
             );
             ui::text_right(
                 c,
                 Rect::new(lay.list.x, y, lay.list.w - 6, PICK_ROW_H - 4),
                 &size,
-                theme::TEXT_MUTED,
+                theme::text_muted(),
             );
         }
         if p.rows().is_empty() {
@@ -1049,12 +1053,12 @@ impl Desktop {
                 lay.list.y + 3,
                 lay.list.w,
                 b"(pasta vazia)",
-                theme::TEXT_MUTED,
+                theme::text_muted(),
             );
         }
         if p.rows().len() > lay.rows {
             let track = Rect::new(lay.list.right() - 5, lay.list.y + 2, 3, lay.list.h - 4);
-            ui::fill_round(c, track, 1, ui::BORDER);
+            ui::fill_round(c, track, 1, theme::line());
             let total = p.rows().len();
             let th = ((track.h as i64 * lay.rows as i64) / total as i64).max(10) as i32;
             let ty =
@@ -1074,13 +1078,13 @@ impl Desktop {
                 ((lay.hint.w / CELL_W) as usize).saturating_sub(24),
             ));
             m.extend_from_slice(b"? Enter sim  Esc nao");
-            (m, ERR)
+            (m, theme::danger())
         } else if let Some(err) = p.error() {
-            (err.chars().map(latin1).collect(), ERR)
+            (err.chars().map(latin1).collect(), theme::danger())
         } else {
             (
                 Vec::from(&b"Enter confirma  Tab completa  Esc cancela"[..]),
-                theme::TEXT_MUTED,
+                theme::text_muted(),
             )
         };
         ui::text(c, lay.hint.x, lay.hint.y, lay.hint.w, &msg, color);

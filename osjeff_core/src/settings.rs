@@ -13,6 +13,8 @@
 //! tz=-180
 //! keyboard=abnt2
 //! toasts=1
+//! appearance=auto
+//! reduce_motion=0
 //! ```
 //!
 //! Parsing is total: [`Settings::parse`] never fails. Blank lines, `#`
@@ -22,6 +24,7 @@
 
 use crate::hw::rtc::{TZ_MAX, TZ_MIN};
 use crate::keymap::Layout;
+use crate::style::AppearanceSetting;
 use crate::wallpaper::PRESETS;
 use alloc::vec::Vec;
 
@@ -33,22 +36,22 @@ pub const PATH_CAP: usize = 40;
 /// `/etc/osjeff.conf`).
 pub const FILE_NAME: &[u8] = b"osjeff.conf";
 
-/// Accent palette (`0xRRGGBB`). Entry 0 is the default teal and must stay
-/// equal to `theme::ACCENT`.
+/// Accent palette (`0xRRGGBB`). Entry 0 is the default indigo and must stay equal
+/// to `theme::ACCENT_DEFAULT`.
 pub const ACCENTS: [u32; 8] = [
-    0x2DD4BF, // teal (default)
-    0x7C6CFF, // violet
-    0x4CC2FF, // sky
-    0x34D399, // green
+    0x5B5CF6, // indigo (default)
+    0x14B8C4, // turquoise
+    0xA855F7, // violet
+    0xEC4899, // rose
+    0xFB6F4B, // coral
     0xF59E0B, // amber
-    0xFB7185, // rose
-    0xF472B6, // pink
-    0xA3E635, // lime
+    0x22C55E, // green
+    0x8B90A0, // graphite
 ];
 
 /// Names of the [`ACCENTS`] for the settings page.
 pub const ACCENT_NAMES: [&str; 8] = [
-    "Turquesa", "Violeta", "Celeste", "Verde", "Ambar", "Rosa", "Pink", "Limao",
+    "Indigo", "Turquesa", "Violeta", "Rosa", "Coral", "Ambar", "Verde", "Grafite",
 ];
 
 /// Which wallpaper is active.
@@ -74,11 +77,15 @@ pub struct Settings {
     pub layout: Layout,
     /// Show notification toasts.
     pub toasts: bool,
+    /// Light, dark, or by the time of day.
+    pub appearance: AppearanceSetting,
+    /// Skip animations: every transition jumps to its end.
+    pub reduce_motion: bool,
 }
 
 impl Default for Settings {
-    /// What the desktop has always looked like: default wallpaper and accent,
-    /// 24-hour clock, Brasilia time (UTC-3), US keyboard, toasts on.
+    /// The defaults: dynamic wallpaper, indigo accent, 24-hour clock, Brasilia time
+    /// (UTC-3), US keyboard, toasts on, appearance by the time of day, motion on.
     fn default() -> Self {
         Self::new()
     }
@@ -95,6 +102,8 @@ impl Settings {
             tz_minutes: -180,
             layout: Layout::Us,
             toasts: true,
+            appearance: AppearanceSetting::Auto,
+            reduce_motion: false,
         }
     }
 
@@ -179,6 +188,16 @@ impl Settings {
                 b"0" | b"off" => self.toasts = false,
                 _ => {}
             },
+            b"appearance" => {
+                if let Some(a) = AppearanceSetting::from_name(val) {
+                    self.appearance = a;
+                }
+            }
+            b"reduce_motion" => match val {
+                b"1" | b"on" => self.reduce_motion = true,
+                b"0" | b"off" => self.reduce_motion = false,
+                _ => {}
+            },
             // `version` and anything unknown: nothing to do (forward compatible).
             _ => {}
         }
@@ -186,7 +205,7 @@ impl Settings {
 
     /// The text form (see the module docs).
     pub fn to_text(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(160);
+        let mut out = Vec::with_capacity(200);
         out.extend_from_slice(b"# OSjeff settings\n");
         push_kv(&mut out, b"version", VERSION);
         match self.wallpaper {
@@ -207,6 +226,10 @@ impl Settings {
         out.extend_from_slice(self.layout.name().as_bytes());
         out.push(b'\n');
         push_kv(&mut out, b"toasts", self.toasts as u32);
+        out.extend_from_slice(b"appearance=");
+        out.extend_from_slice(self.appearance.name().as_bytes());
+        out.push(b'\n');
+        push_kv(&mut out, b"reduce_motion", self.reduce_motion as u32);
         out
     }
 }
@@ -294,7 +317,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_match_the_original_desktop() {
+    fn defaults_are_the_new_desktop() {
         let s = Settings::default();
         assert_eq!(s.wallpaper, WallpaperChoice::Preset(0));
         assert_eq!(s.accent, 0);
@@ -302,7 +325,9 @@ mod tests {
         assert_eq!(s.tz_minutes, -180);
         assert_eq!(s.layout, Layout::Us);
         assert!(s.toasts);
-        assert_eq!(s.accent_rgb(), 0x2DD4BF);
+        assert_eq!(s.accent_rgb(), 0x5B5CF6);
+        assert_eq!(s.appearance, AppearanceSetting::Auto);
+        assert!(!s.reduce_motion);
         assert!(s.image_path().is_empty());
     }
 
@@ -315,6 +340,8 @@ mod tests {
             tz_minutes: 330,
             layout: Layout::Abnt2,
             toasts: false,
+            appearance: AppearanceSetting::Dark,
+            reduce_motion: true,
             ..Settings::default()
         };
         assert!(s.set_image_path(b"fotos/praia-1.png"));
@@ -329,7 +356,7 @@ mod tests {
         let s = Settings::default();
         let text = s.to_text();
         assert_eq!(Settings::parse(&text), s);
-        assert!(text.len() < 200, "{}", text.len());
+        assert!(text.len() < 240, "{}", text.len());
         assert!(text.starts_with(b"# OSjeff settings\nversion=1\n"));
     }
 
@@ -420,14 +447,37 @@ mod tests {
     }
 
     #[test]
-    fn accent_palette_head_is_the_theme_teal() {
-        assert_eq!(ACCENTS[0], 0x2DD4BF);
+    fn accent_palette_head_is_the_theme_indigo() {
+        assert_eq!(ACCENTS[0], 0x5B5CF6);
         assert_eq!(ACCENTS.len(), ACCENT_NAMES.len());
         let s = Settings {
             accent: 200,
             ..Settings::default()
         };
         assert_eq!(s.accent_rgb(), ACCENTS[7]);
+    }
+
+    #[test]
+    fn appearance_and_reduce_motion_parse_and_stay_total() {
+        let s = Settings::parse(b"appearance=dark\nreduce_motion=1\n");
+        assert_eq!(s.appearance, AppearanceSetting::Dark);
+        assert!(s.reduce_motion);
+        // Bad values keep the default, good neighbours survive.
+        let s = Settings::parse(b"appearance=sepia\nreduce_motion=maybe\nappearance=light\n");
+        assert_eq!(s.appearance, AppearanceSetting::Light);
+        assert!(!s.reduce_motion);
+        assert_eq!(
+            Settings::parse(b"appearance=\n=dark\n").appearance,
+            AppearanceSetting::Auto
+        );
+        // Old files without the new keys read as the defaults.
+        let old = Settings::parse(b"version=1\nwallpaper=2\naccent=3\nclock=12\n");
+        assert_eq!(old.appearance, AppearanceSetting::Auto);
+        assert!(!old.reduce_motion);
+        assert!(
+            old.to_text()
+                .ends_with(b"appearance=auto\nreduce_motion=0\n")
+        );
     }
 
     #[test]

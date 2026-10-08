@@ -1,13 +1,21 @@
-//! Hand-drawn app icons built from framebuffer primitives. Each renders a
-//! rounded tile plus a recognizable glyph, sized to fit `size x size`.
+//! App icons: procedural squircle tiles (`osjeff_core::iconart`), drawn at 128 px
+//! once and cached per size so every blit is a plain surface copy.
+//!
+//! The cache is bounded (it is cleared when it outgrows [`MAX_SCALED`] entries)
+//! and used only from the compositor thread. Icons do not depend on the
+//! appearance.
 
-use crate::fb::{Canvas, Color};
-use crate::theme;
+use crate::fb::Canvas;
+use crate::sync::RacyCell;
+use alloc::vec::Vec;
+use osjeff_core::iconart::{self, IconId};
+use osjeff_core::raster::Surface;
 
 /// Which app an icon represents.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Icon {
     Brand,
+    Launchpad,
     Terminal,
     Editor,
     TaskMgr,
@@ -19,358 +27,110 @@ pub enum Icon {
     Settings,
     Log,
     Viewer,
-    Power,
 }
 
+impl Icon {
+    fn id(self) -> IconId {
+        match self {
+            Icon::Brand => IconId::Brand,
+            Icon::Launchpad => IconId::Launchpad,
+            Icon::Terminal => IconId::Terminal,
+            Icon::Editor => IconId::Notes,
+            Icon::TaskMgr => IconId::Tasks,
+            Icon::Calculator => IconId::Calculator,
+            Icon::Browser => IconId::Browser,
+            Icon::WasmApp => IconId::Apps,
+            Icon::Files => IconId::Files,
+            Icon::Monitor => IconId::Monitor,
+            Icon::Settings => IconId::Settings,
+            Icon::Log => IconId::Console,
+            Icon::Viewer => IconId::Photos,
+        }
+    }
+}
+
+/// Scaled copies kept before the cache is flushed.
+const MAX_SCALED: usize = 160;
+
+struct Cache {
+    sources: Vec<(IconId, Surface)>,
+    scaled: Vec<(IconId, u16, Surface)>,
+}
+
+static CACHE: RacyCell<Option<Cache>> = RacyCell::new(None);
+
+fn cache() -> &'static mut Cache {
+    // SAFETY: only the compositor thread draws icons; no reference from an earlier call is
+    // kept across calls (callers use the surface immediately).
+    // NOTE: not guaranteed by the type: safe fn returning `&'static mut`.
+    let slot = unsafe { &mut *CACHE.get() };
+    slot.get_or_insert_with(|| Cache {
+        sources: Vec::new(),
+        scaled: Vec::new(),
+    })
+}
+
+/// The icon at `size` x `size` (cached).
+pub fn surface(icon: Icon, size: i32) -> &'static Surface {
+    let size = size.clamp(8, 256) as usize;
+    let id = icon.id();
+    let c = cache();
+    if let Some(i) = c
+        .scaled
+        .iter()
+        .position(|(i, s, _)| *i == id && *s as usize == size)
+    {
+        return &c.scaled[i].2;
+    }
+    if c.scaled.len() >= MAX_SCALED {
+        c.scaled.clear();
+    }
+    let si = match c.sources.iter().position(|(i, _)| *i == id) {
+        Some(i) => i,
+        None => {
+            let s = iconart::render(id, crate::fb::masks());
+            c.sources.push((id, s));
+            c.sources.len() - 1
+        }
+    };
+    let src = &c.sources[si].1;
+    let scaled = if size == src.w {
+        src.clone()
+    } else {
+        src.resized(size, size)
+    };
+    c.scaled.push((id, size as u16, scaled));
+    &c.scaled.last().expect("just pushed").2
+}
+
+/// Draw `icon` with its top-left at `(x, y)`, `size` pixels square.
+pub fn blit(c: &mut Canvas, icon: Icon, x: i32, y: i32, size: i32, opacity: u32) {
+    let t0 = crate::trace::t();
+    c.blit_surface(surface(icon, size), x, y, opacity);
+    crate::trace::prim(crate::trace::Prim::Glyph, t0);
+}
+
+/// Legacy entry point of the app interiors: draw `icon` at `(x, y)`, `size` square.
 pub fn draw(c: &mut Canvas, icon: Icon, x: usize, y: usize, size: usize) {
-    match icon {
-        Icon::Brand => brand(c, x, y, size),
-        Icon::Terminal => terminal(c, x, y, size),
-        Icon::Editor => editor(c, x, y, size),
-        Icon::TaskMgr => taskmgr(c, x, y, size),
-        Icon::Calculator => calculator(c, x, y, size),
-        Icon::Browser => browser(c, x, y, size),
-        Icon::WasmApp => wasm_app(c, x, y, size),
-        Icon::Files => files(c, x, y, size),
-        Icon::Monitor => monitor(c, x, y, size),
-        Icon::Settings => settings(c, x, y, size),
-        Icon::Log => log(c, x, y, size),
-        Icon::Viewer => viewer(c, x, y, size),
-        Icon::Power => power(c, x, y, size),
-    }
+    blit(c, icon, x as i32, y as i32, size as i32, 256);
 }
 
-/// Resource monitor: a dark tile with a framed screen and a zig-zag load line.
-fn monitor(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x10, 0x18, 0x2A));
-    let pad = size / 6;
-    let (fx, fy, fw, fh) = (x + pad, y + pad, size - pad * 2, size - pad * 2);
-    c.fill_round_rect(fx, fy, fw, fh, size / 10, Color::rgb(0x2A, 0x33, 0x52));
-    let b = (size / 14).max(1);
-    c.fill_round_rect(
-        fx + b,
-        fy + b,
-        fw - 2 * b,
-        fh - 2 * b,
-        size / 12,
-        Color::rgb(0x0B, 0x12, 0x22),
-    );
-    // Load line: rises, dips, spikes (y in eighths, 0 = top).
-    let t = (size / 12).max(2);
-    let pts: [isize; 5] = [7, 4, 6, 1, 5];
-    let seg_w = (fw - 2 * b - 2 * t) / 4;
-    let top = (fy + b + t) as isize;
-    let h = (fh - 2 * b - 2 * t) as isize;
-    for (i, w) in pts.windows(2).enumerate() {
-        for k in 0..seg_w {
-            let num = w[0] * seg_w as isize + (w[1] - w[0]) * k as isize;
-            let py = top + num * h / (8 * seg_w as isize);
-            c.fill_rect(
-                fx + b + t + i * seg_w + k,
-                py as usize,
-                t,
-                t,
-                theme::accent(),
-            );
-        }
-    }
+/// Bytes held by the icon sources and scaled copies (for the memory log).
+pub fn bytes() -> usize {
+    let c = cache();
+    c.sources.iter().map(|(_, s)| s.px.len() * 4).sum::<usize>()
+        + c.scaled
+            .iter()
+            .map(|(_, _, s)| s.px.len() * 4)
+            .sum::<usize>()
 }
 
-/// Settings: a dark tile with a gear (a disc with eight teeth and a hub hole).
-fn settings(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    let tile = Color::rgb(0x14, 0x1B, 0x2E);
-    c.fill_round_rect(x, y, size, size, size / 5, tile);
-    let (cx, cy) = ((x + size / 2) as isize, (y + size / 2) as isize);
-    let r = (size / 4).max(3) as isize;
-    let t = (size / 6).max(2) as isize;
-    let gear = Color::rgb(0xC9, 0xD3, 0xE8);
-    // Eight teeth: the four axes and the four diagonals.
-    let reach = r + t / 2;
-    let diag = reach * 7 / 10;
-    let spots: [(isize, isize); 8] = [
-        (reach, 0),
-        (-reach, 0),
-        (0, reach),
-        (0, -reach),
-        (diag, diag),
-        (-diag, diag),
-        (diag, -diag),
-        (-diag, -diag),
-    ];
-    for (dx, dy) in spots {
-        c.fill_round_rect(
-            (cx + dx - t / 2) as usize,
-            (cy + dy - t / 2) as usize,
-            t as usize,
-            t as usize,
-            1,
-            gear,
-        );
-    }
-    c.fill_round_rect(
-        (cx - r) as usize,
-        (cy - r) as usize,
-        (2 * r) as usize,
-        (2 * r) as usize,
-        r as usize,
-        gear,
-    );
-    let hub = (r / 2).max(2);
-    c.fill_round_rect(
-        (cx - hub) as usize,
-        (cy - hub) as usize,
-        (2 * hub) as usize,
-        (2 * hub) as usize,
-        hub as usize,
-        theme::accent(),
-    );
-}
-
-/// System log: a dark tile with colour-coded text lines (info, warning, error).
-fn log(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x10, 0x18, 0x2A));
-    let pad = size / 6;
-    let lh = (size / 10).max(2);
-    let gap = (size - pad * 2 - lh * 4) / 3;
-    let w = size - pad * 2;
-    let rows: [(usize, Color); 4] = [
-        (w, theme::HEADER_TEXT),
-        (w * 3 / 4, theme::HEADER_TEXT),
-        (w * 5 / 6, Color::rgb(0xFF, 0xC1, 0x4D)),
-        (w * 2 / 3, theme::CLOSE),
-    ];
-    for (i, (len, col)) in rows.iter().enumerate() {
-        c.fill_round_rect(x + pad, y + pad + i * (lh + gap), *len, lh, lh / 2, *col);
-    }
-}
-
-/// File manager: a folder with a lighter tab and a sheet peeking out.
-fn files(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x12, 0x1A, 0x2E));
-    let pad = size / 6;
-    let fw = size - pad * 2;
-    let fh = size - pad * 2 - size / 12;
-    let fy = y + pad + size / 12;
-    // Folder tab.
-    c.fill_round_rect(x + pad, y + pad, fw / 2, size / 6, 3, theme::ACCENT_2);
-    // White sheet peeking above the folder body.
-    c.fill_round_rect(
-        x + pad + fw / 8,
-        fy - size / 16,
-        fw - fw / 4,
-        fh,
-        3,
-        theme::WHITE,
-    );
-    // Folder body.
-    c.fill_round_rect(x + pad, fy, fw, fh, 4, theme::accent());
-}
-
-/// Image viewer: a picture frame with a sun and two hills.
-fn viewer(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x12, 0x1A, 0x2E));
-    let pad = size / 6;
-    let (fw, fh) = (size - pad * 2, size - pad * 2);
-    c.fill_round_rect(x + pad, y + pad, fw, fh, 4, theme::WHITE);
-    let (ix, iy, iw, ih) = (x + pad + 2, y + pad + 2, fw - 4, fh - 4);
-    c.fill_round_rect(ix, iy, iw, ih, 3, Color::rgb(0x8F, 0xD3, 0xF4));
-    // Sun.
-    c.fill_round_rect(
-        ix + iw * 2 / 3,
-        iy + ih / 8,
-        iw / 4,
-        iw / 4,
-        iw / 8,
-        Color::rgb(0xFF, 0xC1, 0x4D),
-    );
-    // Hills.
-    c.fill_round_rect(ix, iy + ih / 2, iw * 3 / 5, ih / 2, iw / 6, theme::accent());
-    c.fill_round_rect(
-        ix + iw / 3,
-        iy + ih * 3 / 5,
-        iw * 2 / 3,
-        ih * 2 / 5,
-        iw / 8,
-        theme::ACCENT_2,
-    );
-}
-
-/// WebAssembly app: brand-purple squircle with a white "W" glyph.
-fn wasm_app(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x65, 0x4F, 0xF0));
-    let pad = size / 6;
-    c.fill_round_rect(
-        x + pad,
-        y + pad,
-        size - pad * 2,
-        size - pad * 2,
-        size / 8,
-        Color::rgb(0x4B, 0x3A, 0xC4),
-    );
-    let scale = (size / 12).max(1);
-    let gw = crate::font::text_width("W", scale);
-    let gx = x + size / 2 - gw / 2;
-    let gy = y + size / 2 - (7 * scale) / 2;
-    crate::font::draw_text(c, gx, gy, "W", theme::WHITE, scale);
-}
-
-/// OSJeff mark: teal squircle, violet diagonal half, white chevron.
-pub fn brand(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    let r = size / 4;
-    c.fill_round_rect(x, y, size, size, r, theme::accent());
-    // Violet lower-right triangle.
-    for row in 0..size {
-        let start = size.saturating_sub(row);
-        if start < size {
-            c.fill_rect(x + start, y + row, size - start, 1, theme::ACCENT_2);
-        }
-    }
-    // White ">" chevron.
-    let u = (size / 8).max(2);
-    let px = x + size / 3;
-    let py = y + size / 4;
-    for i in 0..3 {
-        c.fill_rect(px + i * u, py + i * u, u, u, theme::WHITE);
-        c.fill_rect(px + i * u, py + (4 - i) * u, u, u, theme::WHITE);
-    }
-}
-
-fn terminal(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x10, 0x18, 0x2A));
-    c.fill_round_rect(
-        x + 1,
-        y + 1,
-        size - 2,
-        size / 5,
-        size / 6,
-        Color::rgb(0x1D, 0x28, 0x42),
-    );
-    let green = theme::accent();
-    let u = (size / 10).max(2);
-    let px = x + size / 4;
-    let py = y + size / 3;
-    for i in 0..3 {
-        c.fill_rect(px + i * u, py + i * u, u, u, green);
-        c.fill_rect(px + i * u, py + (4 - i) * u, u, u, green);
-    }
-    c.fill_rect(x + size / 2, y + size - size / 3, size / 3, u, green);
-}
-
-fn editor(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, theme::accent());
-    let pad = size / 6;
-    let pw = size - pad * 2;
-    let ph = size - pad * 2;
-    c.fill_round_rect(x + pad, y + pad, pw, ph, 3, theme::WINDOW_BODY);
-    let line = Color::rgb(0x9A, 0xA6, 0xBD);
-    let lh = ph / 5;
-    let lx = x + pad + pw / 6;
-    for i in 0..3 {
-        let ly = y + pad + lh + i * lh;
-        let w = if i == 2 { pw / 2 } else { pw - pw / 3 };
-        c.fill_rect(lx, ly, w, (lh / 3).max(1), line);
-    }
-    let f = size / 5;
-    c.fill_round_rect(x + size - pad - f, y + pad, f, f, 2, theme::accent());
-}
-
-fn calculator(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x1B, 0x24, 0x3A));
-    let pad = (size / 6).max(2);
-    let gap = (size / 12).max(1);
-    // Screen.
-    c.fill_round_rect(
-        x + pad,
-        y + pad,
-        size - pad * 2,
-        size / 5,
-        2,
-        theme::accent(),
-    );
-    // 3x3 keypad.
-    let gy = y + pad + size / 5 + gap;
-    let cell = ((size - pad * 2).saturating_sub(2 * gap) / 3).max(1);
-    for r in 0..3 {
-        for col in 0..3 {
-            let bx = x + pad + col * (cell + gap);
-            let by = gy + r * (cell + gap);
-            let fill = if r == 2 && col == 2 {
-                theme::ACCENT_2
-            } else {
-                theme::WINDOW_BODY
-            };
-            c.fill_round_rect(bx, by, cell, cell, 2, fill);
-        }
-    }
-}
-
-fn power(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x2A, 0x12, 0x18));
-    let col = theme::CLOSE;
-    let cx = x + size / 2;
-    let cy = y + size / 2;
-    let r = (size / 3).max(3);
-    // Ring: filled disc punched hollow with the tile color.
-    c.fill_round_rect(cx - r, cy - r, 2 * r, 2 * r, r, col);
-    let inner = r.saturating_sub((size / 12).max(2));
-    c.fill_round_rect(
-        cx - inner,
-        cy - inner,
-        2 * inner,
-        2 * inner,
-        inner,
-        Color::rgb(0x2A, 0x12, 0x18),
-    );
-    // Top break + power bar.
-    let bw = (size / 10).max(2);
-    c.fill_rect(cx - bw / 2, y + size / 6, bw, size / 3, col);
-    c.fill_rect(
-        cx - bw / 2 - 1,
-        y + size / 6,
-        bw + 2,
-        (size / 12).max(2),
-        Color::rgb(0x2A, 0x12, 0x18),
-    );
-}
-
-/// Globe: teal disc, violet "land" wedge, white meridian + equator lines.
-fn browser(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x10, 0x1A, 0x30));
-    let cx = x + size / 2;
-    let cy = y + size / 2;
-    let r = (size / 2).saturating_sub(size / 8).max(3);
-    // Ocean disc.
-    c.fill_round_rect(cx - r, cy - r, 2 * r, 2 * r, r, theme::accent());
-    // A couple of violet "continents".
-    let l = (r / 2).max(2);
-    c.fill_round_rect(cx - r + r / 4, cy - r / 2, l, l, l / 2, theme::ACCENT_2);
-    c.fill_round_rect(
-        cx + r / 6,
-        cy,
-        (l * 3) / 4,
-        (l * 3) / 4,
-        l / 3,
-        theme::ACCENT_2,
-    );
-    // Equator + meridian in white.
-    let t = (size / 16).max(1);
-    c.fill_rect(cx - r, cy - t / 2, 2 * r, t, theme::WHITE);
-    c.fill_rect(cx - t / 2, cy - r, t, 2 * r, theme::WHITE);
-}
-
-fn taskmgr(c: &mut Canvas, x: usize, y: usize, size: usize) {
-    c.fill_round_rect(x, y, size, size, size / 5, Color::rgb(0x1A, 0x16, 0x32));
-    let pad = size / 5;
-    let bw = (size - pad * 2) / 4;
-    let base = y + size - pad;
-    let colors = [
-        theme::accent(),
-        theme::ACCENT_2,
-        Color::rgb(0xF5, 0x9E, 0x0B),
-    ];
-    for (i, color) in colors.iter().enumerate() {
-        let bh = (size - pad * 2) * (i + 2) / 4;
-        let bx = x + pad + i * (bw + bw / 3);
-        c.fill_round_rect(bx, base - bh, bw, bh, 2, *color);
-    }
+/// An installed app's own 24x24 (or any size) RGBA icon on a squircle tile, `size`
+/// pixels square. Not cached here: the caller keeps the result.
+pub fn app_tile(rgba: Option<&[u8]>, size: i32) -> Surface {
+    let s = match rgba {
+        Some(px) => iconart::wrap_app_icon(px, 24, 24, crate::fb::masks()),
+        None => iconart::render(IconId::Apps, crate::fb::masks()),
+    };
+    s.resized(size.clamp(8, 256) as usize, size.clamp(8, 256) as usize)
 }

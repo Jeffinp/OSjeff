@@ -124,6 +124,77 @@ impl Path {
         self.close();
     }
 
+    /// Ellipse drawn the other way round: inside a filled shape it cuts a hole
+    /// (opposite windings cancel).
+    pub fn ellipse_hole(&mut self, cx: i32, cy: i32, rx: i32, ry: i32) {
+        let kx = (rx as i64 * 5523 / 10000) as i32;
+        let ky = (ry as i64 * 5523 / 10000) as i32;
+        self.move_to(cx + rx, cy);
+        self.cubic_to((cx + rx, cy - ky), (cx + kx, cy - ry), (cx, cy - ry));
+        self.cubic_to((cx - kx, cy - ry), (cx - rx, cy - ky), (cx - rx, cy));
+        self.cubic_to((cx - rx, cy + ky), (cx - kx, cy + ry), (cx, cy + ry));
+        self.cubic_to((cx + kx, cy + ry), (cx + rx, cy + ky), (cx + rx, cy));
+        self.close();
+    }
+
+    /// Closed polygon through `pts` (24.8), drawn clockwise whatever the order given.
+    pub fn polygon(&mut self, pts: &[(i32, i32)]) {
+        let Some(&(x0, y0)) = pts.first() else {
+            return;
+        };
+        // Shoelace sign decides whether to reverse.
+        let mut area = 0i64;
+        for i in 0..pts.len() {
+            let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+            area += a.0 as i64 * b.1 as i64 - b.0 as i64 * a.1 as i64;
+        }
+        self.move_to(x0, y0);
+        if area >= 0 {
+            for &(x, y) in &pts[1..] {
+                self.line_to(x, y);
+            }
+        } else {
+            for &(x, y) in pts[1..].iter().rev() {
+                self.line_to(x, y);
+            }
+            // The first point was the start: the loop above ends next to it.
+        }
+        self.close();
+    }
+
+    /// Closed rounded rectangle (clockwise), corner radius `r`.
+    pub fn rrect(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32) {
+        let r = r.min(w / 2).min(h / 2).max(0);
+        let k = (r as i64 * 5523 / 10000) as i32;
+        let (x2, y2) = (x + w, y + h);
+        self.move_to(x + r, y);
+        self.line_to(x2 - r, y);
+        self.cubic_to((x2 - r + k, y), (x2, y + r - k), (x2, y + r));
+        self.line_to(x2, y2 - r);
+        self.cubic_to((x2, y2 - r + k), (x2 - r + k, y2), (x2 - r, y2));
+        self.line_to(x + r, y2);
+        self.cubic_to((x + r - k, y2), (x, y2 - r + k), (x, y2 - r));
+        self.line_to(x, y + r);
+        self.cubic_to((x, y + r - k), (x + r - k, y), (x + r, y));
+        self.close();
+    }
+
+    /// The same rounded rectangle drawn counter-clockwise: a hole inside a filled shape.
+    pub fn rrect_hole(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32) {
+        let r = r.min(w / 2).min(h / 2).max(0);
+        let k = (r as i64 * 5523 / 10000) as i32;
+        let (x2, y2) = (x + w, y + h);
+        self.move_to(x + r, y);
+        self.cubic_to((x + r - k, y), (x, y + r - k), (x, y + r));
+        self.line_to(x, y2 - r);
+        self.cubic_to((x, y2 - r + k), (x + r - k, y2), (x + r, y2));
+        self.line_to(x2 - r, y2);
+        self.cubic_to((x2 - r + k, y2), (x2, y2 - r + k), (x2, y2 - r));
+        self.line_to(x2, y + r);
+        self.cubic_to((x2, y + r - k), (x2 - r + k, y), (x2 - r, y));
+        self.close();
+    }
+
     /// Number of flattened segments (0 = nothing to draw).
     pub fn is_empty(&self) -> bool {
         self.lines.is_empty()

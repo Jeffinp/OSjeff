@@ -4,7 +4,16 @@ wait_first_frame() {
   until grep -aq "first desktop frame" "$OUT/serial.log" 2>/dev/null; do sleep 0.2; done
   sleep 2.5   # let the first (animated) frames settle
 }
-move() { mon "mouse_move $1 $2"; }
+# Relative moves are split into steps of at most 100 px: one big PS/2 packet overflows
+# (the guest sees a clipped, unpredictable delta), which broke long `goto` jumps.
+move() {
+  local dx=$1 dy=$2 sx sy
+  while [ "$dx" -ne 0 ] || [ "$dy" -ne 0 ]; do
+    sx=$dx; [ "$sx" -gt 100 ] && sx=100; [ "$sx" -lt -100 ] && sx=-100
+    sy=$dy; [ "$sy" -gt 100 ] && sy=100; [ "$sy" -lt -100 ] && sy=-100
+    mon "mouse_move $sx $sy"; dx=$((dx - sx)); dy=$((dy - sy)); sleep 0.012
+  done
+}
 click() { mon "mouse_button 1"; sleep 0.08; mon "mouse_button 0"; sleep 0.08; }
 # click without the trailing settle sleep: the action starts on the press, so a snap right after
 # lands inside its animation
@@ -15,8 +24,22 @@ key() { mon "sendkey $1"; }
 CX=640
 if [ "$MODE" = uefi ]; then CY=400; H=800; else CY=360; H=720; fi
 goto() { move $(( $1 - CX )) $(( $2 - CY )); CX=$1; CY=$2; sleep 0.3; }
-DOCKY=$(( H - 48 )); DY=$(( DOCKY - CY ))
-# dock icon x: start 451, term 507, edit 559, task 613, calc 666, browser 721, wasm 775, files 829
+DOCKY=$(( H - 40 )); DY=$(( DOCKY - CY ))
+# The app bar (floating, centred): 10 icons of 48 px, 8 px gap, 12 px padding, a 12 px
+# separator after the first. Slots: apps files browser terminal editor calc viewer tasks
+# monitor settings. `dock_icon <name>` moves the pointer onto an icon's centre.
+DOCK_Y_CENTER=$(( H - 40 ))
+dock_x() {
+  local i
+  case "$1" in
+    apps) i=0 ;; files) i=1 ;; browser) i=2 ;; terminal) i=3 ;; editor) i=4 ;;
+    calc) i=5 ;; viewer) i=6 ;; tasks) i=7 ;; monitor) i=8 ;; settings) i=9 ;; *) i=0 ;;
+  esac
+  local x0=$(( 640 - (10 * 48 + 9 * 8 + 12 + 24) / 2 + 12 ))
+  local extra=0; [ "$i" -ge 1 ] && extra=12
+  echo $(( x0 + i * 56 + extra + 24 ))
+}
+dock_icon() { goto "$(dock_x "$1")" "$DOCK_Y_CENTER"; }
 dock() { goto "$1" "$DOCKY"; }
 dock_to() { move "$1" "$DY"; sleep 0.3; }
 shot() { mon "screendump $OUT/$1.ppm"; sleep 1.2; convert "$OUT/$1.ppm" "$OUT/$1.png" 2>/dev/null; rm -f "$OUT/$1.ppm"; }

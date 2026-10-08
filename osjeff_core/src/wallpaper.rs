@@ -15,55 +15,149 @@ pub const MAX_SRC_PIXELS: u64 = 8 * 1024 * 1024;
 /// How a preset is painted.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Style {
-    /// The original look: vertical gradient plus two soft glow blobs.
-    Indigo,
+    /// Vertical gradient from `top` to `bottom` plus soft glows.
+    Glow,
     /// Vertical gradient from `top` to `bottom`.
     Gradient,
     /// One flat colour (`top`).
     Solid,
 }
 
-/// A built-in wallpaper. Colours are `0xRRGGBB`.
+/// A soft round glow on the wallpaper. Positions and sizes are per-mille of the
+/// screen width / height (`r` of the width).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Blob {
+    pub x: i16,
+    pub y: i16,
+    pub r: i16,
+    /// `0xRRGGBB`.
+    pub color: u32,
+    /// Peak opacity (0..=255).
+    pub alpha: u8,
+}
+
+const NO_BLOB: Blob = Blob {
+    x: 0,
+    y: 0,
+    r: 0,
+    color: 0,
+    alpha: 0,
+};
+
+/// The colours of one appearance of a preset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Scheme {
+    pub top: u32,
+    pub bottom: u32,
+    pub blobs: [Blob; 3],
+}
+
+/// A built-in wallpaper. Colours are `0xRRGGBB`. `top` / `bottom` / `blobs` are the
+/// light (or only) scheme; `dark`, when present, is what the dark appearance shows.
 #[derive(Clone, Copy, Debug)]
 pub struct Preset {
     pub name: &'static str,
     pub style: Style,
     pub top: u32,
     pub bottom: u32,
+    pub blobs: [Blob; 3],
+    pub dark: Option<Scheme>,
 }
 
-/// Preset 0 is the default and must keep painting exactly what the desktop
-/// always did (`theme::BG_TOP` / `BG_BOTTOM` with the two glows).
+impl Preset {
+    /// The scheme to paint for the given appearance.
+    pub fn scheme(&self, dark: bool) -> Scheme {
+        match (dark, self.dark) {
+            (true, Some(d)) => d,
+            _ => Scheme {
+                top: self.top,
+                bottom: self.bottom,
+                blobs: self.blobs,
+            },
+        }
+    }
+}
+
+const fn blob(x: i16, y: i16, r: i16, color: u32, alpha: u8) -> Blob {
+    Blob {
+        x,
+        y,
+        r,
+        color,
+        alpha,
+    }
+}
+
+/// Preset 0 is the default and follows the appearance (pale by day, deep indigo at
+/// night); the others keep one look.
 pub const PRESETS: [Preset; 5] = [
     Preset {
-        name: "Indigo",
-        style: Style::Indigo,
-        top: 0x0B0F1C,
-        bottom: 0x161C30,
+        name: "Dinamico",
+        style: Style::Glow,
+        top: 0xDCE6FF,
+        bottom: 0xF3E8FF,
+        blobs: [
+            blob(200, 250, 600, 0x7C83FF, 120),
+            blob(820, 200, 420, 0x5EEAD4, 100),
+            blob(650, 900, 700, 0xF5A3D7, 90),
+        ],
+        dark: Some(Scheme {
+            top: 0x0F1230,
+            bottom: 0x1B1448,
+            blobs: [
+                blob(180, 250, 650, 0x5B5CF6, 120),
+                blob(850, 150, 420, 0x14B8C4, 80),
+                blob(700, 950, 700, 0x8B3FD9, 100),
+            ],
+        }),
     },
     Preset {
-        name: "Aurora",
-        style: Style::Gradient,
-        top: 0x06201F,
-        bottom: 0x16405A,
+        name: "Ceu",
+        style: Style::Glow,
+        top: 0x8EC9FF,
+        bottom: 0xE6F4FF,
+        blobs: [
+            blob(300, 200, 600, 0xFFFFFF, 120),
+            blob(800, 700, 600, 0xFFFFFF, 90),
+            blob(500, 1000, 500, 0xBFE3FF, 100),
+        ],
+        dark: None,
     },
     Preset {
         name: "Ocaso",
-        style: Style::Gradient,
-        top: 0x1A1033,
-        bottom: 0x5A2A3C,
+        style: Style::Glow,
+        top: 0x2B1B5A,
+        bottom: 0xFF7A59,
+        blobs: [
+            blob(800, 900, 700, 0xFFB36B, 130),
+            blob(200, 100, 500, 0x8B5CF6, 100),
+            blob(500, 550, 400, 0xFF5C8A, 70),
+        ],
+        dark: None,
+    },
+    Preset {
+        name: "Aurora",
+        style: Style::Glow,
+        top: 0x04161F,
+        bottom: 0x0B3A44,
+        blobs: [
+            blob(200, 200, 600, 0x14B8C4, 110),
+            blob(800, 800, 600, 0x22C55E, 80),
+            blob(600, 100, 400, 0x5B5CF6, 80),
+        ],
+        dark: None,
     },
     Preset {
         name: "Grafite",
-        style: Style::Solid,
-        top: 0x1E2430,
-        bottom: 0x1E2430,
-    },
-    Preset {
-        name: "Oceano",
-        style: Style::Gradient,
-        top: 0x071A33,
-        bottom: 0x0E5E6F,
+        style: Style::Glow,
+        top: 0x2A2C35,
+        bottom: 0x14151A,
+        blobs: [
+            blob(300, 200, 500, 0xFFFFFF, 22),
+            blob(800, 850, 600, 0x8B90A0, 26),
+            NO_BLOB,
+        ],
+        dark: None,
     },
 ];
 
@@ -246,11 +340,23 @@ mod tests {
 
     #[test]
     fn presets_are_sane() {
-        assert_eq!(PRESETS[0].style, Style::Indigo);
-        assert_eq!(PRESETS[0].top, 0x0B0F1C);
-        assert_eq!(PRESETS[0].bottom, 0x161C30);
+        // The default follows the appearance: pale in light, deep in dark.
+        let luma = |c: u32| ((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF);
+        let light = PRESETS[0].scheme(false);
+        let dark = PRESETS[0].scheme(true);
+        assert!(luma(light.top) > luma(dark.top) + 300);
+        assert!(luma(light.bottom) > luma(dark.bottom) + 300);
+        // A fixed preset shows the same scheme in both appearances.
+        assert_eq!(PRESETS[2].scheme(true), PRESETS[2].scheme(false));
+        // Includes a light preset and a dark one.
+        assert!(PRESETS.iter().any(|p| luma(p.top) + luma(p.bottom) > 900));
+        assert!(PRESETS.iter().any(|p| luma(p.top) + luma(p.bottom) < 200));
         for p in PRESETS {
             assert!(!p.name.is_empty() && p.top <= 0xFFFFFF && p.bottom <= 0xFFFFFF);
+            for b in p.scheme(false).blobs.iter().chain(&p.scheme(true).blobs) {
+                assert!((0..=1000).contains(&b.x) && (0..=1000).contains(&b.y) && b.r <= 1000);
+                assert!(b.color <= 0xFFFFFF);
+            }
         }
     }
 

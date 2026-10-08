@@ -19,9 +19,9 @@ use osjeff_core::shell::{ShellFs, Term, TermAction};
 /// Side padding of the text area and the gap under the title bar.
 const PAD: i32 = 12;
 const TOP: i32 = TITLE_H + 8;
-/// Glyph cell at text scale 2.
-const CELL_W: i32 = 12;
-const LINE_H: i32 = 18;
+/// Character cell of the monospace face at [`crate::text::MONO_PX`] (a 9 px pitch).
+const CELL_W: i32 = 9;
+const LINE_H: i32 = 20;
 /// Room kept at the right edge for the scroll indicator.
 const BAR_W: i32 = 8;
 
@@ -56,7 +56,8 @@ impl TermState {
     }
 }
 
-/// The byte the bitmap font draws for `c` (Latin-1; anything else is `?`).
+/// The Latin-1 byte for `c` (anything else is `?`): the legacy byte-string UI helpers read
+/// bytes as Latin-1 when they are not UTF-8.
 pub(crate) fn latin1(c: char) -> u8 {
     u8::try_from(u32::from(c)).unwrap_or(b'?')
 }
@@ -328,30 +329,39 @@ impl Desktop {
         let plen = t.term.prompt_chars();
         for (i, row) in v.rows.iter().enumerate() {
             let y = ty0 + i * LINE_H as usize;
-            let bytes: Vec<u8> = row.chars().map(latin1).collect();
             // The prompt part of the live line is drawn in the accent colour.
             let split = match v.live_first {
-                Some(lf) if i >= lf => plen.saturating_sub((i - lf) * cols).min(bytes.len()),
+                Some(lf) if i >= lf => plen
+                    .saturating_sub((i - lf) * cols)
+                    .min(row.chars().count()),
                 _ => 0,
             };
+            let at = row.char_indices().nth(split).map_or(row.len(), |(b, _)| b);
             if split > 0 {
-                font::draw_bytes(c, tx, y, &bytes[..split], theme::TERM_PROMPT, 2);
+                crate::text::draw_mono(
+                    c,
+                    tx as i32,
+                    y as i32,
+                    &row[..at],
+                    crate::text::MONO_PX,
+                    theme::TERM_PROMPT,
+                );
             }
-            font::draw_bytes(
+            crate::text::draw_mono(
                 c,
-                tx + split * CELL_W as usize,
-                y,
-                &bytes[split..],
-                theme::TEXT,
-                2,
+                (tx + split * CELL_W as usize) as i32,
+                y as i32,
+                &row[at..],
+                crate::text::MONO_PX,
+                theme::text(),
             );
         }
         if focused && let Some((row, col)) = v.cursor {
             c.fill_rect(
                 tx + col * CELL_W as usize,
-                ty0 + row * LINE_H as usize,
-                3,
-                14,
+                ty0 + row * LINE_H as usize + 2,
+                2,
+                LINE_H as usize - 4,
                 theme::accent(),
             );
         }
@@ -360,7 +370,7 @@ impl Desktop {
             let total = v.above + v.rows.len() + v.below;
             let track_h = rows as i32 * LINE_H;
             let track = Rect::new(r.x + r.w - PAD / 2 - 4, r.y + TOP, 4, track_h);
-            ui::fill_round(c, track, 2, ui::BORDER);
+            ui::fill_round(c, track, 2, theme::line());
             let thumb_h = ((track_h as i64 * v.rows.len() as i64) / total as i64).max(14) as i32;
             let thumb_y = track.y
                 + (((track_h - thumb_h) as i64 * v.above as i64)
@@ -374,14 +384,15 @@ impl Desktop {
         }
         if t.term.is_running() {
             let msg = "executando... Ctrl+C cancela";
-            let w = font::text_width(msg, 1) as i32;
-            font::draw_text(
+            let w = crate::text::measure(msg, crate::text::CAPTION, crate::text::Weight::Regular);
+            crate::text::draw(
                 c,
-                (r.x + r.w - PAD - w).max(0) as usize,
-                (r.y + r.h - 14).max(0) as usize,
+                (r.x + r.w - PAD - w).max(0),
+                (r.y + r.h - 18).max(0),
                 msg,
-                theme::TEXT_MUTED,
-                1,
+                crate::text::CAPTION,
+                crate::text::Weight::Regular,
+                theme::text_muted(),
             );
         }
     }

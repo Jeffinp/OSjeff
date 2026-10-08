@@ -12,12 +12,15 @@ use crate::ttf::Font;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-/// Font weights available (Bold maps to Semibold).
+/// Faces available: three weights of the proportional UI font and the monospace
+/// face of the terminal and the editor.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Weight {
     Regular = 0,
     Medium = 1,
     Semibold = 2,
+    /// The monospace face (fixed pitch).
+    Mono = 3,
 }
 
 /// Where a glyph's coverage lives in the arena and how to place it.
@@ -58,20 +61,21 @@ pub struct Stats {
 }
 
 pub struct TextEngine {
-    fonts: [Font<'static>; 3],
+    fonts: [Font<'static>; 4],
     strips: Vec<Strip>,
     arena: Vec<u8>,
     glyphs: u32,
 }
 
 impl TextEngine {
-    /// Build an engine from the regular, medium and semibold font files.
-    pub fn new(files: [&'static [u8]; 3]) -> Option<TextEngine> {
+    /// Build an engine from the regular, medium, semibold and monospace font files.
+    pub fn new(files: [&'static [u8]; 4]) -> Option<TextEngine> {
         Some(TextEngine {
             fonts: [
                 Font::parse(files[0])?,
                 Font::parse(files[1])?,
                 Font::parse(files[2])?,
+                Font::parse(files[3])?,
             ],
             strips: Vec::new(),
             arena: Vec::new(),
@@ -113,6 +117,13 @@ impl TextEngine {
         let f = self.font(w);
         let adv = f.advance(f.glyph_index(c)) as i64;
         ((adv * px as i64 * 256 + f.units_per_em as i64 / 2) / f.units_per_em as i64) as i32
+    }
+
+    /// Character cell of the monospace face at `px`: `(pitch, line height)` in whole
+    /// pixels. Terminal and editor grids are built from this.
+    pub fn mono_cell(&self, px: u16) -> (i32, i32) {
+        let pitch = (self.advance_q8(Weight::Mono, px, '0') + 128) >> 8;
+        (pitch.max(1), self.vmetrics(Weight::Mono, px).line_height)
     }
 
     pub fn kern_q8(&self, w: Weight, px: u16, l: char, r: char) -> i32 {
@@ -229,9 +240,30 @@ mod tests {
     const R: &[u8] = include_bytes!("../../assets/fonts/Inter-Regular.subset.ttf");
     const M: &[u8] = include_bytes!("../../assets/fonts/Inter-Medium.subset.ttf");
     const S: &[u8] = include_bytes!("../../assets/fonts/Inter-SemiBold.subset.ttf");
+    const MONO: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.subset.ttf");
 
     fn eng() -> TextEngine {
-        TextEngine::new([R, M, S]).unwrap()
+        TextEngine::new([R, M, S, MONO]).unwrap()
+    }
+
+    #[test]
+    fn the_monospace_face_has_a_fixed_pitch_and_a_sane_line() {
+        let e = eng();
+        for px in [12u16, 13, 15, 20] {
+            let w = e.advance_q8(Weight::Mono, px, 'i');
+            for c in ['W', 'm', '0', ' ', '.', 'ç', '│'] {
+                assert_eq!(e.advance_q8(Weight::Mono, px, c), w, "{c:?} at {px}");
+            }
+        }
+        // 600/1000 em: 9 px at 15 px, exactly.
+        assert_eq!(
+            e.mono_cell(15),
+            (9, e.vmetrics(Weight::Mono, 15).line_height)
+        );
+        let (pitch, line) = e.mono_cell(15);
+        assert_eq!(pitch, 9);
+        assert!((18..=22).contains(&line), "{line}");
+        assert_eq!(e.mono_cell(20).0, 12);
     }
 
     #[test]

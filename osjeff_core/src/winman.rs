@@ -615,7 +615,7 @@ impl ClickTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anim::{Anim, Zoom};
+    use crate::anim::Anim;
 
     const WORK: Rect = Rect::new(12, 76, 1256, 552);
 
@@ -862,7 +862,7 @@ mod tests {
         let (mut m, [a, ..]) = table();
         assert!(m.move_to(a, -500, -500, 1280, 720));
         let r = m.get(a).unwrap().rect;
-        assert_eq!((r.x, r.y), (0, 0));
+        assert_eq!((r.x, r.y), (0, crate::window::MENUBAR_H));
         assert!(m.move_to(a, 5000, 5000, 1280, 720));
         let r = m.get(a).unwrap().rect;
         assert_eq!(r.x, 1280 - r.w);

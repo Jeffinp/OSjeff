@@ -255,7 +255,9 @@ impl App {
             App::Log(l) => size_of::<LogState>() + l.heap_bytes(),
             App::Monitor(m) => size_of::<MonitorState>() + m.heap_bytes(),
             App::Settings(s) => size_of::<SettingsState>() + s.heap_bytes(),
-            App::Files(_) | App::Viewer(_) | App::TaskMgr | App::Wasm(_) => return None,
+            App::Files(_) | App::Viewer(_) | App::TaskMgr | App::Wasm(_) | App::Gallery(_) => {
+                return None;
+            }
         };
         Some(n)
     }
@@ -512,21 +514,37 @@ impl Desktop {
             SortKey::Up => (COL_UP, 6),
         };
         head[(sc + sw) as usize] = arrow;
-        text(c, body.x, pl.header_y + 3, body.w, &head, theme::TEXT_MUTED);
-        fill(c, Rect::new(body.x, pl.header_y + ROW_H, body.w, 1), BORDER);
+        text(
+            c,
+            body.x,
+            pl.header_y + 3,
+            body.w,
+            &head,
+            theme::text_muted(),
+        );
+        fill(
+            c,
+            Rect::new(body.x, pl.header_y + ROW_H, body.w, 1),
+            theme::line(),
+        );
 
         let first = (m.sel + 1).saturating_sub(pl.visible);
         let first = first.min(m.rows.len().saturating_sub(pl.visible));
         for (k, row) in m.rows.iter().skip(first).take(pl.visible).enumerate() {
             let y = pl.rows_y + k as i32 * ROW_H;
             if first + k == m.sel {
-                fill_round(c, Rect::new(body.x - 4, y - 1, body.w + 8, ROW_H), 4, SEL);
+                fill_round(
+                    c,
+                    Rect::new(body.x - 4, y - 1, body.w + 8, ROW_H),
+                    4,
+                    theme::selection(),
+                );
             }
             let (fg, cpu_fg) = match (row.kind, row.state) {
                 (_, RowState::Dead) => (theme::CLOSE, theme::CLOSE),
-                (RowKind::Thread, _) => (THREAD_TEXT, THREAD_TEXT),
-                (RowKind::System, _) => (theme::TEXT_MUTED, theme::TEXT_MUTED),
-                (RowKind::App, _) => (theme::TEXT, theme::TEXT_MUTED),
+                (RowKind::Thread, _) => (theme::accent(), theme::accent()),
+                (RowKind::System, _) => (theme::text_muted(), theme::text_muted()),
+                (RowKind::App, _) => (theme::text(), theme::text_muted()),
             };
             let x = |col: i32| body.x + col * CELL_W;
             let mut b = FixedBuf::<8>::new();
@@ -543,7 +561,7 @@ impl Desktop {
                 y + 3,
                 4 * CELL_W,
                 b.as_bytes(),
-                theme::TEXT_MUTED,
+                theme::text_muted(),
             );
             text(c, x(COL_NAME), y + 3, 14 * CELL_W, row.name(), fg);
             text(
@@ -560,7 +578,7 @@ impl Desktop {
                     let r = Rect::new(x(COL_CPU), y, 6 * CELL_W, ROW_H);
                     text_right(c, r, s.as_bytes(), cpu_fg);
                 }
-                None => text(c, x(COL_CPU + 5), y + 3, CELL_W, b"-", theme::TEXT_MUTED),
+                None => text(c, x(COL_CPU + 5), y + 3, CELL_W, b"-", theme::text_muted()),
             }
             match row.mem_kib {
                 Some(k) => {
@@ -568,7 +586,7 @@ impl Desktop {
                     let r = Rect::new(x(COL_MEM), y, 9 * CELL_W, ROW_H);
                     text_right(c, r, s.as_bytes(), fg);
                 }
-                None => text(c, x(COL_MEM + 8), y + 3, CELL_W, b"-", theme::TEXT_MUTED),
+                None => text(c, x(COL_MEM + 8), y + 3, CELL_W, b"-", theme::text_muted()),
             }
             if row.kind == RowKind::App || row.up_s > 0 {
                 let s = fmt_uptime(row.up_s as u64);
@@ -582,7 +600,7 @@ impl Desktop {
             pl.footer.y + 7,
             pl.footer.w - 130,
             b"CPU: threads + ocioso = 100%. Apps: tempo de desenho.",
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
         let can_end = m
             .rows
@@ -816,14 +834,14 @@ impl Desktop {
         let mon = &self.sysmon;
         let mut y = body.y + 2;
         let mut line = |c: &mut Canvas, key: &[u8], val: &[u8]| {
-            text(c, body.x, y, 14 * CELL_W, key, theme::TEXT_MUTED);
+            text(c, body.x, y, 14 * CELL_W, key, theme::text_muted());
             text(
                 c,
                 body.x + 14 * CELL_W,
                 y,
                 body.w - 14 * CELL_W,
                 val,
-                theme::TEXT,
+                theme::text(),
             );
             y += 24;
         };
@@ -902,6 +920,3 @@ impl Desktop {
         line(c, b"Threads", b.as_bytes());
     }
 }
-
-const SEL: Color = Color::rgb(0xCF, 0xEC, 0xE8);
-const THREAD_TEXT: Color = Color::rgb(0x2A, 0x4F, 0x9A);

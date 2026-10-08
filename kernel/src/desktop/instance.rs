@@ -15,8 +15,8 @@
 //!    `input.rs`. Everything else — z-order, focus, minimize / maximize / resize,
 //!    Alt+Tab, the dock indicator, the process entry (`name`, `name 2`, ...) and
 //!    teardown on close — is generic and needs no change.
-//! 4. Give it a dock slot: `osjeff_core::layout::DOCK_COUNT` and the icon list in
-//!    `widgets::paint_background`.
+//! 4. Give it an app-bar slot (`shell::DOCK_ITEMS`) if it should live there; every app
+//!    appears in the Apps overlay and in Busca on its own.
 //!
 //! Instance state is plain data; nothing here allocates per frame. The
 //! per-instance heap objects (`Box`, `Vec`, `String`) are created when the window
@@ -25,7 +25,7 @@
 use super::*;
 use alloc::boxed::Box;
 
-/// Which app a window runs. The order is the dock / start-panel / menu order.
+/// Which app a window runs. The order is the Apps overlay / menu order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Kind {
     Terminal,
@@ -39,12 +39,9 @@ pub(crate) enum Kind {
     Settings,
     LogViewer,
     Viewer,
+    /// The component gallery (Ctrl+Alt+G): not listed anywhere else.
+    Gallery,
 }
-
-/// How many of the [`Kind::ALL`] apps (the first ones) have a dock slot. The later
-/// ones live in the start panel and the context menu only, so the boot dock stays
-/// as it always was.
-pub(crate) const DOCK_APPS: usize = 7;
 
 impl Kind {
     pub(crate) const ALL: [Kind; 11] = [
@@ -70,16 +67,6 @@ impl Kind {
         )
     }
 
-    /// Does this app have a dock icon?
-    pub(crate) fn in_dock(self) -> bool {
-        self.index() < DOCK_APPS
-    }
-
-    /// Position in [`Kind::ALL`] (dock slot is this + 1: slot 0 is the system icon).
-    pub(crate) fn index(self) -> usize {
-        Kind::ALL.iter().position(|&k| k == self).unwrap_or(0)
-    }
-
     /// Process-table name of the first instance (`shell`; later ones get `shell 2`...).
     pub(crate) const fn proc_name(self) -> &'static str {
         match self {
@@ -94,40 +81,43 @@ impl Kind {
             Kind::Settings => "settings",
             Kind::LogViewer => "syslog",
             Kind::Viewer => "viewer",
+            Kind::Gallery => "gallery",
         }
     }
 
     /// Title-bar text of the first instance.
     pub(crate) const fn title(self) -> &'static str {
         match self {
-            Kind::Terminal => "OSJEFF SHELL",
-            Kind::Editor => "OSJEFF EDIT",
-            Kind::TaskMgr => "TASK MANAGER",
-            Kind::Calculator => "CALCULATOR",
-            Kind::Browser => "NAVEGADOR",
-            Kind::WasmApp => "APLICATIVO",
-            Kind::Files => "ARQUIVOS",
-            Kind::Monitor => "MONITOR DO SISTEMA",
-            Kind::Settings => "CONFIGURACOES",
-            Kind::LogViewer => "LOG DO SISTEMA",
-            Kind::Viewer => "IMAGENS",
+            Kind::Terminal => "Terminal",
+            Kind::Editor => "Editor",
+            Kind::TaskMgr => "Tarefas",
+            Kind::Calculator => "Calculadora",
+            Kind::Browser => "Navegador",
+            Kind::WasmApp => "Aplicativo",
+            Kind::Files => "Arquivos",
+            Kind::Monitor => "Monitor do sistema",
+            Kind::Settings => "Configurações",
+            Kind::LogViewer => "Registro do sistema",
+            Kind::Viewer => "Imagens",
+            Kind::Gallery => "Componentes",
         }
     }
 
-    /// Label in the context menu and the start panel.
+    /// Name in menus, the app bar's tooltips, the Apps overlay and Busca.
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Kind::Terminal => "Terminal",
             Kind::Editor => "Editor",
-            Kind::TaskMgr => "Task Manager",
-            Kind::Calculator => "Calculator",
+            Kind::TaskMgr => "Tarefas",
+            Kind::Calculator => "Calculadora",
             Kind::Browser => "Navegador",
             Kind::WasmApp => "Aplicativos",
             Kind::Files => "Arquivos",
             Kind::Monitor => "Monitor",
-            Kind::Settings => "Configuracoes",
-            Kind::LogViewer => "Log do sistema",
+            Kind::Settings => "Configurações",
+            Kind::LogViewer => "Registro",
             Kind::Viewer => "Imagens",
+            Kind::Gallery => "Componentes",
         }
     }
 
@@ -144,6 +134,7 @@ impl Kind {
             Kind::Settings => Icon::Settings,
             Kind::LogViewer => Icon::Log,
             Kind::Viewer => Icon::Viewer,
+            Kind::Gallery => Icon::Settings,
         }
     }
 
@@ -174,6 +165,7 @@ impl Kind {
             Kind::WasmApp => Rect::new(240, 130, 720, 470),
             Kind::Files => Rect::new(220, 110, 860, 520),
             Kind::Viewer => Rect::new(200, 90, 820, 540),
+            Kind::Gallery => Rect::new(160, 70, 900, 600),
             Kind::Monitor => Rect::new(210, 90, 800, 560),
             Kind::Settings => Rect::new(220, 84, 820, 560),
             Kind::LogViewer => Rect::new(180, 110, 860, 460),
@@ -191,6 +183,7 @@ impl Kind {
             Kind::WasmApp => (720, 470),
             Kind::Files => (580, 320),
             Kind::Viewer => (360, 260),
+            Kind::Gallery => (560, 380),
             Kind::Monitor => (660, 420),
             Kind::Settings => (700, 460),
             Kind::LogViewer => (520, 280),
@@ -394,6 +387,7 @@ pub(crate) enum App {
     Monitor(Box<MonitorState>),
     Settings(Box<SettingsState>),
     Log(Box<LogState>),
+    Gallery(Box<gallery::GalleryState>),
 }
 
 impl App {
@@ -429,6 +423,7 @@ impl App {
             Kind::Monitor => App::Monitor(Box::new(MonitorState::new())),
             Kind::Settings => App::Settings(Box::new(SettingsState::new())),
             Kind::LogViewer => App::Log(Box::new(LogState::new())),
+            Kind::Gallery => App::Gallery(Box::new(gallery::GalleryState::new())),
         }
     }
 
@@ -445,6 +440,7 @@ impl App {
             App::Settings(_) => Kind::Settings,
             App::Log(_) => Kind::LogViewer,
             App::Viewer(_) => Kind::Viewer,
+            App::Gallery(_) => Kind::Gallery,
         }
     }
 }

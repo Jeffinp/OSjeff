@@ -9,19 +9,9 @@ use super::files::{MENU_ROW_H, MENU_W_FILES, menu_height};
 use super::*;
 use osjeff_core::fileman::{self, CELL, Layout, Place, ROW_H, SortKey};
 
-const BLUE: Color = Color::rgb(0x25, 0x63, 0xEB);
-const TOOLBAR: Color = Color::rgb(0xE9, 0xED, 0xF5);
-const SIDEBAR: Color = Color::rgb(0xE2, 0xE7, 0xF1);
-const HEADER_BG: Color = Color::rgb(0xEE, 0xF1, 0xF8);
-const ZEBRA: Color = Color::rgb(0xEF, 0xF2, 0xF9);
-const SEP: Color = Color::rgb(0xCB, 0xD2, 0xE0);
-const BTN: Color = Color::rgb(0xFF, 0xFF, 0xFF);
-const ERR: Color = Color::rgb(0xC0, 0x2B, 0x2B);
-const OKC: Color = Color::rgb(0x1B, 0x7F, 0x5F);
-
 fn text(c: &mut Canvas, x: i32, y: i32, s: &[u8], col: Color) {
     if x >= 0 && y >= 0 {
-        font::draw_bytes(c, x as usize, y as usize, s, col, 2);
+        crate::text::legacy::draw_bytes(c, x as usize, y as usize, s, col, 2);
     }
 }
 
@@ -105,7 +95,7 @@ impl Desktop {
             r.y + TITLE_H,
             r.w - 2,
             fileman::TOOLBAR_H,
-            TOOLBAR,
+            theme::toolbar(),
         );
         let nav = [
             (lay.back, b"<", v.history.can_back()),
@@ -113,13 +103,21 @@ impl Desktop {
             (lay.up, b"^", !vfs::is_root(&v.cwd)),
         ];
         for (b, label, on) in nav {
-            round(c, b.x, b.y, b.w, b.h, 6, BTN);
-            let col = if on { theme::TEXT } else { SEP };
+            round(c, b.x, b.y, b.w, b.h, 6, theme::button_bg());
+            let col = if on { theme::text() } else { theme::line() };
             text(c, b.x + (b.w - CELL) / 2, b.y + (b.h - 14) / 2, label, col);
         }
         let ab = lay.address;
-        round(c, ab.x, ab.y, ab.w, ab.h, 8, SEP);
-        round(c, ab.x + 1, ab.y + 1, ab.w - 2, ab.h - 2, 7, BTN);
+        round(c, ab.x, ab.y, ab.w, ab.h, 8, theme::line());
+        round(
+            c,
+            ab.x + 1,
+            ab.y + 1,
+            ab.w - 2,
+            ab.h - 2,
+            7,
+            theme::button_bg(),
+        );
         let crumbs = fileman::breadcrumbs(&v.cwd);
         let labels: Vec<usize> = crumbs
             .iter()
@@ -128,15 +126,19 @@ impl Desktop {
         let (spans, folded) = lay.crumb_spans(&labels);
         let ty = ab.y + (ab.h - 14) / 2;
         if folded {
-            text(c, ab.x + 10, ty, b"...", theme::TEXT_MUTED);
+            text(c, ab.x + 10, ty, b"...", theme::text_muted());
         }
         let last = crumbs.len() - 1;
         for (n, &(i, x, _)) in spans.iter().enumerate() {
-            let col = if i == last { theme::TEXT } else { BLUE };
+            let col = if i == last {
+                theme::text()
+            } else {
+                theme::accent()
+            };
             text(c, x, ty, &fileman::display_ascii(&crumbs[i].label), col);
             if n + 1 < spans.len() {
                 let w = labels[i] as i32 * CELL;
-                text(c, x + w + CELL, ty, b">", theme::TEXT_MUTED);
+                text(c, x + w + CELL, ty, b">", theme::text_muted());
             }
         }
 
@@ -147,14 +149,14 @@ impl Desktop {
             lay.sidebar.y,
             lay.sidebar.w,
             lay.sidebar.h,
-            SIDEBAR,
+            theme::sidebar(),
         );
         text(
             c,
             lay.sidebar.x + 12,
             lay.sidebar.y + 6,
             b"Locais",
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
         let docs = v.cwd.starts_with(b"/Documentos");
         for (p, pr) in lay.places() {
@@ -170,12 +172,12 @@ impl Desktop {
                 continue;
             }
             if active {
-                round(c, pr.x, pr.y, pr.w, pr.h, 7, BLUE);
+                round(c, pr.x, pr.y, pr.w, pr.h, 7, theme::accent());
             }
             let (tc, gc) = if active {
                 (theme::WHITE, theme::WHITE)
             } else {
-                (theme::TEXT, BLUE)
+                (theme::text(), theme::accent())
             };
             glyph(
                 c,
@@ -184,15 +186,19 @@ impl Desktop {
                 pr.y + (pr.h - 16) / 2,
                 16,
                 gc,
-                if active { BLUE } else { SIDEBAR },
+                if active {
+                    theme::accent()
+                } else {
+                    theme::sidebar()
+                },
             );
             text(c, pr.x + 32, pr.y + (pr.h - 14) / 2, label, tc);
         }
 
         // ---- column header ----
         let h = lay.header;
-        rect(c, h.x, h.y, h.w, h.h, HEADER_BG);
-        rect(c, h.x, h.bottom() - 1, h.w, 1, SEP);
+        rect(c, h.x, h.y, h.w, h.h, theme::toolbar());
+        rect(c, h.x, h.bottom() - 1, h.w, 1, theme::line());
         let date_title: &[u8] = if v.in_trash() {
             b"Apagado em"
         } else if v.in_apps() {
@@ -206,7 +212,7 @@ impl Desktop {
             (date_title, lay.date_x + 8, SortKey::Modified),
         ];
         for (title, x, key) in cols {
-            text(c, x, h.y + (h.h - 14) / 2, title, theme::TEXT);
+            text(c, x, h.y + (h.h - 14) / 2, title, theme::text());
             if v.sort.key == key {
                 let ax = x + title.len() as i32 * CELL + 4;
                 text(
@@ -214,14 +220,14 @@ impl Desktop {
                     ax,
                     h.y + (h.h - 14) / 2,
                     if v.sort.asc { b"^" } else { b"v" },
-                    BLUE,
+                    theme::accent(),
                 );
             }
         }
 
         // ---- rows ----
         let l = lay.list;
-        rect(c, l.x, l.y, l.w, l.h, theme::WINDOW_BODY);
+        rect(c, l.x, l.y, l.w, l.h, theme::window_body());
         if v.rows.is_empty() {
             let msg: &[u8] = if v.in_trash() {
                 b"(lixeira vazia)"
@@ -230,7 +236,7 @@ impl Desktop {
             } else {
                 b"(pasta vazia)"
             };
-            text(c, lay.name_x, l.y + 10, msg, theme::TEXT_MUTED);
+            text(c, lay.name_x, l.y + 10, msg, theme::text_muted());
         }
         let name_cols = ((lay.size_x - lay.name_x - 8) / CELL).max(4) as usize;
         for i in v.scroll..v.rows.len().min(v.scroll + vis + 1) {
@@ -244,29 +250,33 @@ impl Desktop {
                 && !v.in_apps()
                 && self.pathclip.is_cut_path(&vfs::join(&v.cwd, &row.name));
             if sel {
-                round(c, l.x + 4, y, l.w - 8, ROW_H - 2, 6, BLUE);
+                round(c, l.x + 4, y, l.w - 8, ROW_H - 2, 6, theme::accent());
             } else if i % 2 == 1 {
-                rect(c, l.x, y, l.w, ROW_H - 2, ZEBRA);
+                rect(c, l.x, y, l.w, ROW_H - 2, theme::zebra());
             }
             if !sel && i == v.sel.cursor() && st.input.is_none() && !v.rows.is_empty() {
-                rect(c, l.x + 4, y, l.w - 8, 1, BLUE);
-                rect(c, l.x + 4, y + ROW_H - 3, l.w - 8, 1, BLUE);
+                rect(c, l.x + 4, y, l.w - 8, 1, theme::accent());
+                rect(c, l.x + 4, y + ROW_H - 3, l.w - 8, 1, theme::accent());
             }
             let (tc, mc) = if sel {
                 (theme::WHITE, theme::WHITE)
             } else if cut {
-                (SEP, SEP)
+                (theme::line(), theme::line())
             } else {
-                (theme::TEXT, theme::TEXT_MUTED)
+                (theme::text(), theme::text_muted())
             };
             let gcol = if sel {
                 theme::WHITE
             } else if row.is_dir() {
-                BLUE
+                theme::accent()
             } else {
-                theme::TEXT_MUTED
+                theme::text_muted()
             };
-            let bg = if sel { BLUE } else { theme::WINDOW_BODY };
+            let bg = if sel {
+                theme::accent()
+            } else {
+                theme::window_body()
+            };
             // Installed apps show their launcher icon, the rest the document glyph.
             let icon = if v.in_apps() && row.installed {
                 self.apps
@@ -314,9 +324,9 @@ impl Desktop {
                 let sc = if sel {
                     theme::WHITE
                 } else if row.installed {
-                    OKC
+                    theme::ok()
                 } else {
-                    theme::TEXT_MUTED
+                    theme::text_muted()
                 };
                 text(c, lay.date_x + 8, ty, status.as_bytes(), sc);
             } else {
@@ -326,18 +336,10 @@ impl Desktop {
 
         // ---- scrollbar ----
         let sb = lay.scrollbar;
-        rect(c, sb.x, sb.y, sb.w, sb.h, HEADER_BG);
+        rect(c, sb.x, sb.y, sb.w, sb.h, theme::toolbar());
         if v.rows.len() > vis {
             let (ty, th) = lay.thumb(v.scroll, v.rows.len());
-            round(
-                c,
-                sb.x + 2,
-                ty,
-                sb.w - 4,
-                th,
-                4,
-                Color::rgb(0x9A, 0xA5, 0xBD),
-            );
+            round(c, sb.x + 2, ty, sb.w - 4, th, 4, theme::ink_dim());
         }
 
         // ---- status bar ----
@@ -365,36 +367,44 @@ impl Desktop {
         } else {
             b"Disco"
         };
-        text(c, sx + 12, pr.y - 22, b"Discos", theme::TEXT_MUTED);
-        glyph(c, 2, pr.x + 8, pr.y + 2, 16, BLUE, SIDEBAR);
-        text(c, pr.x + 32, pr.y + 2, label, theme::TEXT);
+        text(c, sx + 12, pr.y - 22, b"Discos", theme::text_muted());
+        glyph(
+            c,
+            2,
+            pr.x + 8,
+            pr.y + 2,
+            16,
+            theme::accent(),
+            theme::sidebar(),
+        );
+        text(c, pr.x + 32, pr.y + 2, label, theme::text());
         let bar_x = pr.x + 8;
         let bar_w = pr.w - 16;
-        round(c, bar_x, pr.y + 22, bar_w, 8, 4, SEP);
+        round(c, bar_x, pr.y + 22, bar_w, 8, 4, theme::line());
         let fill = bar_w * usage.used_permille() as i32 / 1000;
         if fill > 0 {
             let col = if usage.used_permille() > 900 {
-                ERR
+                theme::danger()
             } else {
-                BLUE
+                theme::accent()
             };
             round(c, bar_x, pr.y + 22, fill.max(8), 8, 4, col);
         }
         let s = alloc::format!("{} livres", fileman::format_size(usage.free));
-        font::draw_bytes(
+        crate::text::legacy::draw_bytes(
             c,
             bar_x.max(0) as usize,
             (pr.y + 36).max(0) as usize,
             s.as_bytes(),
-            theme::TEXT_MUTED,
+            theme::text_muted(),
             1,
         );
     }
 
     fn draw_files_status(&self, c: &mut Canvas, lay: &Layout, st: &FilesState) {
         let s = lay.status;
-        rect(c, s.x + 1, s.y, s.w - 2, s.h - 1, TOOLBAR);
-        rect(c, s.x + 1, s.y, s.w - 2, 1, SEP);
+        rect(c, s.x + 1, s.y, s.w - 2, s.h - 1, theme::toolbar());
+        rect(c, s.x + 1, s.y, s.w - 2, 1, theme::line());
         let ty = s.y + (s.h - 14) / 2;
         let cols = ((s.w - 24) / CELL).max(8) as usize;
         if let Some(job) = &st.job {
@@ -402,28 +412,42 @@ impl Desktop {
             let pm = job.copy.permille();
             let name = shown(job.copy.current_name(), 22);
             let left = alloc::format!("{} {}", job.label, String::from_utf8_lossy(&name));
-            text(c, s.x + 12, ty, left.as_bytes(), theme::TEXT);
+            text(c, s.x + 12, ty, left.as_bytes(), theme::text());
             let bw = (s.w / 3).max(80);
             let bx = s.right() - 12 - bw - 5 * CELL;
-            round(c, bx, ty + 2, bw, 10, 5, SEP);
-            round(c, bx, ty + 2, (bw * pm as i32 / 1000).max(10), 10, 5, BLUE);
+            round(c, bx, ty + 2, bw, 10, 5, theme::line());
+            round(
+                c,
+                bx,
+                ty + 2,
+                (bw * pm as i32 / 1000).max(10),
+                10,
+                5,
+                theme::accent(),
+            );
             let pct = alloc::format!("{:>3}%", pm / 10);
-            text(c, bx + bw + 8, ty, pct.as_bytes(), theme::TEXT);
+            text(c, bx + bw + 8, ty, pct.as_bytes(), theme::text());
             return;
         }
         let summary = st.view.summary();
-        text(c, s.x + 12, ty, summary.as_bytes(), theme::TEXT_MUTED);
+        text(c, s.x + 12, ty, summary.as_bytes(), theme::text_muted());
         if let Some((m, err)) = &st.msg {
             let x = s.x + 12 + (summary.len() as i32 + 3) * CELL;
             let room = ((s.right() - 12 - x) / CELL).max(0) as usize;
-            let col = if *err { ERR } else { OKC };
+            let col = if *err { theme::danger() } else { theme::ok() };
             let mb = m.as_bytes();
             text(c, x, ty, &fileman::ellipsize(mb, room.min(cols)), col);
         } else if st.view.in_apps() {
             let x = s.x + 12 + (summary.len() as i32 + 3) * CELL;
             let room = ((s.right() - 12 - x) / CELL).max(0) as usize;
             let hint: &[u8] = b"Enter abre   I instala   Del remove";
-            text(c, x, ty, &fileman::ellipsize(hint, room), theme::TEXT_MUTED);
+            text(
+                c,
+                x,
+                ty,
+                &fileman::ellipsize(hint, room),
+                theme::text_muted(),
+            );
         }
     }
 
@@ -438,12 +462,12 @@ impl Desktop {
         let h = 96;
         let x = r.x + (r.w - w) / 2;
         let y = r.y + (r.h - h) / 2;
-        round(c, x - 3, y - 3, w + 6, h + 6, 12, SEP);
-        round(c, x, y, w, h, 10, theme::WINDOW_BODY);
-        text(c, x + 14, y + 10, title, theme::TEXT);
+        round(c, x - 3, y - 3, w + 6, h + 6, 12, theme::line());
+        round(c, x, y, w, h, 10, theme::window_body());
+        text(c, x + 14, y + 10, title, theme::text());
         let (bx, by, bw) = (x + 14, y + 34, w - 28);
-        round(c, bx, by, bw, 26, 6, BLUE);
-        round(c, bx + 2, by + 2, bw - 4, 22, 5, BTN);
+        round(c, bx, by, bw, 26, 6, theme::accent());
+        round(c, bx + 2, by + 2, bw - 4, 22, 5, theme::button_bg());
         let cols = ((bw - 16) / CELL).max(4) as usize;
         let disp = fileman::display_ascii(edit.input.text());
         let caret = edit.input.caret_column();
@@ -455,7 +479,7 @@ impl Desktop {
             bx + 8,
             by + 6,
             &disp[start.min(disp.len())..end],
-            theme::TEXT,
+            theme::text(),
         );
         rect(
             c,
@@ -463,14 +487,14 @@ impl Desktop {
             by + 5,
             2,
             16,
-            BLUE,
+            theme::accent(),
         );
         text(
             c,
             x + 14,
             y + 70,
             b"Enter confirma   Esc cancela",
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
     }
 
@@ -484,9 +508,9 @@ impl Desktop {
         let h = 104;
         let x = r.x + (r.w - w) / 2;
         let y = r.y + (r.h - h) / 2;
-        round(c, x - 3, y - 3, w + 6, h + 6, 12, ERR);
-        round(c, x, y, w, h, 10, theme::WINDOW_BODY);
-        text(c, x + 14, y + 12, l1.as_bytes(), theme::TEXT);
+        round(c, x - 3, y - 3, w + 6, h + 6, 12, theme::danger());
+        round(c, x, y, w, h, 10, theme::window_body());
+        text(c, x + 14, y + 12, l1.as_bytes(), theme::text());
         let l2 = if n > 0 {
             alloc::format!("{n} item(ns). Nao ha como desfazer.")
         } else {
@@ -497,14 +521,14 @@ impl Desktop {
             x + 14,
             y + 38,
             &fileman::ellipsize(l2.as_bytes(), ((w - 28) / CELL) as usize),
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
         text(
             c,
             x + 14,
             y + 74,
             b"Enter confirma   Esc cancela",
-            theme::TEXT,
+            theme::text(),
         );
     }
 
@@ -513,9 +537,9 @@ impl Desktop {
         let h = 44 + lines.len() as i32 * 20;
         let x = r.x + (r.w - w) / 2;
         let y = r.y + (r.h - h).max(0) / 2;
-        round(c, x - 3, y - 3, w + 6, h + 6, 12, SEP);
-        round(c, x, y, w, h, 10, theme::WINDOW_BODY);
-        text(c, x + 14, y + 10, b"Propriedades", BLUE);
+        round(c, x - 3, y - 3, w + 6, h + 6, 12, theme::line());
+        round(c, x, y, w, h, 10, theme::window_body());
+        text(c, x + 14, y + 10, b"Propriedades", theme::accent());
         let cols = ((w - 28) / CELL) as usize;
         for (i, l) in lines.iter().enumerate() {
             text(
@@ -523,24 +547,16 @@ impl Desktop {
                 x + 14,
                 y + 34 + i as i32 * 20,
                 &fileman::ellipsize(l.as_bytes(), cols),
-                theme::TEXT,
+                theme::text(),
             );
         }
     }
 
     fn draw_files_menu(&self, c: &mut Canvas, m: &CtxMenu) {
         let h = menu_height(m.items.len());
-        round(
-            c,
-            m.x + 3,
-            m.y + 5,
-            MENU_W_FILES,
-            h,
-            10,
-            Color::rgb(0xB5, 0xBC, 0xCB),
-        );
-        round(c, m.x, m.y, MENU_W_FILES, h, 9, theme::WINDOW_BODY);
-        round(c, m.x, m.y, MENU_W_FILES, 1, 0, SEP);
+        round(c, m.x + 3, m.y + 5, MENU_W_FILES, h, 10, theme::ink_dim());
+        round(c, m.x, m.y, MENU_W_FILES, h, 9, theme::window_body());
+        round(c, m.x, m.y, MENU_W_FILES, 1, 0, theme::line());
         for (i, (cmd, label)) in m.items.iter().enumerate() {
             let y = m.y + 4 + i as i32 * MENU_ROW_H;
             let hover = self.cursor_x >= m.x
@@ -548,7 +564,15 @@ impl Desktop {
                 && self.cursor_y >= y
                 && self.cursor_y < y + MENU_ROW_H;
             if hover {
-                round(c, m.x + 4, y + 1, MENU_W_FILES - 8, MENU_ROW_H - 2, 6, BLUE);
+                round(
+                    c,
+                    m.x + 4,
+                    y + 1,
+                    MENU_W_FILES - 8,
+                    MENU_ROW_H - 2,
+                    6,
+                    theme::accent(),
+                );
             }
             let col = if hover {
                 theme::WHITE
@@ -556,9 +580,9 @@ impl Desktop {
                 cmd,
                 fileman::Cmd::DeletePermanent | fileman::Cmd::EmptyTrash | fileman::Cmd::RemoveApp
             ) {
-                ERR
+                theme::danger()
             } else {
-                theme::TEXT
+                theme::text()
             };
             text(
                 c,

@@ -25,6 +25,10 @@ use osjeff_core::textlayout;
 static REGULAR: &[u8] = include_bytes!("../../assets/fonts/Inter-Regular.subset.ttf");
 static MEDIUM: &[u8] = include_bytes!("../../assets/fonts/Inter-Medium.subset.ttf");
 static SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/Inter-SemiBold.subset.ttf");
+static MONO: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.subset.ttf");
+
+/// Size of the terminal and editor text (a 9 px pitch: 600/1000 em).
+pub const MONO_PX: u16 = 15;
 
 /// UI type scale (pixels).
 pub const CAPTION: u16 = 11;
@@ -63,7 +67,7 @@ static LUT_LIGHT_TEXT: [u8; 256] = gamma_lut(-6);
 /// microseconds so boot can log them. Call once, before the first frame.
 pub fn init(tsc_khz: u64) -> (u64, Stats) {
     let t0 = crate::io::rdtsc();
-    let mut eng = TextEngine::new([REGULAR, MEDIUM, SEMIBOLD]);
+    let mut eng = TextEngine::new([REGULAR, MEDIUM, SEMIBOLD, MONO]);
     if let Some(e) = eng.as_mut() {
         // The faces the chrome shows on every frame; the rest fill on first use.
         for (w, px) in [
@@ -73,6 +77,7 @@ pub fn init(tsc_khz: u64) -> (u64, Stats) {
             (Weight::Regular, FOOTNOTE),
             (Weight::Regular, CAPTION),
             (Weight::Regular, CALLOUT),
+            (Weight::Mono, MONO_PX),
         ] {
             e.prewarm(w, px);
         }
@@ -304,5 +309,159 @@ pub fn from_bytes(t: &[u8]) -> alloc::borrow::Cow<'_, str> {
     match core::str::from_utf8(t) {
         Ok(s) => alloc::borrow::Cow::Borrowed(s),
         Err(_) => alloc::borrow::Cow::Owned(t.iter().map(|&b| b as char).collect()),
+    }
+}
+
+// ------------------------------------------------------------------ monospace
+
+/// The character cell of the terminal and the editor: `(pitch, line height)`.
+pub fn mono_cell() -> (i32, i32) {
+    engine().map_or((9, 20), |e| e.mono_cell(MONO_PX))
+}
+
+/// Draw `text` on the monospace grid: character `i` at `x + i * pitch`, with the top of
+/// its line box at `y`. Returns the width drawn.
+pub fn draw_mono(c: &mut Canvas, x: i32, y: i32, text: &str, px: u16, color: Color) -> i32 {
+    match engine() {
+        Some(e) => draw_mono_with(e, c, x, y, text, px, color),
+        None => 0,
+    }
+}
+
+fn draw_mono_with(
+    e: &mut TextEngine,
+    c: &mut Canvas,
+    x: i32,
+    y: i32,
+    text: &str,
+    px: u16,
+    color: Color,
+) -> i32 {
+    let pitch = e.mono_cell(px).0;
+    let base = y + e.vmetrics(Weight::Mono, px).ascent;
+    let lut = if luma(color) > 140 {
+        &LUT_LIGHT_TEXT
+    } else {
+        &LUT_DARK_TEXT
+    };
+    let clip = c.clip_rect();
+    let mut n = 0;
+    for ch in text.chars() {
+        let cx = x + n * pitch;
+        n += 1;
+        if cx >= clip.right() || cx + pitch <= clip.x || ch == ' ' {
+            continue;
+        }
+        let g = e.glyph(Weight::Mono, px, ch);
+        if g.w > 0 {
+            c.blend_coverage(
+                cx + g.left as i32,
+                base - g.top as i32,
+                e.coverage(&g),
+                g.w as usize,
+                g.h as usize,
+                color,
+                256,
+                lut,
+            );
+        }
+    }
+    n * pitch
+}
+
+/// The engine of the app thread (`appd`), separate from the compositor's so the two
+/// never mutate one glyph cache. Built on first use.
+static GUEST_ENGINE: RacyCell<Option<TextEngine>> = RacyCell::new(None);
+
+fn guest_engine() -> Option<&'static mut TextEngine> {
+    // SAFETY: only the `appd` thread draws guest text (host `draw_text` runs there), so
+    // this cell has one user; the reference is not kept across calls.
+    // NOTE: not guaranteed by the type: safe fn returning `&'static mut`.
+    let slot = unsafe { &mut *GUEST_ENGINE.get() };
+    if slot.is_none() {
+        *slot = TextEngine::new([MONO, MONO, MONO, MONO]);
+    }
+    slot.as_mut()
+}
+
+// ----------------------------------------------------------- compatibility shims
+
+/// The old bitmap-font API (`draw_text(c, x, y, text, colour, scale)`), for app
+/// interiors not yet re-skinned: text is drawn with the proportional UI font at a
+/// size picked from the old scale, `y` being the top of the old glyph box.
+pub mod legacy {
+    use super::*;
+
+    /// UI size and weight standing in for bitmap scale `s`.
+    fn face(scale: usize) -> (u16, Weight) {
+        match scale {
+            0 | 1 => (CAPTION, Weight::Regular),
+            2 => (BODY, Weight::Regular),
+            3 => (TITLE3 + 3, Weight::Medium),
+            4 => (TITLE2 + 4, Weight::Semibold),
+            5 => (TITLE1 + 6, Weight::Semibold),
+            _ => (TITLE1 + 12, Weight::Semibold),
+        }
+    }
+
+    pub fn draw_text(c: &mut Canvas, x: usize, y: usize, text: &str, color: Color, scale: usize) {
+        let (px, w) = face(scale);
+        let ty = center_y(y as i32, scale.max(1) as i32 * 8, px, w);
+        draw(c, x as i32, ty, text, px, w, color);
+    }
+
+    pub fn draw_bytes(c: &mut Canvas, x: usize, y: usize, t: &[u8], color: Color, scale: usize) {
+        draw_text(c, x, y, &from_bytes(t), color, scale);
+    }
+
+    /// Width of `text` at the stand-in size.
+    pub fn text_width(text: &str, scale: usize) -> usize {
+        let (px, w) = face(scale);
+        measure(text, px, w).max(0) as usize
+    }
+
+    /// Average character cell (the width of a digit) at the stand-in size.
+    pub fn cell_w(scale: usize) -> usize {
+        let (px, w) = face(scale);
+        measure("0", px, w).max(1) as usize
+    }
+}
+
+/// The host drawing ABI of the WebAssembly apps: guests lay their text out on a
+/// fixed `6 * scale` pixel pitch, so the host draws it with the monospace face at
+/// `10 * scale` px (a pitch of exactly `6 * scale`).
+pub mod guest {
+    use super::*;
+
+    fn px(scale: usize) -> u16 {
+        (10 * scale.clamp(1, 6)) as u16
+    }
+
+    /// Horizontal advance of one character.
+    pub const fn cell_w(scale: usize) -> usize {
+        6 * scale
+    }
+
+    pub fn draw_char(c: &mut Canvas, x: usize, y: usize, ch: u8, color: Color, scale: usize) {
+        let mut buf = [0u8; 4];
+        let s = char::from(ch).encode_utf8(&mut buf);
+        draw_text(c, x, y, s, color, scale);
+    }
+
+    pub fn draw_text(c: &mut Canvas, x: usize, y: usize, text: &str, color: Color, scale: usize) {
+        if let Some(e) = guest_engine() {
+            // The old glyphs sat on a baseline 7 rows below the top of their cell.
+            let asc = e.vmetrics(Weight::Mono, px(scale)).ascent;
+            let top = y as i32 + 7 * scale as i32 - asc;
+            draw_mono_with(e, c, x as i32, top, text, px(scale), color);
+        }
+    }
+
+    pub fn draw_bytes(c: &mut Canvas, x: usize, y: usize, t: &[u8], color: Color, scale: usize) {
+        draw_text(c, x, y, &from_bytes(t), color, scale);
+    }
+
+    pub fn text_width(text: &str, scale: usize) -> usize {
+        text.chars().count() * 6 * scale
     }
 }

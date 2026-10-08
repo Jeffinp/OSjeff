@@ -7,24 +7,19 @@
 //! stepping, dispatch, and one [`instance::App`] state per window.
 
 pub(crate) use crate::fb::{Canvas, Color, Corner, Shadow};
-pub(crate) use crate::font;
 pub(crate) use crate::icons::{self, Icon};
-pub(crate) use crate::logo;
 pub(crate) use crate::sched;
 pub(crate) use crate::sync::RacyCell;
 pub(crate) use crate::theme;
 pub(crate) use alloc::string::String;
 pub(crate) use alloc::vec::Vec;
 pub(crate) use osjeff_core::clipboard::{self, Clipboard};
-pub(crate) use osjeff_core::window::{ResizeEdge, TITLE_H, WindowId};
+pub(crate) use osjeff_core::window::{MENUBAR_H, ResizeEdge, TITLE_H, WindowId};
 pub(crate) use osjeff_core::winman::{ClickTracker, Switcher, WindowManager, WindowSpec};
 pub(crate) use osjeff_core::{Calc, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Time};
+pub(crate) use osjeff_core::{iconart, widgets as wlogic};
 
-// Dock / menu / start-panel / keypad geometry lives in `osjeff_core::layout`.
-use osjeff_core::layout::{
-    CALC_KEYS, DOCK_MARGIN, MENU_ITEM_H, MENU_PAD, MENU_W, START_GAP, START_PAD, START_ROW_H,
-    START_W,
-};
+use osjeff_core::layout::CALC_KEYS;
 
 /// Longest gap between the two presses of a double click, in timer ticks
 /// (250 Hz): 500 ms.
@@ -46,100 +41,16 @@ pub(crate) fn shadow_box(r: Rect) -> Rect {
 }
 
 /// Cursor sprite bounding box: the area `osjeff_core::cursor::CursorTrack` restores from the back
-/// buffer before every frame. Every sprite (`widgets::CURSOR`, `widgets::HAND`) must fit in it;
-/// the assertion below makes a larger sprite a build error instead of a trail of ghosts.
-pub const CURSOR_W: i32 = 10;
-pub const CURSOR_H: i32 = 16;
-
-const fn sprite_fits(rows: &[&str]) -> bool {
-    if rows.len() > CURSOR_H as usize {
-        return false;
-    }
-    let mut i = 0;
-    while i < rows.len() {
-        if rows[i].len() > CURSOR_W as usize {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
-const _: () = assert!(sprite_fits(&widgets::CURSOR) && sprite_fits(&widgets::HAND));
-
-/// Most app rows the start panel shows at once (more scroll).
-pub(crate) const START_MAX_ROWS: usize = 11;
-
-/// An entry in the start panel.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StartItem {
-    App(Kind),
-    /// An installed WASM app (index into the catalog).
-    Wasm(usize),
-    Reboot,
-    Shutdown,
-}
-
-/// What a dock icon click triggers.
-pub(crate) enum DockAction {
-    Start,
-    Open(Kind),
-}
+/// buffer before every frame. Every pointer sprite is rendered into exactly this box
+/// (`osjeff_core::pointer::{W, H}`), so no sprite can outgrow what gets erased.
+pub const CURSOR_W: i32 = osjeff_core::pointer::W as i32;
+pub const CURSOR_H: i32 = osjeff_core::pointer::H as i32;
 
 /// What changed after a mouse packet, so the caller can pick the cheap
 /// cursor-only repaint vs a full scene recompose.
 pub struct MouseResult {
     pub scene_dirty: bool,
     pub cursor_moved: bool,
-}
-
-/// Which context menu is open.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MenuKind {
-    /// Right click on the desktop: every app.
-    Desktop,
-    /// Right click on a dock icon: that app's window actions.
-    Dock(Kind),
-}
-
-/// What choosing a context-menu entry does.
-#[derive(Clone, Copy)]
-pub(crate) enum MenuAction {
-    /// Focus the app's window, opening one if there is none.
-    Launch(Kind),
-    /// Open one more window of the app.
-    NewWindow(Kind),
-}
-
-impl MenuKind {
-    pub(crate) fn len(self) -> usize {
-        match self {
-            MenuKind::Desktop => Kind::ALL.len(),
-            MenuKind::Dock(_) => 1,
-        }
-    }
-
-    /// Label, icon and action of entry `i`.
-    pub(crate) fn entry(self, i: usize) -> Option<(&'static str, Kind, MenuAction)> {
-        match self {
-            MenuKind::Desktop => Kind::ALL
-                .get(i)
-                .map(|&k| (k.label(), k, MenuAction::Launch(k))),
-            MenuKind::Dock(k) if i == 0 => Some(if k.multi() {
-                ("Nova janela", k, MenuAction::NewWindow(k))
-            } else {
-                ("Abrir", k, MenuAction::Launch(k))
-            }),
-            MenuKind::Dock(_) => None,
-        }
-    }
-}
-
-/// An open context menu: top-left corner and kind.
-#[derive(Clone, Copy)]
-pub(crate) struct MenuState {
-    pub x: i32,
-    pub y: i32,
-    pub kind: MenuKind,
 }
 
 /// A pointer drag in progress.
@@ -192,8 +103,13 @@ pub struct Desktop {
     /// The dynamic window table; every window owns an app instance.
     wm: WindowManager<Inst>,
     drag: Option<Drag>,
-    menu: Option<MenuState>,
-    start_open: bool,
+    /// Menus, popovers, sheets, the Apps and Busca overlays and the app bar.
+    shell: shell::Shell,
+    /// Per-window focus transitions (title bar and shadow cross-fade).
+    focus_mix: core::cell::RefCell<Vec<chrome::FocusMix>>,
+    /// Local date `(year, month, day)` and weekday (0 = Sunday), refreshed each second.
+    today: core::cell::Cell<(i32, u8, u8)>,
+    weekday: core::cell::Cell<u8>,
     /// The Alt+Tab switcher while Alt is held.
     switcher: Option<Switcher>,
     /// Window under the cursor (its title-bar buttons are shown).
@@ -210,10 +126,8 @@ pub struct Desktop {
     cursor_y: i32,
     prev_left: bool,
     prev_right: bool,
-    /// Installed WASM apps (the start panel lists them after the system apps).
+    /// Installed WASM apps (the Apps overlay lists them after the system apps).
     apps: Vec<AppEntry>,
-    /// First visible app row of the (scrollable) start panel.
-    start_scroll: usize,
     /// The WASM window that owns the pressed mouse button.
     wasm_grab: Option<WindowId>,
     /// Last seen generation of app-side clipboard writes.
@@ -249,8 +163,10 @@ impl Desktop {
             toast_dirty: false,
             wm: WindowManager::new(osjeff_core::winman::DEFAULT_MAX_WINDOWS),
             drag: None,
-            menu: None,
-            start_open: false,
+            shell: shell::Shell::new(),
+            focus_mix: core::cell::RefCell::new(Vec::new()),
+            today: core::cell::Cell::new((2026, 1, 1)),
+            weekday: core::cell::Cell::new(4),
             switcher: None,
             hover: None,
             tex_key: core::cell::Cell::new(None),
@@ -262,7 +178,6 @@ impl Desktop {
             prev_left: false,
             prev_right: false,
             apps: Vec::new(),
-            start_scroll: 0,
             wasm_grab: None,
             clip_gen: crate::wasm::clip_generation(),
             fs_gen: vfs::generation(),
@@ -275,14 +190,22 @@ impl Desktop {
         desk
     }
 
-    /// Everything that decides the cursor's pixels: where it is and which sprite (arrow or
-    /// hand). The compositor repaints the sprite whenever this differs from what it painted.
+    /// Everything that decides the cursor's pixels: the top-left of the sprite box and which
+    /// sprite (arrow, hand, I-beam). The compositor repaints the sprite whenever this differs
+    /// from what it painted.
     pub fn pointer(&self) -> osjeff_core::cursor::Pointer {
+        let (x, y) = self.cursor();
         osjeff_core::cursor::Pointer {
-            x: self.cursor_x,
-            y: self.cursor_y,
-            shape: u8::from(self.cursor_is_hand()),
+            x,
+            y,
+            shape: self.cursor_shape() as u8,
         }
+    }
+
+    /// Top-left of the pointer sprite box (the pointer position minus the hotspot).
+    pub fn cursor(&self) -> (i32, i32) {
+        let (hx, hy) = osjeff_core::pointer::hotspot(self.cursor_shape());
+        (self.cursor_x - hx, self.cursor_y - hy)
     }
 
     // ---- window lifecycle ----
@@ -344,6 +267,7 @@ impl Desktop {
         };
         match self.wm.open(spec, inst) {
             Ok(id) => {
+                self.dock_bounce(kind);
                 if kind == Kind::Files {
                     self.files_refresh(id);
                     if let Some(f) = self.files_mut(id) {
@@ -485,6 +409,9 @@ impl Desktop {
         self.step_shell_jobs();
         self.sync_text_windows();
         let (active, gone) = self.wm.step(dt);
+        let focus_busy = self.step_focus(dt);
+        let shell_busy = self.step_shell(dt);
+        let active = active || focus_busy || shell_busy;
         if !active {
             // Nothing animates any more: the next animation re-captures its window.
             self.tex_key.set(None);
@@ -523,75 +450,22 @@ impl Desktop {
     pub fn tick_processes(&mut self) {
         self.procs.tick();
         self.refresh_logs();
+        self.refresh_date();
     }
 
-    pub(crate) fn clamp_menu(&self, x: i32, y: i32, items: usize) -> (i32, i32) {
-        osjeff_core::layout::clamp_menu(self.sw, self.sh, x, y, items)
-    }
-
-    pub(crate) fn dock_hit(&self, px: i32, py: i32) -> Option<DockAction> {
-        match osjeff_core::layout::dock_slot_at(self.sw, self.sh, px, py)? {
-            0 => Some(DockAction::Start), // system icon -> start panel
-            n => Kind::ALL.get(n - 1).map(|&k| DockAction::Open(k)),
+    /// Read the local date once a second (the menu bar clock and the calendar).
+    fn refresh_date(&mut self) {
+        let hour = crate::rtc::now().h;
+        if hour != self.shell.last_hour {
+            self.poll_appearance(hour);
         }
-    }
-
-    /// True while a transient overlay (menu / start panel / Alt+Tab) is shown.
-    pub fn overlay_open(&self) -> bool {
-        self.menu.is_some() || self.start_open || self.switcher.is_some()
-    }
-
-    /// Screen rect of the bottom-right clock pill, including its drop shadow, so
-    /// a per-second tick can repaint just this region instead of the whole
-    /// framebuffer. Mirrors the geometry in [`draw_clock`].
-    pub fn clock_rect(&self) -> Rect {
-        let tw =
-            (osjeff_core::hw::rtc::clock_len(crate::settings::clock24()) * font::cell_w(2)) as i32;
-        let pad = 14;
-        let pw = tw + pad * 2;
-        let ph = 34;
-        let px = self.sw - pw - DOCK_MARGIN;
-        let py = self.sh - ph - DOCK_MARGIN;
-        // +6 (and a little slack) covers the shadow draw_clock offsets below.
-        Rect::new(px, py, pw, ph + 8)
-    }
-
-    /// True when the per-second clock tick can be repainted locally: nothing else
-    /// that changes each second is on screen (the Task Manager redraws its CPU
-    /// figures), and no visible window — including the drop shadow it casts
-    /// (up to 12 px to the sides, 26 px below) — reaches the clock pill, so the
-    /// pixels under the pill are exactly the wallpaper. The caller must also
-    /// know `back` holds the last fully composed scene (steady frame, no
-    /// animation or overlay).
-    pub fn clock_repaint_is_local(&self) -> bool {
-        /// Generous bound on how far a window's shadow extends past its rect.
-        const SHADOW_REACH: i32 = 32;
-        if self.task_window_rect().is_some() {
-            return false;
+        let local =
+            osjeff_core::hw::rtc::utc_to_local(crate::rtc::read_utc(), crate::rtc::tz_minutes());
+        if local.is_valid() {
+            self.today
+                .set((local.date.y as i32, local.date.m, local.date.d));
+            self.weekday.set(local.weekday());
         }
-        let pill = self.clock_rect();
-        !self.wm.windows().iter().any(|w| {
-            w.shown()
-                && self
-                    .window_box(w)
-                    .inflated(SHADOW_REACH)
-                    .intersection(&pill)
-                    .is_some()
-        })
-    }
-
-    /// Redo only the clock pill in `back`: restore the wallpaper under it, then
-    /// draw the pill. Valid when [`clock_repaint_is_local`] holds.
-    pub fn repaint_clock(
-        &self,
-        back: &mut [u8],
-        bg: &[u8],
-        info: bootloader_api::info::FrameBufferInfo,
-        time: Time,
-    ) {
-        copy_region(back, bg, info, self.clock_rect());
-        let mut c = Canvas::new(back, info);
-        draw_clock(&mut c, time);
     }
 
     /// Screen rect covering every visible window whose content changes by
@@ -607,31 +481,6 @@ impl Desktop {
             .reduce(|a, b| a.union(&b))
     }
 
-    /// Bounding rect of the open overlay(s), inflated for their drop shadows and
-    /// clamped to the screen. Empty when nothing is open. Drives the overlay
-    /// damage repaint.
-    pub fn overlay_bounds(&self) -> Rect {
-        let mut bounds: Option<Rect> = None;
-        if let Some(m) = self.menu {
-            let h = osjeff_core::layout::menu_height(m.kind.len());
-            bounds = Some(Rect::new(m.x, m.y, MENU_W, h));
-        }
-        if self.start_open {
-            let rows = self.start_rows();
-            let (sx, sy) = start_origin(self.sw, self.sh, rows);
-            let sr = Rect::new(sx, sy, START_W, start_height(rows));
-            bounds = Some(bounds.map_or(sr, |b| b.union(&sr)));
-        }
-        if let Some(sw) = &self.switcher {
-            let r = self.switcher_rect(sw.list().len());
-            bounds = Some(bounds.map_or(r, |b| b.union(&r)));
-        }
-        match bounds {
-            Some(b) => b.inflated(12).clamped_to(self.sw, self.sh),
-            None => Rect::new(0, 0, 0, 0),
-        }
-    }
-
     /// On-screen rect of window `w` right now: its resting rectangle, the in-flight
     /// rectangle of a zoom, or the scaled/moved one of an open / close / minimise.
     pub(crate) fn window_box(&self, w: &Win) -> Rect {
@@ -639,17 +488,6 @@ impl Desktop {
             return a.frame(w.rect, self.dock_target(w)).rect;
         }
         w.visual_rect()
-    }
-
-    /// Screen rectangle of the dock icon a window flies to / from when it is
-    /// minimised or restored; `None` for apps without a dock icon.
-    pub(crate) fn dock_target(&self, w: &Win) -> Option<Rect> {
-        let kind = w.app.kind();
-        if !kind.in_dock() {
-            return None;
-        }
-        let (_, icons) = dock_layout(self.sw, self.sh);
-        icons.get(kind.index() + 1).copied()
     }
 
     /// On-screen rect of the focused window, or `None` if none is focused. Lets
@@ -676,6 +514,7 @@ impl Desktop {
             || (w.shown() && w.app.kind() == Kind::WasmApp)
             || (w.shown() && matches!(&w.app.app, App::Files(f) if f.job.is_some()))
             || (w.shown() && matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
+            || self.focus_busy(w.id)
     }
 
     /// True while any window is opening, closing, being dragged, or is a live
@@ -683,10 +522,13 @@ impl Desktop {
     /// app gets continuous frames, rather than the steady (repaint-on-change) one.
     pub fn has_animation(&self) -> bool {
         self.drag.is_some()
+            || self.shell_animating()
+            || self.toasts_sliding()
             || self.wm.windows().iter().any(|w| {
                 w.shown()
                     && (w.anim.is_some()
                         || w.zoom.is_some()
+                        || self.focus_busy(w.id)
                         || w.app.kind() == Kind::WasmApp
                         || matches!(&w.app.app, App::Files(f) if f.job.is_some())
                         || matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
@@ -998,15 +840,23 @@ fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
 }
 
 mod apps;
+mod chrome;
+mod cursor;
+mod dock;
 mod edit;
 mod files;
 mod files_ui;
+mod gallery;
+mod glass;
 mod input;
 mod instance;
 mod logview;
+mod menubar;
 mod monitor;
+mod overlays;
 mod render;
 mod settings_ui;
+mod shell;
 mod shellhost;
 mod sysstore;
 mod term;

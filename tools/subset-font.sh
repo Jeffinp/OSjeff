@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Rebuilds assets/fonts/Inter-{Regular,Medium,SemiBold}.subset.ttf from the upstream
-# Inter 4.0 static TrueType files (SIL OFL 1.1, see assets/fonts/OFL.txt).
+# Inter 4.0 static TrueType files (SIL OFL 1.1, see assets/fonts/OFL.txt) and, with a
+# second argument, assets/fonts/JetBrainsMono-Regular.subset.ttf (OFL-JetBrainsMono.txt).
 #
 #   tools/subset-font.sh <dir with Inter-Regular.ttf Inter-Medium.ttf Inter-SemiBold.ttf>
 #
@@ -17,4 +18,13 @@ for w in Regular Medium SemiBold; do
     --no-hinting --name-IDs=0,1,2,4,6,13,14 --notdef-outline --drop-tables+=DSIG,STAT,GDEF,GSUB \
     --output-file="$out/Inter-$w.subset.ttf"
 done
+
+# The monospace face (JetBrains Mono, SIL OFL 1.1) for the terminal and the editor:
+#   tools/subset-font.sh <inter dir> <jetbrains-mono ttf dir>
+if [ -n "${2:-}" ]; then
+  mono="U+0020-007E,U+00A0-00FF,U+0131,U+0152,U+0153,U+0160,U+0161,U+0178,U+017D,U+017E,U+0192,U+02C6,U+02DC,U+2013,U+2014,U+2018-201A,U+201C-201E,U+2020,U+2021,U+2022,U+2026,U+2030,U+2039,U+203A,U+20AC,U+2122,U+2190-2193,U+2212,U+2500-257F,U+2580-259F,U+25A0,U+25B2,U+25B6,U+25BC,U+25C0,U+25CB,U+25CF,U+2713,U+2715"
+  pyftsubset "$2/JetBrainsMono-Regular.ttf" --unicodes="$mono" --layout-features='' \
+    --no-hinting --name-IDs=0,1,2,4,6,13,14 --notdef-outline --drop-tables+=DSIG,STAT,GDEF,GSUB,GPOS,kern \
+    --output-file="$out/JetBrainsMono-Regular.subset.ttf"
+fi
 ls -l "$out"

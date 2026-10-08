@@ -78,7 +78,6 @@ impl Desktop {
                 manifest: c.manifest,
             })
             .collect();
-        self.start_scroll = self.start_scroll.min(self.start_max_scroll());
         serial_println!("apps: catalog has {} apps", self.apps.len());
         // File managers showing the Apps place follow the catalog.
         self.refresh_apps_views();
@@ -192,27 +191,6 @@ impl Desktop {
         }
         self.refresh_catalog();
         Ok(())
-    }
-
-    // ---- start panel geometry ----
-
-    /// Entries in the start panel's app list: the system apps then the installed ones.
-    pub(crate) fn start_total(&self) -> usize {
-        Kind::ALL.len() + self.apps.len()
-    }
-
-    /// Rows the panel shows at once.
-    pub(crate) fn start_rows(&self) -> usize {
-        self.start_total().min(START_MAX_ROWS)
-    }
-
-    pub(crate) fn start_max_scroll(&self) -> usize {
-        self.start_total().saturating_sub(self.start_rows())
-    }
-
-    pub(crate) fn scroll_start(&mut self, delta: i32) {
-        let max = self.start_max_scroll() as i32;
-        self.start_scroll = (self.start_scroll as i32 + delta).clamp(0, max) as usize;
     }
 
     // ---- windows ----

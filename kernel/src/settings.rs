@@ -31,6 +31,7 @@ pub fn set(s: Settings) {
     crate::rtc::set_tz_minutes(s.tz_minutes as i32);
     CLOCK24.store(s.clock24, Ordering::Relaxed);
     TOASTS.store(s.toasts, Ordering::Relaxed);
+    osjeff_core::anim::set_reduce_motion(s.reduce_motion);
 }
 
 /// 24-hour clock (otherwise 12-hour with AM/PM).

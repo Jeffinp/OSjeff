@@ -1,13 +1,14 @@
-//! Animated boot splash drawn before the desktop starts. OSJeff identity:
-//! dark indigo mesh, brand mark, teal progress with glow.
+//! Animated boot splash drawn before the desktop starts: the deep night wallpaper,
+//! the brand mark, the name and a slim progress bar.
 
-use crate::fb::Canvas;
-use crate::font;
-use crate::logo;
+use crate::fb::{Canvas, Color, Corner};
+use crate::text::{self, BODY, Weight};
 use crate::theme;
+use osjeff_core::Rect;
+use osjeff_core::wallpaper::{PRESETS, lerp_rgb};
 
-fn centered_x(c: &Canvas, text: &str, scale: usize) -> usize {
-    (c.width().saturating_sub(font::text_width(text, scale))) / 2
+fn rgb24(v: u32) -> Color {
+    Color::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
 
 /// Renders one frame of the splash. `progress` in `0.0..=1.0` fills the bar.
@@ -15,95 +16,63 @@ pub fn draw_splash(c: &mut Canvas, progress: f32) {
     let w = c.width();
     let h = c.height();
 
-    // Indigo gradient + two soft accent "mesh" blobs.
+    // The dark scheme of the default wallpaper: gradient and soft glows.
+    let sc = PRESETS[0].scheme(true);
     for y in 0..h {
-        let t = ((y * 255) / h.max(1)) as u16;
-        c.fill_rect(0, y, w, 1, theme::BG_TOP.lerp(theme::BG_BOTTOM, t));
+        let t = ((y * 255) / h.max(1)) as u32;
+        c.fill_rect(0, y, w, 1, rgb24(lerp_rgb(sc.top, sc.bottom, t)));
     }
-    let blob = (w / 3).max(320);
-    c.fill_round_rect_alpha(
-        0usize.saturating_sub(0),
-        0,
-        blob,
-        blob,
-        blob / 2,
-        theme::GLOW_TEAL,
-        20,
-    );
-    c.fill_round_rect_alpha(
-        w - blob,
-        h - blob,
-        blob,
-        blob,
-        blob / 2,
-        theme::GLOW_VIOLET,
-        20,
-    );
+    let lut = osjeff_core::raster::glow_lut();
+    for b in sc.blobs.iter().filter(|b| b.alpha > 0 && b.r > 0) {
+        let cx = (w as i64 * b.x as i64 / 1000) as i32;
+        let cy = (h as i64 * b.y as i64 / 1000) as i32;
+        let rad = (w as i64 * b.r as i64 / 1000) as i32;
+        c.glow(cx, cy, rad, rgb24(b.color), b.alpha as u32, &lut);
+    }
 
-    // Brand logo (real RGBA) + glow.
-    let cx = w / 2;
-    let mark = logo::SIZE_128;
-    let gy = h * 30 / 100;
-    let glow = mark * 2;
-    c.fill_round_rect_alpha(
-        cx - glow / 2,
-        gy + mark / 2 - glow / 2,
-        glow,
-        glow,
-        glow / 2,
-        theme::accent(),
-        22,
+    // Brand mark with a soft halo, the name below it.
+    let cx = w as i32 / 2;
+    let mark = 112;
+    let gy = h as i32 * 30 / 100;
+    c.glow(cx, gy + mark / 2, mark * 2, theme::accent(), 70, &lut);
+    c.blit_surface(
+        crate::icons::surface(crate::icons::Icon::Brand, mark),
+        cx - mark / 2,
+        gy,
+        256,
     );
-    c.draw_rgba(logo::ICON_128, mark, mark, cx - mark / 2, gy);
-
-    // Wordmark + tagline.
-    let title = "OSJEFF";
-    font::draw_text(
+    let name = Rect::new(0, gy + mark + 22, w as i32, 48);
+    text::draw_centered(
         c,
-        centered_x(c, title, 6),
-        gy + mark + 24,
-        title,
-        theme::WHITE,
-        6,
+        name,
+        "OSjeff",
+        40,
+        Weight::Semibold,
+        Color::rgb(255, 255, 255),
     );
-    let sub = "Sistema Operacional";
-    font::draw_text(
+    let sub = Rect::new(0, name.bottom() + 2, w as i32, 24);
+    text::draw_centered(
         c,
-        centered_x(c, sub, 2),
-        gy + mark + 88,
         sub,
-        theme::TEXT_MUTED,
-        2,
+        "Sistema operacional",
+        BODY,
+        Weight::Regular,
+        Color::rgb(0xC4, 0xC6, 0xE8),
     );
 
-    // Progress bar with glow under the fill.
-    let bar_w = (w / 3).max(240);
-    let bar_x = (w - bar_w) / 2;
-    let bar_y = h * 72 / 100;
-    let bar_h = 8usize;
-    c.fill_round_rect(bar_x, bar_y, bar_w, bar_h, bar_h / 2, theme::DOCK_EDGE);
+    // Slim progress bar: translucent track, accent fill.
+    let bar_w = (w as i32 / 4).max(220);
+    let bar = Rect::new((w as i32 - bar_w) / 2, h as i32 * 74 / 100, bar_w, 6);
+    c.fill_rrect(bar, 3, Corner::Circle, Color::rgb(255, 255, 255), 46);
     let p = progress.clamp(0.0, 1.0);
-    let fill = (bar_w as f32 * p) as usize;
-    if fill > bar_h {
-        c.fill_round_rect_alpha(
-            bar_x,
-            bar_y - 3,
-            fill,
-            bar_h + 6,
-            (bar_h + 6) / 2,
-            theme::accent(),
-            60,
+    let fill = ((bar_w as f32 * p) as i32).max(0);
+    if fill >= 6 {
+        c.fill_rrect(
+            Rect::new(bar.x, bar.y, fill, bar.h),
+            3,
+            Corner::Circle,
+            theme::accent().lerp(Color::rgb(255, 255, 255), 60),
+            256,
         );
-        c.fill_round_rect(bar_x, bar_y, fill, bar_h, bar_h / 2, theme::accent());
     }
-
-    let status = "Carregando o sistema...";
-    font::draw_text(
-        c,
-        centered_x(c, status, 2),
-        bar_y + 24,
-        status,
-        theme::TEXT_MUTED,
-        2,
-    );
 }

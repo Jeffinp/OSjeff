@@ -11,7 +11,7 @@ use osjeff_core::gfx::{
     alpha255_to_256, blend_lut, corner_inset, luma, mix256, split_span_around_hole,
 };
 #[allow(unused_imports)]
-pub use shapes::{Corner, Shadow, masks_for_bench};
+pub use shapes::{Corner, Shadow, masks};
 
 /// Minimum `w*h` for the table-driven alpha fill (building the table costs
 /// ~3k instructions, which only pays off on large areas).
