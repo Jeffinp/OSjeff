@@ -39,9 +39,26 @@ const SCRATCH_BYTES: usize = 640 * 440 * 4;
 struct AlignedScratch([u8; SCRATCH_BYTES]);
 static SCRATCH: RacyCell<AlignedScratch> = RacyCell::new(AlignedScratch([0; SCRATCH_BYTES]));
 
-/// Cursor sprite bounding box (used by the dirty-rect overlay path).
+/// Cursor sprite bounding box: the area `osjeff_core::cursor::CursorTrack` restores from the back
+/// buffer before every frame. Every sprite (`widgets::CURSOR`, `widgets::HAND`) must fit in it;
+/// the assertion below makes a larger sprite a build error instead of a trail of ghosts.
 pub const CURSOR_W: i32 = 10;
 pub const CURSOR_H: i32 = 16;
+
+const fn sprite_fits(rows: &[&str]) -> bool {
+    if rows.len() > CURSOR_H as usize {
+        return false;
+    }
+    let mut i = 0;
+    while i < rows.len() {
+        if rows[i].len() > CURSOR_W as usize {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+const _: () = assert!(sprite_fits(&widgets::CURSOR) && sprite_fits(&widgets::HAND));
 
 /// Most app rows the start panel shows at once (more scroll).
 pub(crate) const START_MAX_ROWS: usize = 11;
@@ -249,8 +266,14 @@ impl Desktop {
         desk
     }
 
-    pub fn cursor(&self) -> (i32, i32) {
-        (self.cursor_x, self.cursor_y)
+    /// Everything that decides the cursor's pixels: where it is and which sprite (arrow or
+    /// hand). The compositor repaints the sprite whenever this differs from what it painted.
+    pub fn pointer(&self) -> osjeff_core::cursor::Pointer {
+        osjeff_core::cursor::Pointer {
+            x: self.cursor_x,
+            y: self.cursor_y,
+            shape: u8::from(self.cursor_is_hand()),
+        }
     }
 
     // ---- window lifecycle ----

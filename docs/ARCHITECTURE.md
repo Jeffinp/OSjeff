@@ -547,7 +547,22 @@ flowchart TD
   janela e mistura de volta com o alfa da animação. Janelas cujo retângulo não cabe em
   `SCRATCH` (navegador, gerenciador de arquivos e, em 32 bpp, o app WASM) abrem e fecham
   **sem fade**.
-- **O cursor não está em `BACK`**: é desenhado direto no framebuffer depois de cada blit.
+- **O cursor não está em `BACK`**: é desenhado direto no framebuffer, e vale uma invariante
+  (`osjeff_core::cursor::CursorTrack`, testada no host com um framebuffer simulado):
+  **todo quadro que renderiza algo começa apagando o sprite** (restaura de `BACK` o retângulo
+  onde ele foi pintado, recortado na tela) **e termina pintando-o de novo**, depois dos
+  blits, dos toasts e do HUD. Nenhum caminho restaura ou desenha o cursor por conta própria
+  (antes cada caminho fazia o seu, e os que não tratavam `cursor_moved` mas subiam
+  retângulos, como hover, clique ou tecla, deixavam o sprite antigo na tela: um rastro de
+  setas sob as janelas). Vários pacotes de mouse num quadro, cursor preso na borda,
+  mudança de forma (seta para mão) sem movimento e animação sob o cursor caem todos no
+  mesmo par apagar/pintar. O HUD e os toasts também vivem só no framebuffer: se o retângulo
+  apagado os toca, eles são redesenhados antes do cursor. **Ao portar o desenho para outra
+  estrutura, mantenha só isto:** `erase` antes de qualquer escrita no framebuffer do quadro,
+  `paint` depois da última, e `CURSOR_W/H` cobrindo todo sprite (verificado em tempo de
+  compilação). Prova no QEMU: `tools/perf/scen/w20-cursor.sh` (rajadas rápidas sobre bordas,
+  dock e cantos) + `tools/perf/w20-cursor-check.sh` (0 pixels diferentes entre a tela em
+  repouso e a mesma tela depois de um repaint completo forçado).
   **Relógio:** o tique de 1 s repinta só a pílula (e a janela do Task Manager, se aberta),
   em vez de subir ~8 MiB. **Sombra:** não é misturada sob o corpo opaco da janela
   (`fill_round_rect_alpha_skip`): evita ~85% do blend com saída idêntica.

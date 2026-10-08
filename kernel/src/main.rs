@@ -52,6 +52,7 @@ use bootloader_api::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use desktop::{CURSOR_H, CURSOR_W, Desktop};
 use fb::Canvas;
+use osjeff_core::cursor::CursorTrack;
 use osjeff_core::{Rect, Time};
 use ps2::Event;
 
@@ -380,7 +381,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     trace::mark("wallpaper painted");
     let mut last_sec = 0xFFu8; // force first render
-    let mut prev_cursor = desk.cursor();
+    // Where the cursor sprite is painted in the framebuffer (see `osjeff_core::cursor`: erased at
+    // the start of every rendering frame, painted again at its end).
+    let mut cursor = CursorTrack::new(CURSOR_W, CURSOR_H);
     // Seed from the live tick count, NOT 0: the splash ran for ~5 s with the
     // timer firing, so a 0 seed would make the first frame's delta enormous and
     // instantly complete the open animation (skipping the full-screen blit that
@@ -505,11 +508,28 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             clock_tick = false;
         }
 
+        // The pointer changed since the sprite was painted: it moved (possibly several PS/2
+        // packets since the last frame, clamped at an edge or not), or it turned into a hand
+        // over a link without moving. Anything else that renders also repaints the sprite.
+        cursor_moved |= cursor.is_stale(desk.pointer());
+
         // Did this iteration do real rendering work? (Used to time frames.)
         let work = any_anim || scene_dirty || clock_tick || cursor_moved || was_anim;
         let frame_start = io::rdtsc();
         let cpu_start = trace::cpu_now();
         let mut path: Option<trace::Path> = None;
+
+        // CURSOR INVARIANT (see `osjeff_core::cursor`): the sprite lives only in the
+        // framebuffer, never in `back`. Every frame that renders anything first erases it
+        // (restores the old sprite box from `back`), then does its own uploads, toasts and
+        // HUD, and paints the sprite again as the very last step. No path restores or draws
+        // the cursor on its own, so none can forget to.
+        let mut erased_hud = false;
+        if work && let Some(r) = cursor.erase(info.width as i32, info.height as i32) {
+            fb_blit_rect(framebuffer.buffer_mut(), back, info, r.x, r.y, r.w, r.h, n);
+            let hr = perf::Perf::rect(info.width as i32);
+            erased_hud = hr.intersection(&r).is_some();
+        }
 
         if any_anim {
             // ---- Animation fast-path: cache the static scene, then each frame
@@ -529,8 +549,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 let dmg = desk.render_anim_frame(back, static_buf, info, Rect::new(0, 0, 0, 0));
                 trace::stage(trace::Stage::Compose, tc);
                 fb_full_blit(framebuffer.buffer_mut(), back, n);
-                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
-                prev_cursor = desk.cursor();
                 static_valid = true;
                 last_sig = sig;
                 prev_damage = dmg;
@@ -551,21 +569,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     damage.h,
                     n,
                 );
-                // Repaint the cursor (the damage blit may have covered it, and the
-                // cursor itself may have moved).
-                let (ox, oy) = prev_cursor;
-                fb_blit_rect(
-                    framebuffer.buffer_mut(),
-                    back,
-                    info,
-                    ox,
-                    oy,
-                    CURSOR_W,
-                    CURSOR_H,
-                    n,
-                );
-                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
-                prev_cursor = desk.cursor();
                 prev_damage = damage;
             }
         } else if desk.overlay_open() {
@@ -587,8 +590,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 }
                 trace::stage(trace::Stage::Compose, tc);
                 fb_full_blit(framebuffer.buffer_mut(), back, n);
-                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
-                prev_cursor = desk.cursor();
                 static_valid = true;
                 last_sig = sig;
             } else if cursor_moved {
@@ -612,20 +613,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     ov.h,
                     n,
                 );
-                // Repaint the cursor (it may have moved off the overlay).
-                let (ox, oy) = prev_cursor;
-                fb_blit_rect(
-                    framebuffer.buffer_mut(),
-                    back,
-                    info,
-                    ox,
-                    oy,
-                    CURSOR_W,
-                    CURSOR_H,
-                    n,
-                );
-                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
-                prev_cursor = desk.cursor();
             }
         } else {
             static_valid = false;
@@ -670,8 +657,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     }
                     up(desk.clock_rect());
                 }
-                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
-                prev_cursor = desk.cursor();
             } else if clock_tick {
                 let tc = trace::t();
                 // Per-second tick, nothing else changed: refresh `back` but upload
@@ -714,37 +699,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         n,
                     );
                 }
-                // The cursor isn't in `back`; repaint it in case it overlaps the
-                // regions just blitted.
-                let (ox, oy) = prev_cursor;
-                fb_blit_rect(
-                    framebuffer.buffer_mut(),
-                    back,
-                    info,
-                    ox,
-                    oy,
-                    CURSOR_W,
-                    CURSOR_H,
-                    n,
-                );
-                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
-                prev_cursor = desk.cursor();
             } else if cursor_moved {
                 path = Some(trace::Path::Cursor);
-                // Cheap path: restore under the old cursor, draw at the new spot.
-                let (ox, oy) = prev_cursor;
-                fb_blit_rect(
-                    framebuffer.buffer_mut(),
-                    back,
-                    info,
-                    ox,
-                    oy,
-                    CURSOR_W,
-                    CURSOR_H,
-                    n,
-                );
-                cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
-                prev_cursor = desk.cursor();
             }
             prev_focused = desk.focused_box();
         }
@@ -772,6 +728,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // expiry. Only while a toast is on screen, or has just left, is anything
         // repainted: restore the scene under them from `back`, draw them on top.
         let toast_changed = desk.poll_toasts(klog::ticks_to_ms_now());
+        let mut toast_drawn = false;
         if toast_changed || (work && !desk.toasts_idle()) {
             let tt = trace::t();
             let cur = desk.toast_bounds();
@@ -787,15 +744,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
                 desk.draw_toasts(&mut c);
             }
-            cursor_to_fb(&desk, framebuffer.buffer_mut(), info, n);
+            toast_drawn = true;
             prev_toast_rect = cur;
             trace::stage(trace::Stage::Hud, tt);
         }
 
         // Perf HUD: refresh ~10x/s as a framebuffer overlay restored from `back`,
         // so it never pollutes the cached scene. Drawn outside the timed window.
-        if tick.saturating_sub(last_hud) >= 25 {
+        // (Also when erasing the old cursor box just wiped part of it.)
+        let mut hud_drawn = false;
+        if tick.saturating_sub(last_hud) >= 25 || erased_hud {
             last_hud = tick;
+            hud_drawn = true;
             let used = HEAP_SIZE - ALLOCATOR.free_bytes().min(HEAP_SIZE);
             let heap_pct = (used * 100 / HEAP_SIZE) as u32;
             let hr = perf::Perf::rect(info.width as i32);
@@ -813,6 +773,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             let mut c = Canvas::new(&mut framebuffer.buffer_mut()[..n], info);
             perf.draw(&mut c, heap_pct, sched::thread_count());
             trace::stage(trace::Stage::Hud, th);
+        }
+
+        // Cursor: painted last (step 3 of the invariant above), over the frame, the toasts and
+        // the HUD. A toast or HUD restore from `back` can also wipe a sprite that was already
+        // painted in a frame that did no rendering, so those repaint it too.
+        if work || toast_drawn || hud_drawn {
+            cursor_to_fb(&desk, &mut cursor, framebuffer.buffer_mut(), info, n);
         }
         if report_due {
             trace::report(tsc_khz, tick);
@@ -933,9 +900,17 @@ fn copy_bg(dst: &mut [u8], bg: &[u8]) {
     trace::prim(trace::Prim::BgCopy, t0);
 }
 
-/// Draw the cursor straight into the framebuffer (timed as `Stage::Cursor`).
-fn cursor_to_fb(desk: &Desktop, fb: &mut [u8], info: FrameBufferInfo, n: usize) {
+/// Draw the cursor straight into the framebuffer (timed as `Stage::Cursor`) and record where it
+/// went. Always the last step of a frame, after `CursorTrack::erase` restored the old sprite.
+fn cursor_to_fb(
+    desk: &Desktop,
+    track: &mut CursorTrack,
+    fb: &mut [u8],
+    info: FrameBufferInfo,
+    n: usize,
+) {
     let t0 = trace::t();
+    track.paint(desk.pointer(), info.width as i32, info.height as i32);
     let mut c = Canvas::new(&mut fb[..n], info);
     desk.draw_cursor_overlay(&mut c);
     trace::stage(trace::Stage::Cursor, t0);

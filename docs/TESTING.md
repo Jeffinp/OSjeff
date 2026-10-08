@@ -223,6 +223,25 @@ como segundo argumento nos seguintes.
 Uma baseline tirada com o disco antigo de 64 KiB continua valendo com o disco de 64 MiB:
 montar o v3 não muda um pixel do desktop (provado: 0 pixels em BIOS e UEFI).
 
+### Cursor sem rastro (W20)
+
+O cursor é desenhado só no framebuffer; um sprite que não é apagado deixa um rastro de
+setas. O modelo puro (`osjeff_core::cursor`, testes com um framebuffer simulado) prova a
+regra apagar-no-início / pintar-no-fim; o QEMU prova o kernel:
+
+```bash
+QEMU_MEM=256M tools/perf/run.sh <img> bios /tmp/w20c 400 tools/perf/scen/w20-cursor.sh
+tools/perf/w20-cursor-check.sh /tmp/w20c        # "differing_pixels=0" em cada rodada
+STEP=3 GAP=0.02 ...                              # devagar; STEP=250 GAP=0 = pacotes em rajada
+QEMU_EXTRA="-device usb-ehci -device usb-tablet" ...   # o guest só tem PS/2: o tablet não muda nada
+```
+
+O cenário varre bordas de janela, a barra de título, o dock e os cantos da tela com
+`mouse_move` em rajadas (muitos pacotes PS/2 entre dois quadros), estaciona o cursor, tira
+`rest<N>.png` e força um repaint completo (Alt+Tab e volta) para tirar `clean<N>.png` com
+o cursor no mesmo lugar. Os dois têm de ser idênticos fora do HUD e do relógio. Antes da
+correção: 181 pixels de diferença por rodada (setas fantasma); depois: 0.
+
 ### Rede em QEMU
 
 `tools/qemu-headless.sh` captura o tráfego da NIC em `<outdir>/net.pcap` e aceita duas

@@ -26,6 +26,7 @@ pub mod bmp;
 pub mod browser;
 pub mod calc;
 pub mod clipboard;
+pub mod cursor;
 pub mod deflate;
 pub mod dns;
 pub mod editor2;
