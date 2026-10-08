@@ -38,6 +38,7 @@ mod settings;
 mod storage;
 mod sync;
 mod sysinfo;
+mod text;
 mod theme;
 mod tlsv;
 mod trace;
@@ -362,6 +363,29 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ATA driver can yield to the other threads between sectors.
     storage::init();
     trace::mark("storage init done");
+
+    // UI text engine: parse the embedded fonts and rasterise the faces the chrome
+    // draws on every frame (the rest of the glyph cache fills on first use).
+    {
+        let (us, st) = text::init(tsc_khz);
+        klog!(
+            Info,
+            "ui text: {} glyphs, {} KiB atlas in {} us",
+            st.glyphs,
+            st.arena_bytes / 1024,
+            us
+        );
+        if trace::ON {
+            serial_println!(
+                "[trace] ui: text atlas {} glyphs {} bytes {} strips built in {} us",
+                st.glyphs,
+                st.arena_bytes,
+                st.strips,
+                us
+            );
+        }
+    }
+    trace::mark("ui text engine ready");
     // logd: persists the system log off the compositor thread (the boot log is written
     // after the first desktop frame, see `logd`).
     x86_64::instructions::interrupts::without_interrupts(|| {

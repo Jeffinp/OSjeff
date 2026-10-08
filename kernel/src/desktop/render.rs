@@ -251,15 +251,22 @@ impl Desktop {
 
         // App indicator dot + title (clipped before the title-bar buttons).
         c.fill_round_rect(x + 12, y + 11, 8, 8, 4, accent);
-        let title = win.app.title.as_bytes();
-        let room = (r.min_rect().x - (r.x + 28) - 6).max(0) as usize / font::cell_w(2);
-        font::draw_bytes(
+        let room = (r.min_rect().x - (r.x + 28) - 8).max(0);
+        let ty = crate::text::center_y(
+            y as i32,
+            th as i32,
+            crate::text::BODY,
+            crate::text::Weight::Medium,
+        );
+        crate::text::draw_ellipsis(
             c,
-            x + 28,
-            y + 8,
-            &title[..title.len().min(room)],
+            x as i32 + 28,
+            ty,
+            room,
+            &win.app.title,
+            crate::text::BODY,
+            crate::text::Weight::Medium,
             theme::HEADER_TEXT,
-            2,
         );
 
         // Close button (circular).

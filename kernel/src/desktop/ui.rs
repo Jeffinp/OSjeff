@@ -27,37 +27,46 @@ fn us(v: i32) -> usize {
     v.max(0) as usize
 }
 
-/// Draw `text` (scale 2) at `(x, y)`, cut to `max_w` pixels.
+/// Draw `text` at `(x, y)` (the top of a [`CELL_H`]-high row), cut with an ellipsis to
+/// `max_w` pixels. Proportional 13 px UI font; `t` is UTF-8 (or Latin-1) bytes.
 pub(crate) fn text(c: &mut Canvas, x: i32, y: i32, max_w: i32, t: &[u8], color: Color) {
-    let n = (max_w.max(0) / CELL_W) as usize;
-    font::draw_bytes(c, us(x), us(y), &t[..t.len().min(n)], color, 2);
+    let s = crate::text::from_bytes(t);
+    let ty = crate::text::center_y(y, CELL_H, crate::text::BODY, crate::text::Weight::Regular);
+    crate::text::draw_ellipsis(
+        c,
+        x,
+        ty,
+        max_w.max(0),
+        &s,
+        crate::text::BODY,
+        crate::text::Weight::Regular,
+        color,
+    );
 }
 
 /// Text centered in `r`.
 pub(crate) fn text_center(c: &mut Canvas, r: Rect, t: &[u8], color: Color) {
-    let n = ((r.w / CELL_W).max(0) as usize).min(t.len());
-    let w = n as i32 * CELL_W;
-    font::draw_bytes(
+    let s = crate::text::from_bytes(t);
+    crate::text::draw_centered(
         c,
-        us(r.x + (r.w - w) / 2),
-        us(r.y + (r.h - CELL_H) / 2),
-        &t[..n],
+        r,
+        &s,
+        crate::text::BODY,
+        crate::text::Weight::Regular,
         color,
-        2,
     );
 }
 
 /// Text right-aligned to `r`'s right edge.
 pub(crate) fn text_right(c: &mut Canvas, r: Rect, t: &[u8], color: Color) {
-    let n = ((r.w / CELL_W).max(0) as usize).min(t.len());
-    let w = n as i32 * CELL_W;
-    font::draw_bytes(
+    let s = crate::text::from_bytes(t);
+    crate::text::draw_right(
         c,
-        us(r.right() - w),
-        us(r.y + (r.h - CELL_H) / 2),
-        &t[..n],
+        r,
+        &s,
+        crate::text::BODY,
+        crate::text::Weight::Regular,
         color,
-        2,
     );
 }
 
@@ -87,6 +96,7 @@ pub(crate) fn button(c: &mut Canvas, r: Rect, label: &[u8], state: Btn) {
 /// A single-line text box: white pill with a border, the text (or a muted
 /// placeholder) and, when `caret` is set, a caret after the text.
 pub(crate) fn input_box(c: &mut Canvas, r: Rect, t: &[u8], placeholder: &[u8], caret: bool) {
+    use crate::text::{BODY, Weight};
     fill_round(c, r, 8, BORDER);
     fill_round(
         c,
@@ -95,6 +105,7 @@ pub(crate) fn input_box(c: &mut Canvas, r: Rect, t: &[u8], placeholder: &[u8], c
         theme::WHITE,
     );
     let inner = r.w - 16;
+    let ty = crate::text::center_y(r.y, r.h, BODY, Weight::Regular);
     if t.is_empty() {
         text(
             c,
@@ -110,19 +121,20 @@ pub(crate) fn input_box(c: &mut Canvas, r: Rect, t: &[u8], placeholder: &[u8], c
         return;
     }
     // Show the tail when the text is wider than the box.
-    let cols = (inner / CELL_W).max(1) as usize;
-    let tail = &t[t.len().saturating_sub(cols)..];
-    text(
-        c,
-        r.x + 8,
-        r.y + (r.h - CELL_H) / 2,
-        inner,
-        tail,
-        theme::TEXT,
-    );
+    let full = crate::text::from_bytes(t);
+    let mut start = 0usize;
+    while crate::text::measure(&full[start..], BODY, Weight::Regular) > inner && start < full.len()
+    {
+        start += full[start..].chars().next().map_or(1, char::len_utf8);
+    }
+    let tail = &full[start..];
+    let tw = crate::text::draw(c, r.x + 8, ty, tail, BODY, Weight::Regular, theme::TEXT);
     if caret {
-        let cx = r.x + 8 + tail.len() as i32 * CELL_W;
-        fill(c, Rect::new(cx, r.y + 6, 2, r.h - 12), theme::accent());
+        fill(
+            c,
+            Rect::new(r.x + 8 + tw, r.y + 6, 2, r.h - 12),
+            theme::accent(),
+        );
     }
 }
 
@@ -231,13 +243,24 @@ pub(crate) fn graph(c: &mut Canvas, r: Rect, g: &Graph<'_>) {
     let mut lx = r.x + 10;
     let ly = r.bottom() - 20;
     for line in lines.iter().filter(|l| !l.label.is_empty()) {
-        // Scale-1 text (6 px per character) keeps four or five labels on one row.
-        let w = line.label.len() as i32 * 6 + 14;
+        // Caption text keeps four or five labels on one row.
+        let label = crate::text::from_bytes(line.label);
+        let w =
+            crate::text::measure(&label, crate::text::CAPTION, crate::text::Weight::Regular) + 14;
         if lx + w > r.right() - 6 {
             break;
         }
         fill_round(c, Rect::new(lx, ly + 3, 8, 8), 4, line.color);
-        font::draw_bytes(c, us(lx + 12), us(ly + 3), line.label, DIM_TEXT, 1);
+        let ty = crate::text::center_y(ly, 14, crate::text::CAPTION, crate::text::Weight::Regular);
+        crate::text::draw(
+            c,
+            lx + 12,
+            ty,
+            &label,
+            crate::text::CAPTION,
+            crate::text::Weight::Regular,
+            DIM_TEXT,
+        );
         lx += w + 10;
     }
 }

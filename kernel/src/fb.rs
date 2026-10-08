@@ -11,14 +11,62 @@ use osjeff_core::gfx::{
 /// ~3k instructions, which only pays off on large areas).
 const LUT_MIN_PIXELS: usize = 4096;
 
+/// A saved clip rectangle (see [`Canvas::set_clip`]).
+#[derive(Clone, Copy)]
+#[allow(dead_code)] // used by the window chrome and the widgets from the next commits
+pub struct ClipState([usize; 4]);
+
 pub struct Canvas<'a> {
     buf: &'a mut [u8],
     info: FrameBufferInfo,
+    /// Drawing is limited to `[cx0, cx1) x [cy0, cy1)` (the whole canvas by default).
+    cx0: usize,
+    cy0: usize,
+    cx1: usize,
+    cy1: usize,
 }
 
 impl<'a> Canvas<'a> {
     pub fn new(buf: &'a mut [u8], info: FrameBufferInfo) -> Self {
-        Self { buf, info }
+        Self {
+            buf,
+            info,
+            cx0: 0,
+            cy0: 0,
+            cx1: info.width,
+            cy1: info.height,
+        }
+    }
+
+    /// Limit all further drawing to `r` (intersected with the canvas). Returns the
+    /// previous clip so callers can restore it with [`Canvas::restore_clip`].
+    #[allow(dead_code)]
+    pub fn set_clip(&mut self, r: osjeff_core::Rect) -> ClipState {
+        let old = ClipState([self.cx0, self.cy0, self.cx1, self.cy1]);
+        self.cx0 = (r.x.max(0) as usize).min(self.info.width);
+        self.cy0 = (r.y.max(0) as usize).min(self.info.height);
+        self.cx1 = (r.right().max(0) as usize)
+            .min(self.info.width)
+            .max(self.cx0);
+        self.cy1 = (r.bottom().max(0) as usize)
+            .min(self.info.height)
+            .max(self.cy0);
+        old
+    }
+
+    #[allow(dead_code)]
+    pub fn restore_clip(&mut self, c: ClipState) {
+        [self.cx0, self.cy0, self.cx1, self.cy1] = c.0;
+    }
+
+    /// The current clip rectangle.
+    pub fn clip_rect(&self) -> osjeff_core::Rect {
+        osjeff_core::Rect::new(
+            self.cx0 as i32,
+            self.cy0 as i32,
+            (self.cx1 - self.cx0) as i32,
+            (self.cy1 - self.cy0) as i32,
+        )
     }
 
     #[inline]
@@ -65,7 +113,7 @@ impl<'a> Canvas<'a> {
 
     #[inline]
     pub fn put(&mut self, x: usize, y: usize, c: Color) {
-        if x >= self.info.width || y >= self.info.height {
+        if x < self.cx0 || x >= self.cx1 || y < self.cy0 || y >= self.cy1 {
             return;
         }
         let bpp = self.info.bytes_per_pixel;
@@ -157,16 +205,14 @@ impl<'a> Canvas<'a> {
     }
 
     fn fill_rect_inner(&mut self, x0: usize, y0: usize, w: usize, h: usize, c: Color) {
-        if x0 >= self.info.width || y0 >= self.info.height {
+        let x_end = x0.saturating_add(w).min(self.cx1);
+        let y_end = y0.saturating_add(h).min(self.cy1);
+        let (x0, y0) = (x0.max(self.cx0), y0.max(self.cy0));
+        if x_end <= x0 || y_end <= y0 {
             return;
         }
         let bpp = self.info.bytes_per_pixel;
         let stride = self.info.stride;
-        let x_end = (x0 + w).min(self.info.width);
-        let y_end = (y0 + h).min(self.info.height);
-        if x_end <= x0 || y_end <= y0 {
-            return;
-        }
         let count = x_end - x0;
 
         // Fastest path: 4-byte pixels written 32 bits at a time. One store per
@@ -242,7 +288,7 @@ impl<'a> Canvas<'a> {
     /// (0 = unchanged, 256 = fully `c`). Format-aware.
     #[inline]
     pub fn blend_pixel(&mut self, x: usize, y: usize, c: Color, alpha: u16) {
-        if x >= self.info.width || y >= self.info.height {
+        if x < self.cx0 || x >= self.cx1 || y < self.cy0 || y >= self.cy1 {
             return;
         }
         let a = alpha.min(256);
@@ -256,6 +302,58 @@ impl<'a> Canvas<'a> {
         self.buf[o] = mix256(self.buf[o], c0, a);
         self.buf[o + 1] = mix256(self.buf[o + 1], c1, a);
         self.buf[o + 2] = mix256(self.buf[o + 2], c2, a);
+    }
+
+    /// Blend an 8-bit coverage bitmap (`w x h`, tightly packed) with its top-left
+    /// at `(x, y)` in colour `c`. `lut` maps coverage to opacity (text gamma),
+    /// `alpha` (0..=256) scales it (fades). Clipped; only the 3-colour-byte formats.
+    #[allow(clippy::too_many_arguments)]
+    pub fn blend_coverage(
+        &mut self,
+        x: i32,
+        y: i32,
+        cov: &[u8],
+        w: usize,
+        h: usize,
+        c: Color,
+        alpha: u16,
+        lut: &[u8; 256],
+    ) {
+        if w == 0 || h == 0 || cov.len() < w * h || alpha == 0 {
+            return;
+        }
+        let (c0, c1, c2) = match self.info.pixel_format {
+            PixelFormat::Rgb => (c.r as u32, c.g as u32, c.b as u32),
+            PixelFormat::Bgr => (c.b as u32, c.g as u32, c.r as u32),
+            _ => return,
+        };
+        let bpp = self.info.bytes_per_pixel;
+        let stride = self.info.stride;
+        // Visible part of the bitmap.
+        let gx0 = (self.cx0 as i32 - x).max(0) as usize;
+        let gy0 = (self.cy0 as i32 - y).max(0) as usize;
+        let gx1 = ((self.cx1 as i32 - x).max(0) as usize).min(w);
+        let gy1 = ((self.cy1 as i32 - y).max(0) as usize).min(h);
+        if gx0 >= gx1 || gy0 >= gy1 {
+            return;
+        }
+        for gy in gy0..gy1 {
+            let row = &cov[gy * w + gx0..gy * w + gx1];
+            let py = (y + gy as i32) as usize;
+            let mut o = (py * stride + (x + gx0 as i32) as usize) * bpp;
+            for &cv in row {
+                if cv != 0 {
+                    let mut a = lut[cv as usize] as u32;
+                    a += a >> 7; // 0..=256
+                    a = (a * alpha.min(256) as u32) >> 8;
+                    let px = &mut self.buf[o..o + 3];
+                    px[0] = ((px[0] as u32 * (256 - a) + c0 * a) >> 8) as u8;
+                    px[1] = ((px[1] as u32 * (256 - a) + c1 * a) >> 8) as u8;
+                    px[2] = ((px[2] as u32 * (256 - a) + c2 * a) >> 8) as u8;
+                }
+                o += bpp;
+            }
+        }
     }
 
     /// Rounded rectangle blended over existing pixels at `alpha` (0..=256).
@@ -350,15 +448,18 @@ impl<'a> Canvas<'a> {
 
         for y in 0..h {
             let py = y0 + y;
-            if py >= self.info.height {
+            if py >= self.cy1 {
                 break;
+            }
+            if py < self.cy0 {
+                continue;
             }
             let inset = corner_inset(r, y, h);
             if w <= 2 * inset {
                 continue;
             }
-            let xs = x0 + inset;
-            let xe = (x0 + w - inset).min(self.info.width);
+            let xs = (x0 + inset).max(self.cx0);
+            let xe = (x0 + w - inset).min(self.cx1);
             if xs >= xe {
                 continue;
             }
