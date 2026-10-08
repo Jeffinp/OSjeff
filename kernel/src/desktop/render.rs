@@ -215,32 +215,40 @@ impl Desktop {
         // not blended under it: the body would overwrite those pixels anyway,
         // and skipping them removes ~85 % of the blend work for identical output.
         if shadow {
-            let r = radius.min(w / 2).min(h / 2);
-            let hole = (x, y + r, w, h.saturating_sub(2 * r));
-            for &(off, exp, a) in &[(6usize, 4usize, 28u16), (14, 12, 14)] {
-                let sx = x.saturating_sub(exp);
-                let sy = y + off;
-                c.fill_round_rect_alpha_skip(
-                    sx,
-                    sy,
-                    w + exp * 2,
-                    h + exp,
-                    14 + exp,
-                    theme::SHADOW,
-                    a,
-                    hole,
-                );
+            let body = Rect::new(x as i32, y as i32, w as i32, h as i32);
+            let rr = radius.min(w / 2).min(h / 2) as i32;
+            let hole = Rect::new(body.x, body.y + rr, body.w, (body.h - 2 * rr).max(0));
+            for sh in [
+                Shadow {
+                    blur: 20,
+                    dy: 14,
+                    alpha: 70,
+                },
+                Shadow {
+                    blur: 6,
+                    dy: 4,
+                    alpha: 64,
+                },
+            ] {
+                c.draw_shadow(body, sh, hole);
             }
         }
-        // Body + dark header.
-        c.fill_round_rect(x, y, w, h, radius, theme::WINDOW_BODY);
+        // Body + dark header (anti-aliased corners; the header is the same rounded
+        // rectangle clipped to the title band, so only its top corners round).
+        let body = Rect::new(x as i32, y as i32, w as i32, h as i32);
+        c.fill_rrect(body, radius as i32, Corner::Circle, theme::WINDOW_BODY, 256);
         let header = if focused {
             theme::HEADER
         } else {
             theme::HEADER_DIM
         };
-        c.fill_rect(x, y + radius, w, th - radius, header);
-        c.fill_round_rect(x, y, w, th, radius, header);
+        let saved = c.set_clip(
+            Rect::new(x as i32, y as i32, w as i32, th as i32)
+                .intersection(&c.clip_rect())
+                .unwrap_or(Rect::new(0, 0, 0, 0)),
+        );
+        c.fill_rrect(body, radius as i32, Corner::Circle, header, 256);
+        c.restore_clip(saved);
         // Accent top line marks focus (teal) vs unfocused (muted).
         let accent = if focused {
             theme::accent()

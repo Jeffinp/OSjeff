@@ -6,7 +6,7 @@
 //! unit-tested. This module is hardware-facing glue: pixels, animation
 //! stepping, dispatch, and one [`instance::App`] state per window.
 
-pub(crate) use crate::fb::{Canvas, Color};
+pub(crate) use crate::fb::{Canvas, Color, Corner, Shadow};
 pub(crate) use crate::font;
 pub(crate) use crate::icons::{self, Icon};
 pub(crate) use crate::logo;

@@ -55,6 +55,7 @@ pub mod paging;
 pub mod png;
 pub mod ppm;
 pub mod process;
+pub mod raster;
 pub mod redirect;
 pub mod rng;
 pub mod schedule;

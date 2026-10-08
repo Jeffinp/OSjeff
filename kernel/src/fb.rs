@@ -3,9 +3,14 @@
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 
 pub use osjeff_core::gfx::Color;
+
+mod shapes;
+// The shape / shadow / surface toolkit (`Canvas` methods live in `shapes.rs`).
 use osjeff_core::gfx::{
     alpha255_to_256, blend_lut, corner_inset, luma, mix256, split_span_around_hole,
 };
+#[allow(unused_imports)]
+pub use shapes::{Corner, Shadow, masks_for_bench};
 
 /// Minimum `w*h` for the table-driven alpha fill (building the table costs
 /// ~3k instructions, which only pays off on large areas).
@@ -371,28 +376,6 @@ impl<'a> Canvas<'a> {
     ) {
         let t0 = crate::trace::t();
         self.fill_round_rect_alpha_inner(x0, y0, w, h, r, c, alpha, (0, 0, 0, 0));
-        crate::trace::prim(crate::trace::Prim::Alpha, t0);
-    }
-
-    /// Like [`fill_round_rect_alpha`], but leaves the `hole` rectangle
-    /// `(x, y, w, h)` untouched. For drop shadows: the part of the shadow that
-    /// lies under the (opaque) window body is overwritten by the body anyway, so
-    /// not blending it produces the exact same final pixels while skipping
-    /// roughly 85 % of the blend work.
-    #[allow(clippy::too_many_arguments)]
-    pub fn fill_round_rect_alpha_skip(
-        &mut self,
-        x0: usize,
-        y0: usize,
-        w: usize,
-        h: usize,
-        r: usize,
-        c: Color,
-        alpha: u16,
-        hole: (usize, usize, usize, usize),
-    ) {
-        let t0 = crate::trace::t();
-        self.fill_round_rect_alpha_inner(x0, y0, w, h, r, c, alpha, hole);
         crate::trace::prim(crate::trace::Prim::Alpha, t0);
     }
 

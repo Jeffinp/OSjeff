@@ -672,4 +672,116 @@ pub fn bench_prims(back: &mut [u8], info: bootloader_api::info::FrameBufferInfo,
         txt / s.len() as u64,
         khz
     );
+    bench_ui(&mut c, best_fn(), khz);
+}
+
+fn best_fn() -> impl Fn(&mut dyn FnMut()) -> u64 {
+    |f: &mut dyn FnMut()| -> u64 {
+        let mut b = u64::MAX;
+        for _ in 0..4 {
+            let t0 = io::rdtsc();
+            f();
+            b = b.min(io::rdtsc().wrapping_sub(t0));
+        }
+        b
+    }
+}
+
+/// The UI toolkit's primitives (anti-aliased shapes, shadows, text, surfaces,
+/// blur, scaling), best of 4, in cycles and cycles per pixel.
+fn bench_ui(c: &mut crate::fb::Canvas, best: impl Fn(&mut dyn FnMut()) -> u64, khz: u64) {
+    use crate::fb::{Color, Corner, Shadow};
+    use crate::text::{self, Weight};
+    use osjeff_core::Rect;
+    use osjeff_core::raster::{self, Paint, Surface};
+    let col = Color::rgb(0x20, 0x40, 0x80);
+    let col2 = Color::rgb(0xF0, 0xF4, 0xFF);
+    let rect = Rect::new(100, 100, 512, 320);
+    let px = (rect.w * rect.h) as u64;
+    let rr_solid = best(&mut || c.fill_rrect(rect, 12, Corner::Circle, col, 256));
+    let rr_alpha = best(&mut || c.fill_rrect(rect, 12, Corner::Circle, col, 180));
+    let rr_grad = best(&mut || c.fill_rrect_vgrad(rect, 12, Corner::Circle, col2, col, 256));
+    let stroke = best(&mut || c.stroke_rrect(rect, 12, Corner::Circle, col2, 120));
+    let body = Rect::new(150, 120, 600, 400);
+    let hole = Rect::new(150, 132, 600, 376);
+    let sh_area = ((body.w + 40) * (body.h + 40) - hole.w * hole.h) as u64;
+    let shadow = best(&mut || {
+        c.draw_shadow(
+            body,
+            Shadow {
+                blur: 20,
+                dy: 14,
+                alpha: 70,
+            },
+            hole,
+        );
+        c.draw_shadow(
+            body,
+            Shadow {
+                blur: 6,
+                dy: 4,
+                alpha: 64,
+            },
+            hole,
+        );
+    });
+    let s = "The quick brown fox jumps over the lazy dog 0123";
+    let t13 = best(&mut || {
+        text::draw(c, 100, 100, s, 13, Weight::Regular, col);
+    });
+    let masks = crate::fb::masks_for_bench();
+    let mut icon = Surface::new(128, 128);
+    icon.fill_rrect(
+        0,
+        0,
+        128,
+        128,
+        29,
+        raster::Corner::Squircle,
+        Paint::Vertical(raster::rgb(0x60A5FA), raster::rgb(0x2563EB)),
+        masks,
+    );
+    let scaled = icon.resized(56, 56);
+    let blit = best(&mut || c.blit_surface(&scaled, 300, 300, 256));
+    let resize = best(&mut || {
+        core::hint::black_box(icon.resized(56, 56));
+    });
+    let mut bd = Surface::new(360, 80);
+    bd.fill(raster::rgb(0x305080));
+    let blur = best(&mut || bd.blur(8, 3));
+    let mut buf = alloc::vec::Vec::new();
+    let region = Rect::new(100, 100, 360, 80);
+    let read = best(&mut || c.read_region(region, &mut buf));
+    let write = best(&mut || c.write_region(region, &buf));
+    let lut = raster::glow_lut();
+    let glow = best(&mut || c.glow(400, 300, 300, col2, 40, &lut));
+    let masks_t0 = io::rdtsc();
+    core::hint::black_box(raster::CornerMasks::with_max_radius(48));
+    let masks_build = io::rdtsc().wrapping_sub(masks_t0);
+    crate::serial_println!(
+        "[trace] bench ui ({}x{}): rrect solid {} ({}/px) | rrect a180 {} ({}/px) | rrect vgrad {} ({}/px) | stroke {} | shadow x2 {} ({}/px of ring) | text 48ch@13 {} ({}/ch) | blit 56x56 {} ({}/px) | resize 128->56 {} | blur 360x80 r8x3 {} ({}/px) | read 360x80 {} | write {} | glow r300 {} | masks(48) build {} | khz {}",
+        rect.w,
+        rect.h,
+        rr_solid,
+        rr_solid / px,
+        rr_alpha,
+        rr_alpha / px,
+        rr_grad,
+        rr_grad / px,
+        stroke,
+        shadow,
+        shadow / sh_area.max(1),
+        t13,
+        t13 / s.len() as u64,
+        blit,
+        blit / (56 * 56),
+        resize,
+        blur,
+        blur / (360 * 80),
+        read,
+        write,
+        glow,
+        masks_build,
+        khz
+    );
 }
