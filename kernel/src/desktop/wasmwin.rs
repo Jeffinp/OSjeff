@@ -271,7 +271,7 @@ impl Desktop {
             self.wm.activate(id);
             return Some(id);
         }
-        let manifest = Manifest::legacy("app", "WASM App");
+        let manifest = Manifest::legacy("app", "Aplicativo");
         self.open_wasm(manifest, wasm::LEGACY_APP.to_vec())
     }
 
@@ -280,7 +280,7 @@ impl Desktop {
         if wasm::LEGACY_APP.is_empty() {
             return self.open_wasm_app(wasm::DEFAULT_APP);
         }
-        let manifest = Manifest::legacy("app", "WASM App");
+        let manifest = Manifest::legacy("app", "Aplicativo");
         self.open_wasm(manifest, wasm::LEGACY_APP.to_vec())
     }
 

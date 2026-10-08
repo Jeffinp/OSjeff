@@ -1049,10 +1049,10 @@ impl Desktop {
         let _ = write!(b, "versao {}", env!("CARGO_PKG_VERSION"));
         text(c, p.x + 84, p.y + 30, p.w, b.as_bytes(), theme::TEXT_MUTED);
         let lines: [&[u8]; 5] = [
-            b"Sistema operacional x86_64 bare-metal",
-            b"escrito em Rust: kernel, drivers, GUI,",
-            b"navegador e apps WebAssembly.",
+            b"Sistema operacional de 64 bits.",
             b"Licenca MIT.",
+            b"",
+            b"",
             b"",
         ];
         for (i, l) in lines.iter().enumerate() {

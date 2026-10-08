@@ -48,7 +48,6 @@ impl App for Hello {
         c.clear(0x10141F);
         c.fill_rect(0, 0, w, 36, 0x1FB5A6);
         c.text(14, 10, "Ola, OSjeff!", 0xFFFFFF, 2);
-        c.text(14, 56, "App minimo em Rust (ABI v2)", 0xCBD3E6, 1);
         let mut b = StrBuf::<64>::new();
         let _ = write!(b, "teclas: {}   cliques: {}", self.keys, self.clicks);
         c.text(14, 84, b.as_str(), 0xFFFFFF, 2);
@@ -63,7 +62,7 @@ impl App for Hello {
             c.text(14, 134, self.last.as_str(), 0xFFD84D, 1);
         }
         c.fill_rect(14, h - 28, w - 28, 2, 0x2A3140);
-        c.text(14, h - 20, "sem permissoes: fs=none net=none", 0x6A7488, 1);
+        c.text(14, h - 20, "Sem acesso a arquivos ou a rede", 0x6A7488, 1);
     }
 }
 

@@ -29,7 +29,7 @@ extern "C" {
 const W: usize = 320;
 const H: usize = 180;
 
-static TITLE: &[u8] = b"plasma.wasm  -  Rust compilado para WebAssembly";
+static TITLE: &[u8] = b"Plasma";
 
 // The app's own framebuffer + interactive state, in its linear memory. Persisted
 // across frames because the engine keeps the instance resident.

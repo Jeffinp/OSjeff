@@ -18,7 +18,7 @@ long long time_ms(void);
 static unsigned char fb[W * H * 4];
 static int hue = 0;
 
-static const char TITLE[] = "cdemo.c  -  C compilado para wasm (wasi-sdk)";
+static const char TITLE[] = "Demo";
 
 __attribute__((export_name("render")))
 void render(void) {

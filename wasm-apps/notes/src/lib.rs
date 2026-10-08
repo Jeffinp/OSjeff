@@ -250,7 +250,7 @@ impl App for Notes {
         };
         n.refresh_list();
         n.say(format_args!(
-            "Ctrl+S salva  Ctrl+N nova  Tab lista  Ctrl+T teste do sandbox"
+            "Ctrl+S salva  Ctrl+N nova  Tab lista"
         ));
         n
     }

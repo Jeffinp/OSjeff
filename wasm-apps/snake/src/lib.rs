@@ -31,7 +31,7 @@ const OY: i32 = 52;
 const MAXLEN: usize = (COLS * ROWS) as usize;
 const STEP: i64 = 140; // ms between moves
 
-static TITLE: &[u8] = b"snake.wasm  -  jogo nativo em Rust (WASD, R reinicia)";
+static TITLE: &[u8] = b"Snake";
 static OVER: &[u8] = b"GAME OVER  -  R reinicia";
 
 // Game state, in the guest's own memory (persists across frames).
