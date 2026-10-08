@@ -257,8 +257,12 @@ pub fn app_response(response: &[u8], cap: usize) -> Result<(Vec<u8>, bool), Resp
     if !(200..300).contains(&status) {
         return Err(ResponseError::Status(status));
     }
-    let mut body = crate::browser::body_bytes(response).map_err(|_| ResponseError::Encoding)?;
-    let cut = body.len() > cap;
+    // A cut or damaged compressed body still hands the app its decoded prefix; the
+    // flag tells it the body is partial (as it does for a body over `cap`).
+    let page =
+        crate::browser::body_partial(response, false).map_err(|_| ResponseError::Encoding)?;
+    let mut body = page.body;
+    let cut = body.len() > cap || page.note.is_some();
     body.truncate(cap);
     Ok((body, cut))
 }

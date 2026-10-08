@@ -17,10 +17,18 @@ pub const URL_CAP: usize = 480;
 pub const HOST_CAP: usize = 80;
 
 /// Maximum bytes of one HTTP(S) response accepted from the network (headers +
-/// body). Shared by the plain-HTTP and the TLS path so neither can be talked
-/// into exhausting the kernel's single heap. An oversized response is cut at
-/// this size and the page is flagged as truncated.
-pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+/// body, still compressed). Shared by the plain-HTTP and the TLS path so neither
+/// can be talked into exhausting the kernel's single heap. An oversized response
+/// is cut at this size and the page is flagged as truncated (a cut gzip/deflate
+/// body still renders its decoded prefix, see [`page_body_partial`]).
+///
+/// Memory budget of one page load, worst case, of the 64 MiB heap (freed once the
+/// DOM exists; the DOM itself is bounded by `web::MAX_NODES`): the raw response
+/// (this, 1 MiB) + its de-chunked copy (1 MiB) + the decoded body
+/// ([`crate::gzip::MAX_DECODED_BYTES`], 4 MiB, up to 2x transient `Vec` slack)
+/// ~ 12 MiB. It was 256 KiB, which real pages (a gzip home page of a CDN vendor
+/// is ~300 KiB on the wire) overflowed.
+pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 /// Append `data` to `out`, never letting `out` grow past `cap` bytes. Returns
 /// `true` when some of `data` had to be dropped (the response is truncated).
@@ -381,54 +389,161 @@ fn trim_ascii(mut s: &[u8]) -> &[u8] {
 
 /// The payload of a raw HTTP response: headers stripped, the chunk framing removed
 /// if the response is `Transfer-Encoding: chunked`, and `Content-Encoding: gzip` /
-/// `deflate` decompressed (bounded by [`crate::gzip::MAX_DECODED_BYTES`]). An
-/// encoding that cannot be decoded is an error (the page view shows a message, an
-/// app gets a failure: neither gets garbage).
+/// `deflate` decompressed (bounded by [`crate::gzip::MAX_DECODED_BYTES`]). Strict:
+/// a cut or corrupt compressed body is an error. The page view uses the lenient
+/// [`page_body_partial`] instead.
 pub fn body_bytes(resp: &[u8]) -> Result<alloc::vec::Vec<u8>, crate::gzip::EncodingError> {
     let body = http_body(resp);
-    let chunked = header_value(resp, b"transfer-encoding")
-        .map(|v| v.eq_ignore_ascii_case(b"chunked"))
-        .unwrap_or(false);
-    let raw = if chunked {
+    let raw = if is_chunked(resp) {
         dechunk(body)
     } else {
         body.to_vec()
     };
-    let enc = content_encoding(resp);
-    if enc == crate::gzip::Encoding::Identity {
+    let chain = content_encodings(resp);
+    if chain.is_empty() {
         return Ok(raw);
     }
-    crate::gzip::decode_body(enc, &raw)
+    let d = crate::gzip::decode_chain_partial(&chain, &raw)?;
+    match d.status {
+        crate::gzip::Completeness::Complete => Ok(d.data),
+        crate::gzip::Completeness::Cut => Err(crate::gzip::EncodingError::Truncated),
+        crate::gzip::Completeness::TooLarge => Err(crate::gzip::EncodingError::TooLarge),
+        crate::gzip::Completeness::Damaged => Err(crate::gzip::EncodingError::Corrupt),
+        crate::gzip::Completeness::BadChecksum => Err(crate::gzip::EncodingError::BadChecksum),
+    }
 }
 
-fn content_encoding(resp: &[u8]) -> crate::gzip::Encoding {
+/// `Transfer-Encoding` ends in `chunked` (case-insensitive; `gzip, chunked` too).
+fn is_chunked(resp: &[u8]) -> bool {
+    header_value(resp, b"transfer-encoding")
+        .and_then(|v| v.rsplit(|&b| b == b',').next())
+        .is_some_and(|last| last.trim_ascii().eq_ignore_ascii_case(b"chunked"))
+}
+
+/// The `Content-Encoding` codings, in the order the server applied them
+/// (empty = identity).
+fn content_encodings(resp: &[u8]) -> alloc::vec::Vec<crate::gzip::Encoding> {
     header_value(resp, b"content-encoding")
-        .map(crate::gzip::Encoding::parse)
-        .unwrap_or(crate::gzip::Encoding::Identity)
+        .map(crate::gzip::Encoding::parse_chain)
+        .unwrap_or_default()
 }
 
-/// The clean HTML body of a raw HTTP response ([`body_bytes`]); a body that cannot
-/// be decoded becomes a short explanatory page instead of garbage.
-pub fn page_body(resp: &[u8]) -> alloc::vec::Vec<u8> {
-    match body_bytes(resp) {
-        Ok(v) => v,
-        Err(e) => {
-            let msg: &[u8] = match e {
-                crate::gzip::EncodingError::TooLarge => {
-                    b"<p>Pagina descompactada grande demais (limite de 1 MiB).</p>"
-                }
-                _ if content_encoding(resp) == crate::gzip::Encoding::Unsupported => {
-                    b"<p>Codificacao de conteudo nao suportada.</p>"
-                }
-                _ => b"<p>Falha ao descompactar a pagina (dados corrompidos ou cortados).</p>",
-            };
-            msg.to_vec()
+/// Why a page body on screen is not the whole document. Shown as a banner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageNote {
+    /// Cut at [`MAX_RESPONSE_BYTES`] (or the decoded size limit).
+    Truncated,
+    /// The connection ended before the body did.
+    Incomplete,
+    /// The compressed data went bad; the part decoded before that is shown.
+    Damaged,
+    /// Fully decoded, but the gzip/zlib checksum did not match.
+    BadChecksum,
+}
+
+impl PageNote {
+    /// Banner text. ASCII only (the bitmap font has no accents).
+    pub fn label(self) -> &'static str {
+        match self {
+            PageNote::Truncated => "Pagina cortada no limite de tamanho",
+            PageNote::Incomplete => "Pagina incompleta (conexao interrompida)",
+            PageNote::Damaged => "Pagina com dados compactados corrompidos (parcial)",
+            PageNote::BadChecksum => "Pagina com falha de verificacao (checksum)",
         }
     }
 }
 
+/// A decoded page body plus, when it is not the whole document, why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PageBody {
+    pub body: alloc::vec::Vec<u8>,
+    pub note: Option<PageNote>,
+}
+
+/// Like [`body_bytes`] but never throws away what arrived: a body that is cut
+/// (`cut`: the fetch layer stopped reading at the size cap), declared longer than
+/// received (`Content-Length`, or a chunked stream without its last chunk) or
+/// whose compressed data is damaged yields the decoded prefix plus a [`PageNote`].
+/// `Err` only when nothing at all could be decoded (unsupported coding, not a
+/// gzip stream, damaged from the first byte).
+pub fn body_partial(resp: &[u8], cut: bool) -> Result<PageBody, crate::gzip::EncodingError> {
+    use crate::gzip::Completeness;
+    let body = http_body(resp);
+    let chunked = is_chunked(resp);
+    let (raw, mut whole) = if chunked {
+        dechunk_checked(body)
+    } else {
+        (body.to_vec(), true)
+    };
+    if !chunked
+        && let Some(want) = header_value(resp, b"content-length")
+            .and_then(|v| core::str::from_utf8(v).ok())
+            .and_then(|v| v.trim().parse::<usize>().ok())
+    {
+        whole &= raw.len() >= want;
+    }
+    let chain = content_encodings(resp);
+    let (data, status) = if chain.is_empty() {
+        (raw, Completeness::Complete)
+    } else {
+        let d = crate::gzip::decode_chain_partial(&chain, &raw)?;
+        (d.data, d.status)
+    };
+    let note = match status {
+        Completeness::Complete if cut => Some(PageNote::Truncated),
+        Completeness::Complete if !whole => Some(PageNote::Incomplete),
+        Completeness::Complete => None,
+        Completeness::TooLarge => Some(PageNote::Truncated),
+        // The compressed bytes ran out: because we stopped reading, or because the
+        // connection ended (a cut stream the server itself did not finish).
+        Completeness::Cut | Completeness::Damaged if cut => Some(PageNote::Truncated),
+        Completeness::Cut => Some(PageNote::Incomplete),
+        Completeness::Damaged => Some(PageNote::Damaged),
+        Completeness::BadChecksum if cut => Some(PageNote::Truncated),
+        Completeness::BadChecksum => Some(PageNote::BadChecksum),
+    };
+    Ok(PageBody { body: data, note })
+}
+
+/// The page to render for a raw response: [`body_partial`], with a body that
+/// cannot be decoded at all turned into a short explanatory page. `cut` is the
+/// fetch layer's "stopped at the size cap" flag.
+pub fn page_body_partial(resp: &[u8], cut: bool) -> PageBody {
+    match body_partial(resp, cut) {
+        Ok(p) => p,
+        Err(e) => {
+            let msg: &[u8] = match e {
+                crate::gzip::EncodingError::TooLarge => {
+                    b"<p>Pagina descompactada grande demais.</p>"
+                }
+                _ if content_encodings(resp).contains(&crate::gzip::Encoding::Unsupported) => {
+                    b"<p>Codificacao de conteudo nao suportada.</p>"
+                }
+                _ => b"<p>Falha ao descompactar a pagina (dados corrompidos ou cortados).</p>",
+            };
+            PageBody {
+                body: msg.to_vec(),
+                note: cut.then_some(PageNote::Truncated),
+            }
+        }
+    }
+}
+
+/// The clean HTML body of a raw HTTP response ([`page_body_partial`] without the
+/// cut flag and the note); a body that cannot be decoded at all becomes a short
+/// explanatory page instead of garbage.
+pub fn page_body(resp: &[u8]) -> alloc::vec::Vec<u8> {
+    page_body_partial(resp, false).body
+}
+
 /// Decode an HTTP/1.1 chunked body into the raw payload.
 fn dechunk(body: &[u8]) -> alloc::vec::Vec<u8> {
+    dechunk_checked(body).0
+}
+
+/// [`dechunk`] plus whether the terminating zero-size chunk was seen (a body cut
+/// anywhere before it is `false`).
+fn dechunk_checked(body: &[u8]) -> (alloc::vec::Vec<u8>, bool) {
     let mut out = alloc::vec::Vec::new();
     let mut i = 0;
     while i < body.len() {
@@ -442,7 +557,7 @@ fn dechunk(body: &[u8]) -> alloc::vec::Vec<u8> {
                 // must end decoding, not overflow (and later wrap `i + size`).
                 match size.checked_mul(16).and_then(|v| v.checked_add(d as usize)) {
                     Some(v) => size = v,
-                    None => return out,
+                    None => return (out, false),
                 }
                 saw_digit = true;
                 i += 1;
@@ -451,15 +566,18 @@ fn dechunk(body: &[u8]) -> alloc::vec::Vec<u8> {
             }
         }
         if !saw_digit {
-            break;
+            return (out, false);
         }
         // Skip to end of the size line.
         while i < body.len() && body[i] != b'\n' {
             i += 1;
         }
         i += 1; // past '\n'
-        if size == 0 || i >= body.len() {
-            break;
+        if size == 0 {
+            return (out, true);
+        }
+        if i >= body.len() {
+            return (out, false);
         }
         // `i < body.len()` here, so this cannot underflow or overflow.
         let end = i + size.min(body.len() - i);
@@ -470,7 +588,7 @@ fn dechunk(body: &[u8]) -> alloc::vec::Vec<u8> {
             i += 1;
         }
     }
-    out
+    (out, false)
 }
 
 /// Fold a Unicode code point to a single printable ASCII byte for our bitmap
@@ -833,7 +951,7 @@ pub struct Browser {
     nav_len: usize,
     home: bool, // showing the native start page (no page loaded)
     security: Security,
-    truncated: bool,
+    note: Option<PageNote>,
     fail_reason: FailReason,
     insecure: InsecureHosts,
     history: History,
@@ -962,7 +1080,7 @@ impl Browser {
             nav_len: 0,
             home: true,
             security: Security::None,
-            truncated: false,
+            note: None,
             fail_reason: FailReason::Network,
             insecure: InsecureHosts::new(),
             history: History::default(),
@@ -996,7 +1114,7 @@ impl Browser {
         self.home = true;
         self.status = Status::Idle;
         self.security = Security::None;
-        self.truncated = false;
+        self.note = None;
         self.set_url(b"");
     }
 
@@ -1038,9 +1156,14 @@ impl Browser {
         self.security
     }
 
-    /// True when the loaded page was cut at [`MAX_RESPONSE_BYTES`].
+    /// True when the loaded page is not the whole document (see [`Browser::note`]).
     pub fn truncated(&self) -> bool {
-        self.truncated
+        self.note.is_some()
+    }
+
+    /// Why the loaded page is only part of the document, if it is.
+    pub fn note(&self) -> Option<PageNote> {
+        self.note
     }
 
     /// Why the last navigation failed (meaningful when `status()` is `Error`).
@@ -1194,7 +1317,7 @@ impl Browser {
         } else {
             Security::None
         };
-        self.truncated = false;
+        self.note = None;
         self.status = Status::Loading;
         self.pending = true;
         self.home = false;
@@ -1293,12 +1416,18 @@ impl Browser {
     /// describes the *final* connection (after redirects) and `truncated` says
     /// the response hit [`MAX_RESPONSE_BYTES`].
     pub fn loaded_with(&mut self, conn: Conn, truncated: bool) {
+        self.loaded_with_note(conn, truncated.then_some(PageNote::Truncated));
+    }
+
+    /// [`Browser::loaded_with`] with the precise reason the page is partial
+    /// (from [`page_body_partial`]), `None` for a whole page.
+    pub fn loaded_with_note(&mut self, conn: Conn, note: Option<PageNote>) {
         self.security = match conn {
             Conn::Plain => Security::Http,
             Conn::Verified => Security::HttpsVerified,
             Conn::Insecure => Security::HttpsInvalid,
         };
-        self.truncated = truncated;
+        self.note = note;
         self.loaded();
     }
 
@@ -1376,7 +1505,7 @@ impl Browser {
         self.internal = true;
         self.internal_ready = true;
         self.security = Security::None;
-        self.truncated = false;
+        self.note = None;
         self.pending = false;
         self.home = false;
         self.loaded();
@@ -1570,7 +1699,7 @@ impl Browser {
         self.history.replay = false;
         self.status = Status::Error;
         self.fail_reason = reason;
-        self.truncated = false;
+        self.note = None;
         self.home = false;
     }
 }
@@ -1877,7 +2006,7 @@ mod tests {
         // Streaming a huge body in small pieces stays at the cap.
         let mut v = alloc::vec::Vec::new();
         let mut truncated = false;
-        for _ in 0..1000 {
+        for _ in 0..(MAX_RESPONSE_BYTES / 1024 + 100) {
             truncated |= append_capped(&mut v, &[0u8; 1024], MAX_RESPONSE_BYTES);
         }
         assert_eq!(v.len(), MAX_RESPONSE_BYTES);
@@ -2241,3 +2370,6 @@ mod tests {
 
 #[cfg(test)]
 mod ui_tests;
+
+#[cfg(test)]
+mod body_tests;

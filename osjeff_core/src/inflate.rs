@@ -572,47 +572,66 @@ impl<'a> Inflater<'a> {
     /// means the stream ended (or `out` is empty). A short read only happens
     /// at the end of the stream; after an error every later call repeats it.
     pub fn read(&mut self, out: &mut [u8]) -> Result<usize, InflateError> {
+        match self.read_partial(out) {
+            (n, None) => Ok(n),
+            (_, Some(e)) => Err(e),
+        }
+    }
+
+    /// Like [`read`](Self::read) but an error does not throw away what was
+    /// decoded before it: returns `(bytes written to out, error)`. The bytes
+    /// are valid output of the stream (the decoder wrote them before it hit
+    /// the problem), which is what lets a truncated download still render its
+    /// decoded prefix. After an error every later call returns `(0, error)`.
+    pub fn read_partial(&mut self, out: &mut [u8]) -> (usize, Option<InflateError>) {
         let mut hashed = 0usize;
-        match self.read_inner(out, &mut hashed) {
-            Ok(n) => {
-                if self.zlib {
-                    self.adler.update(out.get(hashed..n).unwrap_or(&[]));
-                }
-                Ok(n)
-            }
+        let mut n = 0usize;
+        let r = self.read_inner(out, &mut hashed, &mut n);
+        if self.zlib {
+            self.adler.update(out.get(hashed..n).unwrap_or(&[]));
+        }
+        match r {
+            Ok(()) => (n, None),
             Err(e) => {
                 self.state = State::Failed(e);
-                Err(e)
+                (n, Some(e))
             }
         }
     }
 
-    fn read_inner(&mut self, out: &mut [u8], hashed: &mut usize) -> Result<usize, InflateError> {
-        let mut n = 0usize;
+    fn read_inner(
+        &mut self,
+        out: &mut [u8],
+        hashed: &mut usize,
+        n: &mut usize,
+    ) -> Result<(), InflateError> {
         loop {
-            if n == out.len() {
-                return Ok(n);
+            if *n == out.len() {
+                return Ok(());
             }
             match self.state {
                 State::Failed(e) => return Err(e),
-                State::Done => return Ok(n),
+                State::Done => return Ok(()),
                 State::Header => self.start_block()?,
                 State::Stored(rem) => {
                     if rem == 0 {
-                        self.end_block(out, n, hashed)?;
+                        self.end_block(out, *n, hashed)?;
                         continue;
                     }
-                    let take = rem.min(out.len() - n);
-                    if take > self.limit - self.produced {
+                    // Deliver what fits under the limit before refusing the rest.
+                    let room = self.limit - self.produced;
+                    let take = rem.min(out.len() - *n).min(room);
+                    if take == 0 {
                         return Err(InflateError::OutputLimit);
                     }
-                    let src = self
-                        .br
-                        .data
-                        .get(self.br.pos..)
-                        .and_then(|s| s.get(..take))
-                        .ok_or(InflateError::Truncated)?;
-                    let dst = &mut out[n..n + take];
+                    // A cut input still yields the bytes that did arrive.
+                    let avail = self.br.data.get(self.br.pos..).unwrap_or(&[]);
+                    let src = &avail[..take.min(avail.len())];
+                    let take = src.len();
+                    if take == 0 {
+                        return Err(InflateError::Truncated);
+                    }
+                    let dst = &mut out[*n..*n + take];
                     dst.copy_from_slice(src);
                     for &b in src {
                         self.window[self.wpos & WMASK] = b;
@@ -620,14 +639,13 @@ impl<'a> Inflater<'a> {
                     }
                     self.br.pos += take;
                     self.produced += take;
-                    n += take;
+                    *n += take;
                     self.state = State::Stored(rem - take);
                 }
                 State::Codes => {
-                    let (m, eob) = self.decode_codes(&mut out[n..])?;
-                    n += m;
+                    let eob = self.decode_codes(out, n)?;
                     if eob {
-                        self.end_block(out, n, hashed)?;
+                        self.end_block(out, *n, hashed)?;
                     }
                 }
             }
@@ -747,19 +765,21 @@ impl<'a> Inflater<'a> {
         Ok(())
     }
 
-    /// Decodes symbols into `out` until it is full or the block ends.
-    /// Returns `(bytes written, block ended)`.
-    fn decode_codes(&mut self, out: &mut [u8]) -> Result<(usize, bool), InflateError> {
-        let mut n = 0usize;
+    /// Decodes symbols into `out[*n..]` until it is full or the block ends,
+    /// advancing `*n` as bytes are written (so they survive an error).
+    /// Returns whether the block ended.
+    fn decode_codes(&mut self, out: &mut [u8], n: &mut usize) -> Result<bool, InflateError> {
         loop {
-            if n == out.len() {
-                return Ok((n, false));
+            if *n == out.len() {
+                return Ok(false);
             }
             if self.pend_len > 0 {
-                let take = self.pend_len.min(out.len() - n);
-                if take > self.limit - self.produced {
+                let room = self.limit - self.produced;
+                if room == 0 {
                     return Err(InflateError::OutputLimit);
                 }
+                // A match that would cross the limit delivers its head first.
+                let take = self.pend_len.min(out.len() - *n).min(room);
                 let dist = self.pend_dist;
                 let src = self.wpos.wrapping_sub(dist) & WMASK;
                 if dist >= take && src + take <= WINDOW && self.wpos + take <= WINDOW {
@@ -767,12 +787,12 @@ impl<'a> Inflater<'a> {
                     // ranges: a plain memmove, no per-byte work.
                     let dst = self.wpos;
                     self.window.copy_within(src..src + take, dst);
-                    out[n..n + take].copy_from_slice(&self.window[dst..dst + take]);
+                    out[*n..*n + take].copy_from_slice(&self.window[dst..dst + take]);
                     self.wpos = (dst + take) & WMASK;
                 } else {
                     // Overlapping (dist < len, e.g. run-length) or wrapping.
                     let mut w = self.wpos;
-                    for o in &mut out[n..n + take] {
+                    for o in &mut out[*n..*n + take] {
                         let b = self.window[w.wrapping_sub(dist) & WMASK];
                         self.window[w & WMASK] = b;
                         *o = b;
@@ -782,7 +802,7 @@ impl<'a> Inflater<'a> {
                 }
                 self.produced += take;
                 self.pend_len -= take;
-                n += take;
+                *n += take;
                 continue;
             }
             let sym = self.lit.decode(&mut self.br)? as usize;
@@ -790,13 +810,13 @@ impl<'a> Inflater<'a> {
                 if self.produced >= self.limit {
                     return Err(InflateError::OutputLimit);
                 }
-                out[n] = sym as u8;
+                out[*n] = sym as u8;
                 self.window[self.wpos & WMASK] = sym as u8;
                 self.wpos = (self.wpos + 1) & WMASK;
                 self.produced += 1;
-                n += 1;
+                *n += 1;
             } else if sym == 256 {
-                return Ok((n, true));
+                return Ok(true);
             } else {
                 let li = sym - 257;
                 let (Some(&lbase), Some(&lextra)) = (LEN_BASE.get(li), LEN_EXTRA.get(li)) else {
@@ -819,6 +839,16 @@ impl<'a> Inflater<'a> {
 
     /// Decodes everything that is left into a new `Vec`.
     fn read_all(&mut self) -> Result<Vec<u8>, InflateError> {
+        match self.read_all_partial() {
+            (out, None) => Ok(out),
+            (_, Some(e)) => Err(e),
+        }
+    }
+
+    /// Decodes everything that is left, keeping the decoded prefix when the
+    /// stream fails (cut input, corrupt data, output limit, checksum): returns
+    /// `(everything produced before the problem, the problem if any)`.
+    fn read_all_partial(&mut self) -> (Vec<u8>, Option<InflateError>) {
         let mut out: Vec<u8> = Vec::new();
         loop {
             let room = self.limit - self.produced;
@@ -826,14 +856,16 @@ impl<'a> Inflater<'a> {
             // byte over `room` is never requested, so the limit is exact.
             let want = room.min(out.len().max(4096)).max(1);
             let start = out.len();
-            out.try_reserve(want)
-                .map_err(|_| InflateError::OutOfMemory)?;
-            out.resize(start + want, 0);
-            let got = self.read(&mut out[start..])?;
-            out.truncate(start + got);
-            if got == 0 {
+            if out.try_reserve(want).is_err() {
                 out.shrink_to_fit();
-                return Ok(out);
+                return (out, Some(InflateError::OutOfMemory));
+            }
+            out.resize(start + want, 0);
+            let (got, err) = self.read_partial(&mut out[start..]);
+            out.truncate(start + got);
+            if err.is_some() || got == 0 {
+                out.shrink_to_fit();
+                return (out, err);
             }
         }
     }
@@ -843,6 +875,34 @@ impl<'a> Inflater<'a> {
 /// output size. Bytes after the final block are ignored.
 pub fn inflate(data: &[u8], max_output: usize) -> Result<Vec<u8>, InflateError> {
     Inflater::new_raw(data, max_output).read_all()
+}
+
+/// Like [`inflate`] but a failing stream (cut input, corrupt data, output limit)
+/// still returns what was decoded before the problem: `(prefix, problem)`.
+/// `problem` is `None` only for a stream that ended cleanly.
+pub fn inflate_partial(data: &[u8], max_output: usize) -> (Vec<u8>, Option<InflateError>) {
+    Inflater::new_raw(data, max_output).read_all_partial()
+}
+
+/// [`inflate_partial`] for a zlib stream. A bad zlib header is `Err` (nothing
+/// was decoded); an Adler-32 mismatch after the last block is reported as
+/// `Some(ChecksumMismatch)` next to the complete output.
+pub fn zlib_partial(
+    data: &[u8],
+    max_output: usize,
+) -> Result<(Vec<u8>, Option<InflateError>), InflateError> {
+    Ok(Inflater::new_zlib(data, max_output)?.read_all_partial())
+}
+
+/// Like [`inflate_partial`], also returning how many input bytes the stream
+/// used (only meaningful when `problem` is `None`).
+pub fn inflate_consumed_partial(
+    data: &[u8],
+    max_output: usize,
+) -> (Vec<u8>, Option<InflateError>, usize) {
+    let mut inf = Inflater::new_raw(data, max_output);
+    let (v, e) = inf.read_all_partial();
+    (v, e, inf.consumed())
 }
 
 /// Like [`inflate`], also returning how many input bytes the stream used.
