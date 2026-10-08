@@ -122,3 +122,10 @@ path = "fuzz_targets/http_body.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "entropy_api"
+path = "fuzz_targets/entropy_api.rs"
+test = false
+doc = false
+bench = false
