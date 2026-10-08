@@ -1,253 +1,254 @@
-# UI design system ("macOS feel")
+# OSjeff shell: design system
 
-Status: wave 1 (foundation + system chrome). Wave 2 re-skins each app's content on
-top of the toolkit described here. Code paths named below are the stable API; the
-visual values are tokens that live in one place (`kernel/src/theme.rs`, mirrored
-by the pure tables in `osjeff_core::style`).
+Status: wave 1 (foundation, system chrome, the toolkit). Wave 2 re-skins each app's
+content on top of the toolkit described here. The visual values are tokens that live in
+one place (`kernel/src/theme.rs`, backed by the pure tables in `osjeff_core::style`);
+the code paths named below are the stable API.
 
-The goal is a desktop that looks and moves like a current macOS (Big Sur ... Tahoe):
-quiet, translucent where it is cheap to be, animated with springs, and presented as
-a plain operating system (no self-referential or implementation-language text in
-anything the user sees; the `OSJEFF` name only appears as the system menu).
+The file keeps its original name (`ui-macos.md`) because the brief called the target
+"macOS-like". The result is inspired by that family of desktops and deliberately not a
+copy: it keeps the principles (a clear hierarchy, translucency where it is cheap, rounded
+geometry, soft shadows, springy motion, generous spacing) and has its own identity.
+
+## 0. Identity
+
+| | OSjeff |
+|---|---|
+| Mark | a bold prompt chevron `>` (white) on an indigo squircle; the menu-bar version is the bare chevron. No fruit, no wordmark borrowed from anyone |
+| Names | **Apps** (the grid, replaces the start panel), **Busca** (one field for apps, files and sums), **Barra de apps** (the floating bar), **Controles** (network, appearance, switches), **Arquivos**, **Tarefas**, **Monitor**, **Registro**, **Imagens**, **Componentes** (the widget gallery) |
+| Accent | indigo `5B5CF6` by default; eight choices (Indigo, Turquesa, Violeta, Rosa, Coral, Âmbar, Verde, Grafite) |
+| Icon language | a thick white glyph on a saturated vertical-gradient squircle with a faint top gloss; every glyph is drawn from our own vector paths (`osjeff_core::iconart`), none is a traced system icon |
+| Wallpaper | "Dinâmico": pale lilac and sky by day, deep indigo by night, with soft colour glows; four more presets or an image |
+| Motion | short and springy: windows pop in from 92 %, icons in the bar swell like a bump (spring per icon), launches hop twice; everything eases out and is interruptible |
+| Language | Portuguese, plain: nothing in the UI talks about how the system is built; apps need no explanation |
 
 ## 1. Constraints that shape every decision
 
 | Constraint | Consequence |
 |---|---|
-| Software renderer, 1280x720, 32 bpp (UEFI) or 24 bpp (BIOS), BGR or RGB | all primitives are format-aware `Canvas` methods; no per-pixel format `match` in inner loops |
-| `f32` is **emulated** in the kernel (target has no SSE) | pixel work is integer/fixed point only. `f32` is allowed for per-frame animation state (tens of values), never per pixel |
-| Damage tracking + cached static layer (`STATIC`), scene signature, wheel, drag and resize paths must stay correct | new visuals are layers inside the existing paths (section 8), not a new compositor |
-| Idle desktop must cost ~0 | every animation reports "active" only while it moves; springs snap to rest below an epsilon; nothing polls |
-| Heap is 64 MiB, shared | caches are bounded and logged (section 9) |
-| `osjeff_core` is `no_std`, `forbid(unsafe_code)`, host tested | geometry, easing, text measuring, rasterisation, shapes, blur, settings are pure and tested on the host; the kernel only owns the framebuffer and the glue |
+| Software renderer, 1280x720 (BIOS) or 1280x800 (UEFI), 24/32 bpp, BGR or RGB | every primitive is a format-aware `Canvas` method; no per-pixel format `match` in inner loops |
+| `f32` is **emulated** in the kernel (the target has no SSE) | pixel work is integer / fixed point only (24.8 coverage, Q16 and Q8 maths); `f32` only for per-frame animation state (a few dozen values) |
+| Damage tracking, cached static layer (`STATIC`), scene signature, drag and resize paths must stay correct | new visuals are layers inside the existing compositor paths (section 5), not a new compositor |
+| An idle desktop must cost ~0 | every animation reports "active" only while it moves; springs and tweens snap to rest; nothing polls |
+| 64 MiB heap, shared | caches are bounded and logged (section 9) |
+| `osjeff_core` is `no_std`, `forbid(unsafe_code)`, host tested | geometry, easing, text measuring, rasterisation, shapes, blur, settings, search are pure and tested on the host; the kernel owns the framebuffer and the glue |
 
 ## 2. Tokens
 
-All sizes are logical pixels on a 4 px grid (the screen is 1280x720 or larger;
-there is no HiDPI scaling). Colours are `0xRRGGBB`; `a=` is straight alpha.
+All sizes are logical pixels on a 4 px grid; there is no HiDPI scaling. Colours are
+`0xAARRGGBB` in `osjeff_core::style::{LIGHT, DARK}` and read through `theme::pal()`,
+which follows the appearance in effect.
 
 ### 2.1 Colour (light | dark)
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `window_bg` | `F6F6F8` | `2C2C2F` | unified title bar + toolbars + window body |
-| `content_bg` | `FFFFFF` | `1E1E20` | text areas, lists, fields |
+| `window_bg` | `F6F6F8` | `2C2C2F` | unified title bar, toolbars, window body |
+| `content_bg` | `FFFFFF` | `1E1E20` | text areas, lists, cards |
 | `sidebar_bg` | `EDEDF1` | `262629` | sidebars |
-| `separator` | `000000 a=.10` | `FFFFFF a=.10` | hairlines (1 px, 0.5 alpha look) |
-| `text` | `1D1D1F` | `F5F5F7` | primary text |
-| `text_secondary` | `6E6E73` | `A1A1A6` | secondary |
-| `text_tertiary` | `A1A1A6` | `6E6E73` | placeholders, disabled |
-| `menubar_tint` | `F6F6F8 a=.70` | `1E1E20 a=.62` | over the blurred wallpaper |
-| `dock_tint` | `FFFFFF a=.30` | `1E1E22 a=.46` | over the blurred backdrop |
-| `menu_tint` | `F2F2F5 a=.80` | `2A2A2E a=.80` | context menus, popovers |
-| `field_bg` | `FFFFFF` | `FFFFFF a=.08` | text fields |
-| `control_bg` | `FFFFFF` + border | `FFFFFF a=.12` | buttons |
-| `accent` | from settings (default `0A84FF`) | same | selection, focus, primary button, toggles |
-| `accent_text` | `FFFFFF` | `FFFFFF` | on accent |
-| `danger` | `FF453A` | `FF453A` | |
-| traffic lights | `FF5F57` `FEBC2E` `28C840` | same | active window |
-| traffic lights, inactive | `D1D1D6` | `4A4A4E` | unfocused window |
+| `separator` | black 10 % | white 10 % | hairlines |
+| `text` / `text_secondary` / `text_tertiary` | `1D1D1F` / `6E6E73` / `A1A1A6` | `F5F5F7` / `A1A1A6` / `6E6E73` | text |
+| `menubar_tint`, `dock_tint`, `menu_tint` | pale veils (70 %, 30 %, 80 %) | dark veils (62 %, 46 %, 80 %) | over the blurred backdrops |
+| `field_bg`, `control_bg`, `control_border` | white, white, black 14 % | white 8 %, 12 %, white 14 % | fields and buttons |
+| `danger` | `FF453A` | `FF453A` | destructive buttons, errors |
+| lights | close `FF6B63`, minimise `FFC24A`, zoom `3FD07C`; unfocused grey `D1D1D6` / `4A4A4E` | | window controls |
 
-Accent palette (`osjeff_core::settings::ACCENTS`): Blue `0A84FF` (default), Purple
-`BF5AF2`, Pink `FF375F`, Red `FF453A`, Orange `FF9F0A`, Yellow `FFD60A`, Green
-`32D74B`, Graphite `8E8E93`.
-
-Legacy app content (wave 1 only) keeps its light surface in both appearances; see
-section 10 for what that means and how wave 2 removes it.
+Appearance setting: *Automática* (dark from 19:00 to 07:00 by the clock), *Clara*, *Escura*;
+applied live from Controles or Configurações. Contrast on `window_bg`: body text 15.6:1 (light) and 12.8:1 (dark), secondary text
+4.7:1 and 5.4:1 (all above 4.5:1).
 
 ### 2.2 Radii
 
-| Token | px | Use |
-|---|---|---|
-| `r_window` | 12 | windows (0 when zoomed) |
-| `r_popover` | 12 | popovers, Control Center, toasts (14) |
-| `r_menu` | 8 | context menus; menu item highlight 5 |
-| `r_control` | 6 | buttons, fields, segmented controls |
-| `r_dock` | 22 | dock panel |
-| `r_tile` | 22.5 % of the icon side | app icon squircle |
-| `r_tooltip` | 6 | tooltips |
-
-Corners are anti-aliased from cached coverage masks (`osjeff_core::raster::CornerMask`),
-circular for UI and a superellipse (n=4) "continuous corner" for icon tiles and the dock.
+`window` 12 (0 when zoomed) · `popover` 12 · `menu` 8 · `control` 6 · `dock` 22 · `tooltip` 6 ·
+icon tile 22.5 % of its side (superellipse, n = 4). Corners are anti-aliased from cached
+coverage masks (`osjeff_core::raster::CornerMasks`), identical for fills, strokes and the
+window-corner repair.
 
 ### 2.3 Spacing and sizes
 
-`4 8 12 16 20 24 32 40`. Menu bar 28. Title bar 32 (`window::TITLE_H`). Traffic light
-12 with 8 gap, 12 inset (hit area 16). Toolbar row 40. Control height 24 (small 20,
-large 32). Menu item 24 high, 8 px side padding, separator 9 px. Dock: icon 48, gap 8,
-padding 8, bottom margin 8, magnification up to 76 over a bell of radius 96 px.
-Launchpad grid cell 128x120, icon 72.
+`4 8 12 16 20 24 32`. Menu bar 28 · title bar 32 (`window::TITLE_H`) · lights 12 px, pitch 20,
+12 inset, 16 px hit area · menu row 24, separator 9 · bar icon 48 (magnified up to 76 over a
+bump of 104 px), gap 8, padding 12/8, 8 from the bottom · Apps cell 136x128, icon 72 ·
+Busca 640 wide, field 56, rows 40 · banners 344x68.
 
-### 2.4 Type scale (Inter, SIL OFL; `kernel/src/text.rs`)
+### 2.4 Type
 
-| Role | px | weight | Use |
-|---|---|---|---|
-| `caption` | 11 | Regular | tooltips, badges, scrollbar labels |
-| `footnote` | 12 | Regular | secondary lines |
-| `label` / body | 13 | Regular / Medium / Semibold | menu bar, buttons, lists, window titles (Medium, app name Semibold) |
-| `callout` | 15 | Regular/Medium | Spotlight rows, toasts title |
-| `title3` | 17 | Semibold | popover headers |
-| `title2` | 22 | Semibold | section titles |
-| `title1` | 28 | Semibold | Launchpad/Spotlight field, big numbers |
+Inter (Regular, Medium, Semibold; SIL OFL) for the interface and JetBrains Mono (Regular;
+SIL OFL) for the terminal and the editor, both through the same glyph atlas
+(`kernel/src/text.rs`, licences in `THIRD-PARTY.md`).
 
-Line height = font ascent+descent; vertical centring uses the cap height
-(`text::center_y`). The 8x8 bitmap font survives only for the terminal and editor
-monospace grids (`font.rs`).
+| Role | px | Use |
+|---|---|---|
+| caption | 11 | badges, scrollbar labels |
+| footnote | 12 | secondary lines, tooltips |
+| body | 13 | menu bar, buttons, lists, window titles (Medium) |
+| callout | 15 | Busca rows |
+| title3 / title2 / title1 | 17 / 22 / 28 | sheet and popover titles, Busca field, big numbers |
+| mono | 15 (9 px pitch, 20 px line) | terminal, editor |
+
+Vertical centring uses the cap height (`text::center_y`); strings are measured with the real
+advances and kerning (`text::measure`) and cut with an ellipsis (`text::ellipsize`). The 8x8
+bitmap font only survives in the crash screen.
 
 ### 2.5 Shadows
 
-Two layers per surface, drawn as separable blurred profiles (`osjeff_core::raster::shadow_profile`):
-
-| Surface | ambient (blur, dy, a) | key (blur, dy, a) |
-|---|---|---|
-| window, focused | 40, 14, .30 | 12, 4, .30 |
-| window, inactive | 28, 8, .20 | 8, 3, .20 |
-| menu / popover | 24, 8, .26 | 6, 2, .22 |
-| dock | 24, 6, .18 | n/a |
-| toast | 20, 6, .24 | 6, 2, .20 |
+Separable analytic profiles (`osjeff_core::raster::shadow_profile`), two layers per window:
+focused (blur 20, dy 14, 29 %) + (6, 3, 24 %); unfocused (14, 8, 17 %) + (4, 2, 15 %); menus
+and popovers (12 to 14, dy 8, 31 %); the bar (12, dy 6, 24 %); banners (14, dy 8, 31 %). A
+window being dragged keeps only the ambient layer.
 
 ### 2.6 Motion
 
-Real-time driven (`dt` from the timer, not frame counts), interruptible, and gated by
-the global *reduce motion* switch (`osjeff_core::anim::set_reduce_motion`): with it on,
-every transition jumps to its end value in the next frame.
+Driven by real time (`dt` = timer ticks / 250), interruptible, and gated by the *reduce
+motion* switch (`osjeff_core::anim::set_reduce_motion`; with it on every transition lands on
+its end in the next frame).
 
-| Transition | Model | Duration / parameters |
+| Transition | Model | Time |
 |---|---|---|
-| window open | bezier `(.2,.8,.2,1)`, scale .92 -> 1 + fade | 220 ms |
-| window close | bezier `(.4,0,1,1)`, scale 1 -> .92 + fade | 160 ms |
-| minimise / restore | scale + translate to/from the dock icon, bezier `(.3,.7,.2,1)` | 300 ms |
-| zoom (maximise / restore) | spring, mass 1, stiffness 260, damping 28 on the rect | ~280 ms |
-| focus change | title bar / shadow cross-fade, linear | 120 ms |
-| dock magnification | spring per icon, stiffness 420, damping 30 | settles ~200 ms |
-| dock bounce on launch | two damped hops | 2 x 320 ms |
-| menu / popover | fade + 6 px slide, bezier `(.2,.8,.2,1)` | 140 ms |
-| Launchpad / Spotlight | fade + scale .96 -> 1 (Launchpad icons scale 1.1 -> 1) | 260 ms / 160 ms |
-| toast | slide from the right + fade; spring | 300 ms in, 220 ms out |
-| scrollbar | fade out after 800 ms idle | 200 ms |
+| window open / close | bezier ease-out / ease-in, scale .92 and fade, from a cached texture | 220 / 160 ms |
+| minimise / restore | scale and move to / from the app's icon in the bar | 300 ms |
+| zoom | spring on the rectangle, content clipped live (never a squeezed bitmap) | ~280 ms |
+| focus change | title bar and shadow cross-fade | 120 ms |
+| bar magnification | one spring per icon (stiffness 420, damping 30) | ~200 ms |
+| launch | two damped hops, 18 px | 640 ms |
+| menu, popover, sheet, Busca | fade + 6 px slide | 140 ms |
+| Apps | fade, icons rise 14 px | 220 ms |
+| banners | slide from the right edge, ease-out in, ease-in out | 260 / 220 ms |
+| tooltip | after 350 ms of rest, fade | 120 ms |
 
-## 3. Components (the toolkit)
+## 3. The toolkit (the API for wave 2)
 
-All widgets live in `kernel/src/desktop/ui.rs` (drawing, over `Canvas`) with the
-pure state, hit-testing and geometry in `osjeff_core::widgets` and
-`osjeff_core::chrome`. The old `button`/`input_box`/`scrollbar`/`graph` helpers keep
-their signatures (so apps keep compiling) but now draw in the new style.
+Drawing lives in `kernel/src/desktop/ui.rs` (over `Canvas`, reading the current palette);
+geometry, hit testing and state are pure and tested in `osjeff_core::widgets` and
+`osjeff_core::chrome`. Draw functions take the interaction state as an argument, and the
+caller derives `Control::Hover` / `Pressed` from the pointer.
 
-| Component | Drawing API | Pure state |
+| Widget | Draw | Geometry and state |
 |---|---|---|
-| text (`draw_text`, `measure`, `ellipsize`, `text_in_rect`) | `text.rs` | `osjeff_core::textlayout` |
-| push button (default / primary / destructive / disabled / pressed) | `ui::push_button` | `widgets::ButtonState` |
-| text field (focus ring, placeholder, caret, selection) | `ui::text_field` | `widgets::FieldState` |
-| segmented control | `ui::segmented` | `widgets::Segmented` |
-| toggle switch (animated knob) | `ui::switch` | `widgets::Switch` |
-| slider | `ui::slider` | `widgets::Slider` |
+| push button (secondary, primary, destructive; normal, hover, pressed, disabled) | `ui::push_button(c, r, label, ButtonKind, Control)` | |
+| text field (placeholder, focus ring, caret) | `ui::text_field(c, r, text, placeholder, focused, caret)`, `ui::text_field_frame` | |
+| segmented control (tabs) | `ui::segmented(c, r, labels, selected)` | `widgets::segmented_rects/hit` |
+| switch (animated knob) | `ui::switch(c, r, t256, enabled)` | `widgets::switch_rect/knob` |
+| slider | `ui::slider(c, r, v, min, max, enabled)` | `widgets::slider_track/value/knob_x` |
 | checkbox, radio | `ui::checkbox`, `ui::radio` | |
-| scrollbar (thin overlay, fades) | `ui::overlay_scrollbar` | `widgets::ScrollbarFade` |
-| list row (hover/selected with accent pill) | `ui::list_row` | |
-| context menu / menu panel | `ui::menu_panel`, `ui::menu_item` | `chrome::MenuLayout` |
-| tooltip | `ui::tooltip` | `chrome::Tooltip` |
-| popover (arrow-less, anchored) | `ui::popover_frame` | `chrome::popover_rect` |
-| progress bar | `ui::progress` | |
-| separator, group box | `ui::separator`, `ui::group_box` | |
-| icon (squircle tiles, scaled, cached) | `icons::blit` | `osjeff_core::raster::Surface` |
+| list row, group box, separator, progress | `ui::list_row`, `ui::group_box`, `ui::separator`, `ui::progress` | |
+| overlay scrollbar (fades) | `ui::overlay_scrollbar` | `widgets::ScrollbarFade`, `scroll_thumb` |
+| menu row, tooltip | `ui::menu_item`, `ui::tooltip` | `chrome::menu_geom` |
+| line graph, usage bar (for charts) | `ui::graph`, `ui::usage_bar` | |
+| glass panel (blurred backdrop, tint, edge, shadow) | `glass::panel`, `BackdropSlot` | |
+| text | `text::draw`, `draw_centered`, `draw_left`, `draw_right`, `draw_ellipsis`, `measure`, `wrap`, `draw_mono` | `osjeff_core::textlayout` |
+| icons and glyphs | `icons::blit(c, Icon, x, y, size, opacity)`, `ui::draw_glyph(c, Glyph, x, y, size, argb)` | `osjeff_core::iconart` |
+| colours | `theme::{pal, text, text_muted, window_body, toolbar, sidebar, surface, zebra, line, button_bg, tool_bg, ink, ink_dim, danger, ok, selection, accent}` | `osjeff_core::style` |
 
-The **widget gallery** (hidden, `Ctrl+Alt+G`) shows every component in the current
-appearance and has an appearance switch, so a screenshot run exercises light and dark.
+The **gallery** (`Ctrl+Alt+G`, also in the system menu) shows all of it live in four tabs
+(controls, type, colours, icons) and is the reference for app authors. Tabs, a segmented
+control and charts are all in the toolkit on purpose: the Tarefas app is meant to become an
+activity monitor (CPU, memory, disk and network tabs with a process list).
 
 ## 4. System chrome
 
-* **Menu bar** (28 px, full width, translucent over the blurred wallpaper, baked into
-  the background cache). Left: the system menu (OSJEFF mark: About, Settings, Reboot,
-  Shut Down with confirmation), the focused app name in Semibold and its menus
-  (File, Edit, View, Window with real, wired entries). Right: network status, Control
-  Center, clock (date + time, 24 h/12 h from settings), Spotlight magnifier. Item
-  geometry is `osjeff_core::chrome::menubar_layout` (host tested). The performance
-  HUD is hidden (`Ctrl+Alt+H`).
-* **Windows**: unified title bar (32 px, same colour as the body), traffic lights at
-  the left with `x`, `-`, `+` glyphs on hover, centred Medium title, 12 px AA corners,
-  1 px hairline, large soft shadow (stronger when focused), inactive windows dimmed
-  with grey lights. Double click on the title = zoom. Resize edges and minimum sizes
-  as before.
-* **Dock**: floating translucent panel centred at the bottom, magnification, running
-  indicator dots, tooltips, bounce on launch, context menu. Geometry and the
-  magnification curve are `osjeff_core::chrome::dock_*` (host tested).
-* **Launchpad** (replaces the start panel): full-screen blurred overlay, icon grid,
-  search field (type to filter), Esc closes. **Spotlight** (`Ctrl+Space`): one field,
-  apps, files from the VFS (bounded), calculator expressions.
-* **Notifications**: banners top-right under the menu bar.
-* **Wallpapers**: dynamic-style gradients (light and dark presets) or an image.
-* **Cursor**: arrow, pointing hand and I-beam sprites (`kernel/src/cursor_art.rs`;
-  hot spot and size constants centralised in `desktop/mod.rs`).
+* **Menu bar** (28 px, glass baked into the cached wallpaper): the OSjeff mark (menu: Sobre,
+  Configurações, Componentes, Reiniciar, Desligar, the last two behind a confirmation
+  sheet), the focused app's name (Semibold; menu: Encerrar) and its menus Arquivo, Editar,
+  Visualizar, Janela with real, enabled/disabled-aware entries (new window, close, minimise,
+  zoom, undo/redo/cut/copy/paste/select all for the editor, browser zoom, open and save
+  for the editor, the window list); on the right the network state, Controles, Busca and
+  the clock with the date. Moving along the bar with a menu open switches menus; the
+  keyboard (arrows, Enter, Esc) works too.
+* **Controles** and the **calendar** popovers hang under their bar items.
+* **Windows**: unified title bar, lights at the left (grey when unfocused, glyphs on
+  hover), centred Medium title that never reaches the lights, 12 px corners, hairline,
+  two-layer shadow, focus cross-fade, double click on the title zooms, resize edges and
+  minimum sizes as before. Zoom fills the area between the menu bar and the bar.
+* **Barra de apps**: floating glass panel centred at the bottom, an Apps button, a
+  separator and the apps; magnification, running dots, tooltips, launch hop, a context
+  menu per icon (Abrir / Nova janela / Encerrar). The backdrop is blurred once when the
+  wallpaper is painted; a window under the panel makes it a plain translucent tint.
+* **Apps** (`Apps` button): the wallpaper and windows blurred behind a grid of every app
+  (system and installed) with a search field; type to filter, arrows move, Enter opens,
+  the wheel scrolls, Esc closes.
+* **Busca** (`Ctrl+Space`, or the bar's magnifier): apps, files of the volume (at most 600
+  entries, five levels, indexed when it opens) and arithmetic (`12*(3+4)` shows `= 84`,
+  Enter copies it).
+* **Sheet** for restart and shut down (Enter or the red button confirms, Esc cancels).
+* **Banners** slide in at the top right under the bar.
+* **Pointer**: arrow, pointing hand over links, I-beam over text, drawn as vector shapes
+  with an outline and a soft shadow (`osjeff_core::cursor`; one 24x28 box for all three).
+* **HUD** (frame time, heap, threads) only with `Ctrl+Alt+H`.
 
 ## 5. Rendering model
 
-Layers, bottom to top, in every compose path:
+Bottom to top, in every compose path:
 
-1. wallpaper + menu-bar backdrop + dock backdrop (cached in `BG`, painted once);
-2. windows in z-order, each with its shadow (static ones cached in `STATIC`);
-3. dock (icons are drawn live because they magnify; the panel is a blit of the
-   cached blurred backdrop when no window is under it, else a tinted translucent fill);
-4. menu bar content (title, status items, clock) over the cached strip;
-5. overlays: menus, popovers, Control Center, Launchpad, Spotlight, Alt+Tab;
-6. toasts (framebuffer overlay restored from `BACK`), then the cursor.
+1. the wallpaper with the menu-bar glass and the bar's blurred strip (cached in `BG`);
+2. windows in z-order, each with its shadow (the static ones cached in `STATIC`);
+3. the bar (live: its icons magnify; excluded from `STATIC`);
+4. the menu-bar content (names, status items, clock);
+5. overlays: menus, popovers, Apps, Busca, sheet, Alt+Tab;
+6. banners, then the pointer, straight onto the framebuffer.
 
-Blur is **never** computed per frame on large areas. A blurred backdrop is built when
-a surface opens (menu: ~220x200, Launchpad: full screen at 1/4 resolution then
-upsampled, toast: ~360x80) and kept until it closes. Shadows are analytic separable
-profiles, no 2-D cache. Scaled icons are cached per (icon, size).
+Blur is never computed per frame on a large area: a blurred backdrop is captured once when
+a surface opens (menus about 200x200, Apps at a quarter of the resolution) and kept until it
+closes. The hover repaint of Apps only redraws the cells that changed (`overlay_bounds`
+returns that dirty rectangle). Scaled icons are cached per (icon, size) and the glyph atlas
+is filled lazily.
 
-## 6. Performance budget
+## 6. Performance (QEMU TCG, 1280x720, `perf-trace` build)
 
-Targets on QEMU TCG (no KVM), 1280x720, `perf-trace` build:
+Frame cost per path, mean over the run (microseconds; `tools/perf/summ.py`; before = the tree
+at the start of this work):
 
-| Interaction | Budget (frame cost) | Notes |
+| Scenario | before | after |
 |---|---|---|
-| idle (clock tick) | <= 0.3 ms per second, 0 frames otherwise | `ClockLocal` path |
-| cursor move only | <= 0.1 ms | unchanged path |
-| window drag (damage frame) | <= 4 ms **goal**; the 800x520 window damage blit dominates in TCG, see results | shadow is single-layer while dragging |
-| dock magnification frame | <= 4 ms | 700x100 region, cached scaled icons |
-| menu open / hover | <= 2 ms | cached blur |
-| Launchpad open | one frame <= 60 ms (blur cache), animation frames <= 8 ms | 1/4 res blur |
-| text: 100 glyphs | <= 0.1 ms | cached coverage bitmaps |
+| idle: CPU per second | 0 + one 0.33 ms clock tick | 0 + one 0.35 ms clock tick |
+| window drag (damage frame) | 2316 | 3673 |
+| open and close a window (animation frame) | 11330 | 4134 |
+| Apps / start panel: hover frame | 5051 | 642 |
+| Apps / start panel: open (rebuild frame) | 14035 | 34264 |
+| text, 48 characters | 283672 cycles | 39550 cycles at 13 px |
+| rounded rectangle, 512x320 | 874120 cycles | 1113396 cycles (anti-aliased) |
 
-Measured numbers (before and after) are in `docs/TESTING.md`, section "Custo de
-quadro da interface". Microbenchmarks of the pure primitives are in `bench/`.
+The drag frame costs more because the window is now anti-aliased, has a soft shadow and a
+title bar with real text; it stays under the 4 ms goal. Opening Apps costs one frame of
+blur capture, paid once.
 
 ## 7. What changes where
 
 | Area | Files |
 |---|---|
-| tokens, appearance | `kernel/src/theme.rs`, `osjeff_core/src/style.rs`, `osjeff_core/src/settings.rs` |
-| text | `osjeff_core/src/{ttf,glyph,textlayout}.rs`, `kernel/src/text.rs`, `assets/fonts/` |
-| primitives | `osjeff_core/src/{gfx,raster}.rs`, `kernel/src/fb.rs` |
-| motion | `osjeff_core/src/anim.rs`, `kernel/src/desktop/motion.rs` |
-| chrome geometry | `osjeff_core/src/{window,layout,chrome}.rs` |
-| chrome drawing | `kernel/src/desktop/{chrome,dock,menubar,launchpad,spotlight,controlcenter}.rs`, `render.rs` |
-| widgets | `kernel/src/desktop/ui.rs`, `osjeff_core/src/widgets.rs`, `desktop/gallery.rs` |
-| icons | `kernel/src/icons.rs` |
-| cursor | `kernel/src/cursor_art.rs` |
-| compositor glue | `kernel/src/main.rs` (menu bar upload line, animation flag), `desktop/mod.rs` |
+| tokens, appearance | `kernel/src/theme.rs`, `osjeff_core/src/{style,settings}.rs` |
+| text | `osjeff_core/src/{ttf,glyph,fontcache,textlayout}.rs`, `kernel/src/text.rs`, `assets/fonts/` |
+| primitives | `osjeff_core/src/{gfx,raster}.rs`, `kernel/src/fb.rs`, `kernel/src/fb/{shapes,scale}.rs` |
+| motion | `osjeff_core/src/anim.rs` |
+| chrome geometry, search, cursor, widgets | `osjeff_core/src/{window,layout,chrome,widgets,search,cursor,iconart}.rs` |
+| chrome drawing | `kernel/src/desktop/{chrome,dock,menubar,overlays,shell,glass,cursor,render}.rs` |
+| toolkit and gallery | `kernel/src/desktop/{ui,gallery}.rs` |
+| icons, glyphs | `kernel/src/{icons,glyphs}.rs` |
 
 ## 8. Compatibility rules for app content (wave 2)
 
-* Draw inside `Rect` below `r.y + TITLE_H`; `TITLE_H` is 32 now. Use `window::TITLE_H`,
-  never a literal.
-* Content must not paint outside the window rect; the chrome (corner rounding,
-  hairline, traffic lights) is drawn by `draw_window` and clipped by its mask.
-* Prefer `ui::*` widgets and `theme::tokens()` colours (they follow light/dark).
-  Colours baked into legacy code keep working; they are simply light-themed.
+* Draw inside `r.body()` (below `TITLE_H`); never use a literal for the title height.
+* Content must not paint outside the window rectangle; the corners are repaired after the
+  app draws, but a stray pixel under the hairline will show.
+* Take colours from `theme::*` (they follow light and dark) and text from `text::*`;
+  `ui::text`, `ui::button` and the other byte-string helpers still work and now use the
+  new look.
+* Fixed character grids (terminal, editor) use `text::mono_cell()`; other text is
+  proportional, so measure instead of multiplying by a column count.
 
 ## 9. Memory
 
-Logged at boot (`[trace] ui:` lines) and at runtime in the monitor: glyph cache
-(bytes, glyphs), icon cache (bytes), shadow/backdrop caches. Budget: fonts 90 KiB
-embedded, glyph cache <= 1 MiB, icon sources (128 px) 0.9 MiB, scaled icon cache
-<= 2 MiB, Launchpad backdrop 3.7 MiB while open.
+After the first frame (logged as `[trace] ui: memory ...`): glyph atlas about 62 KiB for 917
+glyphs (grows as new sizes and characters are used), icon cache a few hundred KiB (128 px
+sources plus the scaled copies; flushed when it passes 160 entries), the bar's blurred strip about
+0.3 MiB, fonts 120 KiB embedded. The Apps backdrop (3.6 MiB at 1280x720) exists only while
+the overlay is open. Building the atlas takes about 34 ms at boot (logged).
 
 ## 10. Known gaps after wave 1
 
-* App interiors still use the old 8x8 text and light surfaces; they sit inside the
-  new chrome. Dark mode darkens the chrome and token-driven widgets only.
-* No right-to-left or complex text; kerning is pair kerning only.
-* No subpixel (LCD) text, deliberately: grayscale AA looks the same in every
-  framebuffer format.
+* App interiors are token-driven but not redesigned: Tarefas, Imagens, the file list and
+  the log still use the old layouts and fixed-pitch measurements in places; the browser page
+  layout assumes fixed character widths. Wave 2 moves each app to the widgets above.
+* No right-to-left or complex text; kerning is pair kerning only; no LCD text.
+* The pointer ghost left by a frame that both repaints a region and moves the pointer is
+  owned by another change (`main.rs` cursor path) and untouched here.

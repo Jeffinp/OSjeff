@@ -7,7 +7,7 @@ sugestões na barra, busca na página, zoom, seleção e cópia de texto, págin
 
 ## 1. Modelo de confiança
 
-O navegador só mostra **"Conexao segura"** quando as três coisas aconteceram, nesta
+O navegador só mostra **"Conexão segura"** quando as três coisas aconteceram, nesta
 conexão:
 
 1. a **cadeia** que o servidor mandou foi montada até uma raiz da trust store embutida,
@@ -114,8 +114,8 @@ A barra de endereço mostra o estado da **conexão atual**:
 
 | Estado | Barra |
 |---|---|
-| `https://` com cadeia válida | "Conexao segura" (verde) |
-| `https://` aberto com "continuar mesmo assim" | "Certificado invalido" (vermelho) |
+| `https://` com cadeia válida | "Conexão segura" (verde) |
+| `https://` aberto com "continuar mesmo assim" | "Certificado inválido" (vermelho) |
 | `http://` | "Nao seguro" (vermelho claro) |
 | carregando `https://` ou página inicial | nada |
 
@@ -123,7 +123,7 @@ A barra de endereço mostra o estado da **conexão atual**:
 `Browser::loaded_with(Conn::Verified, ..)`, e o `fetcher` só devolve `Conn::Verified` com o
 `Verifier` concluído (cadeia **e** assinatura).
 
-Mensagens (todas começam com "Certificado invalido: "): expirado; ainda nao valido; nome
+Mensagens (todas começam com "Certificado inválido: "): expirado; ainda nao valido; nome
 nao confere com o site; autoassinado, cadeia nao confiavel; cadeia nao confiavel;
 assinatura invalida; autoridade invalida na cadeia; restricao da cadeia violada; algoritmo
 nao suportado; hora do sistema incorreta; certificado malformado/grande demais; cadeia
@@ -133,7 +133,7 @@ falha TLS, redirecionamento de HTTPS para HTTP bloqueado.
 Só o erro de certificado oferece **"Continuar mesmo assim (inseguro)"**. O clique
 guarda o host (comparação sem diferenciar maiúsculas) numa lista em memória, recarrega, e o
 `fetcher` pula a validação **só para esse host**, em todos os saltos da navegação. A página
-fica marcada "Certificado invalido". Nada é gravado em disco.
+fica marcada "Certificado inválido". Nada é gravado em disco.
 
 ## 5.1 Navegador
 

@@ -3,6 +3,34 @@
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
 tem releases versionadas; as seções são marcos na `master`.
 
+## 2026-10 — Nova interface (W22)
+
+- **Visual novo, claro e escuro.** Barra de menus com menu do sistema, nome e menus do app em
+  foco (ligados a ações reais), rede, Controles, Busca e relógio com data; barra de apps flutuante
+  com ampliação por mola, pontos de app aberto, dicas e salto ao abrir; overlay **Apps** no lugar
+  do painel iniciar; **Busca** (`Ctrl+Space`) com apps, arquivos do volume e uma calculadora;
+  janelas com barra de título unificada, botões à esquerda, cantos de 12 px e sombra em duas
+  camadas; folha de confirmação para reiniciar e desligar; popovers de Controles e de calendário;
+  banners que deslizam no canto superior direito; cursores vetoriais (seta, mão, I). A identidade é
+  própria (marca, nomes, ícones, paleta índigo, movimento); detalhes em `docs/design/ui-macos.md`.
+- **Texto vetorial em toda parte.** Inter para a interface e JetBrains Mono para o terminal e o
+  editor (ambas OFL, em `THIRD-PARTY.md`), por um leitor TrueType e um rasterizador próprios, no
+  `osjeff_core`, com atlas lazy (917 glifos, 61 KiB, 34 ms no boot). A fonte 8x8 ficou só na tela
+  de pânico.
+- **Primitivas e movimento.** Formas com anti-aliasing, sombras analíticas, gradientes, desfoque e
+  reamostragem; molas e curvas por tempo real, interrompíveis, com a chave *reduzir movimento*.
+  Janelas abrem, fecham, minimizam (voando para o ícone), restauram e fazem zoom animados; o
+  desktop ocioso continua custando zero quadros.
+- **Configurações:** `appearance` (automática pela hora, clara, escura) e `reduce_motion`, no
+  arquivo de configuração (leitor total) e na tela, aplicados na hora; novas cores de destaque e
+  papel de parede dinâmico com esquema escuro.
+- **Atalhos novos:** `Ctrl+Space` Busca, `Ctrl+W` fechar, `Ctrl+M` minimizar, `Ctrl+Alt+G`
+  galeria de componentes, `Ctrl+Alt+H` HUD de desempenho (escondido por padrão).
+- **Toolkit** em `desktop/ui.rs` (botões, campos, segmentado, switch, slider, listas, menus, dicas,
+  gráficos) com geometria pura em `osjeff_core::{chrome,widgets}`; os apps antigos seguem
+  funcionando dentro da moldura nova e seguem a aparência pelas funções de `theme`.
+- Testes: 2414 no `osjeff_core` (eram 2331); custo de quadro antes e depois em
+  `docs/TESTING.md`.
 ## 2026-10 — Correções do uso real (W20)
 
 - **Cursor sem rastro.** O sprite do cursor vive só no framebuffer; os caminhos de desenho que

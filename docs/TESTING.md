@@ -332,7 +332,7 @@ QEMU sem aceleração **não** representa hardware real. Compare proporções.
 
 | Ferramenta | Uso |
 |---|---|
-| HUD do desktop (canto superior direito) | ms/frame, fps, draws/s, heap, threads |
+| HUD do desktop (Ctrl+Alt+H; canto superior esquerdo) | ms/frame, fps, draws/s, heap, threads |
 | `cargo build --release -p os --features perf-trace` | estatísticas por segundo na serial (`[trace]`): custo por etapa de render, ISR, alocações, latência de entrada |
 | `tools/perf/run.sh`, `ab.sh`, `cmp.sh` | cenários scriptados (mouse/teclas pelo monitor do QEMU), A/B intercalado, `-icount` para razões estáveis |
 | `tools/perf/scen/w8-*.sh`, `w8-heap.sh` | window manager: várias instâncias (`w8-multi`), maximizar/minimizar/Alt+Tab/redimensionar (`w8-wm`), 30+ janelas (`w8-stress`), soak de abrir/fechar 100x com a ocupação exata do heap (`w8-soak` + `w8-heap.sh`, build `perf-trace`) |
@@ -340,6 +340,47 @@ QEMU sem aceleração **não** representa hardware real. Compare proporções.
 | `cd bench && cargo bench` | microbenchmarks no host (criterion), crate fora do workspace |
 
 Os marcos de boot (`[trace] boot + N ms`) saem na serial em qualquer build.
+
+### Interface (W22): testes e custo de quadro
+
+Testes novos no `osjeff_core` (todos no host; o kernel só liga o framebuffer a eles):
+
+| Módulo | Testes | O que prova |
+|---|---|---|
+| `ttf`, `glyph`, `fontcache`, `textlayout` | 8, 9, 7, 6 | leitor TrueType total (fontes hostis não estouram nem entram em laço), contornos compostos, cobertura exata do rasterizador, cache por (peso, tamanho), medição, quebra e reticências, célula da fonte monoespaçada |
+| `raster` | 14 | pré-multiplicação e *source-over* sem deriva, máscaras de canto, retângulos e contornos AA, perfis de sombra simétricos, desfoque, reamostragem |
+| `anim` | 16 | bezier monotônico, mola sem divergir, `Tween` que reaponta sem salto, animação de janela interrompível, *reduzir movimento*, salto de lançamento |
+| `style`, `chrome`, `widgets` | 4, 12, 6 | paletas e aparência automática pela hora, geometria e acerto de barra de menus, menus, barra de apps (ampliação), Apps, Busca, popovers e banners; segmentado, switch, controle deslizante, barra de rolagem |
+| `iconart`, `cursor` | 7, 4 | todos os ícones e glifos têm conteúdo, cantos transparentes, determinismo; sprites dentro da caixa, ponto quente sobre a forma |
+| `search` | 5 | ranqueamento, dobra de acentos, calculadora exata (overflow recusado, nunca embrulhado), nenhum texto curto derruba o *parser* |
+| `notify`, `settings`, `wallpaper`, `window`, `layout`, `winman` | 10, 15, 10, 21, 40, 44 | banners deslizando, chaves `appearance`/`reduce_motion` totais, esquemas claro e escuro, luzes à esquerda, área de trabalho sob a barra de menus |
+
+Cenários de tela (cada um fotografa e a imagem é revisada em claro e escuro):
+`w22-look`, `w22-apps` (todos os apps nas duas aparências), `w22-shell` (Busca, folha, galeria,
+HUD, menus de contexto), `w22-polish` (menus, Controles, calendário, Apps, Busca, folha),
+`w22-wm` (Alt+Tab, muitas janelas), `w22-anim` (abrir, zoom, minimizar, restaurar em voo),
+`w22-bar` (ampliação da barra), `w22-splash`, `w22-readme` (capturas do README, em UEFI).
+`tools/perf/lib.sh` ganhou `dock_icon <nome>` (posição de cada ícone da barra) e `move` agora
+divide saltos grandes em passos de 100 px (um pacote PS/2 grande estoura).
+
+Custo de quadro (QEMU/TCG sem KVM, 1280x720, `perf-trace`, `tools/perf/summ.py`; média por caminho;
+antes = árvore no início do trabalho, mesmos cenários):
+
+| Cenário | antes | depois |
+|---|---|---|
+| ocioso (CPU por segundo) | 0 + um tique de relógio de 0,33 ms | 0 + um tique de 0,35 ms |
+| arrastar a janela (quadro de dano) | 2,32 ms | 3,67 ms |
+| abrir e fechar uma janela (quadro de animação) | 11,3 ms | 4,1 ms |
+| Apps (antes, painel iniciar): quadro de hover | 5,05 ms | 0,64 ms |
+| Apps (antes, painel iniciar): quadro que abre | 14,0 ms | 34,3 ms |
+| barra de apps varrida pelo ponteiro (ampliação) | n/a | 2,98 ms por quadro |
+| texto, 48 caracteres | 283 672 ciclos (fonte 8x8) | 39 550 ciclos (13 px, vetorial) |
+| retângulo arredondado 512x320, cheio | 874 120 ciclos | 1 113 396 ciclos (AA) |
+| atlas de glifos no boot | n/a | 917 glifos, 61 KiB, 34 ms |
+
+O arrasto custa mais porque a janela agora tem cantos e sombra com anti-aliasing e um título de
+texto de verdade; fica abaixo da meta de 4 ms. Abrir o Apps paga uma vez a captura do fundo
+borrado (um quarto da resolução). O ocioso continua em zero quadros fora do tique do relógio.
 
 ## 5. Lint e supply chain
 

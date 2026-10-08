@@ -9,13 +9,13 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly--2026--10--05-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-2373%20passing-success?style=for-the-badge)
-![Fuzz](https://img.shields.io/badge/fuzz-14%20targets-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-2414%20passing-success?style=for-the-badge)
+![Fuzz](https://img.shields.io/badge/fuzz-13%20targets-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
 **🇧🇷 Português** · [🇺🇸 English](README.en.md)
 
-<img src="docs/img/demo.gif" alt="OSJeff em ação: abrir editor, digitar, fechar" width="760">
+<img src="docs/img/demo.gif" alt="OSjeff em ação: barra de apps, editor, Busca, calculadora, tema claro e escuro" width="760">
 
 </div>
 
@@ -36,11 +36,17 @@ estão corrigidos ou documentados.
 
 ## 🖼️ Capturas
 
-| Desktop | Gerenciador de tarefas (CPU real por thread) |
+| Desktop (escuro, por volta das 19h) | Desktop (claro) |
 |:---:|:---:|
-| <img src="docs/img/desktop.png" width="420"> | <img src="docs/img/taskmanager.png" width="420"> |
-| **Gerenciador de arquivos (pastas, lixeira, persistente)** | **Navegador (HTTPS verificado: "Conexao segura")** |
-| <img src="docs/img/files.png" width="420"> | <img src="docs/img/browser.png" width="420"> |
+| <img src="docs/img/ui-desktop-dark.png" width="420"> | <img src="docs/img/ui-desktop-light.png" width="420"> |
+| **Apps (todos os aplicativos, com busca)** | **Busca: apps, arquivos e contas (`Ctrl+Space`)** |
+| <img src="docs/img/ui-apps-dark.png" width="420"> | <img src="docs/img/ui-busca-light.png" width="420"> |
+| **Gerenciador de arquivos (pastas, lixeira, persistente)** | **Navegador (HTTPS verificado: "Conexão segura")** |
+| <img src="docs/img/ui-files-dark.png" width="420"> | <img src="docs/img/ui-browser-light.png" width="420"> |
+| **Configurações (aparência, movimento, destaque)** | **Controles (rede, aparência, destaque)** |
+| <img src="docs/img/ui-settings-dark.png" width="420"> | <img src="docs/img/ui-controls-dark.png" width="420"> |
+| **Monitor do sistema (CPU real por thread)** | **Componentes (`Ctrl+Alt+G`): a vitrine do toolkit** |
+| <img src="docs/img/ui-monitor-light.png" width="420"> | <img src="docs/img/ui-gallery-light.png" width="420"> |
 
 Quando o kernel falha, ele **diz o que aconteceu**, na tela e na serial (aqui, um
 estouro de pilha tratado em pilha IST própria, sem triple fault):
@@ -91,7 +97,7 @@ que compila com `std` sob teste. O kernel só liga o hardware a ela.
 
 ```mermaid
 flowchart LR
-    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2373 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2414 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · unsafe documentado<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>builder da imagem BIOS/UEFI"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -101,8 +107,8 @@ flowchart LR
 
 | Verificação | Estado |
 |---|---|
-| Testes unitários | **2373** no `osjeff_core`; cobertura de linhas 96,6% (bruta, inclui os módulos de teste; medida com `cargo llvm-cov`) |
-| Fuzzing | 14 alvos (entropia, rede, discos OJFS v2/v3, HTML/CSS/imagens/formulários, shell, editor, certificados X.509, manifesto e sandbox de apps); bugs achados são corrigidos com entrada mínima e teste de regressão |
+| Testes unitários | **2414** no `osjeff_core`; cobertura de linhas 96,6% (bruta, inclui os módulos de teste; medida com `cargo llvm-cov`) |
+| Fuzzing | 13 alvos (rede, discos OJFS v2/v3, HTML/CSS/imagens/formulários, shell, editor, certificados X.509, manifesto e sandbox de apps); bugs achados são corrigidos com entrada mínima e teste de regressão |
 | `unsafe` | **100%** dos blocos do kernel com `// SAFETY:`, imposto por `clippy::undocumented_unsafe_blocks` |
 | Boot em QEMU | BIOS **e** UEFI em todo commit de kernel, desktop comparado pixel a pixel com a baseline (`tools/verify-boot.sh`) |
 | Lint e formato | `cargo lint-kernel`, `cargo lint-host`, `cargo fmt --check`, todos `-D warnings` |

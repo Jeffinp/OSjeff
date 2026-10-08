@@ -20,7 +20,7 @@ e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espa�
 endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
 o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
 
-- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2373 testes
+- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2414 testes
   passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
 - **Multitarefa preemptiva** a 250 Hz, com bloqueio. Cinco threads: `compositor`,
@@ -507,10 +507,13 @@ arquivos do kernel (grep). Isso torna o `unsafe` **justificado e fiscalizado**, 
 
 ### 6.1 Buffers
 
-`BG` guarda o wallpaper (gradiente, dois blobs de *glow*, dock), pintado **uma vez**;
-`BACK` é o alvo de composição; `STATIC` é "tudo menos as janelas dinâmicas", composto uma
-vez por animação ou arrasto; `SCRATCH` guarda o que está atrás de uma janela em fade; o
-framebuffer só recebe retângulos ou um blit completo. Tamanhos em §2.3.
+`BG` guarda o wallpaper (gradiente e *glows* do esquema claro ou escuro, a faixa de vidro da
+barra de menus já assada e o fundo borrado da barra de apps), pintado **uma vez** (e de novo
+quando o wallpaper, o destaque ou a aparência mudam); `BACK` é o alvo de composição; `STATIC`
+é "tudo menos as janelas dinâmicas e a barra de apps", composto uma vez por animação ou
+arrasto; uma textura de 3,5 MiB (`TEXTURE`) guarda a janela que abre, fecha, minimiza ou
+restaura enquanto ela é reamostrada; o framebuffer só recebe retângulos ou um blit completo.
+Tamanhos em §2.3.
 
 ### 6.2 Caminhos do laço (`main.rs`)
 
@@ -523,8 +526,8 @@ flowchart TD
     A -->|sim| AR{"assinatura da cena mudou?"}
     AR -->|sim| ARB["AnimRebuild: BG para STATIC, compoe as estaticas, blit completo"]
     AR -->|nao| AD["AnimDamage: restaura STATIC so no dano, redesenha as dinamicas, blit do retangulo"]
-    A -->|nao| O{"menu ou painel iniciar aberto?"}
-    O -->|sim| OV["OverlayRebuild ou OverlayHover: repinta so o retangulo do overlay"]
+    A -->|nao| O{"menu, popover, Apps, Busca, folha ou Alt+Tab aberto?"}
+    O -->|sim| OV["OverlayRebuild ou OverlayHover: repinta so o retangulo do overlay (no Apps, so as celulas que mudaram)"]
     O -->|nao| S{"cena suja?"}
     S -->|sim| ST["Steady ou Settle: recompoe tudo em BACK, sobe so a janela focada, a que perdeu foco e o relogio"]
     S -->|nao| CL{"tique do relogio?"}
@@ -544,10 +547,15 @@ flowchart TD
   restaurar, minimizar-que-termina e fechar um overlay "assentam" com um repaint completo
   (`Settle`). O app WASM mantém o laço nesse caminho enquanto sua janela está visível
   (`has_animation`), pois pede quadro novo a cada tick.
-- **Fade sobre o conteúdo real:** `draw_animating` guarda o fundo em `SCRATCH`, desenha a
-  janela e mistura de volta com o alfa da animação. Janelas cujo retângulo não cabe em
-  `SCRATCH` (navegador, gerenciador de arquivos e, em 32 bpp, o app WASM) abrem e fecham
-  **sem fade**.
+- **Abrir, fechar, minimizar, restaurar:** `draw_animating` desenha a janela **uma vez** no
+  tamanho de repouso na `TEXTURE` e, a cada quadro, reamostra (bilinear, cantos arredondados,
+  alfa da animação) no retângulo do instante, sob uma sombra que desaparece junto; minimizar e
+  restaurar voam de/para o ícone do app na barra (`Desktop::dock_target`). Janelas maiores
+  que a textura (1280x720) animam sem o efeito de escala. **Zoom** (maximizar/restaurar) não
+  usa textura: desenha a janela real no retângulo em voo com o conteúdo recortado, então o
+  layout nunca vira um bitmap espremido. As animações andam por tempo real
+  (`dt = ticks / 250`), são interrompíveis e obedecem a *reduzir movimento*
+  (`osjeff_core::anim`).
 - **O cursor não está em `BACK`**: é desenhado direto no framebuffer, e vale uma invariante
   (`osjeff_core::cursor::CursorTrack`, testada no host com um framebuffer simulado):
   **todo quadro que renderiza algo começa apagando o sprite** (restaura de `BACK` o retângulo
@@ -560,32 +568,67 @@ flowchart TD
   mesmo par apagar/pintar. O HUD e os toasts também vivem só no framebuffer: se o retângulo
   apagado os toca, eles são redesenhados antes do cursor. **Ao portar o desenho para outra
   estrutura, mantenha só isto:** `erase` antes de qualquer escrita no framebuffer do quadro,
-  `paint` depois da última, e `CURSOR_W/H` cobrindo todo sprite (verificado em tempo de
-  compilação). Prova no QEMU: `tools/perf/scen/w20-cursor.sh` (rajadas rápidas sobre bordas,
+  `paint` depois da última, e `CURSOR_W/H` (= `osjeff_core::pointer::{W, H}`, a caixa de todos os sprites) cobrindo todo sprite. Prova no QEMU: `tools/perf/scen/w20-cursor.sh` (rajadas rápidas sobre bordas,
   dock e cantos) + `tools/perf/w20-cursor-check.sh` (0 pixels diferentes entre a tela em
   repouso e a mesma tela depois de um repaint completo forçado).
-  **Relógio:** o tique de 1 s repinta só a pílula (e a janela do Task Manager, se aberta),
-  em vez de subir ~8 MiB. **Sombra:** não é misturada sob o corpo opaco da janela
+  **Relógio:** o tique de 1 s repinta só o texto do relógio na barra de
+  menus (e a janela do Task Manager, se aberta), em vez de subir ~8 MiB. **Sombra:** não é misturada sob o corpo opaco da janela
   (`fill_round_rect_alpha_skip`): evita ~85% do blend com saída idêntica.
 
 ### 6.3 Primitivas (`fb.rs`, `osjeff_core::gfx`)
 
-`fill_rect` escreve por linha: em 32 bpp com `align_to_mut::<u32>` (um store por pixel);
+A interface usa as primitivas anti-aliased de `osjeff_core::raster` e `fb/shapes.rs` (§6.5);
+as de baixo nível seguem aqui. `fill_rect` escreve por linha: em 32 bpp com `align_to_mut::<u32>` (um store por pixel);
 em 24 bpp (BIOS) em blocos de 4 pixels (12 B) de um padrão pronto. **Tabela de blend:**
 para áreas ≥ 4096 px, `gfx::blend_lut(cor, alfa)` constrói uma vez três tabelas
 `destino para resultado` por canal, e o preenchimento alfa vira uma consulta por byte,
-bit-idêntica a `mix256` (testes no core). Cantos arredondados usam `corner_inset`
-(`isqrt`), também no core. Texto: fonte 8x8 própria com escala inteira.
+bit-idêntica a `mix256` (testes no core). O texto da interface é vetorial (§6.5); a fonte 8x8
+(`font.rs`) só desenha a tela de pânico.
 
 ### 6.4 HUD e `perf-trace`
 
-O HUD (canto superior direito, 212x60) mostra ms por quadro, fps possível, `draws/s`, pior
+O HUD (canto superior esquerdo, sob a barra de menus; escondido: **Ctrl+Alt+H**) mostra ms por quadro, fps possível, `draws/s`, pior
 quadro do segundo, uso do heap e `thr N`. Atualiza a cada 25 ticks (100 ms) **direto no
 framebuffer**, depois de restaurar a área a partir de `BACK`, fora da janela cronometrada.
 `trace.rs` tem **marcos de boot** (sempre compilados) e **estatísticas por segundo**
 (caminhos de quadro, allocator, ISR, ocioso, latência de entrada) só com
 `cargo build --release -p os --features perf-trace` (`ON` é `const`; sem a feature os
 ganchos somem); saem como linhas `[trace]` na serial, lidas por `tools/perf/`.
+
+### 6.5 A interface: texto, primitivas, movimento e o shell
+
+O desenho da interface (`docs/design/ui-macos.md` tem os tokens e a API de widgets) se apoia
+em quatro peças puras no `osjeff_core`, testadas no host, e em cola fina no kernel. O `f32`
+do kernel é emulado em software (o alvo não tem SSE): todo trabalho por pixel é inteiro ou
+ponto fixo (24.8 na cobertura, Q16/Q8 nas contas); `f32` só guarda o estado de animação por
+quadro (algumas dezenas de valores).
+
+- **Texto** (`ttf`, `glyph`, `fontcache`, `textlayout`; `kernel/src/text.rs`): leitor TrueType
+  próprio (`glyf` simples e compostos, `cmap` formato 4, `hmtx`, kerning GPOS formatos 1 e 2),
+  rasterizador de cobertura exata por área, cache preguiçoso de glifos por (peso, tamanho) e
+  medição/quebra/reticências. Inter (Regular, Medium, Semibold) para a interface e JetBrains
+  Mono para o terminal e o editor, ambas OFL e embutidas em subconjunto (~120 KiB, licenças em
+  `THIRD-PARTY.md`); o atlas é montado no boot (~34 ms, registrado) e cresce sob demanda. Um
+  segundo motor serve a thread `appd` (o do compositor é de uma thread só).
+- **Primitivas** (`raster`, `fb/shapes.rs`, `fb/scale.rs`): superfícies ARGB pré-multiplicadas,
+  retângulos arredondados e contornos com cantos de círculo ou superelipse (máscaras de
+  cobertura em cache), sombras analíticas separáveis, gradientes, desfoque de caixa, reamostragem
+  de área e bilinear, caminhos preenchidos (ícones, glifos, cursor).
+- **Movimento** (`anim`): bezier, mola (Euler semi-implícito em subpassos), `Tween` que
+  reaponta sem salto, a animação de janela (`Anim`), o zoom e o salto de lançamento. Tudo avança
+  por tempo real e reporta se ainda se move, e é isso que decide se o laço fica no caminho de
+  animação (`has_animation`) ou volta a custar zero.
+- **Cromo e shell** (`chrome`, `widgets`, `style`, `search`, `iconart`): geometria da barra de
+  menus, dos menus, da barra de apps (disposição e curva de ampliação), do Apps, da Busca, dos
+  popovers e dos banners; paletas clara e escura; o ranqueamento e a calculadora da Busca; os
+  ícones e glifos vetoriais.
+
+No kernel: `desktop/shell.rs` guarda o estado (menus, popovers, folha, Apps, Busca, barra de
+apps) e executa os comandos (`Cmd`), `menubar.rs`, `dock.rs`, `overlays.rs`, `chrome.rs` e
+`cursor.rs` desenham e tratam entrada, `glass.rs` captura o fundo borrado **uma vez** quando uma
+superfície abre, e `ui.rs`/`gallery.rs` são o toolkit e sua vitrine. A janela do Alt+Tab, os
+banners e o HUD usam o mesmo vidro. Aparência (automática pelo relógio, clara, escura), cor de
+destaque e *reduzir movimento* vêm de `osjeff_core::settings` e valem na hora.
 
 ## 7. Apps e window manager
 
@@ -616,19 +659,20 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
   lançá-los de novo foca a janela existente, mas passam pelo mesmo mecanismo. **Apps WASM são
   multi-instância** (cada janela é uma instância do `AppManager`, §10.4), com tamanho, mínimo e
   `resizable` vindos do manifesto; minimizar suspende o app (sem `render`), fechar o encerra.
-- **Geometria** (`osjeff_core::window`, `layout`): botões da barra de título (fechar,
-  maximizar/restaurar, minimizar, nessa ordem da direita), faixa de redimensionar de 5 px
-  em volta da janela (cantos de 14 px), `Rect::resized`, `layout::work_area` (a tela menos
-  a faixa do HUD no topo, margem lateral e o dock) e `winman::cascade_rect` (novas
-  instâncias descem 28 px por índice, com volta a cada 8).
-- **Dock e menus.** O ícone do dock **foca** (ou restaura) a janela mais recente do app;
-  só abre outra quando não há nenhuma. Janelas minimizadas aparecem como um ponto sob o
-  ícone. **Nova instância:** `Ctrl+N` na janela focada (Terminal, Editor, Arquivos,
-  Calculadora; Navegador apenas foca) ou botão direito no ícone do dock, "Nova janela".
-  Painel iniciar e menu de contexto da área de trabalho usam a mesma regra de foco.
-- **Mouse.** Botões minimizar/maximizar **aparecem quando o ponteiro está sobre a janela**
-  (a janela em repouso fica idêntica à de antes do WM); duplo clique na barra de título
-  alterna maximizar (`ClickTracker`, 500 ms); arrastar a barra move (não com a janela
+- **Geometria** (`osjeff_core::window`, `layout`): barra de título unificada de 32 px com os três
+  botões de 12 px à esquerda (fechar, minimizar, zoom; área de clique de 16 px), faixa de
+  redimensionar de 5 px em volta da janela (cantos de 14 px), `Rect::resized`, `layout::work_area`
+  (a tela abaixo da barra de menus de 28 px, até a barra de apps) e `winman::cascade_rect`
+  (novas instâncias descem 28 px por índice, com volta a cada 8). Nenhuma janela cobre a barra
+  de menus (`clamped_pos`, `resized`).
+- **Barra de apps e menus.** O ícone da barra **foca** (ou restaura) a janela mais recente do app;
+  só abre outra quando não há nenhuma. Um ponto sob o ícone marca os apps abertos. **Nova
+  instância:** `Ctrl+N` na janela focada (Terminal, Editor, Arquivos, Calculadora; Navegador
+  apenas foca), o menu Arquivo do app ou o botão direito no ícone, "Nova janela". O overlay
+  **Apps**, a **Busca** (`Ctrl+Space`) e o menu de contexto da área de trabalho usam a mesma
+  regra de foco. `Ctrl+W` fecha e `Ctrl+M` minimiza a janela focada.
+- **Mouse.** Os três botões ficam coloridos na janela focada e cinzas nas outras; os glifos
+  aparecem com o ponteiro sobre eles; duplo clique na barra de título alterna o zoom (`ClickTracker`, 500 ms); arrastar a barra move (não com a janela
   maximizada); arrastar qualquer borda ou canto redimensiona.
 - **Teclado.** `Alt+Tab` / `Alt+Shift+Tab` abrem o seletor (`Switcher`) em ordem de uso
   recente, mostrando também as minimizadas; soltar o Alt confirma, Esc cancela. O
@@ -703,19 +747,18 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   de 100 % a imagem é reduzida uma vez por mudança de zoom (filtro de caixa, em cache); a 100 %
   ou mais a amostragem é por vizinho mais próximo direto da origem. Lógica pura em
   `osjeff_core::viewer` (zoom, pan, caixa de ajuste, lista da pasta, texto de informações).
-  Está no Painel Iniciar e no menu do desktop; o **dock padrão não mudou**. Capturas:
+  Está no overlay Apps e na Busca. Capturas:
   `docs/img/files-list.png`, `files-copy-progress.png`, `files-trash-confirm.png`,
   `viewer-photo.png`, `viewer-transparency.png`, `viewer-error.png`.
 - **Navegador:** a barra de endereço e a área de conteúdo seguem a janela, e a página é
   **diagramada de novo** para a nova largura ao terminar de redimensionar (o corpo HTML
   fica guardado na instância). Fechar a janela descarta página e estado.
-- **Apps WASM:** §10. O Painel Iniciar lista os instalados (ícone e nome, com rolagem) depois dos
+- **Apps WASM:** §10. O overlay Apps lista os instalados (ícone e nome, com rolagem) depois dos
   apps do sistema; o Gerenciador de arquivos ganhou a vista **Apps** (`Enter` abre, `I` instala,
   `Del` remove).
 
 - **App WASM:** §10.
-- **Monitor, Configurações e Log do sistema** (só no Painel Iniciar e no menu de contexto;
-  o dock não mudou): monitor de recursos com abas Processos/Desempenho/Sistema, janela de
+- **Monitor, Configurações e Log do sistema** (no overlay Apps e na Busca): monitor de recursos com abas Processos/Desempenho/Sistema, janela de
   configurações (papel de parede, destaque, relógio, fuso, data/hora, teclado ABNT2, rede,
   armazenamento, energia) e visualizador do log do kernel (`klog`), mais as notificações
   em toast. Detalhes, formatos e traits de integração: `docs/design/sysmgmt.md`.
@@ -727,12 +770,8 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
    (estado por janela, criado em `App::new`).
 2. `desktop/render.rs` (`draw_window`) e `apps.rs`: desenhar dentro do `Rect` da janela
    (nunca fora dele); `input.rs`: teclas (`handle_key`) e cliques (`click_window`).
-3. Dock: `layout::DOCK_COUNT` e a lista de ícones em `widgets::paint_background`. Só os
-   primeiros `DOCK_APPS` (`instance.rs`) de `Kind::ALL` têm ícone; os demais aparecem apenas
-   no Painel Iniciar e no menu de contexto.
-3. Dock (opcional): `layout::DOCK_COUNT` e a lista de ícones em `widgets::paint_background`. Um
-   `Kind` além dos slots do dock (o Visualizador) aparece só no Painel Iniciar e no menu do
-   desktop; `draw_dock_dots` ignora quem não tem ícone.
+3. Barra de apps (opcional): uma entrada em `shell::DOCK_ITEMS`. Todo `Kind` de `Kind::ALL`
+   aparece sozinho no overlay Apps e na Busca; quem não está na barra não ganha ícone nem ponto.
 
 Foco, z-order, minimizar/maximizar/redimensionar, Alt+Tab, processo (`nome`, `nome 2`...),
 ponto de minimizada, menu "Nova janela" e o encerramento ao fechar não pedem nenhuma mudança.
@@ -1013,7 +1052,7 @@ tem 4 atalhos (Bing, Wikipedia, Cloudflare, Exemplo), escolhidos por aceitarem o
 handshake P-256 do cliente.
 
 **Rótulo de segurança.** O enum `Security` tem `None`, `Http` ("Nao seguro"),
-`HttpsVerified` ("Conexao segura") e `HttpsInvalid` ("Certificado invalido", só depois do
+`HttpsVerified` ("Conexão segura") e `HttpsInvalid` ("Certificado inválido", só depois do
 "continuar mesmo assim"). **"Seguro" só existe como `HttpsVerified`**, que só sai de
 `Browser::loaded_with(Conn::Verified, ..)`: o `fetcher` devolve `Conn::Verified` apenas
 depois da cadeia e da assinatura do handshake verificadas.

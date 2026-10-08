@@ -9,13 +9,13 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly--2026--10--05-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-2373%20passing-success?style=for-the-badge)
-![Fuzz](https://img.shields.io/badge/fuzz-14%20targets-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-2414%20passing-success?style=for-the-badge)
+![Fuzz](https://img.shields.io/badge/fuzz-13%20targets-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
 [🇧🇷 Português](README.md) · **🇺🇸 English**
 
-<img src="docs/img/demo.gif" alt="OSJeff in action: open the editor, type, close" width="760">
+<img src="docs/img/demo.gif" alt="OSjeff in action: the app bar, the editor, Search, the calculator, light and dark" width="760">
 
 </div>
 
@@ -36,11 +36,17 @@ fixed or documented. (Audit documents are in Portuguese.)
 
 ## 🖼️ Screenshots
 
-| Desktop | Task manager (real per-thread CPU) |
+| Desktop (dark, around 7 pm) | Desktop (light) |
 |:---:|:---:|
-| <img src="docs/img/desktop.png" width="420"> | <img src="docs/img/taskmanager.png" width="420"> |
-| **File manager (folders, trash, persistent)** | **Browser (verified HTTPS: "Conexao segura")** |
-| <img src="docs/img/files.png" width="420"> | <img src="docs/img/browser.png" width="420"> |
+| <img src="docs/img/ui-desktop-dark.png" width="420"> | <img src="docs/img/ui-desktop-light.png" width="420"> |
+| **Apps (every application, with search)** | **Search: apps, files and sums (`Ctrl+Space`)** |
+| <img src="docs/img/ui-apps-dark.png" width="420"> | <img src="docs/img/ui-busca-light.png" width="420"> |
+| **File manager (folders, trash, persistent)** | **Browser (verified HTTPS: "Conexão segura")** |
+| <img src="docs/img/ui-files-dark.png" width="420"> | <img src="docs/img/ui-browser-light.png" width="420"> |
+| **Settings (appearance, motion, accent)** | **Controls (network, appearance, accent)** |
+| <img src="docs/img/ui-settings-dark.png" width="420"> | <img src="docs/img/ui-controls-dark.png" width="420"> |
+| **System monitor (real per-thread CPU)** | **Components (`Ctrl+Alt+G`): the toolkit showcase** |
+| <img src="docs/img/ui-monitor-light.png" width="420"> | <img src="docs/img/ui-gallery-light.png" width="420"> |
 
 When the kernel fails it **says what happened**, on screen and on serial (here, a
 stack overflow handled on a dedicated IST stack, no triple fault):
@@ -91,7 +97,7 @@ builds with `std` under test. The kernel only wires hardware to it.
 
 ```mermaid
 flowchart LR
-    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2373 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2414 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · documented unsafe<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>BIOS/UEFI image builder"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -101,8 +107,8 @@ flowchart LR
 
 | Verification | Status |
 |---|---|
-| Unit tests | **2373** in `osjeff_core`; 96.6% line coverage (raw, includes the test modules; measured with `cargo llvm-cov`) |
-| Fuzzing | 14 targets (entropy, network, OJFS v2/v3 disks, HTML/CSS/images/forms, shell, editor, X.509 certificates, app manifest and sandbox); every bug found is fixed with a minimal input and a regression test |
+| Unit tests | **2414** in `osjeff_core`; 96.6% line coverage (raw, includes the test modules; measured with `cargo llvm-cov`) |
+| Fuzzing | 13 targets (network, OJFS v2/v3 disks, HTML/CSS/images/forms, shell, editor, X.509 certificates, app manifest and sandbox); every bug found is fixed with a minimal input and a regression test |
 | `unsafe` | **100%** of kernel blocks carry `// SAFETY:`, enforced by `clippy::undocumented_unsafe_blocks` |
 | QEMU boot | BIOS **and** UEFI on every kernel commit, desktop compared pixel by pixel to a baseline (`tools/verify-boot.sh`) |
 | Lint and format | `cargo lint-kernel`, `cargo lint-host`, `cargo fmt --check`, all `-D warnings` |

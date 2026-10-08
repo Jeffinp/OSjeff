@@ -67,8 +67,8 @@ das 46 raízes embutidas (`osjeff_core/data/trust-store.bin`, SHA-256 de cada um
 Limites: 8 certificados, 16 KiB cada, handshake em até 30 s. O desenho completo está em
 [`design/tls-browser.md`](design/tls-browser.md).
 
-A barra de endereço diz o que aconteceu: **"Conexao segura"** só com cadeia válida,
-"Certificado invalido" (vermelho) se o usuário abriu a página mesmo com erro, "Nao seguro"
+A barra de endereço diz o que aconteceu: **"Conexão segura"** só com cadeia válida,
+"Certificado inválido" (vermelho) se o usuário abriu a página mesmo com erro, "Nao seguro"
 em `http://`. O tipo `Security` só chega a "seguro" por `Conn::Verified`, que o `fetcher`
 devolve apenas depois da cadeia e da assinatura. Um erro de certificado bloqueia a página
 com o motivo (expirado, nome não confere, cadeia não confiável, autoassinado, hora do
