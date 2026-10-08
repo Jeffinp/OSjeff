@@ -2,6 +2,11 @@
 
 Status: wave 1 (foundation, system chrome, the toolkit) and, for the system apps, wave 2 (section 11:
 Tarefas, Registro, Ajustes, Calculadora, notificações). The rest of wave 2 re-skins each app's
+> The macOS-like look described in sections 0 and 4 was judged too close to macOS. The
+> direction now is `docs/design/ui-identity.md`; this file keeps the tokens, the toolkit and
+> the rendering rules, and is updated as each step of that document lands.
+
+Status: wave 1 (foundation, system chrome, the toolkit). Wave 2 re-skins each app's
 content on top of the toolkit described here. The visual values are tokens that live in
 one place (`kernel/src/theme.rs`, backed by the pure tables in `osjeff_core::style`);
 the code paths named below are the stable API.
