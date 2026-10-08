@@ -13,6 +13,7 @@
 // production, and by `std` under tests).
 extern crate alloc;
 
+pub mod activity;
 pub mod anim;
 pub mod appabi;
 pub mod appfs;
