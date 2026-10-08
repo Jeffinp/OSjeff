@@ -1114,49 +1114,40 @@ impl Desktop {
     }
 
     fn draw_about(&self, c: &mut Canvas, p: Rect) {
-        icons::draw(c, Icon::Brand, p.x as usize, p.y as usize, 64);
-        text(c, p.x + 84, p.y + 6, p.w, b"OSjeff", theme::text());
-        let mut b = FixedBuf::<48>::new();
-        let _ = write!(b, "versao {}", env!("CARGO_PKG_VERSION"));
-        text(
+        use crate::text::{self, BODY, TITLE1, Weight};
+        let pal = theme::pal();
+        icons::blit(c, Icon::Brand, p.x, p.y, 72, 256);
+        text::draw(
             c,
-            p.x + 84,
-            p.y + 30,
-            p.w,
-            b.as_bytes(),
-            theme::text_muted(),
+            p.x + 92,
+            p.y + 6,
+            "OSjeff",
+            TITLE1,
+            Weight::Semibold,
+            theme::solid(pal.text),
         );
-        let lines: [&[u8]; 5] = [
-            b"Sistema operacional de 64 bits.",
-            b"Licenca MIT.",
-            b"",
-            b"",
-            b"",
-        ];
-        for (i, l) in lines.iter().enumerate() {
-            text(c, p.x, p.y + 90 + i as i32 * 22, p.w, l, theme::text());
-        }
-        let mut b = FixedBuf::<48>::new();
-        let _ = write!(b, "ligado ha {}", fmt_uptime(self.sysmon.uptime_s));
-        text(
+        let v = alloc::format!("versão {}", env!("CARGO_PKG_VERSION"));
+        text::draw(
             c,
-            p.x,
-            p.y + 90 + 5 * 22,
-            p.w,
-            b.as_bytes(),
-            theme::text_muted(),
+            p.x + 92,
+            p.y + 44,
+            &v,
+            BODY,
+            Weight::Regular,
+            theme::solid(pal.text_secondary),
         );
+        let line = |c: &mut Canvas, y: i32, t: &str, muted: bool| {
+            let col = if muted { pal.text_secondary } else { pal.text };
+            text::draw(c, p.x, y, t, BODY, Weight::Regular, theme::solid(col));
+        };
+        let y0 = p.y + 104;
+        line(c, y0, "Sistema operacional de 64 bits.", false);
+        line(c, y0 + 24, "Licença MIT.", false);
+        let up = alloc::format!("Ligado há {}", fmt_uptime(self.sysmon.uptime_s));
+        line(c, y0 + 72, &up, true);
         if let Some(si) = crate::sysinfo::get() {
-            let mut b = FixedBuf::<60>::new();
-            let _ = write!(b, "{}x{}  {}", si.width, si.height, si.boot_mode);
-            text(
-                c,
-                p.x,
-                p.y + 90 + 6 * 22,
-                p.w,
-                b.as_bytes(),
-                theme::text_muted(),
-            );
+            let t = alloc::format!("{}x{}  {}", si.width, si.height, si.boot_mode);
+            line(c, y0 + 96, &t, true);
         }
     }
 }

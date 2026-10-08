@@ -164,7 +164,12 @@ impl Desktop {
         }
         // The dock is repainted when it moves or something moving crosses it.
         let dock_zone = self.dock_paint_zone();
-        if self.dock_animating() || damage.intersection(&dock_zone).is_some() {
+        // An empty `prev_damage` is the rebuild of the cached layer, which has no bar:
+        // the bar must be painted into this first frame whatever is animating.
+        if prev_damage.is_empty()
+            || self.dock_animating()
+            || damage.intersection(&dock_zone).is_some()
+        {
             damage = damage.union(&dock_zone);
         }
         if self.overlay_open() {

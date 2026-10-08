@@ -110,11 +110,6 @@ pub fn blit(c: &mut Canvas, icon: Icon, x: i32, y: i32, size: i32, opacity: u32)
     crate::trace::prim(crate::trace::Prim::Glyph, t0);
 }
 
-/// Legacy entry point of the app interiors: draw `icon` at `(x, y)`, `size` square.
-pub fn draw(c: &mut Canvas, icon: Icon, x: usize, y: usize, size: usize) {
-    blit(c, icon, x as i32, y as i32, size as i32, 256);
-}
-
 /// Bytes held by the icon sources and scaled copies (for the memory log).
 pub fn bytes() -> usize {
     let c = cache();

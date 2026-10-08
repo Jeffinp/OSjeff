@@ -223,7 +223,7 @@ impl Toasts {
         }
         let r = Self::rect(0, sw, sh)
             .union(&Self::rect(n - 1, sw, sh))
-            .inflated(14);
+            .inflated(30);
         // Banners come from beyond the right edge: the strip reaches it.
         Rect::new(r.x, r.y, (sw - r.x).max(r.w), r.h).clamped_to(sw, sh)
     }

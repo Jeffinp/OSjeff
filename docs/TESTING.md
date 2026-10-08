@@ -358,7 +358,7 @@ Testes novos no `osjeff_core` (todos no host; o kernel só liga o framebuffer a 
 Cenários de tela (cada um fotografa e a imagem é revisada em claro e escuro):
 `w22-look`, `w22-apps` (todos os apps nas duas aparências), `w22-shell` (Busca, folha, galeria,
 HUD, menus de contexto), `w22-polish` (menus, Controles, calendário, Apps, Busca, folha),
-`w22-wm` (Alt+Tab, muitas janelas), `w22-anim` (abrir, zoom, minimizar, restaurar em voo),
+`w22-wm` (Alt+Tab, muitas janelas), `w22-toast` (banners; precisa de um gancho temporário de build, como o `w14-toast`), `w22-anim` (abrir, zoom, minimizar, restaurar em voo),
 `w22-bar` (ampliação da barra), `w22-splash`, `w22-readme` (capturas do README, em UEFI).
 `tools/perf/lib.sh` ganhou `dock_icon <nome>` (posição de cada ícone da barra) e `move` agora
 divide saltos grandes em passos de 100 px (um pacote PS/2 grande estoura).
