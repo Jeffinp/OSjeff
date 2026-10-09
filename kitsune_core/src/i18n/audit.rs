@@ -765,28 +765,24 @@ fn text_never_names_the_toolchain() {
 /// Files whose user-visible literals are fully migrated: Portuguese text in them must carry
 /// its accents. (The rest of the tree is the backlog printed by `i18n_report`.)
 const ACCENT_STRICT: &[&str] = &[
-    "kernel/src/desktop/panel.rs",
-    "kernel/src/desktop/taskbar.rs",
-    "kernel/src/desktop/overlays.rs",
-    "kernel/src/desktop/shell.rs",
-    "kernel/src/desktop/toasts_ui.rs",
-    "kernel/src/desktop/chrome.rs",
+    // An entry ending in `/` is a whole folder: every file under it is strict.
+    "kernel/src/desktop/shell/",
+    "kernel/src/desktop/windows/chrome.rs",
     "kitsune_core/src/launcher.rs",
     // w30: Arquivos, Imagens, Editor.
-    "kernel/src/desktop/files.rs",
-    "kernel/src/desktop/files_ui.rs",
-    "kernel/src/desktop/sysstore.rs",
-    "kernel/src/desktop/vfs.rs",
+    "kernel/src/desktop/apps/files/",
+    "kernel/src/desktop/services/sysstore.rs",
+    "kernel/src/desktop/services/vfs.rs",
     "kitsune_core/src/fileman.rs",
     "kitsune_core/src/fileman/apps.rs",
     "kitsune_core/src/fileman/ui.rs",
     "kitsune_core/src/vfs.rs",
     // w31: Terminal, Tarefas, Registro, Calculadora
-    "kernel/src/desktop/term.rs",
-    "kernel/src/desktop/shellhost.rs",
-    "kernel/src/desktop/tarefas.rs",
-    "kernel/src/desktop/logview.rs",
-    "kernel/src/desktop/calc_ui.rs",
+    "kernel/src/desktop/apps/terminal/",
+    "kernel/src/desktop/services/shellhost/",
+    "kernel/src/desktop/apps/tarefas/",
+    "kernel/src/desktop/apps/registro/",
+    "kernel/src/desktop/apps/calculadora/",
     "kitsune_core/src/activity.rs",
     "kitsune_core/src/calc.rs",
     "kitsune_core/src/shell/builtins.rs",
@@ -802,13 +798,10 @@ const ACCENT_STRICT: &[&str] = &[
 
 /// Files migrated in W32 (Navegador, Ajustes, apps WASM, Kit de componentes): same rule.
 const ACCENT_STRICT_W32: &[&str] = &[
-    "kernel/src/desktop/browser.rs",
-    "kernel/src/desktop/browser_input.rs",
-    "kernel/src/desktop/browser_paint.rs",
-    "kernel/src/desktop/browser_ui.rs",
-    "kernel/src/desktop/gallery.rs",
-    "kernel/src/desktop/settings_ui.rs",
-    "kernel/src/desktop/wasmwin.rs",
+    "kernel/src/desktop/apps/browser/",
+    "kernel/src/desktop/apps/gallery/",
+    "kernel/src/desktop/apps/ajustes/",
+    "kernel/src/desktop/apps/wasm/",
     "kernel/src/wasm/abi2.rs",
     "kernel/src/wasm/manager.rs",
     "kernel/src/wasm/manager/runtime.rs",
@@ -854,19 +847,29 @@ fn migrated_sources_have_accents() {
     let a = accents();
     let files = source_files();
     let mut bad = Vec::new();
-    let mut seen = 0;
+    let matches = |entry: &str, file: &str| {
+        if entry.ends_with('/') {
+            file.starts_with(entry)
+        } else {
+            file == entry
+        }
+    };
     for (file, src) in &files {
-        if ACCENT_STRICT.contains(&file.as_str()) || ACCENT_STRICT_W32.contains(&file.as_str()) {
-            seen += 1;
+        if ACCENT_STRICT
+            .iter()
+            .chain(ACCENT_STRICT_W32)
+            .any(|e| matches(e, file))
+        {
             bad.extend(unaccented_literals(file, src, &a));
         }
     }
     if files.iter().any(|(f, _)| f.starts_with("kernel/")) {
-        assert_eq!(
-            seen,
-            ACCENT_STRICT.len() + ACCENT_STRICT_W32.len(),
-            "a strict file is missing"
-        );
+        for entry in ACCENT_STRICT.iter().chain(ACCENT_STRICT_W32) {
+            assert!(
+                files.iter().any(|(f, _)| matches(entry, f)),
+                "a strict file is missing: {entry}"
+            );
+        }
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
