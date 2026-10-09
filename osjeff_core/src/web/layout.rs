@@ -32,6 +32,8 @@ use super::style::{
 use alloc::string::String;
 use alloc::vec::Vec;
 
+mod table;
+
 // ---- the display list ----
 
 /// Underline bit of [`Cmd::Text::deco`].
@@ -270,6 +272,9 @@ impl Doc {
             })];
         }
         let mut sheet = parse_css(UA_CSS);
+        for r in &mut sheet.rules {
+            r.author = false;
+        }
         sheet.rules.extend(parse_css(&css).rules);
         let title = find_title(&dom, 0)
             .map(|t| fold_display(&t))
@@ -308,6 +313,7 @@ impl Doc {
             marker: None,
             lists: Vec::new(),
             canvas: None,
+            last_box: (None, None),
         };
         let area = Area {
             x: 0,
@@ -394,6 +400,8 @@ struct Style {
     link: Option<usize>,
     /// Line-height of the run in pixels.
     lh: i32,
+    /// Pixels the run is raised above the baseline (negative: lowered).
+    shift: i32,
 }
 
 /// An inline object: sized when its line is laid out.
@@ -434,6 +442,8 @@ enum Item {
         sp: Option<Font>,
     },
     Br(Style),
+    /// Horizontal padding of an inline box (its background shows through it).
+    Gap(i32, Style, Option<Font>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -487,6 +497,9 @@ struct Painter<'a> {
     lists: Vec<ListCtx>,
     /// `html` / `body` background.
     canvas: Option<Rgb>,
+    /// Indices of the background and border commands of the block laid out last (the table
+    /// code stretches a cell's box to its row).
+    last_box: (Option<usize>, Option<usize>),
 }
 
 impl Painter<'_> {
@@ -535,6 +548,7 @@ impl Painter<'_> {
             bg: c.bg.filter(|_| c.display == Disp::Inline),
             link: self.link,
             lh: self.lh(c, font),
+            shift: i32::from(c.vshift) * (i32::from(font.size) * 2 / 5).max(1),
         }
     }
 
@@ -728,7 +742,10 @@ struct Piece {
 
 enum PieceKind {
     Text(String),
-    Obj(Obj, i32, i32),
+    /// An object: its box and how far it hangs below the baseline.
+    Obj(Obj, i32, i32, i32),
+    /// Inline padding.
+    Gap,
 }
 
 struct Line {
@@ -765,7 +782,7 @@ fn text_extents(p: &Painter, st: &Style) -> (i32, i32) {
     let asc = p.asc(st.font);
     let nat = p.nat(st.font);
     let top = asc + (st.lh - nat) / 2;
-    (top, st.lh - top)
+    ((top + st.shift).max(0), (st.lh - top - st.shift).max(0))
 }
 
 /// Emit the buffered inline words as wrapped, aligned line boxes starting at `y`;
@@ -803,6 +820,7 @@ fn flush_inline(
             }
             Item::Obj { obj, st, sp } => {
                 let (w, h) = obj_size(p, &obj, area.w);
+                let below = obj_below(p, &obj, h);
                 let space = match sp {
                     Some(f) if !line.pieces.is_empty() => wq(p, " ", f),
                     _ => 0,
@@ -816,9 +834,25 @@ fn flush_inline(
                 let space = if line.pieces.is_empty() { 0 } else { space };
                 let x = line.w.saturating_add(space);
                 line.w = x.saturating_add(wq_);
-                line.top = line.top.max(h);
+                line.top = line.top.max(h - below);
+                line.bottom = line.bottom.max(below);
                 line.pieces.push(Piece {
-                    kind: PieceKind::Obj(obj, w, h),
+                    kind: PieceKind::Obj(obj, w, h, below),
+                    st,
+                    x,
+                    w: wq_,
+                });
+            }
+            Item::Gap(w, st, sp) => {
+                let wq_ = w.max(0).saturating_mul(Q);
+                let space = match sp {
+                    Some(f) if !line.pieces.is_empty() => wq(p, " ", f),
+                    _ => 0,
+                };
+                let x = line.w.saturating_add(space);
+                line.w = x.saturating_add(wq_);
+                line.pieces.push(Piece {
+                    kind: PieceKind::Gap,
                     st,
                     x,
                     w: wq_,
@@ -934,7 +968,22 @@ fn emit_line(
 
     // Merge neighbouring text pieces that look the same into one run.
     let mut runs: Vec<(i32, i32, String, Style)> = Vec::new(); // x q8, w q8, text, style
-    let mut objs: Vec<(i32, Obj, i32, i32, Style)> = Vec::new();
+    let mut objs: Vec<(i32, Obj, i32, i32, i32, Style)> = Vec::new();
+    // Backgrounds of inline boxes: (left, right, top, height, colour), joined when they touch.
+    let mut bgs: Vec<(i32, i32, i32, i32, Rgb)> = Vec::new();
+    let add_bg =
+        |bgs: &mut Vec<(i32, i32, i32, i32, Rgb)>, l: i32, r: i32, t: i32, h: i32, c: Rgb| {
+            if let Some(last) = bgs.last_mut()
+                && last.4 == c
+                && last.2 == t
+                && last.3 == h
+                && l <= last.1 + 1
+            {
+                last.1 = last.1.max(r);
+                return;
+            }
+            bgs.push((l, r, t, h, c));
+        };
     for pc in done.pieces {
         match pc.kind {
             PieceKind::Text(t) => {
@@ -953,24 +1002,58 @@ fn emit_line(
                     runs.push((pc.x, pc.w, t, pc.st));
                 }
             }
-            PieceKind::Obj(o, w, h) => objs.push((pc.x, o, w, h, pc.st)),
+            PieceKind::Obj(o, w, h, below) => objs.push((pc.x, o, w, h, below, pc.st)),
+            PieceKind::Gap => {
+                if let Some(bg) = pc.st.bg {
+                    let nat = p.nat(pc.st.font);
+                    let ty = baseline - p.asc(pc.st.font) - pc.st.shift;
+                    let l = (x0.saturating_add(pc.x).saturating_add(Q / 2)) / Q;
+                    let r = (x0
+                        .saturating_add(pc.x)
+                        .saturating_add(pc.w)
+                        .saturating_add(Q / 2))
+                        / Q;
+                    bgs.push((l, r, ty - 1, nat + 2, bg));
+                }
+            }
         }
+    }
+    // Background boxes of the runs (and of the gaps between them), in order.
+    let mut run_bgs: Vec<(i32, i32, i32, i32, Rgb)> = Vec::new();
+    for (x, w, _, st) in &runs {
+        if let Some(bg) = st.bg {
+            let nat = p.nat(st.font);
+            let ty = baseline - p.asc(st.font) - st.shift;
+            let l = (x0.saturating_add(*x).saturating_add(Q / 2)) / Q;
+            let r = (x0
+                .saturating_add(*x)
+                .saturating_add(*w)
+                .saturating_add(Q - 1))
+                / Q;
+            run_bgs.push((l, r, ty - 1, nat + 2, bg));
+        }
+    }
+    bgs.extend(run_bgs);
+    bgs.sort_by_key(|b| (b.2, b.0));
+    let mut joined: Vec<(i32, i32, i32, i32, Rgb)> = Vec::new();
+    for b in bgs {
+        add_bg(&mut joined, b.0, b.1, b.2, b.3, b.4);
+    }
+    for (l, r, t, h, col) in joined {
+        p.push_cmd(Cmd::Rect {
+            x: l,
+            y: t,
+            w: (r - l).max(1),
+            h,
+            color: col,
+            radius: 4,
+        });
     }
     for (x, text, w, st) in runs.into_iter().map(|(x, w, t, s)| (x, t, w, s)) {
         let px = (x0.saturating_add(x).saturating_add(Q / 2)) / Q;
         let pw = (w + Q - 1) / Q;
         let nat = p.nat(st.font);
-        let ty = baseline - p.asc(st.font);
-        if let Some(bg) = st.bg {
-            p.push_cmd(Cmd::Rect {
-                x: px,
-                y: ty - 1,
-                w: pw,
-                h: nat + 2,
-                color: bg,
-                radius: 3,
-            });
-        }
+        let ty = baseline - p.asc(st.font) - st.shift;
         if let Some(l) = st.link {
             p.hits.push(LinkHit {
                 x: px,
@@ -992,9 +1075,9 @@ fn emit_line(
             link: st.link.map(|l| l as u32),
         });
     }
-    for (x, obj, w, h, st) in objs {
+    for (x, obj, w, h, below, st) in objs {
         let px = (x0.saturating_add(x).saturating_add(Q / 2)) / Q;
-        emit_obj(p, &obj, px, baseline - h, w, h, st);
+        emit_obj(p, &obj, px, baseline - (h - below), w, h, st);
     }
     adv(y, line_h)
 }
@@ -1122,8 +1205,9 @@ fn obj_size(p: &Painter, obj: &Obj, avail: i32) -> (i32, i32) {
                     (tw + 2 * p.z(16)).max(p.z(64))
                 }
                 FieldKind::Checkbox | FieldKind::Radio => {
+                    // The box and a gap before the label that follows.
                     let s = p.z(16).max(8);
-                    return (s, s);
+                    return (s + p.z(6), s);
                 }
                 _ => {
                     let cw = (wq(p, "0", f) + Q - 1) / Q;
@@ -1132,6 +1216,23 @@ fn obj_size(p: &Painter, obj: &Obj, avail: i32) -> (i32, i32) {
             };
             (w.min(avail.max(20)).max(8), h)
         }
+    }
+}
+
+/// How far an object hangs below the baseline of its line: nothing for a picture; a control
+/// sits with the baseline of its own text on the line's, a toggle roughly centred on the
+/// x-height.
+fn obj_below(p: &Painter, obj: &Obj, h: i32) -> i32 {
+    match obj {
+        Obj::Img { .. } => 0,
+        Obj::Field { kind, .. } => match kind {
+            FieldKind::Checkbox | FieldKind::Radio => h / 4,
+            _ => {
+                let f = control_font(p);
+                let text_top = (h - p.nat(f)) / 2;
+                (h - (text_top + p.asc(f))).clamp(0, h)
+            }
+        },
     }
 }
 
@@ -1253,6 +1354,11 @@ fn emit_obj(p: &mut Painter, obj: &Obj, x: i32, y: i32, w: i32, h: i32, st: Styl
             form, field, kind, ..
         } => {
             let f = control_font(p);
+            let w = if matches!(kind, FieldKind::Checkbox | FieldKind::Radio) {
+                (w - p.z(6)).max(1)
+            } else {
+                w
+            };
             p.fields.push(FieldBox {
                 form: *form,
                 field: *field,
@@ -1354,9 +1460,20 @@ fn inline_element<'a>(
         p.link = Some(p.links.len());
         p.links.push(decode_attr(href));
     }
+    // Horizontal padding of an inline box: a gap its background shows through.
+    let (pl, pr) = (side(c.padding[3], 0, p.zoom), side(c.padding[1], 0, p.zoom));
+    let st = p.style(c);
+    if pl > 0 {
+        // The space before the box goes before its padding, not inside it.
+        let sp = p.space.take();
+        p.items.push(Item::Gap(pl, st, sp));
+    }
     p.anc.push(el);
     let y = flow(p, &el.children, c, c, area, y);
     p.anc.pop();
+    if pr > 0 {
+        p.items.push(Item::Gap(pr, st, None));
+    }
     p.link = saved_link;
     y
 }
@@ -1500,24 +1617,41 @@ fn side(l: Len, base: i32, zoom: i32) -> i32 {
 /// Lay out a single block-level element: margins, border, padding, background and
 /// content. Returns the y below its border box (its bottom margin waits in
 /// `p.pending` to collapse with what follows).
-fn layout_block<'a>(
+fn layout_block<'a>(p: &mut Painter<'a>, el: &'a Element, c: &Computed, area: Area, y: i32) -> i32 {
+    layout_block_in(p, el, c, area, y, None)
+}
+
+/// [`layout_block`], optionally in a box of exactly `fixed = (x, border-box width)`
+/// (a table cell: no margins, the width is the column's).
+fn layout_block_in<'a>(
     p: &mut Painter<'a>,
     el: &'a Element,
     c: &Computed,
     area: Area,
     mut y: i32,
+    fixed: Option<(i32, i32)>,
 ) -> i32 {
     let zoom = p.zoom;
     let aw = area.w;
     let [mt_l, mr_l, mb_l, ml_l] = c.margin;
-    let mt = side(mt_l, aw, zoom);
-    let mb = side(mb_l, aw, zoom);
+    let (mt, mb) = if fixed.is_some() {
+        (0, 0)
+    } else {
+        (side(mt_l, aw, zoom), side(mb_l, aw, zoom))
+    };
     let pad_t = side(c.padding[0], aw, zoom);
     let pad_r = side(c.padding[1], aw, zoom);
     let pad_b = side(c.padding[2], aw, zoom);
     let pad_l = side(c.padding[3], aw, zoom);
     let [bt, br, bb, bl] = c.border_w.map(|w| if w > 0 { p.z(w).max(1) } else { 0 });
     let extra = pad_l + pad_r + bl + br;
+
+    // A table is as wide as its columns want to be (or its `width`); read it first.
+    let mut table = if c.display == Disp::Table && fixed.is_none() {
+        Some(table::collect(p, el, c))
+    } else {
+        None
+    };
 
     // ---- width and horizontal position ----
     let ml_fixed = if ml_l == Len::Auto {
@@ -1532,6 +1666,11 @@ fn layout_block<'a>(
     };
     let room = (aw - ml_fixed - mr_fixed).max(1);
     let mut total = room;
+    if let Some(t) = &table
+        && c.width == Len::Auto
+    {
+        total = t.totals().1.saturating_add(extra).min(room);
+    }
     if let Some(w) = c.width.resolve(aw, zoom) {
         total = if c.border_box { w } else { w + extra };
     }
@@ -1546,8 +1685,7 @@ fn layout_block<'a>(
         (true, false) => leftover,
         _ => ml_fixed,
     };
-    let bx = area.x + ml;
-    let bw = total;
+    let (bx, bw) = fixed.unwrap_or((area.x + ml, total));
     let cx = bx + bl + pad_l;
     let cw = (bw - extra).max(1);
 
@@ -1646,8 +1784,12 @@ fn layout_block<'a>(
     // ---- content ----
     p.anc.push(el);
     let inner = Area { x: cx, w: cw };
-    y = flow(p, &el.children, c, c, inner, y);
-    y = flush_inline(p, c, inner, y, None);
+    if let Some(t) = &mut table {
+        y = table::layout(p, t, c, inner, y, c.width != Len::Auto);
+    } else {
+        y = flow(p, &el.children, c, c, inner, y);
+        y = flush_inline(p, c, inner, y, None);
+    }
     p.anc.pop();
     if is_list && !p.lists.is_empty() {
         p.lists.pop();
@@ -1673,6 +1815,7 @@ fn layout_block<'a>(
     let height = (y - top).max(0);
 
     // Background behind the content, border on top of it.
+    p.last_box = (None, None);
     if let Some(bg) = paint_bg {
         let rect = Cmd::Rect {
             x: bx,
@@ -1684,9 +1827,11 @@ fn layout_block<'a>(
         };
         if bg_index <= p.cmds.len() && p.cmds.len() < MAX_CMDS {
             p.cmds.insert(bg_index, rect);
+            p.last_box.0 = Some(bg_index);
         }
     }
     if bt + br + bb + bl > 0 {
+        p.last_box.1 = Some(p.cmds.len());
         p.push_cmd(Cmd::Border {
             x: bx,
             y: top,

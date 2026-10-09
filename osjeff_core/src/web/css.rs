@@ -42,6 +42,9 @@ pub struct Stylesheet {
 pub struct Rule {
     pub selectors: Vec<Selector>,
     pub decls: Vec<Decl>,
+    /// From the page (true) or from the user-agent sheet (false). Presentational attributes
+    /// beat the second kind and lose to the first.
+    pub author: bool,
 }
 
 /// How an attribute selector compares.
@@ -312,7 +315,11 @@ pub fn parse_css(input: &str) -> Stylesheet {
         let decls = parse_decls(decl_text);
         if !selectors.is_empty() && !decls.is_empty() {
             selector_total += selectors.len();
-            rules.push(Rule { selectors, decls });
+            rules.push(Rule {
+                selectors,
+                decls,
+                author: true,
+            });
         }
     }
     Stylesheet { rules }
