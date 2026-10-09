@@ -38,12 +38,14 @@ mod keys;
 mod search;
 #[cfg(test)]
 mod tests;
+pub mod ui;
 mod undo;
 mod view;
 
 pub use buffer::{GapBuffer, REPLACEMENT, TextBuf};
 pub use dialog::{
-    CloseAsk, CloseChoice, MAX_FIELD, PickEvent, PickMode, PickRow, Picker, status_line,
+    CloseAsk, CloseChoice, MAX_FIELD, PickEvent, PickMode, PickRow, Picker, StatusBar, status_bar,
+    status_line,
 };
 pub use search::{Notice, PromptKind, PromptView};
 pub use undo::{Edit, History, Kind};

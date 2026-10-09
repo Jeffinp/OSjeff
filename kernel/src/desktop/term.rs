@@ -56,12 +56,6 @@ impl TermState {
     }
 }
 
-/// The Latin-1 byte for `c` (anything else is `?`): the legacy byte-string UI helpers read
-/// bytes as Latin-1 when they are not UTF-8.
-pub(crate) fn latin1(c: char) -> u8 {
-    u8::try_from(u32::from(c)).unwrap_or(b'?')
-}
-
 /// Characters and rows that fit a terminal window of rectangle `r`.
 pub(crate) fn term_grid(r: Rect) -> (usize, usize) {
     let cols = ((r.w - 2 * PAD - BAR_W) / CELL_W).max(1) as usize;

@@ -411,7 +411,7 @@ impl Desktop {
     /// is still animating (the caller keeps rendering).
     pub fn animate(&mut self, dt: f32) -> bool {
         self.step_file_jobs();
-        let files_busy = self.step_files(dt) | self.step_viewers(dt);
+        let files_busy = self.step_files(dt) | self.step_viewers(dt) | self.step_editors(dt);
         self.step_shell_jobs();
         self.sync_text_windows();
         self.live_step(dt);
@@ -525,6 +525,8 @@ impl Desktop {
             || (w.shown() && w.app.kind() == Kind::WasmApp)
             || (w.shown() && matches!(&w.app.app, App::Files(f) if f.animating()))
             || (w.shown() && matches!(&w.app.app, App::Viewer(v) if v.animating()))
+            || (w.shown()
+                && matches!(&w.app.app, App::Editor(e) if e.animating(self.focused() == Some(w.id))))
             || (w.shown() && matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
             || self.live_dynamic(w)
             || self.focus_busy(w.id)
@@ -546,6 +548,7 @@ impl Desktop {
                         || w.app.kind() == Kind::WasmApp
                         || matches!(&w.app.app, App::Files(f) if f.animating())
                         || matches!(&w.app.app, App::Viewer(v) if v.animating())
+                        || matches!(&w.app.app, App::Editor(e) if e.animating(self.focused() == Some(w.id)))
                         || matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
             })
     }
@@ -861,6 +864,7 @@ pub(crate) mod calc_ui;
 mod chrome;
 mod cursor;
 mod edit;
+mod edit_ui;
 mod files;
 mod files_ui;
 mod gallery;

@@ -18,7 +18,12 @@
 //! toast_secs=4
 //! dock_zoom=100
 //! tz_city=17
+//! terminal_font=17
+//! editor_font=13
 //! ```
+//!
+//! `terminal_font` and `editor_font` (text size in pixels, [`FONT_MIN`] to [`FONT_MAX`]) are written
+//! only when they differ from the default ([`FONT_DEFAULT`]).
 //!
 //! Parsing is total: [`Settings::parse`] never fails. Blank lines, `#`
 //! comments, unknown keys and malformed or out-of-range values are skipped and
@@ -154,6 +159,22 @@ pub const PATH_CAP: usize = 40;
 /// `/etc/osjeff.conf`).
 pub const FILE_NAME: &[u8] = b"osjeff.conf";
 
+/// Smallest, largest and default size of the terminal and editor text, in pixels.
+pub const FONT_MIN: u8 = 11;
+pub const FONT_MAX: u8 = 24;
+pub const FONT_DEFAULT: u8 = 15;
+
+/// The size one zoom step away from `px` (`dir` > 0 larger, < 0 smaller), kept in range;
+/// `dir == 0` is the default size.
+pub fn font_step(px: u8, dir: i32) -> u8 {
+    let px = px.clamp(FONT_MIN, FONT_MAX);
+    match dir {
+        0 => FONT_DEFAULT,
+        d if d > 0 => (px + 1).min(FONT_MAX),
+        _ => (px - 1).max(FONT_MIN),
+    }
+}
+
 /// Accent palette (`0xRRGGBB`). Entry 0 is the default indigo and must stay equal
 /// to `theme::ACCENT_DEFAULT`.
 pub const ACCENTS: [u32; 8] = [
@@ -205,6 +226,10 @@ pub struct Settings {
     pub dock_zoom: u8,
     /// The city picked for `tz_minutes` (index into [`TIMEZONES`]) or [`CITY_NONE`].
     pub tz_city: u8,
+    /// Size of the terminal text in pixels ([`FONT_MIN`]..=[`FONT_MAX`]).
+    pub terminal_font: u8,
+    /// Size of the editor text in pixels.
+    pub editor_font: u8,
 }
 
 impl Default for Settings {
@@ -231,6 +256,8 @@ impl Settings {
             toast_secs: TOAST_SECS_DEFAULT,
             dock_zoom: DOCK_ZOOM_MAX,
             tz_city: DEFAULT_CITY,
+            terminal_font: FONT_DEFAULT,
+            editor_font: FONT_DEFAULT,
         }
     }
 
@@ -357,6 +384,20 @@ impl Settings {
                     self.tz_city = n as u8;
                 }
             }
+            b"terminal_font" => {
+                if let Some(n) =
+                    parse_u32(val).filter(|n| (FONT_MIN as u32..=FONT_MAX as u32).contains(n))
+                {
+                    self.terminal_font = n as u8;
+                }
+            }
+            b"editor_font" => {
+                if let Some(n) =
+                    parse_u32(val).filter(|n| (FONT_MIN as u32..=FONT_MAX as u32).contains(n))
+                {
+                    self.editor_font = n as u8;
+                }
+            }
             // `version` and anything unknown: nothing to do (forward compatible).
             _ => {}
         }
@@ -393,6 +434,12 @@ impl Settings {
         push_kv(&mut out, b"dock_zoom", self.dock_zoom as u32);
         if (self.tz_city as usize) < TIMEZONES.len() {
             push_kv(&mut out, b"tz_city", self.tz_city as u32);
+        }
+        if self.terminal_font != FONT_DEFAULT {
+            push_kv(&mut out, b"terminal_font", self.terminal_font as u32);
+        }
+        if self.editor_font != FONT_DEFAULT {
+            push_kv(&mut out, b"editor_font", self.editor_font as u32);
         }
         out
     }
@@ -645,6 +692,59 @@ mod tests {
         );
         assert_eq!(old.toast_secs, TOAST_SECS_DEFAULT);
         assert_eq!(old.dock_zoom, DOCK_ZOOM_MAX);
+    }
+
+    #[test]
+    fn font_sizes_parse_inside_their_range_and_round_trip() {
+        let s = Settings::parse(b"terminal_font=18\neditor_font=12\n");
+        assert_eq!((s.terminal_font, s.editor_font), (18, 12));
+        let text = s.to_text();
+        assert!(text.ends_with(b"terminal_font=18\neditor_font=12\n"));
+        assert_eq!(Settings::parse(&text), s);
+        // Out of range, not a number, empty: the default stays, neighbours survive.
+        for bad in [
+            &b"terminal_font=10\n"[..],
+            b"terminal_font=25\n",
+            b"terminal_font=x\n",
+            b"terminal_font=\n",
+            b"terminal_font=-3\n",
+            b"terminal_font=99999999999\n",
+        ] {
+            assert_eq!(Settings::parse(bad).terminal_font, FONT_DEFAULT, "{bad:?}");
+        }
+        let s = Settings::parse(b"editor_font=40\nterminal_font=20\n");
+        assert_eq!((s.terminal_font, s.editor_font), (20, FONT_DEFAULT));
+        // The limits themselves are valid.
+        let s = Settings::parse(b"terminal_font=11\neditor_font=24\n");
+        assert_eq!((s.terminal_font, s.editor_font), (11, 24));
+        // The default is not written, so old and new files stay small and equal.
+        assert!(
+            !Settings::default()
+                .to_text()
+                .windows(5)
+                .any(|w| w == b"_font")
+        );
+    }
+
+    #[test]
+    fn font_steps_stay_in_range() {
+        assert_eq!(font_step(15, 1), 16);
+        assert_eq!(font_step(15, -1), 14);
+        assert_eq!(font_step(15, 0), FONT_DEFAULT);
+        assert_eq!(font_step(FONT_MAX, 1), FONT_MAX);
+        assert_eq!(font_step(FONT_MIN, -1), FONT_MIN);
+        // A stored value outside the range is first pulled in.
+        assert_eq!(font_step(200, -1), FONT_MAX - 1);
+        assert_eq!(font_step(0, 1), FONT_MIN + 1);
+        let mut px = FONT_DEFAULT;
+        for _ in 0..40 {
+            px = font_step(px, 1);
+        }
+        assert_eq!(px, FONT_MAX);
+        for _ in 0..40 {
+            px = font_step(px, -1);
+        }
+        assert_eq!(px, FONT_MIN);
     }
 
     #[test]

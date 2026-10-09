@@ -488,6 +488,16 @@ impl Editor {
         }
     }
 
+    /// Put the focus on field `i` of the open prompt (0 = search, 1 = replacement): a click on
+    /// a field of the bar. The replacement field exists only in the replace prompt.
+    pub fn prompt_focus(&mut self, i: usize) {
+        if let Some(p) = self.prompt.as_mut()
+            && (i == 0 || (i == 1 && p.kind == PromptKind::Replace))
+        {
+            p.active = i;
+        }
+    }
+
     pub(crate) fn prompt_switch_field(&mut self) {
         if let Some(p) = self.prompt.as_mut()
             && p.kind == PromptKind::Replace

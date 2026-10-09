@@ -112,6 +112,12 @@ impl Picker {
         (self.field.iter().collect(), self.caret)
     }
 
+    /// The name field still holds the name it started with: it is drawn selected, and the
+    /// first typed character replaces it.
+    pub fn field_fresh(&self) -> bool {
+        self.fresh
+    }
+
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
@@ -546,6 +552,51 @@ pub fn status_line(st: &Status, read_only: bool) -> String {
     s
 }
 
+/// The pieces of the editor's status bar, ready to lay out: the cursor position on the left, the
+/// document facts on the right.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct StatusBar {
+    /// `Ln 12, Col 5`, with the selection size when there is one (`Ln 12, Col 5 (14 selecionados)`).
+    pub position: String,
+    /// `UTF-8`, `LF` or `CRLF`, the size, the line count, in the order they are drawn.
+    pub facts: [String; 4],
+    /// The document has unsaved changes.
+    pub modified: bool,
+}
+
+/// Build the status bar pieces of `st`.
+pub fn status_bar(st: &Status) -> StatusBar {
+    let mut position = alloc::format!("Ln {}, Col {}", st.line, st.col);
+    if st.selected_chars > 0 {
+        position.push_str(&alloc::format!(
+            " ({} {})",
+            st.selected_chars,
+            if st.selected_chars == 1 {
+                "selecionado"
+            } else {
+                "selecionados"
+            }
+        ));
+    }
+    StatusBar {
+        position,
+        facts: [
+            String::from("UTF-8"),
+            String::from(match st.eol {
+                Eol::Lf => "LF",
+                Eol::Crlf => "CRLF",
+            }),
+            crate::fileman::format_size(st.bytes as u64),
+            if st.total_lines == 1 {
+                String::from("1 linha")
+            } else {
+                alloc::format!("{} linhas", st.total_lines)
+            },
+        ],
+        modified: st.modified,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -875,6 +926,38 @@ mod tests {
     }
 
     #[test]
+    fn status_bar_pieces_follow_the_editor() {
+        let mut e = Editor::from_bytes(b"ola\nmundo\n");
+        e.set_cursor(1, 2);
+        let b = status_bar(&e.status());
+        assert_eq!(b.position, "Ln 2, Col 3");
+        assert_eq!(b.facts[0], "UTF-8");
+        assert_eq!(b.facts[1], "LF");
+        assert_eq!(b.facts[2], "10 B");
+        assert_eq!(b.facts[3], "3 linhas");
+        assert!(!b.modified);
+        let big = status_bar(&Editor::from_bytes(&alloc::vec![b'x'; 1536]).status());
+        assert_eq!(big.facts[2], "1,5 KiB");
+        e.select_all();
+        let b = status_bar(&e.status());
+        assert!(b.position.ends_with("(10 selecionados)"), "{}", b.position);
+        let one = status_bar(&Editor::from_bytes(b"x").status());
+        assert_eq!(one.facts[3], "1 linha");
+        let mut crlf = Editor::from_bytes(b"a\r\nb\r\n");
+        crlf.insert_char('z');
+        let b = status_bar(&crlf.status());
+        assert_eq!(b.facts[1], "CRLF");
+        assert!(b.modified);
+        let mut sel1 = Editor::from_bytes(b"ab");
+        sel1.select_range(0, 1);
+        assert!(
+            status_bar(&sel1.status())
+                .position
+                .ends_with("(1 selecionado)")
+        );
+    }
+
+    #[test]
     fn status_line_reports_position_size_and_state() {
         let mut e = Editor::from_bytes(b"one\r\ntwo\r\nthree");
         e.set_cursor(1, 2);
@@ -894,5 +977,15 @@ mod tests {
         assert!(status_line(&big.status(), false).contains("1.5 MB"));
         assert_eq!(size_text(1536), "1.5 KB");
         assert_eq!(size_text(0), "0 B");
+    }
+
+    #[test]
+    fn the_starting_name_is_fresh_until_a_key_touches_it() {
+        let mut p = Picker::new(PickMode::SaveAs, "/", "nota.txt");
+        assert!(p.field_fresh());
+        p.key(k(KeyCode::Char('x')));
+        assert!(!p.field_fresh());
+        assert_eq!(p.field().0, "x");
+        assert!(!Picker::new(PickMode::Open, "/", "").field_fresh());
     }
 }

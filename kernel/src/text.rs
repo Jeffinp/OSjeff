@@ -319,6 +319,11 @@ pub fn mono_cell() -> (i32, i32) {
     engine().map_or((9, 20), |e| e.mono_cell(MONO_PX))
 }
 
+/// The character cell of the monospace face at `px` pixels: `(pitch, line height)`.
+pub fn mono_cell_px(px: u16) -> (i32, i32) {
+    engine().map_or((px as i32 * 3 / 5, px as i32 * 4 / 3), |e| e.mono_cell(px))
+}
+
 /// Draw `text` on the monospace grid: character `i` at `x + i * pitch`, with the top of
 /// its line box at `y`. Returns the width drawn.
 pub fn draw_mono(c: &mut Canvas, x: i32, y: i32, text: &str, px: u16, color: Color) -> i32 {

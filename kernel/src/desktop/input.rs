@@ -1194,6 +1194,7 @@ impl Desktop {
                 let changed = match self.kind_of(h) {
                     Some(Kind::Files) => self.files_hover(h, cx, cy),
                     Some(Kind::Viewer) => self.viewer_hover(h, cx, cy),
+                    Some(Kind::Editor) => self.editor_hover(h, cx, cy),
                     _ => false,
                 };
                 if changed && let Some(win) = self.wm.get(h) {
@@ -1205,6 +1206,7 @@ impl Desktop {
                 match self.hover.and_then(|o| self.kind_of(o).map(|k| (o, k))) {
                     Some((o, Kind::Files)) => self.files_unhover(o),
                     Some((o, Kind::Viewer)) => self.viewer_unhover(o),
+                    Some((o, Kind::Editor)) => self.editor_unhover(o),
                     _ => {}
                 }
                 for id in [self.hover, hov].into_iter().flatten() {
