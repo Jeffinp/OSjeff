@@ -551,11 +551,16 @@ mod shell;
 mod windows;
 
 pub(crate) use apps::ajustes::SettingsState;
+pub(crate) use apps::browser::{
+    BrowserHover, BrowserState, PageCmd, PageMenu, StripEntry, TabData,
+};
 pub(crate) use apps::editor::EditorState;
+pub(crate) use apps::files::*;
 pub(crate) use apps::registro::LogState;
 pub use apps::tarefas::SysInputs;
 pub(crate) use apps::tarefas::{SysMon, TarefasState};
 pub(crate) use apps::terminal::TermState;
+pub(crate) use apps::viewer::*;
 pub(crate) use apps::wasm::*;
 pub use compositor::{Compositor, FrameIn, Screen};
 pub(crate) use input::Special;

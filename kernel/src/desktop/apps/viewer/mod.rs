@@ -1,3 +1,9 @@
 //! Visualizador, the image viewer.
 
-pub(super) mod logic;
+mod input;
+mod load;
+mod paint;
+mod state;
+mod step;
+
+pub(crate) use state::*;

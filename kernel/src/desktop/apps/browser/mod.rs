@@ -6,3 +6,6 @@ pub(super) mod paint;
 pub(super) mod ui;
 
 pub(crate) use paint::PaintCache;
+mod state;
+
+pub(crate) use state::*;

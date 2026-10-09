@@ -8,7 +8,8 @@
 //! an optional preview pane, a status bar and sheets attached to the window. Text is
 //! measured, never counted in columns.
 
-use super::logic::{SheetKind, crumbs_of, files_sheet_kind, modified_label};
+use super::labels::{crumbs_of, modified_label};
+use super::props::{SheetKind, files_sheet_kind};
 use crate::desktop::kit::appui::{self, EmptyIcon};
 use crate::desktop::kit::ui::ButtonKind;
 use crate::desktop::*;
