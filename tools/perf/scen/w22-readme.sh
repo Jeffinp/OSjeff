@@ -11,7 +11,7 @@ key ctrl-w; sleep 0.8                              # the terminal opened at boot
 dock_icon files; click; sleep 1.0; goto 900 700; shot "$t-files"; key ctrl-w; sleep 0.6
 dock_icon browser; click; sleep 1.2; goto 900 700; shot "$t-browser"; key ctrl-w; sleep 0.6
 dock_icon settings; click; sleep 1.0; goto 900 700; shot "$t-settings"; key ctrl-w; sleep 0.6
-dock_icon monitor; click; sleep 1.0; goto 900 700; shot "$t-monitor"; key ctrl-w; sleep 0.6
+dock_icon tasks; click; sleep 1.5; goto 900 700; shot "$t-tarefas"; key ctrl-w; sleep 0.6
 dock_icon apps; click; sleep 1.2; goto 900 700; shot "$t-apps"; key esc; sleep 0.7
 key ctrl-spc; sleep 0.5; typestr "12*7"; sleep 0.6; shot "$t-busca"; key esc; sleep 0.5
 goto 1100 14; click; sleep 0.8; shot "$t-controls"; key esc; sleep 0.5

@@ -9,7 +9,6 @@ shot_apps() { # <tag>
   dock_icon calc; click; sleep 0.9; shot "$t-calc"
   dock_icon viewer; click; sleep 0.9; shot "$t-viewer"
   dock_icon tasks; click; sleep 0.9; shot "$t-tasks"
-  dock_icon monitor; click; sleep 0.9; shot "$t-monitor"
   dock_icon settings; click; sleep 0.9; shot "$t-settings"
 }
 shot_apps dark
