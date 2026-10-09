@@ -173,7 +173,7 @@ impl Kind {
             Kind::Browser => (420, 260),
             Kind::WasmApp => (720, 470),
             Kind::Files => (640, 340),
-            Kind::Viewer => (360, 260),
+            Kind::Viewer => (520, 340),
             Kind::Gallery => (560, 380),
             Kind::Settings => (720, 480),
             Kind::LogViewer => (720, 360),
@@ -439,6 +439,13 @@ impl FilesState {
     }
 }
 
+/// A filmstrip thumbnail: not made yet, made, or impossible (too big or unreadable).
+pub(crate) enum Thumb {
+    Pending,
+    Ready(osjeff_core::raster::Surface),
+    Missing,
+}
+
 /// An image-viewer window.
 pub(crate) struct ViewerState {
     pub path: Vec<u8>,
@@ -446,6 +453,7 @@ pub(crate) struct ViewerState {
     /// Box-filtered copy for zooms below 100 %: `(zoom, image)`.
     pub scaled: Option<(u32, osjeff_core::image::Image)>,
     pub opaque: bool,
+    /// Where the zoom and pan are heading (the drawn values follow with springs).
     pub view: osjeff_core::viewer::View,
     pub list: osjeff_core::viewer::ImageList,
     pub format: Option<osjeff_core::image::Format>,
@@ -453,13 +461,36 @@ pub(crate) struct ViewerState {
     /// Why the file could not be shown.
     pub error: Option<[String; 2]>,
     pub show_info: bool,
-    /// The "save as" prompt.
+    /// The "save as" sheet.
     pub save: Option<osjeff_core::fileman::TextInput>,
     pub msg: Option<(String, bool)>,
+    /// The zoom (permille) and pan being drawn.
+    pub zoom_s: osjeff_core::anim::Spring,
+    pub pan_x_s: osjeff_core::anim::Spring,
+    pub pan_y_s: osjeff_core::anim::Spring,
+    /// Extra turn (degrees, clockwise) of the drawn picture while a rotation animates.
+    pub rot: osjeff_core::anim::Tween,
+    /// The picture fading in after a change of image.
+    pub enter_t: osjeff_core::anim::Tween,
+    pub info_t: osjeff_core::anim::Tween,
+    pub sheet_t: osjeff_core::anim::Tween,
+    pub hover: Option<osjeff_core::viewer::ui::Hit>,
+    pub hover_t: osjeff_core::anim::Tween,
+    pub inertia: osjeff_core::viewer::ui::Inertia,
+    /// Tick of the last drag event (for the speed of a flick).
+    pub drag_tick: u64,
+    pub slideshow: osjeff_core::viewer::ui::Slideshow,
+    pub thumbs: Vec<Thumb>,
+    pub strip_scroll: osjeff_core::anim::Spring,
+    /// Tick the last thumbnail was made.
+    pub thumb_tick: u64,
+    /// The viewport the zoom was last fitted for: a change jumps instead of animating.
+    pub vp_seen: (i32, i32),
 }
 
 impl ViewerState {
     pub(crate) fn new() -> Self {
+        use osjeff_core::anim::{Spring, Tween};
         ViewerState {
             path: Vec::new(),
             image: None,
@@ -473,7 +504,43 @@ impl ViewerState {
             show_info: false,
             save: None,
             msg: None,
+            zoom_s: Spring::pixels(1000.0, 240.0, 31.0),
+            pan_x_s: Spring::pixels(0.0, 240.0, 31.0),
+            pan_y_s: Spring::pixels(0.0, 240.0, 31.0),
+            rot: Tween::at(0.0),
+            enter_t: Tween::at(1.0),
+            info_t: Tween::at(0.0),
+            sheet_t: Tween::at(0.0),
+            hover: None,
+            hover_t: Tween::at(1.0),
+            inertia: osjeff_core::viewer::ui::Inertia::new(),
+            drag_tick: 0,
+            slideshow: osjeff_core::viewer::ui::Slideshow::new(),
+            thumbs: Vec::new(),
+            strip_scroll: Spring::pixels(0.0, 260.0, 32.0),
+            thumb_tick: 0,
+            vp_seen: (0, 0),
         }
+    }
+
+    /// Whether something in the window moves on its own and needs frames.
+    pub(crate) fn animating(&self) -> bool {
+        !self.zoom_s.at_rest()
+            || !self.pan_x_s.at_rest()
+            || !self.pan_y_s.at_rest()
+            || !self.rot.finished()
+            || !self.enter_t.finished()
+            || !self.info_t.finished()
+            || !self.sheet_t.finished()
+            || !self.hover_t.finished()
+            || !self.strip_scroll.at_rest()
+            || self.inertia.active()
+            || self.thumbs_pending()
+    }
+
+    /// Thumbnails still to make (the window keeps running frames until they are done).
+    pub(crate) fn thumbs_pending(&self) -> bool {
+        self.list.len() > 1 && self.thumbs.iter().any(|t| matches!(t, Thumb::Pending))
     }
 }
 

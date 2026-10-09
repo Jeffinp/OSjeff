@@ -1107,6 +1107,10 @@ impl Desktop {
                 self.files_release(d.win, cx, cy);
                 scene = true;
             }
+            // A dragged picture glides on after the button is released.
+            if matches!(d.mode, DragMode::Pan { .. }) {
+                self.viewer_release(d.win);
+            }
         }
 
         if let Some(d) = &self.drag {
@@ -1182,19 +1186,26 @@ impl Desktop {
         // buttons. Only an enter / leave changes pixels; skipped while dragging.
         if self.drag.is_none() {
             let hov = self.topmost_at(cx, cy);
-            // The item under the pointer in a file manager lights up.
-            if let Some(h) = hov.filter(|&h| self.kind_of(h) == Some(Kind::Files))
+            // The item or button under the pointer in a file manager or viewer lights up.
+            if let Some(h) = hov
                 && cursor_moved
                 && !self.overlay_open()
-                && self.files_hover(h, cx, cy)
-                && let Some(win) = self.wm.get(h)
             {
-                let b = self.window_box(win);
-                self.mark_dirty(b);
+                let changed = match self.kind_of(h) {
+                    Some(Kind::Files) => self.files_hover(h, cx, cy),
+                    Some(Kind::Viewer) => self.viewer_hover(h, cx, cy),
+                    _ => false,
+                };
+                if changed && let Some(win) = self.wm.get(h) {
+                    let b = self.window_box(win);
+                    self.mark_dirty(b);
+                }
             }
             if hov != self.hover {
-                if let Some(old) = self.hover.filter(|&o| self.kind_of(o) == Some(Kind::Files)) {
-                    self.files_unhover(old);
+                match self.hover.and_then(|o| self.kind_of(o).map(|k| (o, k))) {
+                    Some((o, Kind::Files)) => self.files_unhover(o),
+                    Some((o, Kind::Viewer)) => self.viewer_unhover(o),
+                    _ => {}
                 }
                 for id in [self.hover, hov].into_iter().flatten() {
                     if let Some(r) = self.wm.get(id).map(|w| self.window_box(w)) {

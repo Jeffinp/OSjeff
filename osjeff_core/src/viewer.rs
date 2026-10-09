@@ -7,8 +7,13 @@
 //! Zoom is in permille (1000 = 100 %). The pan is the offset of the image centre from
 //! the viewport centre, in screen pixels; it is clamped so an image larger than the
 //! viewport never leaves a gap at its edges, and an image that fits is centred.
+//!
+//! [`ui`] holds the window geometry, the filmstrip maths, pan inertia, the slideshow clock and the
+//! rotation sampler that the kernel draws with.
 
-use crate::fileman::{display_ascii, format_size, is_image, natural_cmp};
+pub mod ui;
+
+use crate::fileman::{format_size, is_image, natural_cmp};
 use crate::image::{DecodeError, Format, ImageError};
 use crate::vfs::{self, Entry, EntryKind};
 use alloc::string::String;
@@ -41,6 +46,18 @@ pub fn fit_zoom(iw: usize, ih: usize, vw: i32, vh: i32) -> u32 {
     let zw = vw as u64 * 1000 / iw as u64;
     let zh = vh as u64 * 1000 / ih as u64;
     (zw.min(zh) as u32).clamp(MIN_ZOOM, 1000)
+}
+
+/// The zoom (permille) at which an `iw x ih` image covers the whole `vw x vh` viewport (the
+/// larger of the two fit ratios), at most [`MAX_ZOOM`] and at least [`MIN_ZOOM`].
+pub fn fill_zoom(iw: usize, ih: usize, vw: i32, vh: i32) -> u32 {
+    if iw == 0 || ih == 0 || vw <= 0 || vh <= 0 {
+        return 1000;
+    }
+    // Round up so no sliver of background shows at an edge.
+    let zw = (vw as u64 * 1000).div_ceil(iw as u64);
+    let zh = (vh as u64 * 1000).div_ceil(ih as u64);
+    (zw.max(zh) as u32).clamp(MIN_ZOOM, MAX_ZOOM)
 }
 
 /// Pan limit on one axis: an image no larger than the viewport is centred.
@@ -111,6 +128,8 @@ pub struct View {
     pub zoom: u32,
     /// Keep the image fitted when the window or the image changes.
     pub fit: bool,
+    /// Keep the image covering the viewport (never together with `fit`).
+    pub fill: bool,
     pub pan_x: i32,
     pub pan_y: i32,
 }
@@ -120,6 +139,7 @@ impl Default for View {
         View {
             zoom: 1000,
             fit: true,
+            fill: false,
             pan_x: 0,
             pan_y: 0,
         }
@@ -130,7 +150,17 @@ impl View {
     /// Fit the image to the viewport (key `0`).
     pub fn fit_to(&mut self, iw: usize, ih: usize, vw: i32, vh: i32) {
         self.fit = true;
+        self.fill = false;
         self.zoom = fit_zoom(iw, ih, vw, vh);
+        self.pan_x = 0;
+        self.pan_y = 0;
+    }
+
+    /// Make the image cover the viewport (key `9`).
+    pub fn fill_to(&mut self, iw: usize, ih: usize, vw: i32, vh: i32) {
+        self.fit = false;
+        self.fill = true;
+        self.zoom = fill_zoom(iw, ih, vw, vh);
         self.pan_x = 0;
         self.pan_y = 0;
     }
@@ -138,6 +168,7 @@ impl View {
     /// Show the image at 100 % (key `1`).
     pub fn actual(&mut self) {
         self.fit = false;
+        self.fill = false;
         self.zoom = 1000;
         self.pan_x = 0;
         self.pan_y = 0;
@@ -147,6 +178,13 @@ impl View {
     pub fn relayout(&mut self, iw: usize, ih: usize, vw: i32, vh: i32) {
         if self.fit {
             self.fit_to(iw, ih, vw, vh);
+        } else if self.fill {
+            // The pan survives a resize; only the zoom follows the viewport.
+            let (px, py) = (self.pan_x, self.pan_y);
+            self.fill_to(iw, ih, vw, vh);
+            self.pan_x = px;
+            self.pan_y = py;
+            self.clamp(iw, ih, vw, vh);
         } else {
             self.clamp(iw, ih, vw, vh);
         }
@@ -188,6 +226,7 @@ impl View {
         self.pan_y = scale(self.pan_y, ay);
         self.zoom = new;
         self.fit = false;
+        self.fill = false;
         self.clamp(iw, ih, vw, vh);
     }
 
@@ -279,6 +318,20 @@ impl ImageList {
         self.names.get(self.idx).map(|n| vfs::join(&self.dir, n))
     }
 
+    /// Path of image `i`.
+    pub fn path_at(&self, i: usize) -> Option<Vec<u8>> {
+        self.names.get(i).map(|n| vfs::join(&self.dir, n))
+    }
+
+    /// Make image `i` the current one and return its path (`None` for an index past the end).
+    pub fn go_to(&mut self, i: usize) -> Option<Vec<u8>> {
+        if i >= self.names.len() {
+            return None;
+        }
+        self.idx = i;
+        self.current()
+    }
+
     /// Step to the next image (wraps) and return its path.
     pub fn go_next(&mut self) -> Option<Vec<u8>> {
         if self.names.is_empty() {
@@ -312,8 +365,9 @@ impl ImageList {
 // Text
 // ---------------------------------------------------------------------------
 
-/// The lines of the information panel (ASCII-folded, ready to draw).
-pub fn info_lines(
+/// The rows of the information inspector: label and value, in Portuguese.
+#[allow(clippy::too_many_arguments)]
+pub fn info_rows(
     name: &[u8],
     w: usize,
     h: usize,
@@ -321,49 +375,56 @@ pub fn info_lines(
     file_bytes: u64,
     zoom: u32,
     position: (usize, usize),
-) -> Vec<String> {
+    transparent: bool,
+) -> Vec<(String, String)> {
     let mut v = Vec::new();
-    v.push(String::from_utf8_lossy(&display_ascii(name)).into_owned());
-    v.push(alloc::format!("{} x {} px", w, h));
+    v.push((
+        String::from("Nome"),
+        String::from_utf8_lossy(name).into_owned(),
+    ));
+    v.push((String::from("Dimensões"), alloc::format!("{w} × {h} px")));
     let mpx = (w as u64 * h as u64 * 10 + 500_000) / 1_000_000;
-    v.push(alloc::format!("{},{} Mpx", mpx / 10, mpx % 10));
-    v.push(alloc::format!(
-        "Formato: {}",
-        match format {
+    v.push((
+        String::from("Resolução"),
+        alloc::format!("{},{} Mpx", mpx / 10, mpx % 10),
+    ));
+    v.push((
+        String::from("Formato"),
+        String::from(match format {
             Some(Format::Png) => "PNG",
             Some(Format::Bmp) => "BMP",
             Some(Format::Ppm) => "PPM",
-            None => "?",
-        }
+            None => "—",
+        }),
     ));
-    v.push(alloc::format!("Arquivo: {}", format_size(file_bytes)));
-    v.push(alloc::format!("Zoom: {}", zoom_label(zoom)));
+    v.push((String::from("Tamanho"), format_size(file_bytes)));
+    v.push((
+        String::from("Transparência"),
+        String::from(if transparent { "Sim" } else { "Não" }),
+    ));
+    v.push((String::from("Zoom"), zoom_label(zoom)));
     if position.1 > 1 {
-        v.push(alloc::format!(
-            "Imagem {} de {}",
-            position.0 + 1,
-            position.1
+        v.push((
+            String::from("Posição"),
+            alloc::format!("{} de {}", position.0 + 1, position.1),
         ));
     }
     v
 }
 
-/// What to tell the user when an image cannot be opened (ASCII, one or two lines).
+/// What to tell the user when an image cannot be opened: a headline and one plain sentence.
 pub fn decode_error_message(e: &DecodeError) -> [String; 2] {
+    let kind = |f: &str| {
+        alloc::format!("O arquivo {f} está danificado ou usa um recurso que o Imagens não suporta.")
+    };
     let (head, detail) = match e {
-        DecodeError::UnknownFormat => ("Formato de imagem desconhecido", String::new()),
-        DecodeError::Png(x) => (
-            "Arquivo PNG corrompido ou nao suportado",
-            alloc::format!("{x}"),
+        DecodeError::UnknownFormat => (
+            "Formato não reconhecido",
+            String::from("O Imagens abre arquivos PNG, BMP e PPM."),
         ),
-        DecodeError::Bmp(x) => (
-            "Arquivo BMP corrompido ou nao suportado",
-            alloc::format!("{x}"),
-        ),
-        DecodeError::Ppm(x) => (
-            "Arquivo PPM corrompido ou nao suportado",
-            alloc::format!("{x}"),
-        ),
+        DecodeError::Png(_) => ("Não foi possível abrir a imagem", kind("PNG")),
+        DecodeError::Bmp(_) => ("Não foi possível abrir a imagem", kind("BMP")),
+        DecodeError::Ppm(_) => ("Não foi possível abrir a imagem", kind("PPM")),
     };
     [String::from(head), detail]
 }
@@ -372,8 +433,8 @@ pub fn decode_error_message(e: &DecodeError) -> [String; 2] {
 pub fn image_error_message(e: ImageError) -> &'static str {
     match e {
         ImageError::TooLarge => "Imagem grande demais (limite de 16 Mpx)",
-        ImageError::OutOfMemory => "Memoria insuficiente",
-        ImageError::ZeroSize | ImageError::BadBuffer | ImageError::OutOfBounds => "Imagem invalida",
+        ImageError::OutOfMemory => "Memória insuficiente",
+        ImageError::ZeroSize | ImageError::BadBuffer | ImageError::OutOfBounds => "Imagem inválida",
     }
 }
 
