@@ -376,8 +376,18 @@ fn source_files() -> Vec<(String, String)> {
     let root = repo_root();
     let skip = ["audit.rs"];
     let mut out = Vec::new();
+    // Modules declared `#[cfg(test)] mod x;` hold fixtures (made-up keys), like the inline ones.
+    let mut skip_tests = std::collections::BTreeSet::new();
+    for p in rs_files(&root.join("kitsune_core/src")) {
+        if let Ok(s) = fs::read_to_string(&p) {
+            crate::testutil::test_modules(&p, &s, &mut skip_tests);
+        }
+    }
     for dir in ["kernel/src", "kitsune_core/src"] {
         for p in rs_files(&root.join(dir)) {
+            if p.ancestors().any(|a| skip_tests.contains(a)) {
+                continue;
+            }
             let rel = p
                 .strip_prefix(&root)
                 .unwrap()

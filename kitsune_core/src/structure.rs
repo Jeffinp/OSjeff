@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::string::String;
 use std::vec::Vec;
 
+use crate::testutil::test_modules;
+
 /// Every group and the groups it may use (besides itself). Keep in step with the table in
 /// `docs/design/code-structure.md`.
 const ALLOWED: &[(&str, &[&str])] = &[
@@ -49,32 +51,6 @@ fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
             rs_files(&p, out);
         } else if p.extension().is_some_and(|e| e == "rs") {
             out.push(p);
-        }
-    }
-}
-
-/// Paths of the modules declared `#[cfg(test)] mod name;` next to `file`.
-fn test_modules(file: &Path, src: &str, skip: &mut BTreeSet<PathBuf>) {
-    let dir = match file.file_name().and_then(|n| n.to_str()) {
-        Some("mod.rs" | "lib.rs") => file.parent().unwrap().to_path_buf(),
-        _ => file.with_extension(""),
-    };
-    let lines: Vec<&str> = src.lines().collect();
-    for (i, l) in lines.iter().enumerate() {
-        if l.trim() != "#[cfg(test)]" {
-            continue;
-        }
-        let Some(next) = lines.get(i + 1) else {
-            continue;
-        };
-        let t = next.trim();
-        let t = t
-            .strip_prefix("pub(crate) ")
-            .or_else(|| t.strip_prefix("pub "))
-            .unwrap_or(t);
-        if let Some(name) = t.strip_prefix("mod ").and_then(|r| r.strip_suffix(';')) {
-            skip.insert(dir.join(format!("{name}.rs")));
-            skip.insert(dir.join(name));
         }
     }
 }
