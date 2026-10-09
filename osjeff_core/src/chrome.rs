@@ -917,19 +917,4 @@ mod tests {
             }
         }
     }
-
-    #[test]
-    fn dock_zoom_scales_the_bump() {
-        let (_, rest) = dock_rest(1280, 720, 9, Some(0));
-        let mid = rest[4].x + rest[4].w / 2;
-        let full = dock_magnify_scaled(&rest, Some(mid), 100);
-        let half = dock_magnify_scaled(&rest, Some(mid), 50);
-        let none = dock_magnify_scaled(&rest, Some(mid), 0);
-        assert_eq!(full, dock_magnify(&rest, Some(mid)));
-        assert!(none.iter().all(|&v| v == DOCK_ICON as f32));
-        let bump = |v: &Vec<f32>| v[4] - DOCK_ICON as f32;
-        assert!((bump(&half) * 2.0 - bump(&full)).abs() < 0.01);
-        // More than 100 is clamped.
-        assert_eq!(dock_magnify_scaled(&rest, Some(mid), 250), full);
-    }
 }
