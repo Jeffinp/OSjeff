@@ -41,6 +41,8 @@ pub(super) struct Table<'a> {
     colmin: Vec<i32>,
     colmax: Vec<i32>,
     colpct: Vec<Option<i32>>,
+    /// A cell of the column gave it a width in pixels: spare room goes to the other columns.
+    colfix: Vec<bool>,
     spacing: i32,
     collapse: bool,
     /// The captions' narrowest and widest content (the table is at least as wide).
@@ -252,6 +254,7 @@ pub(super) fn collect<'a>(p: &mut Painter<'a>, el: &'a Element, c: &Computed) ->
         colmin: Vec::new(),
         colmax: Vec::new(),
         colpct: Vec::new(),
+        colfix: Vec::new(),
         spacing: if c.collapse { 0 } else { p.z(c.spacing) },
         collapse: c.collapse,
         cap_min: 0,
@@ -345,6 +348,7 @@ fn measure_columns<'a>(p: &mut Painter<'a>, t: &mut Table<'a>) {
     t.colmin = alloc::vec![0; n];
     t.colmax = alloc::vec![0; n];
     t.colpct = alloc::vec![None; n];
+    t.colfix = alloc::vec![false; n];
     let zoom = p.zoom;
     // Measure rows in place (the cells borrow the DOM, not `t`).
     for ri in 0..t.rows.len() {
@@ -369,8 +373,10 @@ fn measure_columns<'a>(p: &mut Painter<'a>, t: &mut Table<'a>) {
                 .saturating_add(extra)
                 .max(min);
             let mut pct = None;
+            let mut fixed = false;
             match cc.width {
                 Len::Px(w) => {
+                    fixed = true;
                     let w = (p.z(w) + extra).max(min);
                     max = w;
                     min = min.min(w);
@@ -388,6 +394,7 @@ fn measure_columns<'a>(p: &mut Painter<'a>, t: &mut Table<'a>) {
                 if let Some(v) = pct {
                     t.colpct[col] = Some(t.colpct[col].map_or(v, |o| o.max(v)));
                 }
+                t.colfix[col] |= fixed;
             }
             col += span;
         }
@@ -455,16 +462,30 @@ fn column_widths(t: &Table, avail: i32, fill: bool) -> Vec<i32> {
         // A table that is meant to fill its width hands the extra to the columns in
         // proportion to their widths.
         let extra = i64::from(avail - total);
-        let base = i64::from(total.max(1));
+        // Columns with a pixel width keep it as long as another column can take the room.
+        let all_fixed = t.colfix.iter().all(|f| *f);
+        let share = |k: usize, x: i32| if all_fixed || !t.colfix[k] { x } else { 0 };
+        let base = i64::from(
+            w.iter()
+                .enumerate()
+                .map(|(k, x)| share(k, *x))
+                .sum::<i32>()
+                .max(1),
+        );
         let mut given = 0;
-        for x in w.iter_mut() {
-            let add = (i64::from(*x) * extra / base) as i32;
+        let mut last_open = 0;
+        for (k, x) in w.iter_mut().enumerate() {
+            let sh = share(k, *x);
+            if sh > 0 {
+                last_open = k;
+            }
+            let add = (i64::from(sh) * extra / base) as i32;
             *x += add;
             given += add;
         }
         let rest = avail - total - given;
-        if let Some(last) = w.last_mut() {
-            *last += rest.max(0);
+        if let Some(l) = w.get_mut(last_open) {
+            *l += rest.max(0);
         }
     } else if total > avail {
         // Pull the widest column back until it fits.
@@ -516,6 +537,7 @@ pub(super) fn layout<'a>(
     }
     y = adv(y, sp);
     let rows = core::mem::take(&mut t.rows);
+    let mut above_bottom = 0;
     for (ri, row) in rows.iter().enumerate() {
         let row_top = y;
         let row_bg_index = p.cmds.len();
@@ -523,8 +545,11 @@ pub(super) fn layout<'a>(
         // Every cell laid out at the row's top, remembering what it emitted.
         struct Placed {
             cmds_from: usize,
+            cmds_to: usize,
             hits_from: usize,
+            hits_to: usize,
             fields_from: usize,
+            fields_to: usize,
             bg: Option<usize>,
             border: Option<usize>,
             end: i32,
@@ -532,21 +557,25 @@ pub(super) fn layout<'a>(
         }
         let mut placed: Vec<Placed> = Vec::with_capacity(row.cells.len());
         let mut col = 0;
+        let mut prev_right = 0;
+        let mut row_bottom = 0;
         for cell in &row.cells {
             let span = cell.span.min(n - col);
             let x0 = colx[col];
             let w: i32 = widths[col..col + span].iter().sum::<i32>() + sp * (span as i32 - 1);
             let mut cc = cell.c.clone();
             if t.collapse {
-                // Neighbouring cells share one edge: only the first column and row draw
-                // their left and top.
-                if col > 0 {
+                // Neighbouring cells share one edge: the one already drawn by the cell to
+                // the left or the row above stays, unless this cell asks for a thicker one.
+                if col > 0 && prev_right >= cc.border_w[3] {
                     cc.border_w[3] = 0;
                 }
-                if ri > 0 {
+                if ri > 0 && above_bottom >= cc.border_w[0] {
                     cc.border_w[0] = 0;
                 }
             }
+            prev_right = cc.border_w[1];
+            row_bottom = row_bottom.max(cc.border_w[2]);
             cc.margin = [Len::Px(0); 4];
             let from = (p.cmds.len(), p.hits.len(), p.fields.len());
             p.pending = 0;
@@ -555,8 +584,11 @@ pub(super) fn layout<'a>(
             p.pending = 0;
             placed.push(Placed {
                 cmds_from: from.0,
+                cmds_to: p.cmds.len(),
                 hits_from: from.1,
+                hits_to: p.hits.len(),
                 fields_from: from.2,
+                fields_to: p.fields.len(),
                 bg: p.last_box.0,
                 border: p.last_box.1,
                 end,
@@ -568,6 +600,7 @@ pub(super) fn layout<'a>(
             }
         }
         p.anc.pop();
+        above_bottom = row_bottom;
         let row_h = placed
             .iter()
             .map(|pl| pl.end - row_top)
@@ -595,14 +628,14 @@ pub(super) fn layout<'a>(
             };
             if dy > 0 {
                 let first = pl.cmds_from + usize::from(pl.bg.is_some());
-                let last = pl.border.unwrap_or(p.cmds.len()).min(p.cmds.len());
+                let last = pl.border.unwrap_or(pl.cmds_to).min(pl.cmds_to);
                 for cmd in p.cmds.iter_mut().take(last).skip(first) {
                     shift_cmd(cmd, dy);
                 }
-                for h in p.hits.iter_mut().skip(pl.hits_from) {
+                for h in p.hits.iter_mut().take(pl.hits_to).skip(pl.hits_from) {
                     h.y += dy;
                 }
-                for f in p.fields.iter_mut().skip(pl.fields_from) {
+                for f in p.fields.iter_mut().take(pl.fields_to).skip(pl.fields_from) {
                     f.y += dy;
                 }
             }

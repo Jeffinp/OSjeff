@@ -291,7 +291,7 @@ fn open_internal(b: &mut Browser, url: &str) -> String {
 fn internal_pages_load_without_the_network() {
     let mut b = Browser::new();
     let html = open_internal(&mut b, "osjeff://sobre");
-    assert!(html.contains("Navegador OSjeff"));
+    assert!(html.contains("Sobre o Navegador"));
     assert!(b.take_request().is_none(), "nothing for the fetcher");
     assert_eq!(b.status(), Status::Done);
     assert!(b.is_internal());

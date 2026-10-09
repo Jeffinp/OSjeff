@@ -154,12 +154,18 @@ pub fn host_of(url: &str) -> &str {
 
 /// Byte range of the host in an address typed or shown in the omnibox: after a scheme
 /// (`https://`, `http://`) up to the first `/`, `?` or `#`. When there is no scheme the range
-/// starts at 0. Shown highlighted while the rest is dimmed.
+/// starts at 0. Shown highlighted while the rest is dimmed. The browser's own `osjeff://` pages
+/// keep their scheme in the highlighted part.
 pub fn host_range(url: &str) -> (usize, usize) {
-    let start = url.find("://").map_or(0, |i| i + 3);
-    let end = url[start..]
+    let own = url.starts_with("osjeff://");
+    let start = if own {
+        0
+    } else {
+        url.find("://").map_or(0, |i| i + 3)
+    };
+    let end = url[start + if own { 9 } else { 0 }..]
         .find(['/', '?', '#'])
-        .map_or(url.len(), |i| start + i);
+        .map_or(url.len(), |i| start + if own { 9 } else { 0 } + i);
     (start, end)
 }
 
@@ -342,7 +348,7 @@ mod tests {
         assert_eq!((&u[a..b], b), ("a.test", u.len()));
         assert_eq!(host_range(""), (0, 0));
         let u = "osjeff://favoritos";
-        assert_eq!(&u[host_range(u).0..host_range(u).1], "favoritos");
+        assert_eq!(&u[host_range(u).0..host_range(u).1], "osjeff://favoritos");
     }
 
     #[test]

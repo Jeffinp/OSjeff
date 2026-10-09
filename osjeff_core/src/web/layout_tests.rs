@@ -1165,6 +1165,38 @@ fn table_links_and_forms_keep_their_boxes_after_alignment() {
 }
 
 #[test]
+fn vertical_alignment_moves_only_the_cell_it_belongs_to() {
+    // A tall middle cell between short neighbours (one with a background): centring the
+    // neighbours must not drag the cells laid out after them.
+    let row = |n: &str| {
+        alloc::format!(
+            "<tr><td style=\"background:#66f;width:40px\">{n}</td><td>top{n}<br>bot{n}</td><td>end{n}</td></tr>"
+        )
+    };
+    let p = lay(
+        &alloc::format!("<table>{}{}{}</table>", row("1"), row("2"), row("3")),
+        400,
+    );
+    for n in ["1", "2", "3"] {
+        let (top, bot, end) = (
+            y_of(&p, &alloc::format!("top{n}")),
+            y_of(&p, &alloc::format!("bot{n}")),
+            y_of(&p, &alloc::format!("end{n}")),
+        );
+        assert!(bot > top);
+        // The short cells are centred on the two-line cell, not pushed below it.
+        assert!(
+            end >= top && end < bot,
+            "end{n} at {end}, lines at {top}/{bot}"
+        );
+        let tile = y_of(&p, n);
+        assert!(tile >= top && tile <= bot, "tile {n} at {tile}");
+    }
+    assert!(y_of(&p, "top2") > y_of(&p, "bot1"));
+    assert!(y_of(&p, "top3") > y_of(&p, "bot2"));
+}
+
+#[test]
 fn hostile_tables_are_bounded() {
     // Thousands of columns and rows, huge colspans.
     let mut html = String::from("<table>");
@@ -1281,4 +1313,18 @@ fn a_check_box_keeps_a_gap_before_its_label() {
     let f = p.fields[0];
     assert_eq!(f.w, 16);
     assert!(x_of(&p, "Aceito") >= f.x + f.w + 6);
+}
+
+#[test]
+fn a_full_width_table_keeps_pixel_width_columns_and_widens_the_others() {
+    let p = lay(
+        "<table style=\"width:100%\"><tr><td style=\"width:40px\">a</td><td>bb</td></tr></table>",
+        400,
+    );
+    // The first column stays 40 px wide: the second cell starts right after it.
+    assert!(
+        x_of(&p, "bb") - x_of(&p, "a") < 60,
+        "{}",
+        x_of(&p, "bb") - x_of(&p, "a")
+    );
 }

@@ -9,6 +9,7 @@
 pub mod cert;
 pub mod errors;
 pub mod motion;
+pub mod pages;
 pub mod tabs;
 
 pub use cert::CertInfo;
@@ -1556,53 +1557,15 @@ impl Browser {
     }
 
     fn page_bookmarks(&self) -> Vec<u8> {
-        let mut h =
-            String::from("<html><head><title>Favoritos</title></head><body><h1>Favoritos</h1>");
-        let all = self.bookmarks.borrow().all();
-        if all.is_empty() {
-            h.push_str("<p>Nenhum favorito ainda. Abra uma pagina e aperte Ctrl+D.</p>");
-        }
-        for (i, b) in all.iter().enumerate() {
-            h.push_str(&alloc::format!(
-                "<p><a href=\"{u}\">{t}</a> <a href=\"osjeff://favoritos?rm={i}\">[remover]</a><br>{u}</p>",
-                u = html_escape(&b.url),
-                t = html_escape(if b.title.is_empty() { &b.url } else { &b.title }),
-            ));
-        }
-        h.push_str("<p><a href=\"osjeff://inicio\">Inicio</a> | <a href=\"osjeff://historico\">Historico</a></p></body></html>");
-        h.into_bytes()
+        pages::bookmarks(&self.bookmarks.borrow().all())
     }
 
     fn page_history(&self) -> Vec<u8> {
-        let mut h =
-            String::from("<html><head><title>Historico</title></head><body><h1>Historico</h1>");
-        let mut any = false;
-        for u in self.history.urls.iter().rev() {
-            let u = String::from_utf8_lossy(u);
-            if u.starts_with("osjeff://") {
-                continue;
-            }
-            any = true;
-            h.push_str(&alloc::format!(
-                "<p><a href=\"{0}\">{0}</a></p>",
-                html_escape(&u)
-            ));
-        }
-        if !any {
-            h.push_str("<p>Nada visitado ainda.</p>");
-        }
-        h.push_str("<p><a href=\"osjeff://inicio\">Inicio</a> | <a href=\"osjeff://favoritos\">Favoritos</a></p></body></html>");
-        h.into_bytes()
+        pages::history(&self.history.urls)
     }
 
     fn page_about(&self) -> Vec<u8> {
-        let mut h = String::from(
-            "<html><head><title>Sobre o navegador</title></head><body><h1>Navegador OSjeff</h1>",
-        );
-        h.push_str("<p>HTTPS com certificado verificado (TLS 1.3), links, historico, imagens PNG/BMP/PPM, formularios GET, favoritos, busca na pagina e zoom.</p>");
-        h.push_str("<h3>Teclas</h3><ul><li>Alt+Esq / Alt+Dir: voltar e avancar</li><li>Ctrl+D: favorito</li><li>Ctrl+F: buscar na pagina</li><li>Ctrl+ + / - / 0: zoom</li><li>PgUp, PgDn, Home, End, Espaco: rolar</li><li>Ctrl+C: copia o texto selecionado</li></ul>");
-        h.push_str("<h3>Paginas</h3><ul><li><a href=\"osjeff://inicio\">osjeff://inicio</a></li><li><a href=\"osjeff://favoritos\">osjeff://favoritos</a></li><li><a href=\"osjeff://historico\">osjeff://historico</a></li><li><a href=\"osjeff://sobre\">osjeff://sobre</a></li></ul></body></html>");
-        h.into_bytes()
+        pages::about()
     }
 
     /// Remember the `<title>` of the page on screen (for favourites and the window title).
