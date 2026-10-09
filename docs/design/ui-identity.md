@@ -40,7 +40,7 @@ the Quick Settings tile grid; KDE the launcher with a category rail.
 | Notifications | banners top right, centre in a side panel | banners bottom right, centre with the calendar | banners top centre, list under the calendar | popup + history in the tray | similar | **Calendar + notification centre popover from the clock** (GNOME/Windows 11), a *Não perturbe* switch, banners keep sliding in at the top right under the panel |
 | Quick settings | Control Center (tile + slider grid) | tile grid + sliders flyout | Quick Settings pill + grid | tray popups | tray applets | **Quick Settings pill** in the panel opening a tile grid: Rede, Aparência (Claro / Escuro), Reduzir movimento, Não perturbar, Relógio 24 h, Reiniciar / Desligar. No sliders (no volume or brightness hardware to drive) |
 | Window snapping | none native (tiling since Sequoia) | drag to edge: halves, quarters, maximise; snap layouts | half tiling to edges, maximise at top | quick tile to edges and corners | edge tiling | **Windows 11 / KDE model**: top edge = maximise, left / right = half, corners = quarter, an **animated translucent preview**, `Alt+arrows`; geometry respects the work area (panel and taskbar) |
-| Workspaces | Spaces (Ctrl+arrows) | virtual desktops | dynamic workspaces, Ctrl+Alt+arrows | virtual desktops | workspaces | **2-4 workspaces**, `Ctrl+Alt+Left/Right`, a dot indicator in the panel, slide transition, `Ctrl+Alt+Shift+arrows` moves a window (see section 6 for status) |
+| Workspaces | Spaces (Ctrl+arrows) | virtual desktops | dynamic workspaces, Ctrl+Alt+arrows | virtual desktops | workspaces | **2-4 workspaces**, `Ctrl+Alt+Left/Right`, a dot indicator in the panel, slide transition, `Ctrl+Alt+Shift+arrows` moves a window (see section 5) |
 | Search | Spotlight (centre field) | search in Start / taskbar | type in the overview | KRunner | menu search | **Busca** (`Ctrl+Space`) stays: a centred field with apps, files and sums; the launcher has its own filter field |
 | File dialogs | sheets slide from the title bar | modal window | modal with headerbar | modal | modal | unchanged (owned by the apps work); sheets stay centred modals |
 
@@ -67,7 +67,7 @@ the Quick Settings tile grid; KDE the launcher with a category rail.
 |---|---|
 | Panel | 30 px high, full width, translucent over a lightly blurred strip, 1 px bottom hairline |
 | Title bar | 32 px (`TITLE_H`, unchanged: apps keep drawing under `r.body()`), buttons 40x32, menu button 32x32 |
-| Taskbar | icons 40, gap 6, padding 10/8, 8 px above the bottom, radius 12, sliver 12 px |
+| Taskbar | icons 40, gap 6, padding 10/8, 8 px above the bottom, radius 12, sliver 10 px |
 | Snap zones | 6 px at the screen edges (top / left / right), corner zones 48 px along the edges |
 | Work area | below the panel, above the taskbar (plus 8 px), full width |
 
@@ -92,7 +92,7 @@ light and in dark):
 The result of this comparison is recorded in `CHANGELOG.md` and in the section "Result" at the
 end of this file once the last step lands.
 
-## 6. Workspaces (step g: done)
+## 5. Workspaces (step g: done)
 
 2 to 4 virtual desktops, `Ctrl+Alt+Left/Right`, a dot indicator in the panel (the current one is a
 pill; a dot is stronger when its workspace holds windows; click to go), a sideways slide with a fade
@@ -101,7 +101,7 @@ follows it). Opening, activating from the taskbar or Alt+Tab a window of another
 workspace. The structure allowed it cleanly: `Window::{ws, off_ws}` and
 `WindowManager::{switch_workspace, move_to_workspace, visible_workspaces}`, all pure and tested.
 
-## 5. Implementation order (small verified commits)
+## 6. Implementation order (small verified commits)
 
 a. this document; b. controls at the right, left titles, title-bar menu button, edge snapping
 with preview and `Alt+arrow`; c. top panel, calendar + notification centre, Quick Settings
@@ -110,3 +110,32 @@ wallpapers, radii and borders; f. launcher categories; g. workspaces.
 
 `Alt+Left` / `Alt+Right` keep going back / forward in the Navegador when it is focused (the
 browser claimed them first); `Alt+Shift+arrows` snaps in every window, including the browser.
+
+## 7. Result: the checklist against our own screenshots
+
+Checked on the final screenshots (`tools/perf/scen/w26-*.sh`, `w22-readme.sh`; dark and light; BIOS
+1280x720 and UEFI 1280x800) against the six references of section 0:
+
+| # | Item | Result |
+|---|---|---|
+| 1 | controls are flat glyphs, at the right | yes: menu, minimise, maximise / restore and close at the right, red close hover; no dots |
+| 2 | no global menu bar or bold app name | yes: Apps, Busca and the workspace dots at the left, per-app menus behind the window's menu button |
+| 3 | title left-aligned next to an icon | yes (app tile, Medium title) |
+| 4 | no magnification, no gloss squircle dock | yes: floating taskbar of flat tiles with pill and dot indicators |
+| 5 | wallpaper is not a purple-blue wave | yes: six original presets; the default is a dusk gradient with geometric facets (it is purple at night, so it is the preset closest to a macOS mood by colour, but the shapes are angular facets, not a wave) |
+| 6 | pointer silhouette not Apple's | yes: a slim dart with a round-capped tail and an indigo outline |
+| 7 | clock in the centre | yes |
+| 8 | launcher with a category rail | yes |
+| 9 | Quick Settings and the calendar are popovers of the panel | yes: a tile grid and a two-column calendar with notifications |
+| 10 | shared ergonomics acknowledged | rounded windows, soft shadows and springs remain, as every modern desktop has them |
+
+What still echoes the references on purpose: the taskbar's centred floating form (Windows 11, elementary),
+the centred clock with a notification popover (GNOME), the category rail (KDE) and edge snapping
+(Windows 11 / KDE). What is new is the combination and the signature details: the accent line on the
+focused title bar, the flat faceted tiles, the dart pointer, the workspace dots in the panel and the
+Shell tab of the component gallery that documents them.
+
+Not done: persistence of the pinned order and of the workspace of each window across reboots; middle
+click on a taskbar icon (the pointer driver reports only the left and right buttons: Shift+click opens a
+new window instead); window thumbnails in the taskbar menu (titles only); `docs/img/demo.gif` still shows
+the first shell.

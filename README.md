@@ -15,7 +15,7 @@
 
 **🇧🇷 Português** · [🇺🇸 English](README.en.md)
 
-<img src="docs/img/demo.gif" alt="OSjeff em ação: barra de apps, editor, Busca, calculadora, tema claro e escuro" width="760">
+<img src="docs/img/demo.gif" alt="OSjeff em ação: barra de tarefas, editor, Busca, calculadora, tema claro e escuro" width="760">
 
 </div>
 

@@ -15,7 +15,7 @@
 
 [🇧🇷 Português](README.md) · **🇺🇸 English**
 
-<img src="docs/img/demo.gif" alt="OSjeff in action: the app bar, the editor, Search, the calculator, light and dark" width="760">
+<img src="docs/img/demo.gif" alt="OSjeff in action: the taskbar, the editor, Search, the calculator, light and dark" width="760">
 
 </div>
 
