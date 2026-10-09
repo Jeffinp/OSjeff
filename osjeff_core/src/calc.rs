@@ -1,4 +1,5 @@
-//! Pure 4-function calculator with immediate-execution semantics.
+//! Pure calculator with immediate-execution semantics: the four operations, percent,
+//! sign change, one memory register and a short history of finished operations.
 //!
 //! UI-agnostic: the kernel feeds button/key bytes via [`Calc::input`] and renders
 //! the [`Calc::display`] string. All math is `f64`, but the decimal formatter
@@ -6,6 +7,20 @@
 //! casts, so it builds under `no_std`.
 
 const ENTRY_MAX: usize = 16;
+/// Finished operations kept for the history strip.
+pub const HISTORY: usize = 4;
+/// Longest history line: `a op b = result`.
+const LINE_MAX: usize = 56;
+
+/// Input bytes of the memory keys (they never collide with typed characters).
+pub const KEY_MC: u8 = 0x01;
+pub const KEY_MR: u8 = 0x02;
+pub const KEY_MSUB: u8 = 0x03;
+pub const KEY_MADD: u8 = 0x04;
+/// The sign-change key.
+pub const KEY_NEG: u8 = b'n';
+/// The percent key.
+pub const KEY_PCT: u8 = b'%';
 
 /// Calculator state machine. Holds the current entry text, an accumulator, and a
 /// pending operator (classic infix calculator behavior).
@@ -17,6 +32,14 @@ pub struct Calc {
     /// When true the next digit starts a fresh entry (after an operator or `=`).
     fresh: bool,
     error: bool,
+    /// The memory register and whether anything was stored in it.
+    mem: f64,
+    mem_set: bool,
+    /// The last finished operations, newest in slot `hist_head - 1` (a ring).
+    hist: [[u8; LINE_MAX]; HISTORY],
+    hist_len: [u8; HISTORY],
+    hist_head: usize,
+    hist_count: usize,
 }
 
 impl Default for Calc {
@@ -36,6 +59,12 @@ impl Calc {
             pending: None,
             fresh: true,
             error: false,
+            mem: 0.0,
+            mem_set: false,
+            hist: [[0; LINE_MAX]; HISTORY],
+            hist_len: [0; HISTORY],
+            hist_head: 0,
+            hist_count: 0,
         }
     }
 
@@ -58,21 +87,137 @@ impl Calc {
         self.error
     }
 
-    /// Feed one input byte: a digit `0-9`, `.`, an operator `+ - * /`, `=`, or
-    /// `c`/`C` to clear. Anything else is ignored.
+    /// Feed one input byte: a digit `0-9`, `.` (or `,`), an operator `+ - * /`, `=`,
+    /// `%`, `n` (change sign), a memory key (`KEY_MC`..`KEY_MADD`), or `c`/`C` to clear.
+    /// Anything else is ignored.
     pub fn input(&mut self, b: u8) {
         match b {
             b'0'..=b'9' => self.push_digit(b),
-            b'.' => self.push_dot(),
+            b'.' | b',' => self.push_dot(),
             b'+' | b'-' | b'*' | b'/' => self.apply_op(b),
             b'=' => self.equals(),
+            KEY_PCT => self.percent(),
+            KEY_NEG | b'N' => self.negate(),
+            KEY_MC => self.memory_clear(),
+            KEY_MR => self.memory_recall(),
+            KEY_MSUB => self.memory_add(-1.0),
+            KEY_MADD => self.memory_add(1.0),
             b'c' | b'C' => self.clear(),
             _ => {}
         }
     }
 
+    /// Clear the entry, the pending operation and the history; the memory stays (as on a
+    /// pocket calculator, `MC` clears that).
     pub fn clear(&mut self) {
+        let (mem, mem_set) = (self.mem, self.mem_set);
         *self = Calc::new();
+        self.mem = mem;
+        self.mem_set = mem_set;
+    }
+
+    /// Is something stored in the memory register?
+    pub fn has_memory(&self) -> bool {
+        self.mem_set
+    }
+
+    /// Empty the memory register.
+    fn memory_clear(&mut self) {
+        self.mem = 0.0;
+        self.mem_set = false;
+    }
+
+    /// Show the memory register as the current entry.
+    fn memory_recall(&mut self) {
+        if !self.mem_set {
+            return;
+        }
+        if self.error {
+            self.clear();
+        }
+        let v = self.mem;
+        self.write_entry(v);
+        self.fresh = true;
+    }
+
+    /// Add (`sign` = 1) or subtract (`sign` = -1) the entry to the memory register.
+    fn memory_add(&mut self, sign: f64) {
+        if self.error {
+            return;
+        }
+        self.mem += sign * self.entry_value();
+        self.mem_set = true;
+        self.fresh = true;
+    }
+
+    /// Percent: with a pending `+` or `-` the entry becomes that share of the left operand
+    /// (`200 + 10 %` adds 20); otherwise it is divided by 100.
+    pub fn percent(&mut self) {
+        if self.error {
+            return;
+        }
+        let x = self.entry_value();
+        let v = match self.pending {
+            Some(b'+') | Some(b'-') => self.acc * x / 100.0,
+            _ => x / 100.0,
+        };
+        self.write_entry(v);
+        self.fresh = false;
+    }
+
+    /// Change the sign of the entry (`0` stays `0`).
+    pub fn negate(&mut self) {
+        if self.error || (self.len == 1 && self.buf[0] == b'0') {
+            return;
+        }
+        if self.buf[0] == b'-' {
+            self.buf.copy_within(1..self.len, 0);
+            self.len -= 1;
+        } else if self.len < ENTRY_MAX {
+            self.buf.copy_within(0..self.len, 1);
+            self.buf[0] = b'-';
+            self.len += 1;
+        }
+    }
+
+    /// The pending expression for the strip above the display (`12 *`), if any.
+    pub fn pending_text(&self) -> Option<([u8; ENTRY_MAX + 2], usize)> {
+        let op = self.pending?;
+        let (n, nl) = render(self.acc)?;
+        let mut out = [b' '; ENTRY_MAX + 2];
+        out[..nl].copy_from_slice(&n[..nl]);
+        out[nl + 1] = op;
+        Some((out, nl + 2))
+    }
+
+    /// The finished operations, oldest first: `12 * 3 = 36` (ASCII, `.` decimal point).
+    pub fn history(&self) -> impl Iterator<Item = &[u8]> + '_ {
+        let n = self.hist_count.min(HISTORY);
+        (0..n).map(move |i| {
+            let slot = (self.hist_head + HISTORY - n + i) % HISTORY;
+            &self.hist[slot][..self.hist_len[slot] as usize]
+        })
+    }
+
+    fn push_history(&mut self, a: f64, op: u8, b: f64, r: f64) {
+        let (Some((an, al)), Some((bn, bl)), Some((rn, rl))) = (render(a), render(b), render(r))
+        else {
+            return;
+        };
+        let mut line = [0u8; LINE_MAX];
+        let mut n = 0;
+        for part in [&an[..al], b" ", &[op], b" ", &bn[..bl], b" = ", &rn[..rl]] {
+            for &c in part {
+                if n < LINE_MAX {
+                    line[n] = c;
+                    n += 1;
+                }
+            }
+        }
+        self.hist[self.hist_head] = line;
+        self.hist_len[self.hist_head] = n as u8;
+        self.hist_head = (self.hist_head + 1) % HISTORY;
+        self.hist_count = (self.hist_count + 1).min(HISTORY);
     }
 
     /// Erase the last entered character.
@@ -137,7 +282,7 @@ impl Calc {
         }
         if self.pending.is_some() && !self.fresh {
             // Chain: fold the current entry into the accumulator and show it.
-            self.commit_pending();
+            self.commit_pending_recorded();
             self.write_entry(self.acc);
         } else if self.pending.is_none() {
             self.acc = self.entry_value();
@@ -153,10 +298,19 @@ impl Calc {
         if self.error || self.pending.is_none() {
             return;
         }
-        self.commit_pending();
+        self.commit_pending_recorded();
         self.pending = None;
         self.write_entry(self.acc);
         self.fresh = true;
+    }
+
+    /// Finish the pending operation and remember it in the history (unless it failed).
+    fn commit_pending_recorded(&mut self) {
+        let (a, op, b) = (self.acc, self.pending.unwrap_or(b'+'), self.entry_value());
+        self.commit_pending();
+        if (self.acc.to_bits() >> 52) & 0x7ff != 0x7ff {
+            self.push_history(a, op, b, self.acc);
+        }
     }
 
     fn commit_pending(&mut self) {
@@ -177,78 +331,124 @@ impl Calc {
     /// Render `v` into the entry buffer, or latch `ERROR` for non-finite /
     /// out-of-range results.
     fn write_entry(&mut self, v: f64) {
-        // Finite check without `f64::is_finite` (std-only): a NaN/inf has all
-        // exponent bits set. `f64::to_bits` is available in `core`.
-        let finite = (v.to_bits() >> 52) & 0x7ff != 0x7ff;
-        let mag = if v < 0.0 { -v } else { v };
-        if !finite || mag >= 1e12 {
-            self.error = true;
-            self.acc = 0.0;
-            self.pending = None;
-            return;
-        }
-
-        let mut buf = [b' '; ENTRY_MAX];
-        let mut idx = 0;
-        if v < 0.0 {
-            buf[0] = b'-';
-            idx = 1;
-        }
-
-        // Round to 6 decimals as fixed-point micro-units; the carry into the
-        // integer part is handled for free.
-        let scaled = (mag * 1_000_000.0 + 0.5) as i64;
-        let mut int_part = (scaled / 1_000_000) as u64;
-        let frac = (scaled % 1_000_000) as u64;
-
-        // Integer digits, generated low-to-high then reversed.
-        let mut digits = [0u8; 20];
-        let mut dn = 0;
-        if int_part == 0 {
-            digits[0] = b'0';
-            dn = 1;
-        }
-        while int_part > 0 {
-            digits[dn] = b'0' + (int_part % 10) as u8;
-            int_part /= 10;
-            dn += 1;
-        }
-        while dn > 0 {
-            dn -= 1;
-            if idx < ENTRY_MAX {
-                buf[idx] = digits[dn];
-                idx += 1;
+        match render(v) {
+            Some((buf, len)) => {
+                self.buf = buf;
+                self.len = len;
+                self.error = false;
+            }
+            None => {
+                self.error = true;
+                self.acc = 0.0;
+                self.pending = None;
             }
         }
+    }
+}
 
-        // Fractional part: 6 fixed digits, trailing zeros trimmed.
-        if frac > 0 {
-            let mut fd = [0u8; 6];
-            let mut f = frac;
-            for k in (0..6).rev() {
-                fd[k] = b'0' + (f % 10) as u8;
-                f /= 10;
-            }
-            let mut end = 6;
-            while end > 0 && fd[end - 1] == b'0' {
-                end -= 1;
-            }
-            if end > 0 && idx < ENTRY_MAX {
-                buf[idx] = b'.';
-                idx += 1;
-                for &d in fd.iter().take(end) {
-                    if idx < ENTRY_MAX {
-                        buf[idx] = d;
-                        idx += 1;
-                    }
+/// Format `v` as `[-]digits[.digits]` (6 decimals at most, trailing zeros trimmed), or
+/// `None` when it is not finite or too large for the display.
+fn render(v: f64) -> Option<([u8; ENTRY_MAX], usize)> {
+    // Finite check without `f64::is_finite` (std-only): a NaN/inf has all exponent bits set.
+    let finite = (v.to_bits() >> 52) & 0x7ff != 0x7ff;
+    let mag = if v < 0.0 { -v } else { v };
+    if !finite || mag >= 1e12 {
+        return None;
+    }
+    let mut buf = [b' '; ENTRY_MAX];
+    let mut idx = 0;
+    // Round to 6 decimals as fixed-point micro-units; the carry into the integer part is
+    // handled for free. A value that rounds to zero loses its sign.
+    let scaled = (mag * 1_000_000.0 + 0.5) as i64;
+    if v < 0.0 && scaled != 0 {
+        buf[0] = b'-';
+        idx = 1;
+    }
+    let mut int_part = (scaled / 1_000_000) as u64;
+    let frac = (scaled % 1_000_000) as u64;
+
+    // Integer digits, generated low-to-high then reversed.
+    let mut digits = [0u8; 20];
+    let mut dn = 0;
+    if int_part == 0 {
+        digits[0] = b'0';
+        dn = 1;
+    }
+    while int_part > 0 {
+        digits[dn] = b'0' + (int_part % 10) as u8;
+        int_part /= 10;
+        dn += 1;
+    }
+    while dn > 0 {
+        dn -= 1;
+        if idx < ENTRY_MAX {
+            buf[idx] = digits[dn];
+            idx += 1;
+        }
+    }
+
+    // Fractional part: 6 fixed digits, trailing zeros trimmed.
+    if frac > 0 {
+        let mut fd = [0u8; 6];
+        let mut f = frac;
+        for k in (0..6).rev() {
+            fd[k] = b'0' + (f % 10) as u8;
+            f /= 10;
+        }
+        let mut end = 6;
+        while end > 0 && fd[end - 1] == b'0' {
+            end -= 1;
+        }
+        if end > 0 && idx < ENTRY_MAX {
+            buf[idx] = b'.';
+            idx += 1;
+            for &d in fd.iter().take(end) {
+                if idx < ENTRY_MAX {
+                    buf[idx] = d;
+                    idx += 1;
                 }
             }
         }
-
-        self.buf = buf;
-        self.len = idx.max(1);
-        self.error = false;
     }
+    Some((buf, idx.max(1)))
+}
+
+/// A display string for people: the decimal comma, dots between thousands, `Erro` for
+/// the error state (`"-1234567.5"` -> `"-1.234.567,5"`, `"5."` -> `"5,"`). Text that is
+/// not a number is returned as it is.
+pub fn pretty(display: &[u8]) -> alloc::string::String {
+    use alloc::string::String;
+    if display == b"ERROR" {
+        return String::from("Erro");
+    }
+    let mut out = String::new();
+    let (neg, rest) = match display.split_first() {
+        Some((b'-', r)) => (true, r),
+        _ => (false, display),
+    };
+    let dot = rest.iter().position(|&b| b == b'.');
+    let (int, frac) = match dot {
+        Some(i) => (&rest[..i], Some(&rest[i + 1..])),
+        None => (rest, None),
+    };
+    if !int.iter().all(u8::is_ascii_digit) || !frac.is_none_or(|f| f.iter().all(u8::is_ascii_digit))
+    {
+        return String::from_utf8_lossy(display).into_owned();
+    }
+    if neg {
+        out.push('-');
+    }
+    for (i, &d) in int.iter().enumerate() {
+        if i > 0 && (int.len() - i).is_multiple_of(3) {
+            out.push('.');
+        }
+        out.push(d as char);
+    }
+    if let Some(f) = frac {
+        out.push(',');
+        out.extend(f.iter().map(|&d| d as char));
+    }
+    out
 }
 
 /// Parse a `[-]digits[.digits]` byte string into `f64` (no `std` parser).
@@ -278,6 +478,8 @@ fn parse_decimal(s: &[u8]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::String;
+    use alloc::vec::Vec;
 
     fn feed(c: &mut Calc, s: &str) {
         for b in s.bytes() {
@@ -425,5 +627,134 @@ mod tests {
         assert!((parse_decimal(b"3.25") - 3.25).abs() < 1e-9);
         assert!((parse_decimal(b"-12") + 12.0).abs() < 1e-9);
         assert!((parse_decimal(b"0") - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn percent_of_the_left_operand_for_plus_and_minus() {
+        let mut c = Calc::new();
+        feed(&mut c, "200+10%");
+        assert_eq!(shown(&c), "20");
+        feed(&mut c, "=");
+        assert_eq!(shown(&c), "220");
+        let mut c = Calc::new();
+        feed(&mut c, "200-25%=");
+        assert_eq!(shown(&c), "150");
+    }
+
+    #[test]
+    fn percent_alone_and_with_times_divides_by_100() {
+        let mut c = Calc::new();
+        feed(&mut c, "50%");
+        assert_eq!(shown(&c), "0.5");
+        let mut c = Calc::new();
+        feed(&mut c, "80*50%=");
+        assert_eq!(shown(&c), "40");
+    }
+
+    #[test]
+    fn negate_toggles_the_sign() {
+        let mut c = Calc::new();
+        feed(&mut c, "n");
+        assert_eq!(shown(&c), "0");
+        feed(&mut c, "5n");
+        assert_eq!(shown(&c), "-5");
+        feed(&mut c, "n");
+        assert_eq!(shown(&c), "5");
+        feed(&mut c, "n+3=");
+        assert_eq!(shown(&c), "-2");
+        // The result of an operation can be negated too.
+        feed(&mut c, "n");
+        assert_eq!(shown(&c), "2");
+        // Full entry: no overflow.
+        let mut c = Calc::new();
+        feed(&mut c, "1234567890123456n");
+        assert_eq!(c.display().len(), 16);
+    }
+
+    #[test]
+    fn memory_keys_store_add_subtract_recall_and_clear() {
+        let mut c = Calc::new();
+        assert!(!c.has_memory());
+        c.input(KEY_MR);
+        assert_eq!(shown(&c), "0");
+        feed(&mut c, "12");
+        c.input(KEY_MADD);
+        assert!(c.has_memory());
+        feed(&mut c, "5");
+        c.input(KEY_MSUB);
+        feed(&mut c, "99");
+        c.input(KEY_MR);
+        assert_eq!(shown(&c), "7");
+        // Clear leaves the memory alone; MC empties it.
+        c.clear();
+        assert!(c.has_memory());
+        c.input(KEY_MR);
+        assert_eq!(shown(&c), "7");
+        c.input(KEY_MC);
+        assert!(!c.has_memory());
+        c.input(KEY_MR);
+        assert_eq!(shown(&c), "7"); // nothing stored: the entry stays
+    }
+
+    #[test]
+    fn history_keeps_the_last_four_operations() {
+        let mut c = Calc::new();
+        assert_eq!(c.history().count(), 0);
+        for (a, b) in [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5)] {
+            feed(&mut c, &alloc::format!("{a}+{b}="));
+        }
+        let h: Vec<String> = c
+            .history()
+            .map(|l| String::from_utf8_lossy(l).into_owned())
+            .collect();
+        assert_eq!(h, ["2 + 2 = 4", "3 + 3 = 6", "4 + 4 = 8", "5 + 5 = 10"]);
+        // A chained operation records the partial result.
+        let mut c = Calc::new();
+        feed(&mut c, "2+3*4=");
+        let h: Vec<&[u8]> = c.history().collect();
+        assert_eq!(h, [&b"2 + 3 = 5"[..], b"5 * 4 = 20"]);
+        // A failed operation records nothing.
+        let mut c = Calc::new();
+        feed(&mut c, "5/0=");
+        assert_eq!(c.history().count(), 0);
+        // Clear forgets the history.
+        feed(&mut c, "1+1=");
+        c.clear();
+        assert_eq!(c.history().count(), 0);
+    }
+
+    #[test]
+    fn pending_expression_is_shown() {
+        let mut c = Calc::new();
+        assert!(c.pending_text().is_none());
+        feed(&mut c, "12*");
+        let (t, n) = c.pending_text().unwrap();
+        assert_eq!(&t[..n], b"12 *");
+    }
+
+    #[test]
+    fn comma_is_a_decimal_point_and_tiny_negatives_lose_their_sign() {
+        let mut c = Calc::new();
+        feed(&mut c, "1,5+1=");
+        assert_eq!(shown(&c), "2.5");
+        let mut c = Calc::new();
+        feed(&mut c, "0.0000001n=");
+        c.input(b'+');
+        feed(&mut c, "0=");
+        assert_eq!(shown(&c), "0");
+    }
+
+    #[test]
+    fn pretty_groups_thousands_with_a_decimal_comma() {
+        assert_eq!(pretty(b"0"), "0");
+        assert_eq!(pretty(b"999"), "999");
+        assert_eq!(pretty(b"1000"), "1.000");
+        assert_eq!(pretty(b"-1234567.5"), "-1.234.567,5");
+        assert_eq!(pretty(b"5."), "5,");
+        assert_eq!(pretty(b"0.25"), "0,25");
+        assert_eq!(pretty(b"ERROR"), "Erro");
+        assert_eq!(pretty(b""), "");
+        assert_eq!(pretty(b"abc"), "abc");
+        assert_eq!(pretty(b"12.3.4"), "12.3.4");
     }
 }

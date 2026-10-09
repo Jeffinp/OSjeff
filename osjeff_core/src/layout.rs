@@ -6,45 +6,97 @@
 
 use crate::window::{Rect, TITLE_H};
 
-/// Calculator keypad: the input byte for each cell (`0x08` = backspace).
-/// Duplicate cells (`0` spanning two columns, `=` spanning two rows) map to the
-/// same byte; the draw code merges them visually.
-pub const CALC_KEYS: [[u8; 4]; 5] = [*b"C\x08/*", *b"789-", *b"456+", *b"123=", *b"00.="];
+/// Calculator keypad: the input byte for each cell, six rows of four. The first row is the
+/// memory keys (`MC MR M- M+`, see `calc::KEY_*`), then `C`, backspace (`0x08`), percent and
+/// divide; the digit rows each end in their operator; the last row is sign, `0`, the point
+/// and equals.
+pub const CALC_KEYS: [[u8; 4]; 6] = [
+    [0x01, 0x02, 0x03, 0x04],
+    [b'C', 0x08, b'%', b'/'],
+    *b"789*",
+    *b"456-",
+    *b"123+",
+    *b"n0.=",
+];
 
-// ------------------------------------------------------------------ calculator
-
-/// Keypad geometry for a calculator window: grid origin x/y, cell width/height
-/// and gap. Shared by drawing and hit-testing so they always agree.
-pub fn calc_layout(r: Rect) -> (i32, i32, i32, i32, i32) {
-    let pad = 14;
-    let gap = 8;
-    let disp_h = 48;
-    let gx = r.x + pad;
-    let gy = r.y + TITLE_H + 12 + disp_h + 12;
-    let grid_w = r.w - pad * 2;
-    let grid_h = r.bottom() - gy - pad;
-    let cw = (grid_w - gap * 3) / 4;
-    let ch = (grid_h - gap * 4) / 5;
-    (gx, gy, cw, ch, gap)
+/// Where everything sits in a calculator window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CalcGeom {
+    /// The strip with the pending expression and the last results.
+    pub history: Rect,
+    /// The big number.
+    pub display: Rect,
+    /// The copy button, at the right end of the history strip.
+    pub copy: Rect,
+    /// Every key, row by row.
+    pub keys: [[Rect; 4]; 6],
 }
 
-/// The keypad byte under `(px, py)` in calculator window `r`, if any. Spanning
-/// buttons map through their duplicate cells in [`CALC_KEYS`].
-pub fn calc_button_at(r: Rect, px: i32, py: i32) -> Option<u8> {
-    let (gx, gy, cw, ch, gap) = calc_layout(r);
-    if cw <= 0 || ch <= 0 {
-        return None;
+/// Height of the memory row; the other rows share the rest.
+pub const CALC_MEM_H: i32 = 28;
+/// Gap between keys.
+pub const CALC_GAP: i32 = 8;
+
+/// Geometry of calculator window `r` (the window rectangle, title bar included).
+pub fn calc_geom(r: Rect) -> CalcGeom {
+    let pad = 16;
+    let x = r.x + pad;
+    let w = (r.w - 2 * pad).max(0);
+    let history = Rect::new(x, r.y + TITLE_H + 8, w, 36);
+    let display = Rect::new(x, history.bottom(), w, 64);
+    let copy = Rect::new(history.right() - 28, history.y + 2, 28, 24);
+    let gy = display.bottom() + 8;
+    let cw = ((w - CALC_GAP * 3) / 4).max(0);
+    let grid_h = r.bottom() - pad - gy;
+    let ch = ((grid_h - CALC_MEM_H - CALC_GAP * 5) / 5).max(0);
+    let mut keys = [[Rect::new(0, 0, 0, 0); 4]; 6];
+    let mut y = gy;
+    for (row, cells) in keys.iter_mut().enumerate() {
+        let h = if row == 0 { CALC_MEM_H } else { ch };
+        for (col, cell) in cells.iter_mut().enumerate() {
+            *cell = Rect::new(x + col as i32 * (cw + CALC_GAP), y, cw, h);
+        }
+        y += h + CALC_GAP;
     }
-    for (row, keys) in CALC_KEYS.iter().enumerate() {
-        for (col, &k) in keys.iter().enumerate() {
-            let bx = gx + col as i32 * (cw + gap);
-            let by = gy + row as i32 * (ch + gap);
-            if px >= bx && px < bx + cw && py >= by && py < by + ch {
-                return Some(k);
+    CalcGeom {
+        history,
+        display,
+        copy,
+        keys,
+    }
+}
+
+/// What a click in a calculator window hit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CalcHit {
+    /// A key, by its input byte.
+    Key(u8),
+    /// The copy button, or the display itself.
+    Copy,
+}
+
+/// The key (or the copy action) under `(px, py)` in calculator window `r`, if any.
+pub fn calc_hit(r: Rect, px: i32, py: i32) -> Option<CalcHit> {
+    let g = calc_geom(r);
+    if g.copy.contains(px, py) || g.display.contains(px, py) {
+        return Some(CalcHit::Copy);
+    }
+    for (row, cells) in g.keys.iter().enumerate() {
+        for (col, cell) in cells.iter().enumerate() {
+            if cell.w > 0 && cell.h > 0 && cell.contains(px, py) {
+                return Some(CalcHit::Key(CALC_KEYS[row][col]));
             }
         }
     }
     None
+}
+
+/// The keypad byte under `(px, py)` in calculator window `r`, if any.
+pub fn calc_button_at(r: Rect, px: i32, py: i32) -> Option<u8> {
+    match calc_hit(r, px, py)? {
+        CalcHit::Key(k) => Some(k),
+        CalcHit::Copy => None,
+    }
 }
 
 // --------------------------------------------------------------------- browser
@@ -259,40 +311,56 @@ mod tests {
 
     #[test]
     fn calc_keypad_maps_every_cell() {
-        let r = Rect::new(100, 100, 320, 420);
-        let (gx, gy, cw, ch, gap) = calc_layout(r);
-        assert!(cw > 0 && ch > 0);
-        for (row, keys) in CALC_KEYS.iter().enumerate() {
-            for (col, &k) in keys.iter().enumerate() {
-                let px = gx + col as i32 * (cw + gap) + cw / 2;
-                let py = gy + row as i32 * (ch + gap) + ch / 2;
-                assert_eq!(calc_button_at(r, px, py), Some(k), "row {row} col {col}");
+        let r = Rect::new(100, 100, 320, 520);
+        let g = calc_geom(r);
+        for (row, cells) in g.keys.iter().enumerate() {
+            for (col, cell) in cells.iter().enumerate() {
+                assert!(cell.w > 0 && cell.h > 0, "row {row} col {col}");
+                assert_eq!(
+                    calc_button_at(r, cell.x + cell.w / 2, cell.y + cell.h / 2),
+                    Some(CALC_KEYS[row][col]),
+                    "row {row} col {col}"
+                );
             }
         }
     }
 
     #[test]
     fn calc_gaps_and_outside_are_misses() {
-        let r = Rect::new(100, 100, 320, 420);
-        let (gx, gy, cw, ch, gap) = calc_layout(r);
-        assert_eq!(calc_button_at(r, gx + cw, gy), None); // horizontal gap
-        assert_eq!(calc_button_at(r, gx, gy + ch), None); // vertical gap
-        assert_eq!(calc_button_at(r, gx - 1, gy), None);
-        assert_eq!(calc_button_at(r, gx, gy - 1), None);
-        assert_eq!(calc_button_at(r, gx + 4 * (cw + gap), gy), None);
-        assert_eq!(calc_button_at(r, gx, gy + 5 * (ch + gap)), None);
+        let r = Rect::new(100, 100, 320, 520);
+        let g = calc_geom(r);
+        let k = g.keys[2][1];
+        assert_eq!(calc_button_at(r, k.right(), k.y), None); // horizontal gap
+        assert_eq!(calc_button_at(r, k.x, k.bottom()), None); // vertical gap
+        assert_eq!(calc_button_at(r, g.keys[2][0].x - 1, k.y), None);
+        assert_eq!(calc_button_at(r, r.x + 2, r.bottom() - 2), None);
     }
 
     #[test]
-    fn calc_spanning_buttons_share_a_byte() {
-        let r = Rect::new(0, 0, 320, 420);
-        let (gx, gy, cw, ch, gap) = calc_layout(r);
-        let at = |row: i32, col: i32| {
-            calc_button_at(r, gx + col * (cw + gap) + 1, gy + row * (ch + gap) + 1)
-        };
-        assert_eq!(at(4, 0), at(4, 1)); // '0' spans two columns
-        assert_eq!(at(3, 3), at(4, 3)); // '=' spans two rows
-        assert_eq!(at(3, 3), Some(b'='));
+    fn calc_regions_stack_inside_the_window() {
+        let r = Rect::new(0, 0, 320, 520);
+        let g = calc_geom(r);
+        assert!(g.history.y >= TITLE_H);
+        assert_eq!(g.display.y, g.history.bottom());
+        assert!(g.keys[0][0].y > g.display.bottom());
+        assert!(g.keys[5][3].bottom() <= r.bottom());
+        // The memory row is the short one and the rest are equal.
+        assert_eq!(g.keys[0][0].h, CALC_MEM_H);
+        assert!(g.keys[1][0].h > CALC_MEM_H);
+        assert!(g.keys[1..].iter().all(|row| row[0].h == g.keys[1][0].h));
+        // Copy sits in the history strip; clicking the display copies too.
+        assert_eq!(calc_hit(r, g.copy.x + 2, g.copy.y + 2), Some(CalcHit::Copy));
+        assert_eq!(
+            calc_hit(r, g.display.x + 10, g.display.y + 10),
+            Some(CalcHit::Copy)
+        );
+    }
+
+    #[test]
+    fn calc_operators_are_in_the_last_column() {
+        for (row, expect) in [(1, b'/'), (2, b'*'), (3, b'-'), (4, b'+'), (5, b'=')] {
+            assert_eq!(CALC_KEYS[row][3], expect);
+        }
     }
 
     #[test]
@@ -301,6 +369,9 @@ mod tests {
         assert_eq!(calc_button_at(tiny, 20, 20), None);
         let negative = Rect::new(0, 0, 10, 10);
         assert_eq!(calc_button_at(negative, 5, 5), None);
+        // Even a tiny window never yields a negative-sized key.
+        let g = calc_geom(tiny);
+        assert!(g.keys.iter().flatten().all(|k| k.w >= 0 && k.h >= 0));
     }
 
     // ---- browser ----

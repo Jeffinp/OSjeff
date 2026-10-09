@@ -251,6 +251,7 @@ impl Desktop {
                 Key::Char(b) => self.calc_input(top, b),
                 Key::Enter => self.calc_input(top, b'='),
                 Key::Backspace => self.calc_input(top, 0x08),
+                Key::Delete => self.calc_input(top, b'C'),
                 Key::Esc => self.request_close(top),
                 _ => {}
             },
@@ -604,16 +605,6 @@ impl Desktop {
         self.mark_dirty(rect);
     }
 
-    pub(crate) fn calc_input(&mut self, id: WindowId, k: u8) {
-        if let Some(c) = self.calc_mut(id) {
-            if k == 0x08 {
-                c.backspace();
-            } else {
-                c.input(k);
-            }
-        }
-    }
-
     /// Copy the focused app's current text (terminal input line / calculator display /
     /// browser URL; the editor copies its selection itself) into the shared clipboard.
     pub(crate) fn copy_from_focused(&mut self) {
@@ -878,11 +869,7 @@ impl Desktop {
             return;
         }
         match kind {
-            Kind::Calculator => {
-                if let Some(k) = calc_button_at(rect, cx, cy) {
-                    self.calc_input(w, k);
-                }
-            }
+            Kind::Calculator => self.calc_click(w, rect, cx, cy),
             Kind::Browser => {
                 if self.browser_click(w, rect, cx, cy) {
                     self.drag = Some(Drag {

@@ -3,9 +3,7 @@
 
 use super::*;
 
-pub(crate) use osjeff_core::layout::{
-    BrowserChrome, browser_home_layout, calc_button_at, calc_layout,
-};
+pub(crate) use osjeff_core::layout::{BrowserChrome, browser_home_layout};
 
 /// Alt+Tab panel geometry.
 pub(crate) const SWITCH_W: i32 = 380;
@@ -13,38 +11,6 @@ pub(crate) const SWITCH_PAD: i32 = 10;
 pub(crate) const SWITCH_ROW_H: i32 = 38;
 /// Most rows shown at once (the list scrolls with the selection).
 pub(crate) const SWITCH_ROWS: usize = 8;
-
-/// Background/foreground for a keypad button; the pending operator is inverted.
-pub(crate) fn key_style(k: u8, pending: Option<u8>) -> (Color, Color) {
-    match k {
-        b'=' => (theme::accent(), theme::WHITE),
-        b'C' => (
-            theme::danger().lerp(theme::window_body(), if theme::dark() { 110 } else { 70 }),
-            if theme::dark() {
-                Color::rgb(0xFF, 0xB4, 0xAE)
-            } else {
-                Color::rgb(0xB4, 0x23, 0x18)
-            },
-        ),
-        0x08 => (theme::tool_bg(), theme::text()),
-        b'+' | b'-' | b'*' | b'/' => {
-            if pending == Some(k) {
-                (theme::accent(), theme::WHITE)
-            } else {
-                (
-                    theme::accent()
-                        .lerp(theme::window_body(), if theme::dark() { 120 } else { 150 }),
-                    if theme::dark() {
-                        Color::rgb(0xFF, 0xFF, 0xFF)
-                    } else {
-                        theme::accent().lerp(Color::rgb(0, 0, 0), 60)
-                    },
-                )
-            }
-        }
-        _ => (theme::button_bg(), theme::text()), // digits + dot
-    }
-}
 
 /// Backdrop of the app bar (dock): the wallpaper under its resting zone, blurred, taken
 /// when the wallpaper is painted so the bar never blurs anything per frame.

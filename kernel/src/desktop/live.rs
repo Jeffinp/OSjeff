@@ -1,4 +1,4 @@
-//! The "live" behaviour shared by the system apps (Tarefas and Registro):
+//! The "live" behaviour shared by the system apps (Tarefas, Registro and Calculadora):
 //! hover tracking that repaints a window only when what the pointer is over changes, and the
 //! animation clock for their glides. The apps own the details; this file is the one place the
 //! compositor talks to.
@@ -10,7 +10,8 @@ impl Desktop {
     pub(crate) fn live_hover(&mut self, cx: i32, cy: i32, down: bool) -> bool {
         let a = self.tarefas_hover(cx, cy, down);
         let b = self.log_hover(cx, cy, down);
-        a | b
+        let c = self.calc_hover(cx, cy, down);
+        a | b | c
     }
 
     /// Advance the system apps' animations by `dt` seconds.
@@ -19,6 +20,7 @@ impl Desktop {
         self.sysmon.age_ms = self.sysmon.age_ms.saturating_add(ms).min(60_000);
         self.tarefas_step(ms);
         self.log_step(ms);
+        self.calc_step(ms);
     }
 
     /// Does any system app still animate (so the compositor keeps rendering frames)?
@@ -26,12 +28,12 @@ impl Desktop {
         self.wm
             .windows()
             .iter()
-            .any(|w| self.tarefas_busy_one(w) || self.log_busy_one(w))
+            .any(|w| self.tarefas_busy_one(w) || self.log_busy_one(w) || self.calc_busy_one(w))
     }
 
     /// Is `w` kept out of the cached static layer because it animates by itself?
     pub(crate) fn live_dynamic(&self, w: &Win) -> bool {
-        self.tarefas_busy_one(w) || self.log_busy_one(w)
+        self.tarefas_busy_one(w) || self.log_busy_one(w) || self.calc_busy_one(w)
     }
 
     /// The part of `w` that changes while it animates, when that is all that changes (no

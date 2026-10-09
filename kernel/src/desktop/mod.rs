@@ -19,8 +19,6 @@ pub(crate) use osjeff_core::winman::{ClickTracker, Switcher, WindowManager, Wind
 pub(crate) use osjeff_core::{Calc, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Time};
 pub(crate) use osjeff_core::{iconart, widgets as wlogic};
 
-use osjeff_core::layout::CALC_KEYS;
-
 /// Longest gap between the two presses of a double click, in timer ticks
 /// (250 Hz): 500 ms.
 const DOUBLE_CLICK_TICKS: u64 = 125;
@@ -332,13 +330,6 @@ impl Desktop {
 
     pub(crate) fn app_mut(&mut self, id: WindowId) -> Option<&mut App> {
         self.wm.get_mut(id).map(|w| &mut w.app.app)
-    }
-
-    pub(crate) fn calc_mut(&mut self, id: WindowId) -> Option<&mut Calc> {
-        match self.app_mut(id) {
-            Some(App::Calculator(c)) => Some(c),
-            _ => None,
-        }
     }
 
     pub(crate) fn browser_state_mut(&mut self, id: WindowId) -> Option<&mut BrowserState> {
@@ -846,7 +837,7 @@ fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
 }
 
 mod apps;
-mod calc_ui;
+pub(crate) mod calc_ui;
 mod chrome;
 mod cursor;
 mod dock;
