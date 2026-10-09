@@ -29,6 +29,7 @@ use osjeff_core::shell::sys::{
     DateTime, DiskInfo, HttpResponse, MemInfo, NetInfo, PingStats, ProcInfo, SysErr, SysInfo,
 };
 use osjeff_core::shell::{Host, RunResult, Shell};
+use osjeff_core::{t, tk};
 
 // ---- filesystem ------------------------------------------------------------
 
@@ -299,7 +300,14 @@ impl SysInfo for KSys {
             let total = d.sectors.saturating_mul(512);
             v.push(DiskInfo {
                 name: alloc::format!("hd{}", (b'a' + i as u8) as char),
-                mount: alloc::format!("({})", if i == 0 { "boot disk" } else { "unused" }),
+                mount: alloc::format!(
+                    "({})",
+                    if i == 0 {
+                        t!("sh.df.boot_disk")
+                    } else {
+                        t!("sh.df.unused")
+                    }
+                ),
                 total,
                 used: if i == 0 { total } else { 0 },
             });
@@ -481,13 +489,13 @@ fn cmd_edit(cx: &mut CmdCtx<'_>) -> i32 {
             if let Ok(st) = cx.fs.stat(&p)
                 && st.kind == FsKind::Dir
             {
-                cx.error(&alloc::format!("{p}: Is a directory"));
+                cx.error(&alloc::format!("{p}: {}", FsErr::IsADirectory.message()));
                 return 1;
             }
             post_ui(UiReq::Edit(Some(p)));
         }
         _ => {
-            cx.error("usage: edit [FILE]");
+            cx.error(t!("sh.edit.usage"));
             return 2;
         }
     }
@@ -525,12 +533,12 @@ pub(crate) fn new_shell() -> Shell {
     // The kernel thread has a 128 KiB stack; keep recursion well under the host-tested worst case.
     sh.limits.max_call_depth = 16;
     sh.limits.max_sub_depth = 4;
-    sh.register("edit", "edit [FILE]: open the text editor", cmd_edit);
-    sh.register("files", "files: open the file manager", cmd_files);
-    sh.register("tasks", "tasks: open the task manager", cmd_tasks);
-    sh.register("calc", "calc: open the calculator", cmd_calc);
-    sh.register("reboot", "reboot: restart the machine", cmd_reboot);
-    sh.register("shutdown", "shutdown: power the machine off", cmd_shutdown);
+    sh.register("edit", tk!("sh.edit.help"), cmd_edit);
+    sh.register("files", tk!("sh.files.help"), cmd_files);
+    sh.register("tasks", tk!("sh.tasks.help"), cmd_tasks);
+    sh.register("calc", tk!("sh.calc.help"), cmd_calc);
+    sh.register("reboot", tk!("sh.reboot.help"), cmd_reboot);
+    sh.register("shutdown", tk!("sh.shutdown.help"), cmd_shutdown);
     sh.env.set("PS1", "\\w\\$ ");
     sh.env.set("HOME", "/");
     sh
@@ -634,7 +642,7 @@ pub(crate) fn cancel(uid: u32) {
             job.ctx,
             RunResult {
                 status: 130,
-                output: b"sh: interrupted\n".to_vec(),
+                output: alloc::format!("sh: {}\n", t!("sh.sys.interrupted")).into_bytes(),
                 ..RunResult::default()
             },
             prompt,

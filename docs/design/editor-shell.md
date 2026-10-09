@@ -295,9 +295,23 @@ Sintaxe: aspas simples/duplas, `\`, `$VAR`, `${VAR}`, `$?`, `$#`, `$@`, `$*`, `$
 rodam por `sh arq`, `source arq`, pelo nome se estiverem no `PATH`, ou por caminho.
 
 Erros de sintaxe: `ParseError { kind, pos }` com `line_col()`; o shell imprime
-`sh: syntax error at line L, column C: ...` e devolve status 2. Rejeitados com mensagem
-clara: `&` (jobs em segundo plano), `<<` (here-document), `2>` e `>&`.
+`sh: erro de sintaxe na linha L, coluna C: ...` (em inglês: `sh: syntax error at line L, column C: ...`)
+e devolve status 2. Rejeitados com mensagem clara: `&` (jobs em segundo plano), `<<`
+(here-document), `2>` e `>&`.
 Códigos de saída: 0 ok, 1 falha, 2 uso/sintaxe, 126 não executável, 127 não encontrado.
+
+**Idioma das mensagens.** O motor fala o idioma da interface **no momento da execução** (`i18n::lang()`;
+a thread `shelld` lê o mesmo átomo que o desktop). Mudam: mensagens de erro e de uso (`ls: não foi
+possível acessar ...`, `sh: foo: comando não encontrado`, `uso: mv ORIGEM... DESTINO`), a linha de
+cada comando em `help` (a sinopse fica, a descrição muda), os títulos e rótulos de `df`, `free`, `ps`,
+`uptime`, `ping` (resumo), `ifconfig`, `nslookup`, `which`, `stat`, `wget`, `curl`, e o texto
+`[saída truncada]`. As mensagens saem do catálogo (`sh.*`; `FsErr`/`SysErr`/`RegexErr`/`ArithErr`/
+`ParseError` guardam a chave e consultam na hora). Texto já impresso fica como foi impresso.
+**Estável em qualquer idioma** (scripts podem depender): nomes de comandos e opções, status de saída,
+os dados que os comandos imprimem (`echo`, `cat`, `seq`, `wc`, `sort`, `head`, `tail`, `cut`, `tr`,
+`date`, `env`, `export`, `alias`, `history`, `basename`, `dirname`, nomes e colunas de `ls -l`, a
+linha `Mem:` de `free`, os números de `df`, os estados de `ps`, a linha `PING host`). O teste
+`shell::tests::i18n` roda o mesmo script nos dois idiomas e exige saída e status idênticos.
 
 Atalhos do editor de linha: ←/→, Home/End, Ctrl+A/E/B/F, Ctrl+←/→ (palavra), Ctrl+K
 (apaga até o fim), Ctrl+U (até o início), Ctrl+W (palavra), Ctrl+Y (cola), Ctrl+D (EOF

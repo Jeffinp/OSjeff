@@ -229,7 +229,7 @@ impl LineEditor {
     /// search line instead.
     pub fn display(&self) -> (String, usize) {
         if let Some(s) = &self.search {
-            let head = alloc::format!("(reverse-i-search)`{}': ", s.query);
+            let head = alloc::format!("{} ", crate::t!("sh.line.rsearch", q = s.query.as_str()));
             let col = head.chars().count();
             let tail: String = self.buf.iter().collect();
             return (alloc::format!("{head}{tail}"), col);
@@ -1009,6 +1009,7 @@ mod tests {
 
     #[test]
     fn reverse_search_finds_and_cycles() {
+        let _lang = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::En);
         let h = hist(&["echo one", "ls", "echo two", "pwd"]);
         let mut e = LineEditor::new("$ ");
         let k = |e: &mut LineEditor, c: KeyCode, m: Mods| key(e, &h, &NoCompleter, c, m);
@@ -1023,6 +1024,14 @@ mod tests {
                 .0
                 .starts_with("(reverse-i-search)`echo': echo two")
         );
+        // The search prompt follows the language, and the column counts its characters.
+        let _pt = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
+        let (text, col) = e.display();
+        assert!(
+            text.starts_with("(busca reversa)`echo': echo two"),
+            "{text}"
+        );
+        assert_eq!(col, "(busca reversa)`echo': ".chars().count());
         k(&mut e, KeyCode::Char('r'), Mods::CTRL);
         assert_eq!(e.text(), "echo one");
         k(&mut e, KeyCode::Char('r'), Mods::CTRL);

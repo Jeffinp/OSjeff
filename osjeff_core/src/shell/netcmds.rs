@@ -9,6 +9,8 @@ use super::builtins::{fs_err, parse_opts};
 use super::exec::{BuiltinFn, CmdCtx, Registry};
 use super::fs::basename;
 use super::sys::SysErr;
+use crate::i18n::bytes;
+use crate::{t, tk};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -19,22 +21,10 @@ pub const MAX_DOWNLOAD: usize = 4 << 20;
 /// Register the network builtins into `r`.
 pub fn register_all(r: &mut Registry) {
     let table: [(&str, &'static str, BuiltinFn); 4] = [
-        (
-            "nslookup",
-            "nslookup HOST: look up the IPv4 addresses of a name",
-            nslookup,
-        ),
-        (
-            "curl",
-            "curl [-sSfiL] [-o FILE|-O] URL: fetch a http(s) URL",
-            curl,
-        ),
-        (
-            "wget",
-            "wget [-q] [-O FILE|-] URL: download a http(s) URL to a file",
-            wget,
-        ),
-        ("ifconfig", "ifconfig: show the network interface", ifconfig),
+        ("nslookup", tk!("sh.nslookup.help"), nslookup),
+        ("curl", tk!("sh.curl.help"), curl),
+        ("wget", tk!("sh.wget.help"), wget),
+        ("ifconfig", tk!("sh.ifconfig.help"), ifconfig),
     ];
     for (n, h, f) in table {
         r.register(n, h, f);
@@ -64,25 +54,25 @@ fn nslookup(cx: &mut CmdCtx<'_>) -> i32 {
         return 2;
     };
     let [host] = o.operands.as_slice() else {
-        cx.error("usage: nslookup HOST");
+        cx.error(t!("sh.nslookup.usage"));
         return 2;
     };
     let host = host.clone();
     if let Some(ip) = parse_ipv4(&host) {
-        cx.println(&format!("Name:    {host}"));
-        cx.println(&format!("Address: {} (literal)", dotted(ip)));
+        cx.println(&t!("sh.net.name", host = host.as_str()));
+        cx.println(&t!("sh.net.address_literal", addr = dotted(ip).as_str()));
         return 0;
     }
     match cx.sys.resolve(&host) {
         Ok(addrs) if !addrs.is_empty() => {
-            cx.println(&format!("Name:    {host}"));
+            cx.println(&t!("sh.net.name", host = host.as_str()));
             for a in addrs {
-                cx.println(&format!("Address: {}", dotted(a)));
+                cx.println(&t!("sh.net.address", addr = dotted(a).as_str()));
             }
             0
         }
         Ok(_) | Err(SysErr::HostNotFound) => {
-            cx.error(&format!("can't find {host}: NXDOMAIN"));
+            cx.error(&t!("sh.net.nxdomain", host = host.as_str()));
             1
         }
         Err(e) => {
@@ -94,6 +84,7 @@ fn nslookup(cx: &mut CmdCtx<'_>) -> i32 {
 
 /// `http://` is assumed when the URL has no scheme; other schemes are refused.
 fn normalize_url(raw: &str) -> Result<String, &'static str> {
+    // The error is a catalog key.
     match raw.split_once("://") {
         None => Ok(format!("http://{raw}")),
         Some((s, rest))
@@ -102,7 +93,7 @@ fn normalize_url(raw: &str) -> Result<String, &'static str> {
         {
             Ok(raw.to_string())
         }
-        Some(_) => Err("unsupported protocol"),
+        Some(_) => Err(tk!("sh.net.unsupported_protocol")),
     }
 }
 
@@ -136,13 +127,13 @@ fn curl(cx: &mut CmdCtx<'_>) -> i32 {
         return 2;
     };
     let [raw] = o.operands.as_slice() else {
-        cx.error("usage: curl [-sSfiL] [-o FILE|-O] URL");
+        cx.error(t!("sh.curl.usage"));
         return 2;
     };
     let url = match normalize_url(raw) {
         Ok(u) => u,
         Err(m) => {
-            cx.error(&format!("(1) {m}"));
+            cx.error(&format!("(1) {}", crate::i18n::tr(m)));
             return 1;
         }
     };
@@ -165,7 +156,7 @@ fn curl(cx: &mut CmdCtx<'_>) -> i32 {
         Err(e) => {
             if !quiet || e == SysErr::Cancelled {
                 let what = match e {
-                    SysErr::HostNotFound => "Could not resolve host".to_string(),
+                    SysErr::HostNotFound => t!("sh.net.no_resolve").to_string(),
                     other => other.message().to_string(),
                 };
                 let code = curl_code(e);
@@ -176,10 +167,7 @@ fn curl(cx: &mut CmdCtx<'_>) -> i32 {
     };
     if o.has('f') && r.status >= 400 {
         if !quiet {
-            cx.error(&format!(
-                "(22) The requested URL returned error: {}",
-                r.status
-            ));
+            cx.error(&t!("sh.net.curl_http", code = r.status));
         }
         return 22;
     }
@@ -200,7 +188,7 @@ fn curl(cx: &mut CmdCtx<'_>) -> i32 {
         _ => cx.out(&r.body),
     }
     if r.truncated {
-        cx.error(&format!("(23) body cut at {} bytes", r.body.len()));
+        cx.error(&t!("sh.net.curl_cut", n = r.body.len()));
         status = 23;
     }
     status
@@ -211,13 +199,13 @@ fn wget(cx: &mut CmdCtx<'_>) -> i32 {
         return 2;
     };
     let [raw] = o.operands.as_slice() else {
-        cx.error("usage: wget [-q] [-O FILE|-] URL");
+        cx.error(t!("sh.wget.usage"));
         return 2;
     };
     let url = match normalize_url(raw) {
         Ok(u) => u,
         Err(m) => {
-            cx.error(&format!("{raw}: {m}"));
+            cx.error(&format!("{raw}: {}", crate::i18n::tr(m)));
             return 1;
         }
     };
@@ -228,7 +216,7 @@ fn wget(cx: &mut CmdCtx<'_>) -> i32 {
         .filter(|f| *f != "-")
         .map_or_else(|| remote_name(&url), |f| f.to_string());
     if !quiet && !to_stdout {
-        cx.println(&format!("Fetching {url}"));
+        cx.println(&t!("sh.net.wget_fetching", url = url.as_str()));
     }
     let r = match cx.sys.http_get(&url, MAX_DOWNLOAD) {
         Ok(r) => r,
@@ -238,7 +226,7 @@ fn wget(cx: &mut CmdCtx<'_>) -> i32 {
         }
     };
     if r.status >= 400 {
-        cx.error(&format!("{url}: server returned error {}", r.status));
+        cx.error(&t!("sh.net.wget_http", url = url.as_str(), code = r.status));
         return 8;
     }
     if to_stdout {
@@ -247,28 +235,29 @@ fn wget(cx: &mut CmdCtx<'_>) -> i32 {
         fs_err(cx, &name, e);
         return 1;
     } else if !quiet {
-        cx.println(&format!("'{name}' saved [{} bytes]", r.body.len()));
+        cx.println(&t!(
+            "sh.net.wget_saved",
+            name = name.as_str(),
+            n = r.body.len()
+        ));
     }
     if r.truncated {
-        cx.error(&format!("warning: body cut at {} bytes", r.body.len()));
+        cx.error(&t!("sh.net.wget_cut", n = r.body.len()));
     }
     0
 }
 
-fn kib(bytes: u64) -> String {
-    format!("{}.{} KiB", bytes / 1024, bytes % 1024 * 10 / 1024)
-}
-
 fn ifconfig(cx: &mut CmdCtx<'_>) -> i32 {
     let Some(i) = cx.sys.net_info() else {
-        cx.error("no network interface");
+        cx.error(t!("sh.ifconfig.none"));
         return 1;
     };
-    cx.println(&format!(
-        "eth0: {}  link {}",
-        i.nic,
-        if i.link_up { "up" } else { "down" }
-    ));
+    let state = if i.link_up {
+        t!("sh.ifconfig.up")
+    } else {
+        t!("sh.ifconfig.down")
+    };
+    cx.println(&t!("sh.ifconfig.head", nic = i.nic.as_str(), state = state));
     match &i.ip {
         Some(ip) => {
             let mut l = format!("  inet {ip}/{}", i.prefix);
@@ -277,7 +266,7 @@ fn ifconfig(cx: &mut CmdCtx<'_>) -> i32 {
             }
             cx.println(&l);
         }
-        None => cx.println("  no address"),
+        None => cx.println(&format!("  {}", t!("sh.ifconfig.no_address"))),
     }
     if !i.dns.is_empty() {
         let l: Vec<&str> = i.dns.iter().map(String::as_str).collect();
@@ -286,18 +275,20 @@ fn ifconfig(cx: &mut CmdCtx<'_>) -> i32 {
     if !i.dhcp.is_empty() {
         cx.println(&format!("  dhcp {}", i.dhcp));
     }
-    cx.println(&format!(
-        "  RX {} packets, {} bytes ({})",
-        i.rx_packets,
-        i.rx_bytes,
-        kib(i.rx_bytes)
-    ));
-    cx.println(&format!(
-        "  TX {} packets, {} bytes ({})",
-        i.tx_packets,
-        i.tx_bytes,
-        kib(i.tx_bytes)
-    ));
+    let rx = t!(
+        "sh.ifconfig.rx",
+        n = i.rx_packets,
+        bytes = i.rx_bytes,
+        size = bytes(i.rx_bytes)
+    );
+    cx.println(&format!("  {rx}"));
+    let tx = t!(
+        "sh.ifconfig.tx",
+        n = i.tx_packets,
+        bytes = i.tx_bytes,
+        size = bytes(i.tx_bytes)
+    );
+    cx.println(&format!("  {tx}"));
     0
 }
 
@@ -342,11 +333,5 @@ mod tests {
         assert_eq!(remote_name("http://a.org/"), "index.html");
         assert_eq!(remote_name("http://a.org"), "index.html");
         assert_eq!(remote_name("https://a.org/dir/"), "index.html");
-    }
-
-    #[test]
-    fn size_text() {
-        assert_eq!(kib(0), "0.0 KiB");
-        assert_eq!(kib(1536), "1.5 KiB");
     }
 }

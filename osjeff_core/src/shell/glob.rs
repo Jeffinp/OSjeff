@@ -138,12 +138,18 @@ pub enum ArithErr {
 }
 
 impl ArithErr {
-    pub const fn message(self) -> &'static str {
+    /// The catalog key of the text for this error.
+    pub const fn key(self) -> &'static str {
         match self {
-            ArithErr::DivZero => "division by zero",
-            ArithErr::Syntax => "arithmetic syntax error",
-            ArithErr::TooDeep => "arithmetic expression too deep",
+            ArithErr::DivZero => crate::tk!("sh.arith.div_zero"),
+            ArithErr::Syntax => crate::tk!("sh.arith.syntax"),
+            ArithErr::TooDeep => crate::tk!("sh.arith.too_deep"),
         }
+    }
+
+    /// The text of this error in the language in effect.
+    pub fn message(self) -> &'static str {
+        crate::i18n::tr(self.key())
     }
 }
 

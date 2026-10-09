@@ -5,19 +5,35 @@ use super::*;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use crate::i18n::Lang;
+use crate::i18n::testlang::LangGuard;
+
+/// A shell under test. The tests below assert on the English texts, so a `T` pins the language
+/// of its thread to English (see [`T::in_lang`] for the Portuguese checks).
 struct T {
     sh: Shell,
     fs: MemFs,
     sys: MockSys,
+    _lang: LangGuard,
 }
 
 impl T {
     fn new() -> Self {
+        Self::in_lang(Lang::En)
+    }
+
+    fn in_lang(l: Lang) -> Self {
         Self {
             sh: Shell::new(),
             fs: MemFs::new(),
             sys: MockSys::default(),
+            _lang: LangGuard::new(l),
         }
+    }
+
+    /// Switch the language the following commands answer in.
+    fn lang(&mut self, l: Lang) {
+        self._lang.set(l);
     }
 
     fn with_files() -> Self {
@@ -868,6 +884,7 @@ fn ps_kill_ping_sleep_clear() {
 
 #[test]
 fn unsupported_system_calls_are_reported() {
+    let _lang = LangGuard::new(Lang::En);
     let mut sh = Shell::new();
     let mut fs = MemFs::new();
     let mut sys = super::sys::MinimalSys;
@@ -1132,4 +1149,5 @@ fn arbitrary_bytes_never_panic_the_whole_pipeline() {
     }
 }
 
+mod i18n;
 mod net;

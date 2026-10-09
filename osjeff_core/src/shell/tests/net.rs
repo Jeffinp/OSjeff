@@ -127,11 +127,17 @@ fn ifconfig_describes_the_interface() {
     assert!(s.contains("inet 10.0.2.15/24  gateway 10.0.2.2"));
     assert!(s.contains("dns 10.0.2.3"));
     assert!(s.contains("RX 12 packets, 1536 bytes (1.5 KiB)"));
-    assert!(s.contains("TX 7 packets, 700 bytes (0.6 KiB)"));
+    assert!(s.contains("TX 7 packets, 700 bytes (700 B)"), "{s}");
+    // The labels follow the language; the figures use the language's separators.
+    t.lang(Lang::Pt);
+    let s = t.out("ifconfig");
+    assert!(s.contains("eth0: ne2000  link ativo"), "{s}");
+    assert!(s.contains("RX 12 pacotes, 1536 bytes (1,5 KiB)"), "{s}");
 }
 
 #[test]
 fn unsupported_network_commands_say_so() {
+    let _lang = LangGuard::new(Lang::En);
     let mut sh = Shell::new();
     let mut fs = MemFs::new();
     let mut sys = MinimalSys;

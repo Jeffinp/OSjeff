@@ -20,14 +20,20 @@ pub enum RegexErr {
 }
 
 impl RegexErr {
-    pub const fn message(self) -> &'static str {
+    /// The catalog key of the text for this error.
+    pub const fn key(self) -> &'static str {
         match self {
-            RegexErr::UnbalancedParen => "unbalanced parenthesis",
-            RegexErr::UnterminatedClass => "unterminated [ ]",
-            RegexErr::NothingToRepeat => "nothing to repeat",
-            RegexErr::TrailingBackslash => "trailing backslash",
-            RegexErr::TooLong => "pattern too long",
+            RegexErr::UnbalancedParen => crate::tk!("sh.regex.unbalanced"),
+            RegexErr::UnterminatedClass => crate::tk!("sh.regex.class"),
+            RegexErr::NothingToRepeat => crate::tk!("sh.regex.nothing"),
+            RegexErr::TrailingBackslash => crate::tk!("sh.regex.backslash"),
+            RegexErr::TooLong => crate::tk!("sh.regex.too_long"),
         }
+    }
+
+    /// The text of this error in the language in effect.
+    pub fn message(self) -> &'static str {
+        crate::i18n::tr(self.key())
     }
 }
 

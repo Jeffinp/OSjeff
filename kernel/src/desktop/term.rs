@@ -21,6 +21,7 @@ use osjeff_core::settings::{FONT_MAX, FONT_MIN, font_step};
 use osjeff_core::shell::sys::{MemInfo, ProcInfo};
 use osjeff_core::shell::{ShellFs, Term, TermAction};
 use osjeff_core::sysif::SettingsStore;
+use osjeff_core::t;
 use osjeff_core::termui::{self, Grid, Metrics, Selection};
 use osjeff_core::widgets::ScrollbarFade;
 
@@ -51,8 +52,8 @@ impl TermState {
     pub(crate) fn new() -> Self {
         let ctx = Ctx::new();
         let mut term = Term::new(&shellhost::prompt_of(&ctx));
-        term.print("OSjeff shell: digite help para ver os comandos.");
-        term.print("Tab completa, Ctrl+C interrompe, PageUp rola.");
+        term.print(t!("term.welcome1"));
+        term.print(t!("term.welcome2"));
         Self {
             uid: NEXT_UID.fetch_add(1, Ordering::Relaxed),
             term,
@@ -251,20 +252,20 @@ impl Desktop {
                 Ok(()) => return,
                 Err(job) => {
                     ts.ctx = Some(job.ctx);
-                    "sh: too many commands waiting"
+                    t!("term.err.queue_full")
                 }
             },
             Some(ctx) => {
                 ts.ctx = Some(ctx);
-                "sh: the command thread stopped"
+                t!("term.err.thread_stopped")
             }
-            None => "sh: no shell",
+            None => t!("term.err.no_shell"),
         };
         let ctx = ts.ctx.get_or_insert_with(Ctx::new);
         let prompt = shellhost::prompt_of(ctx);
         let res = osjeff_core::shell::RunResult {
             status: 1,
-            output: alloc::format!("{problem}\n").into_bytes(),
+            output: alloc::format!("sh: {problem}\n").into_bytes(),
             ..Default::default()
         };
         ts.term.finish(&res, &prompt);
@@ -392,7 +393,8 @@ impl Desktop {
                     let prompt = shellhost::prompt_of(ctx);
                     let res = osjeff_core::shell::RunResult {
                         status: 1,
-                        output: b"sh: the command thread stopped\n".to_vec(),
+                        output: alloc::format!("sh: {}\n", t!("term.err.thread_stopped"))
+                            .into_bytes(),
                         ..Default::default()
                     };
                     ts.term.finish(&res, &prompt);
@@ -591,7 +593,7 @@ impl Desktop {
             t.scroll_fade.alpha(appui::now_ms()),
         );
         if t.term.is_running() {
-            let msg = "Executando · Ctrl+C cancela";
+            let msg = t!("term.running");
             let w = text::measure(msg, FOOTNOTE, Weight::Medium) + 24;
             let pill = Rect::new(r.right() - 14 - w, r.bottom() - 14 - 24, w, 24);
             ui::fill_token(c, pill, 12, p.control_bg);

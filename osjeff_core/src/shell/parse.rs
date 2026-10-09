@@ -62,21 +62,19 @@ impl ParseError {
     pub fn message(&self) -> String {
         use ParseErrorKind::*;
         match self.kind {
-            UnterminatedSingleQuote => "unterminated single quote".to_string(),
-            UnterminatedDoubleQuote => "unterminated double quote".to_string(),
-            UnterminatedSubstitution => "unterminated $( ) substitution".to_string(),
-            BadSubstitution => "bad ${ } substitution".to_string(),
-            UnexpectedToken => "unexpected token".to_string(),
-            UnexpectedEof => "unexpected end of input".to_string(),
-            Expected(what) => alloc::format!("expected `{what}`"),
-            MissingRedirectTarget => "redirection needs a file name".to_string(),
-            BackgroundNotSupported => "`&` (background jobs) is not supported".to_string(),
-            HeredocNotSupported => "`<<` (here-documents) is not supported".to_string(),
-            FdRedirectNotSupported => {
-                "descriptor redirections such as `2>` are not supported".to_string()
-            }
-            BadFunctionName => "invalid function name".to_string(),
-            TooDeep => "nesting is too deep".to_string(),
+            UnterminatedSingleQuote => crate::t!("sh.parse.single_quote").to_string(),
+            UnterminatedDoubleQuote => crate::t!("sh.parse.double_quote").to_string(),
+            UnterminatedSubstitution => crate::t!("sh.parse.substitution").to_string(),
+            BadSubstitution => crate::t!("sh.parse.bad_subst").to_string(),
+            UnexpectedToken => crate::t!("sh.parse.unexpected").to_string(),
+            UnexpectedEof => crate::t!("sh.parse.eof").to_string(),
+            Expected(what) => crate::t!("sh.parse.expected", what = what),
+            MissingRedirectTarget => crate::t!("sh.parse.redirect").to_string(),
+            BackgroundNotSupported => crate::t!("sh.parse.background").to_string(),
+            HeredocNotSupported => crate::t!("sh.parse.heredoc").to_string(),
+            FdRedirectNotSupported => crate::t!("sh.parse.fd_redirect").to_string(),
+            BadFunctionName => crate::t!("sh.parse.func_name").to_string(),
+            TooDeep => crate::t!("sh.parse.too_deep").to_string(),
         }
     }
 
@@ -1340,7 +1338,10 @@ mod tests {
         let e = err("sleep 5 &");
         assert_eq!(e.kind, ParseErrorKind::BackgroundNotSupported);
         assert_eq!(e.pos, 8);
+        let _lang = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::En);
         assert!(e.message().contains("background"));
+        let _pt = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
+        assert!(e.message().contains("segundo plano"));
     }
 
     #[test]

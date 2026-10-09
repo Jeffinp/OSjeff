@@ -8,6 +8,7 @@
 //!
 //! All numbers are integers (the kernel is soft-float).
 
+use crate::tk;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -85,17 +86,23 @@ pub enum SysErr {
 }
 
 impl SysErr {
-    pub const fn message(self) -> &'static str {
+    /// The catalog key of the text for this error.
+    pub const fn key(self) -> &'static str {
         match self {
-            SysErr::Unsupported => "not supported on this system",
-            SysErr::NoSuchProcess => "no such process",
-            SysErr::Denied => "operation not permitted",
-            SysErr::Network => "network is unreachable",
-            SysErr::HostNotFound => "host not found",
-            SysErr::Timeout => "timed out",
-            SysErr::Cancelled => "interrupted",
-            SysErr::Failed => "transfer failed",
+            SysErr::Unsupported => tk!("sh.sys.unsupported"),
+            SysErr::NoSuchProcess => tk!("sh.sys.no_process"),
+            SysErr::Denied => tk!("sh.sys.denied"),
+            SysErr::Network => tk!("sh.sys.network"),
+            SysErr::HostNotFound => tk!("sh.sys.host_not_found"),
+            SysErr::Timeout => tk!("sh.sys.timeout"),
+            SysErr::Cancelled => tk!("sh.sys.interrupted"),
+            SysErr::Failed => tk!("sh.sys.failed"),
         }
+    }
+
+    /// The text of this error in the language in effect.
+    pub fn message(self) -> &'static str {
+        crate::i18n::tr(self.key())
     }
 }
 

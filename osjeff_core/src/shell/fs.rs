@@ -5,6 +5,7 @@
 //! `/a/b/c` paths with `.` and `..`). The shell never touches
 //! `osjeff_core::fs` directly, so the format can change without touching it.
 
+use crate::tk;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -26,21 +27,27 @@ pub enum FsErr {
 }
 
 impl FsErr {
-    /// Short human-readable text (what `ls`/`cat` print after the file name).
-    pub const fn message(self) -> &'static str {
+    /// The catalog key of the text for this error.
+    pub const fn key(self) -> &'static str {
         match self {
-            FsErr::NotFound => "No such file or directory",
-            FsErr::NotADirectory => "Not a directory",
-            FsErr::IsADirectory => "Is a directory",
-            FsErr::AlreadyExists => "File exists",
-            FsErr::NotEmpty => "Directory not empty",
-            FsErr::NoSpace => "No space left on device",
-            FsErr::TooBig => "File too large",
-            FsErr::NameTooLong => "File name too long",
-            FsErr::InvalidPath => "Invalid path",
-            FsErr::ReadOnly => "Read-only file system",
-            FsErr::Io => "Input/output error",
+            FsErr::NotFound => tk!("sh.fs.not_found"),
+            FsErr::NotADirectory => tk!("sh.fs.not_dir"),
+            FsErr::IsADirectory => tk!("sh.fs.is_dir"),
+            FsErr::AlreadyExists => tk!("sh.fs.exists"),
+            FsErr::NotEmpty => tk!("sh.fs.not_empty"),
+            FsErr::NoSpace => tk!("sh.fs.no_space"),
+            FsErr::TooBig => tk!("sh.fs.too_big"),
+            FsErr::NameTooLong => tk!("sh.fs.name_long"),
+            FsErr::InvalidPath => tk!("sh.fs.bad_path"),
+            FsErr::ReadOnly => tk!("sh.fs.read_only"),
+            FsErr::Io => tk!("sh.fs.io"),
         }
+    }
+
+    /// Short human-readable text (what `ls`/`cat` print after the file name), in the
+    /// language in effect.
+    pub fn message(self) -> &'static str {
+        crate::i18n::tr(self.key())
     }
 }
 

@@ -25,6 +25,11 @@ impl LangGuard {
     pub(crate) fn new(l: Lang) -> Self {
         Self(OVERRIDE.with(|c| c.replace(Some(l))))
     }
+
+    /// Change the language of this guard (what it restores on drop stays as it was).
+    pub(crate) fn set(&mut self, l: Lang) {
+        OVERRIDE.with(|c| c.set(Some(l)));
+    }
 }
 
 impl Drop for LangGuard {

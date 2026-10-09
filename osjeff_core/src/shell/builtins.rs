@@ -9,6 +9,8 @@
 use super::exec::{BuiltinFn, Builtins, CmdCtx, Registry};
 use super::fs::{FsErr, Kind, basename, join};
 use super::regex::Regex;
+use crate::i18n::{self, Arg, dec};
+use crate::{t, tk, tp};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -16,94 +18,54 @@ use alloc::vec::Vec;
 /// Register every standard builtin into `r`.
 pub fn register_all(r: &mut Registry) {
     let table: [(&str, &'static str, BuiltinFn); 48] = [
-        ("help", "help [CMD]: list commands or describe one", help),
-        ("ls", "ls [-aF1l] [PATH...]: list directory contents", ls),
-        ("cd", "cd [DIR|-]: change directory", cd),
-        ("pwd", "pwd: print the working directory", pwd),
-        ("cat", "cat [-n] [FILE...]: print files or stdin", cat),
-        ("echo", "echo [-ne] [ARG...]: print arguments", echo),
-        ("mkdir", "mkdir [-p] DIR...: create directories", mkdir),
-        ("rm", "rm [-rf] PATH...: remove files or directories", rm),
-        ("rmdir", "rmdir DIR...: remove empty directories", rmdir),
-        ("mv", "mv SRC... DEST: move or rename", mv),
-        ("cp", "cp [-r] SRC... DEST: copy files or directories", cp),
-        ("touch", "touch FILE...: create empty files", touch),
-        ("head", "head [-n N] [FILE...]: first lines", head),
-        ("tail", "tail [-n N] [FILE...]: last lines", tail),
-        ("wc", "wc [-lwcm] [FILE...]: count lines, words, bytes", wc),
-        (
-            "grep",
-            "grep [-ivncFlqHh] PATTERN [FILE...]: search text",
-            grep,
-        ),
-        ("sort", "sort [-rnu] [FILE...]: sort lines", sort),
-        (
-            "uniq",
-            "uniq [-cdui]: collapse adjacent duplicate lines",
-            uniq,
-        ),
-        (
-            "tee",
-            "tee [-a] FILE...: copy stdin to stdout and files",
-            tee,
-        ),
-        ("clear", "clear: clear the terminal", clear),
-        ("env", "env: list exported variables", env),
-        (
-            "export",
-            "export [NAME[=VALUE]...]: mark variables exported",
-            export,
-        ),
-        ("unset", "unset NAME...: remove variables", unset),
-        (
-            "history",
-            "history [N|-c]: show or clear the command history",
-            history,
-        ),
-        (
-            "alias",
-            "alias [NAME=VALUE...]: define or list aliases",
-            alias,
-        ),
-        ("unalias", "unalias [-a] NAME...: remove aliases", unalias),
-        ("which", "which CMD...: show how a command resolves", which),
-        ("date", "date [+FORMAT]: print the date and time", date),
-        ("uptime", "uptime: time since boot", uptime),
-        ("free", "free [-bkm]: memory usage", free),
-        ("df", "df: disk usage", df),
-        ("ps", "ps: list processes", ps),
-        ("kill", "kill [-SIGNAL] PID...: signal processes", kill),
-        ("ping", "ping [-c N] HOST: test network reachability", ping),
-        ("true", "true: succeed", true_cmd),
-        ("false", "false: fail", false_cmd),
-        ("test", "test EXPR: evaluate a condition", test),
-        ("[", "[ EXPR ]: evaluate a condition", bracket),
-        ("sleep", "sleep SECONDS: wait", sleep),
-        ("seq", "seq [FIRST] LAST: print a sequence of numbers", seq),
-        (
-            "basename",
-            "basename PATH [SUFFIX]: last path component",
-            basename_cmd,
-        ),
-        (
-            "dirname",
-            "dirname PATH: directory part of a path",
-            dirname_cmd,
-        ),
-        ("stat", "stat PATH...: show kind and size", stat),
-        ("rev", "rev: reverse each line", rev),
-        ("tr", "tr SET1 SET2: translate characters (stdin)", tr),
-        (
-            "cut",
-            "cut -d C -f N[,M]: select fields (stdin or files)",
-            cut,
-        ),
-        ("nl", "nl: number lines (stdin or files)", nl),
-        (
-            "yes",
-            "yes [WORD]: repeat a word (bounded by the output limit)",
-            yes,
-        ),
+        ("help", tk!("sh.help.help"), help),
+        ("ls", tk!("sh.ls.help"), ls),
+        ("cd", tk!("sh.cd.help"), cd),
+        ("pwd", tk!("sh.pwd.help"), pwd),
+        ("cat", tk!("sh.cat.help"), cat),
+        ("echo", tk!("sh.echo.help"), echo),
+        ("mkdir", tk!("sh.mkdir.help"), mkdir),
+        ("rm", tk!("sh.rm.help"), rm),
+        ("rmdir", tk!("sh.rmdir.help"), rmdir),
+        ("mv", tk!("sh.mv.help"), mv),
+        ("cp", tk!("sh.cp.help"), cp),
+        ("touch", tk!("sh.touch.help"), touch),
+        ("head", tk!("sh.head.help"), head),
+        ("tail", tk!("sh.tail.help"), tail),
+        ("wc", tk!("sh.wc.help"), wc),
+        ("grep", tk!("sh.grep.help"), grep),
+        ("sort", tk!("sh.sort.help"), sort),
+        ("uniq", tk!("sh.uniq.help"), uniq),
+        ("tee", tk!("sh.tee.help"), tee),
+        ("clear", tk!("sh.clear.help"), clear),
+        ("env", tk!("sh.env.help"), env),
+        ("export", tk!("sh.export.help"), export),
+        ("unset", tk!("sh.unset.help"), unset),
+        ("history", tk!("sh.history.help"), history),
+        ("alias", tk!("sh.alias.help"), alias),
+        ("unalias", tk!("sh.unalias.help"), unalias),
+        ("which", tk!("sh.which.help"), which),
+        ("date", tk!("sh.date.help"), date),
+        ("uptime", tk!("sh.uptime.help"), uptime),
+        ("free", tk!("sh.free.help"), free),
+        ("df", tk!("sh.df.help"), df),
+        ("ps", tk!("sh.ps.help"), ps),
+        ("kill", tk!("sh.kill.help"), kill),
+        ("ping", tk!("sh.ping.help"), ping),
+        ("true", tk!("sh.true.help"), true_cmd),
+        ("false", tk!("sh.false.help"), false_cmd),
+        ("test", tk!("sh.test.help"), test),
+        ("[", tk!("sh.bracket.help"), bracket),
+        ("sleep", tk!("sh.sleep.help"), sleep),
+        ("seq", tk!("sh.seq.help"), seq),
+        ("basename", tk!("sh.basename.help"), basename_cmd),
+        ("dirname", tk!("sh.dirname.help"), dirname_cmd),
+        ("stat", tk!("sh.stat.help"), stat),
+        ("rev", tk!("sh.rev.help"), rev),
+        ("tr", tk!("sh.tr.help"), tr),
+        ("cut", tk!("sh.cut.help"), cut),
+        ("nl", tk!("sh.nl.help"), nl),
+        ("yes", tk!("sh.yes.help"), yes),
     ];
     for (n, h, f) in table {
         r.register(n, h, f);
@@ -177,14 +139,14 @@ pub(super) fn parse_opts(
                     o.values.push((c, args[i].clone()));
                     i += 1;
                 } else {
-                    cx.error(&format!("option requires an argument -- '{c}'"));
+                    cx.error(&t!("sh.err.option_needs_arg", c = c.to_string().as_str()));
                     return None;
                 }
                 break;
             } else if known.contains(c) {
                 o.flags.push(c);
             } else {
-                cx.error(&format!("invalid option -- '{c}'"));
+                cx.error(&t!("sh.err.invalid_option", c = c.to_string().as_str()));
                 return None;
             }
         }
@@ -243,7 +205,7 @@ fn help(cx: &mut CmdCtx<'_>) -> i32 {
             match cx.registry.help_of(name) {
                 Some(h) => cx.println(h),
                 None => {
-                    cx.error(&format!("no help for '{name}'"));
+                    cx.error(&t!("sh.help.none", name = name.as_str()));
                     st = 1;
                 }
             }
@@ -251,7 +213,7 @@ fn help(cx: &mut CmdCtx<'_>) -> i32 {
         return st;
     }
     let list = cx.registry.list();
-    cx.println("Commands (help NAME for one):");
+    cx.println(t!("sh.help.header"));
     for (_, h) in list {
         cx.print("  ");
         cx.println(h);
@@ -290,7 +252,7 @@ fn ls(cx: &mut CmdCtx<'_>) -> i32 {
         let st = match cx.fs.stat(t) {
             Ok(s) => s,
             Err(e) => {
-                let msg = format!("cannot access '{t}': {}", e.message());
+                let msg = t!("sh.err.cannot_access", path = t.as_str(), why = e.message());
                 cx.error(&msg);
                 status = 2;
                 continue;
@@ -343,7 +305,7 @@ fn set_pwd(cx: &mut CmdCtx<'_>, old: &str) {
 
 fn cd(cx: &mut CmdCtx<'_>) -> i32 {
     if cx.args.len() > 2 {
-        cx.error("too many arguments");
+        cx.error(t!("sh.err.too_many_args"));
         return 1;
     }
     let old = cx.fs.cwd();
@@ -356,7 +318,7 @@ fn cd(cx: &mut CmdCtx<'_>) -> i32 {
                 p
             }
             _ => {
-                cx.error("OLDPWD not set");
+                cx.error(t!("sh.cd.oldpwd_unset"));
                 return 1;
             }
         },
@@ -462,7 +424,7 @@ fn mkdir(cx: &mut CmdCtx<'_>) -> i32 {
         return 2;
     };
     if o.operands.is_empty() {
-        cx.error("missing operand");
+        cx.error(t!("sh.err.missing_operand"));
         return 2;
     }
     let mut status = 0;
@@ -490,7 +452,11 @@ fn mkdir(cx: &mut CmdCtx<'_>) -> i32 {
                 }
             }
         } else if let Err(e) = cx.fs.mkdir(d) {
-            let msg = format!("cannot create directory '{d}': {}", e.message());
+            let msg = t!(
+                "sh.err.cannot_create_dir",
+                path = d.as_str(),
+                why = e.message()
+            );
             cx.error(&msg);
             status = 1;
         }
@@ -521,7 +487,7 @@ fn rm(cx: &mut CmdCtx<'_>) -> i32 {
         if o.has('f') {
             return 0;
         }
-        cx.error("missing operand");
+        cx.error(t!("sh.err.missing_operand"));
         return 2;
     }
     let recursive = o.has('r') || o.has('R');
@@ -531,24 +497,32 @@ fn rm(cx: &mut CmdCtx<'_>) -> i32 {
         let abs = cx.fs.resolve(p);
         let base = basename(p.trim_end_matches('/'));
         if abs == "/" || base == "." || base == ".." {
-            cx.error(&format!("refusing to remove '{p}'"));
+            cx.error(&t!("sh.err.refuse_remove", path = p.as_str()));
             status = 1;
             continue;
         }
         match cx.fs.stat(p) {
             Err(FsErr::NotFound) if force => {}
             Err(e) => {
-                let msg = format!("cannot remove '{p}': {}", e.message());
+                let msg = t!("sh.err.cannot_remove", path = p.as_str(), why = e.message());
                 cx.error(&msg);
                 status = 1;
             }
             Ok(s) if s.kind == Kind::Dir && !recursive => {
-                cx.error(&format!("cannot remove '{p}': Is a directory"));
+                cx.error(&t!(
+                    "sh.err.cannot_remove",
+                    path = p.as_str(),
+                    why = FsErr::IsADirectory.message()
+                ));
                 status = 1;
             }
             Ok(_) => {
                 if let Err((at, e)) = remove_tree(cx, p, 0) {
-                    let msg = format!("cannot remove '{at}': {}", e.message());
+                    let msg = t!(
+                        "sh.err.cannot_remove",
+                        path = at.as_str(),
+                        why = e.message()
+                    );
                     cx.error(&msg);
                     status = 1;
                 }
@@ -560,7 +534,7 @@ fn rm(cx: &mut CmdCtx<'_>) -> i32 {
 
 fn rmdir(cx: &mut CmdCtx<'_>) -> i32 {
     if cx.args.len() < 2 {
-        cx.error("missing operand");
+        cx.error(t!("sh.err.missing_operand"));
         return 2;
     }
     let mut status = 0;
@@ -568,18 +542,22 @@ fn rmdir(cx: &mut CmdCtx<'_>) -> i32 {
         match cx.fs.stat(d) {
             Ok(s) if s.kind == Kind::Dir => {
                 if let Err(e) = cx.fs.remove(d) {
-                    let msg = format!("failed to remove '{d}': {}", e.message());
+                    let msg = t!("sh.err.rmdir_failed", path = d.as_str(), why = e.message());
                     cx.error(&msg);
                     status = 1;
                 }
             }
             Ok(_) => {
-                let msg = format!("failed to remove '{d}': Not a directory");
+                let msg = t!(
+                    "sh.err.rmdir_failed",
+                    path = d.as_str(),
+                    why = FsErr::NotADirectory.message()
+                );
                 cx.error(&msg);
                 status = 1;
             }
             Err(e) => {
-                let msg = format!("failed to remove '{d}': {}", e.message());
+                let msg = t!("sh.err.rmdir_failed", path = d.as_str(), why = e.message());
                 cx.error(&msg);
                 status = 1;
             }
@@ -601,20 +579,25 @@ fn dest_for(cx: &CmdCtx<'_>, src: &str, dst: &str) -> String {
 
 fn mv(cx: &mut CmdCtx<'_>) -> i32 {
     if cx.args.len() < 3 {
-        cx.error("usage: mv SRC... DEST");
+        cx.error(t!("sh.mv.usage"));
         return 2;
     }
     let dst = cx.args[cx.args.len() - 1].clone();
     let srcs: Vec<String> = cx.args[1..cx.args.len() - 1].to_vec();
     if srcs.len() > 1 && !matches!(cx.fs.stat(&dst), Ok(s) if s.kind == Kind::Dir) {
-        cx.error(&format!("target '{dst}' is not a directory"));
+        cx.error(&t!("sh.err.target_not_dir", path = dst.as_str()));
         return 1;
     }
     let mut status = 0;
     for s in srcs {
         let to = dest_for(cx, &s, &dst);
         if let Err(e) = cx.fs.rename(&s, &to) {
-            let msg = format!("cannot move '{s}' to '{to}': {}", e.message());
+            let msg = t!(
+                "sh.err.cannot_move",
+                from = s.as_str(),
+                to = to.as_str(),
+                why = e.message()
+            );
             cx.error(&msg);
             status = 1;
         }
@@ -632,36 +615,42 @@ fn copy_tree(
     let st = cx
         .fs
         .stat(src)
-        .map_err(|e| format!("cannot stat '{src}': {}", e.message()))?;
+        .map_err(|e| t!("sh.err.cannot_stat", path = src, why = e.message()))?;
     if st.kind == Kind::File {
         let data = cx
             .fs
             .read(src)
-            .map_err(|e| format!("cannot read '{src}': {}", e.message()))?;
+            .map_err(|e| t!("sh.err.cannot_read", path = src, why = e.message()))?;
         return cx
             .fs
             .write(dst, &data)
-            .map_err(|e| format!("cannot create '{dst}': {}", e.message()));
+            .map_err(|e| t!("sh.err.cannot_create", path = dst, why = e.message()));
     }
     if !recursive {
-        return Err(format!("-r not specified; omitting directory '{src}'"));
+        return Err(t!("sh.cp.omit_dir", path = src));
     }
     if depth > 64 {
-        return Err(format!("'{src}': nesting too deep"));
+        return Err(t!("sh.cp.too_deep", path = src));
     }
     let abs_src = cx.fs.resolve(src);
     let abs_dst = cx.fs.resolve(dst);
     if abs_dst == abs_src || abs_dst.starts_with(&format!("{abs_src}/")) {
-        return Err(format!("cannot copy '{src}' into itself"));
+        return Err(t!("sh.cp.into_itself", path = src));
     }
     match cx.fs.mkdir(&abs_dst) {
         Ok(()) | Err(FsErr::AlreadyExists) => {}
-        Err(e) => return Err(format!("cannot create directory '{dst}': {}", e.message())),
+        Err(e) => {
+            return Err(t!(
+                "sh.err.cannot_create_dir",
+                path = dst,
+                why = e.message()
+            ));
+        }
     }
     let entries = cx
         .fs
         .list(&abs_src)
-        .map_err(|e| format!("cannot read '{src}': {}", e.message()))?;
+        .map_err(|e| t!("sh.err.cannot_read", path = src, why = e.message()))?;
     for e in entries {
         copy_tree(
             cx,
@@ -679,13 +668,13 @@ fn cp(cx: &mut CmdCtx<'_>) -> i32 {
         return 2;
     };
     if o.operands.len() < 2 {
-        cx.error("usage: cp [-r] SRC... DEST");
+        cx.error(t!("sh.cp.usage"));
         return 2;
     }
     let dst = o.operands[o.operands.len() - 1].clone();
     let srcs = &o.operands[..o.operands.len() - 1];
     if srcs.len() > 1 && !matches!(cx.fs.stat(&dst), Ok(s) if s.kind == Kind::Dir) {
-        cx.error(&format!("target '{dst}' is not a directory"));
+        cx.error(&t!("sh.err.target_not_dir", path = dst.as_str()));
         return 1;
     }
     let recursive = o.has('r') || o.has('R');
@@ -702,7 +691,7 @@ fn cp(cx: &mut CmdCtx<'_>) -> i32 {
 
 fn touch(cx: &mut CmdCtx<'_>) -> i32 {
     if cx.args.len() < 2 {
-        cx.error("missing file operand");
+        cx.error(t!("sh.err.missing_file_operand"));
         return 2;
     }
     let mut status = 0;
@@ -710,7 +699,7 @@ fn touch(cx: &mut CmdCtx<'_>) -> i32 {
         if cx.fs.stat(f).is_err()
             && let Err(e) = cx.fs.write(f, b"")
         {
-            let msg = format!("cannot touch '{f}': {}", e.message());
+            let msg = t!("sh.err.cannot_create", path = f.as_str(), why = e.message());
             cx.error(&msg);
             status = 1;
         }
@@ -727,7 +716,7 @@ fn head_tail(cx: &mut CmdCtx<'_>, tail: bool) -> i32 {
         Some(v) => match parse_num(v) {
             Some(n) if n >= 0 => n as usize,
             _ => {
-                cx.error(&format!("invalid number of lines: '{v}'"));
+                cx.error(&t!("sh.err.bad_lines", v = v));
                 return 2;
             }
         },
@@ -820,7 +809,7 @@ fn grep(cx: &mut CmdCtx<'_>) -> i32 {
         Some(p) => p.to_string(),
         None => {
             if operands.is_empty() {
-                cx.error("usage: grep [OPTIONS] PATTERN [FILE...]");
+                cx.error(t!("sh.grep.usage"));
                 return 2;
             }
             operands.remove(0)
@@ -834,7 +823,7 @@ fn grep(cx: &mut CmdCtx<'_>) -> i32 {
         match Regex::new(&pattern, icase) {
             Ok(r) => Some(r),
             Err(e) => {
-                cx.error(&format!("invalid pattern: {}", e.message()));
+                cx.error(&t!("sh.grep.bad_pattern", why = e.message()));
                 return 2;
             }
         }
@@ -891,12 +880,11 @@ fn grep(cx: &mut CmdCtx<'_>) -> i32 {
         }
         if o.has('l') {
             if count > 0 {
-                let n = if name.is_empty() {
-                    "(standard input)"
+                if name.is_empty() {
+                    cx.println(t!("sh.grep.stdin"));
                 } else {
-                    name
-                };
-                cx.println(n);
+                    cx.println(name);
+                }
             }
         } else if o.has('c') {
             if with_name {
@@ -1060,7 +1048,7 @@ fn export(cx: &mut CmdCtx<'_>) -> i32 {
             None => (a.clone(), None),
         };
         if !super::env::valid_name(&name) {
-            cx.error(&format!("`{a}': not a valid identifier"));
+            cx.error(&t!("sh.export.bad_name", name = a.as_str()));
             status = 1;
             continue;
         }
@@ -1069,7 +1057,7 @@ fn export(cx: &mut CmdCtx<'_>) -> i32 {
             None => cx.env.export(&name),
         };
         if !ok {
-            cx.error(&format!("cannot set `{name}'"));
+            cx.error(&t!("sh.export.cannot_set", name = name.as_str()));
             status = 1;
         }
     }
@@ -1096,7 +1084,7 @@ fn history(cx: &mut CmdCtx<'_>) -> i32 {
                 Some(a) => match a.parse::<usize>() {
                     Ok(n) => n.min(total),
                     Err(_) => {
-                        cx.error(&format!("{a}: numeric argument required"));
+                        cx.error(&t!("sh.err.numeric_required", name = a));
                         return 2;
                     }
                 },
@@ -1130,20 +1118,20 @@ fn alias(cx: &mut CmdCtx<'_>) -> i32 {
         match a.split_once('=') {
             Some((n, v)) if !n.is_empty() && !n.contains(char::is_whitespace) => {
                 if cx.meta.aliases.len() >= 256 && !cx.meta.aliases.contains_key(n) {
-                    cx.error("too many aliases");
+                    cx.error(t!("sh.alias.too_many"));
                     status = 1;
                 } else {
                     cx.meta.aliases.insert(n.to_string(), v.to_string());
                 }
             }
             Some(_) => {
-                cx.error(&format!("invalid alias name in `{a}'"));
+                cx.error(&t!("sh.alias.bad_name", arg = a.as_str()));
                 status = 1;
             }
             None => match cx.meta.aliases.get(a).cloned() {
                 Some(v) => cx.println(&format!("alias {a}='{v}'")),
                 None => {
-                    cx.error(&format!("{a}: not found"));
+                    cx.error(&t!("sh.err.not_found", name = a.as_str()));
                     status = 1;
                 }
             },
@@ -1158,13 +1146,13 @@ fn unalias(cx: &mut CmdCtx<'_>) -> i32 {
         return 0;
     }
     if cx.args.len() < 2 {
-        cx.error("usage: unalias [-a] NAME...");
+        cx.error(t!("sh.unalias.usage"));
         return 2;
     }
     let mut status = 0;
     for a in &cx.args[1..] {
         if cx.meta.aliases.remove(a).is_none() {
-            cx.error(&format!("{a}: not found"));
+            cx.error(&t!("sh.err.not_found", name = a.as_str()));
             status = 1;
         }
     }
@@ -1173,17 +1161,17 @@ fn unalias(cx: &mut CmdCtx<'_>) -> i32 {
 
 fn which(cx: &mut CmdCtx<'_>) -> i32 {
     if cx.args.len() < 2 {
-        cx.error("usage: which CMD...");
+        cx.error(t!("sh.which.usage"));
         return 2;
     }
     let mut status = 0;
     for n in &cx.args[1..] {
         if let Some(v) = cx.meta.aliases.get(n).cloned() {
-            cx.println(&format!("{n}: aliased to '{v}'"));
+            cx.println(&t!("sh.which.alias", name = n.as_str(), value = v.as_str()));
         } else if cx.funcs.contains_key(n) {
-            cx.println(&format!("{n}: shell function"));
+            cx.println(&t!("sh.which.function", name = n.as_str()));
         } else if cx.registry.contains(n) {
-            cx.println(&format!("{n}: shell builtin"));
+            cx.println(&t!("sh.which.builtin", name = n.as_str()));
         } else {
             let mut found = None;
             let cands: Vec<String> = if n.contains('/') {
@@ -1205,7 +1193,9 @@ fn which(cx: &mut CmdCtx<'_>) -> i32 {
             match found {
                 Some(p) => cx.println(&p),
                 None => {
-                    cx.err_bytes(format!("{n} not found\n").as_bytes());
+                    let msg = t!("sh.which.missing", name = n.as_str());
+                    cx.err_bytes(msg.as_bytes());
+                    cx.err_bytes(b"\n");
                     status = 1;
                 }
             }
@@ -1225,7 +1215,7 @@ fn date(cx: &mut CmdCtx<'_>) -> i32 {
         Some(f) => match f.strip_prefix('+') {
             Some(r) => r.to_string(),
             None => {
-                cx.error(&format!("invalid date '{f}'"));
+                cx.error(&t!("sh.date.invalid", f = f.as_str()));
                 return 1;
             }
         },
@@ -1267,11 +1257,11 @@ fn uptime(cx: &mut CmdCtx<'_>) -> i32 {
         (total / 60) % 60,
         total % 60,
     );
+    let (h, m, s) = (Arg::Pad(h, 2), Arg::Pad(m, 2), Arg::Pad(s, 2));
     let line = if d > 0 {
-        let unit = if d == 1 { "day" } else { "days" };
-        format!("up {d} {unit}, {h:02}:{m:02}:{s:02}")
+        tp!("sh.uptime.days", d, h = h, m = m, s = s)
     } else {
-        format!("up {h:02}:{m:02}:{s:02}")
+        t!("sh.uptime.short", h = h, m = m, s = s)
     };
     cx.println(&line);
     0
@@ -1282,7 +1272,7 @@ fn free(cx: &mut CmdCtx<'_>) -> i32 {
         return 2;
     };
     let (div, unit) = if o.has('b') {
-        (1u64, "bytes")
+        (1u64, t!("sh.free.bytes"))
     } else if o.has('m') {
         (1024 * 1024, "MiB")
     } else {
@@ -1291,7 +1281,10 @@ fn free(cx: &mut CmdCtx<'_>) -> i32 {
     let m = cx.sys.mem();
     cx.println(&format!(
         "{:<6}{:>12}{:>12}{:>12}",
-        unit, "total", "used", "free"
+        unit,
+        t!("sh.free.total"),
+        t!("sh.free.used"),
+        t!("sh.free.free")
     ));
     cx.println(&format!(
         "{:<6}{:>12}{:>12}{:>12}",
@@ -1315,8 +1308,13 @@ fn df(cx: &mut CmdCtx<'_>) -> i32 {
         });
     }
     cx.println(&format!(
-        "{:<12}{:>10}{:>10}{:>10}{:>6}  Mounted on",
-        "Filesystem", "KiB", "Used", "Avail", "Use%"
+        "{:<12}{:>10}{:>10}{:>10}{:>6}  {}",
+        t!("sh.df.fs"),
+        "KiB",
+        t!("sh.df.used"),
+        t!("sh.df.avail"),
+        t!("sh.df.use"),
+        t!("sh.df.mount")
     ));
     for d in disks {
         let pct = match d.used.saturating_mul(100).checked_div(d.total) {
@@ -1338,8 +1336,11 @@ fn df(cx: &mut CmdCtx<'_>) -> i32 {
 
 fn ps(cx: &mut CmdCtx<'_>) -> i32 {
     cx.println(&format!(
-        "{:>5}  {:<8}{:>8}  NAME",
-        "PID", "STATE", "MEM(K)"
+        "{:>5}  {:<8}{:>8}  {}",
+        "PID",
+        t!("sh.ps.state"),
+        t!("sh.ps.mem"),
+        t!("sh.ps.name")
     ));
     for p in cx.sys.procs() {
         cx.println(&format!(
@@ -1382,7 +1383,7 @@ fn kill(cx: &mut CmdCtx<'_>) -> i32 {
             match signal_number(s) {
                 Some(n) => sig = n,
                 None => {
-                    cx.error(&format!("invalid signal '{s}'"));
+                    cx.error(&t!("sh.kill.bad_signal", s = s));
                     return 2;
                 }
             }
@@ -1391,7 +1392,7 @@ fn kill(cx: &mut CmdCtx<'_>) -> i32 {
         }
     }
     if pids.is_empty() {
-        cx.error("usage: kill [-SIGNAL] PID...");
+        cx.error(t!("sh.kill.usage"));
         return 2;
     }
     let mut status = 0;
@@ -1404,7 +1405,7 @@ fn kill(cx: &mut CmdCtx<'_>) -> i32 {
                 }
             }
             Err(_) => {
-                cx.error(&format!("invalid pid '{p}'"));
+                cx.error(&t!("sh.kill.bad_pid", p = p.as_str()));
                 status = 1;
             }
         }
@@ -1421,13 +1422,13 @@ fn ping(cx: &mut CmdCtx<'_>) -> i32 {
         Some(v) => match v.parse::<u32>() {
             Ok(n) if (1..=100).contains(&n) => n,
             _ => {
-                cx.error(&format!("invalid count '{v}'"));
+                cx.error(&t!("sh.ping.bad_count", v = v));
                 return 2;
             }
         },
     };
     let Some(host) = o.operands.first().cloned() else {
-        cx.error("usage: ping [-c N] HOST");
+        cx.error(t!("sh.ping.usage"));
         return 2;
     };
     cx.println(&format!("PING {host}"));
@@ -1436,16 +1437,11 @@ fn ping(cx: &mut CmdCtx<'_>) -> i32 {
             let loss = ((s.sent - s.received.min(s.sent)) * 100)
                 .checked_div(s.sent)
                 .unwrap_or(0);
-            cx.println(&format!(
-                "{} packets transmitted, {} received, {}% packet loss",
-                s.sent, s.received, loss
-            ));
+            let line = tp!("sh.ping.stats", s.sent, recv = s.received, loss = loss);
+            cx.println(&line);
             if s.received > 0 {
-                cx.println(&format!(
-                    "avg rtt = {}.{:03} ms",
-                    s.avg_rtt_us / 1000,
-                    s.avg_rtt_us % 1000
-                ));
+                let ms = dec(i64::try_from(s.avg_rtt_us).unwrap_or(i64::MAX), 3);
+                cx.println(&t!("sh.ping.rtt", ms = ms));
                 0
             } else {
                 1
@@ -1523,13 +1519,13 @@ impl TestEval<'_, '_> {
 
     fn primary(&mut self) -> Result<bool, &'static str> {
         let Some(tok) = self.peek().map(String::from) else {
-            return Err("argument expected");
+            return Err(tk!("sh.test.arg_expected"));
         };
         if tok == "(" {
             self.i += 1;
             let v = self.or()?;
             if self.peek() != Some(")") {
-                return Err("missing ')'");
+                return Err(tk!("sh.test.missing_paren"));
             }
             self.i += 1;
             return Ok(v);
@@ -1557,7 +1553,7 @@ impl TestEval<'_, '_> {
             let ints = |a: &str, b: &str| -> Result<(i64, i64), &'static str> {
                 match (parse_num(a), parse_num(b)) {
                     (Some(x), Some(y)) => Ok((x, y)),
-                    _ => Err("integer expression expected"),
+                    _ => Err(tk!("sh.test.int_expected")),
                 }
             };
             return Ok(match op.as_str() {
@@ -1608,11 +1604,11 @@ fn run_test(cx: &mut CmdCtx<'_>, tokens: &[String]) -> i32 {
     match ev.or() {
         Ok(v) if ev.i == tokens.len() => i32::from(!v),
         Ok(_) => {
-            ev.cx.error("too many arguments");
+            ev.cx.error(t!("sh.err.too_many_args"));
             2
         }
         Err(m) => {
-            ev.cx.error(m);
+            ev.cx.error(i18n::tr(m));
             2
         }
     }
@@ -1626,7 +1622,7 @@ fn test(cx: &mut CmdCtx<'_>) -> i32 {
 fn bracket(cx: &mut CmdCtx<'_>) -> i32 {
     let mut t: Vec<String> = cx.args[1..].to_vec();
     if t.last().map(String::as_str) != Some("]") {
-        cx.error("missing ']'");
+        cx.error(t!("sh.test.missing_bracket"));
         return 2;
     }
     t.pop();
@@ -1635,7 +1631,7 @@ fn bracket(cx: &mut CmdCtx<'_>) -> i32 {
 
 fn sleep(cx: &mut CmdCtx<'_>) -> i32 {
     let Some(arg) = cx.args.get(1).cloned() else {
-        cx.error("missing operand");
+        cx.error(t!("sh.err.missing_operand"));
         return 2;
     };
     let (num, mult) = match arg.strip_suffix('s') {
@@ -1653,7 +1649,7 @@ fn sleep(cx: &mut CmdCtx<'_>) -> i32 {
         .or(if whole.is_empty() { Some(0) } else { None });
     let digits_ok = frac.chars().all(|c| c.is_ascii_digit());
     let (Some(w), true, true) = (w, digits_ok, ok) else {
-        cx.error(&format!("invalid time interval '{arg}'"));
+        cx.error(&t!("sh.sleep.bad_interval", arg = arg.as_str()));
         return 1;
     };
     // Fraction: up to 3 digits of precision relative to the unit.
@@ -1672,7 +1668,7 @@ fn sleep(cx: &mut CmdCtx<'_>) -> i32 {
 fn seq(cx: &mut CmdCtx<'_>) -> i32 {
     let nums: Vec<Option<i64>> = cx.args[1..].iter().map(|s| parse_num(s)).collect();
     if nums.is_empty() || nums.len() > 3 || nums.iter().any(Option::is_none) {
-        cx.error("usage: seq [FIRST [INCR]] LAST");
+        cx.error(t!("sh.seq.usage"));
         return 2;
     }
     let n: Vec<i64> = nums.into_iter().flatten().collect();
@@ -1683,7 +1679,7 @@ fn seq(cx: &mut CmdCtx<'_>) -> i32 {
         _ => return 2,
     };
     if step == 0 {
-        cx.error("increment must not be zero");
+        cx.error(t!("sh.seq.zero_step"));
         return 2;
     }
     let mut v = first;
@@ -1704,7 +1700,7 @@ fn seq(cx: &mut CmdCtx<'_>) -> i32 {
 
 fn basename_cmd(cx: &mut CmdCtx<'_>) -> i32 {
     let Some(p) = cx.args.get(1).cloned() else {
-        cx.error("missing operand");
+        cx.error(t!("sh.err.missing_operand"));
         return 2;
     };
     let trimmed = p.trim_end_matches('/');
@@ -1726,7 +1722,7 @@ fn basename_cmd(cx: &mut CmdCtx<'_>) -> i32 {
 
 fn dirname_cmd(cx: &mut CmdCtx<'_>) -> i32 {
     let Some(p) = cx.args.get(1).cloned() else {
-        cx.error("missing operand");
+        cx.error(t!("sh.err.missing_operand"));
         return 2;
     };
     let trimmed = p.trim_end_matches('/');
@@ -1747,22 +1743,24 @@ fn dirname_cmd(cx: &mut CmdCtx<'_>) -> i32 {
 
 fn stat(cx: &mut CmdCtx<'_>) -> i32 {
     if cx.args.len() < 2 {
-        cx.error("missing operand");
+        cx.error(t!("sh.err.missing_operand"));
         return 2;
     }
     let mut status = 0;
     for p in &cx.args[1..] {
         match cx.fs.stat(p) {
             Ok(s) => {
-                let k = if s.kind == Kind::Dir {
-                    "directory"
+                let key = if s.kind == Kind::Dir {
+                    tk!("sh.stat.dir")
                 } else {
-                    "file"
+                    tk!("sh.stat.file")
                 };
-                cx.println(&format!("{p}: {k}, {} bytes", s.size));
+                let size = i64::try_from(s.size).unwrap_or(i64::MAX);
+                let line = i18n::tr_fmt(key, &[("path", Arg::Str(p)), ("size", Arg::Int(size))]);
+                cx.println(&line);
             }
             Err(e) => {
-                let msg = format!("cannot stat '{p}': {}", e.message());
+                let msg = t!("sh.err.cannot_stat", path = p.as_str(), why = e.message());
                 cx.error(&msg);
                 status = 1;
             }
@@ -1835,7 +1833,7 @@ fn tr(cx: &mut CmdCtx<'_>) -> i32 {
         o.operands.len() == 2
     };
     if !ok_args {
-        cx.error("usage: tr SET1 SET2 | tr -d SET1");
+        cx.error(t!("sh.tr.usage"));
         return 2;
     }
     let from = expand_set(&o.operands[0]);
@@ -1863,7 +1861,7 @@ fn cut(cx: &mut CmdCtx<'_>) -> i32 {
     };
     let delim = o.value('d').and_then(|d| d.chars().next()).unwrap_or('\t');
     let Some(fields) = o.value('f') else {
-        cx.error("you must specify a list of fields (-f)");
+        cx.error(t!("sh.cut.no_fields"));
         return 2;
     };
     let mut idx: Vec<usize> = Vec::new();
@@ -1871,7 +1869,7 @@ fn cut(cx: &mut CmdCtx<'_>) -> i32 {
         match part.parse::<usize>() {
             Ok(n) if n >= 1 => idx.push(n - 1),
             _ => {
-                cx.error(&format!("invalid field '{part}'"));
+                cx.error(&t!("sh.cut.bad_field", part = part));
                 return 2;
             }
         }

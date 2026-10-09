@@ -9,6 +9,7 @@ use super::parse::{
     self, AndOr, Command, Connector, ParseError, Part, Pipeline, RedirKind, Simple, Stmt, Word,
 };
 use super::sys::SysInfo;
+use crate::{t, tk};
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -176,7 +177,7 @@ pub type BuiltinFn = fn(&mut CmdCtx<'_>) -> i32;
 /// callers describe additional command sets.
 pub trait Builtins {
     fn lookup(&self, name: &str) -> Option<BuiltinFn>;
-    /// Sorted `(name, one-line help)`.
+    /// Sorted `(name, one-line help)`, the help in the language in effect.
     fn list(&self) -> Vec<(String, &'static str)>;
 }
 
@@ -200,6 +201,8 @@ impl Registry {
         r
     }
 
+    /// Add a command. `help` is the catalog key of its one-line help (synopsis and description),
+    /// looked up in the language in effect whenever the help is shown.
     pub fn register(&mut self, name: &str, help: &'static str, f: BuiltinFn) {
         self.map.insert(name.to_string(), (f, help));
     }
@@ -209,7 +212,7 @@ impl Registry {
     }
 
     pub fn help_of(&self, name: &str) -> Option<&'static str> {
-        self.map.get(name).map(|e| e.1)
+        self.map.get(name).map(|e| crate::i18n::tr(e.1))
     }
 
     pub fn names(&self) -> impl Iterator<Item = &str> {
@@ -223,7 +226,10 @@ impl Builtins for Registry {
     }
 
     fn list(&self) -> Vec<(String, &'static str)> {
-        self.map.iter().map(|(k, v)| (k.clone(), v.1)).collect()
+        self.map
+            .iter()
+            .map(|(k, v)| (k.clone(), crate::i18n::tr(v.1)))
+            .collect()
     }
 }
 
@@ -322,20 +328,18 @@ fn is_special(name: &str) -> bool {
 }
 
 /// Names and help of builtins that the executor handles itself.
+/// The help is a catalog key; the text follows the language when `help` runs.
 pub const SPECIAL_HELP: [(&str, &str); 10] = [
-    ("exit", "exit [N]: leave the shell or script with status N"),
-    ("return", "return [N]: leave a function with status N"),
-    ("break", "break [N]: leave N enclosing loops"),
-    ("continue", "continue [N]: next iteration of the Nth loop"),
-    ("shift", "shift [N]: drop the first N positional arguments"),
-    ("source", "source FILE [ARGS]: run a script in this shell"),
-    (".", ". FILE [ARGS]: same as source"),
-    ("sh", "sh FILE [ARGS]: run a script file"),
-    (
-        "set",
-        "set [NAME=VALUE | -- ARGS]: list variables or set them",
-    ),
-    (":", ":: do nothing, successfully"),
+    ("exit", tk!("sh.exit.help")),
+    ("return", tk!("sh.return.help")),
+    ("break", tk!("sh.break.help")),
+    ("continue", tk!("sh.continue.help")),
+    ("shift", tk!("sh.shift.help")),
+    ("source", tk!("sh.source.help")),
+    (".", tk!("sh.dot.help")),
+    ("sh", tk!("sh.sh.help")),
+    ("set", tk!("sh.set.help")),
+    (":", tk!("sh.colon.help")),
 ];
 
 impl Shell {
@@ -451,7 +455,7 @@ impl Shell {
             self.status = 1;
             return RunResult {
                 status: 1,
-                output: b"sh: line too long\n".to_vec(),
+                output: alloc::format!("sh: {}\n", t!("sh.exec.line_long")).into_bytes(),
                 ..RunResult::default()
             };
         }
@@ -470,7 +474,7 @@ impl Shell {
         if src.len() > self.limits.max_script {
             return RunResult {
                 status: 1,
-                output: b"sh: script too large\n".to_vec(),
+                output: alloc::format!("sh: {}\n", t!("sh.exec.script_big_short")).into_bytes(),
                 ..RunResult::default()
             };
         }
@@ -502,7 +506,7 @@ impl Shell {
                 // with no later step to notice it.
                 if !self.interrupted && h.sys.interrupted() {
                     self.interrupted = true;
-                    self.say("interrupted");
+                    self.say(t!("sh.sys.interrupted"));
                 }
                 self.finish_status(s)
             }
@@ -543,7 +547,10 @@ impl Shell {
         let truncated = out.truncated || self.pipe_truncated;
         if out.truncated {
             out.truncated = false;
-            out.data.extend_from_slice(b"\n[output truncated]\n");
+            out.data.extend_from_slice(b"\n");
+            out.data
+                .extend_from_slice(t!("sh.exec.output_cut").as_bytes());
+            out.data.extend_from_slice(b"\n");
         }
         RunResult {
             status,
@@ -557,8 +564,14 @@ impl Shell {
     fn syntax_error(&mut self, name: &str, src: &str, e: ParseError) {
         let (l, c) = e.line_col(src);
         let msg = alloc::format!(
-            "{name}: syntax error at line {l}, column {c}: {}\n",
-            e.message()
+            "{}\n",
+            t!(
+                "sh.exec.syntax",
+                name = name,
+                l = l,
+                c = c,
+                msg = e.message().as_str()
+            )
         );
         self.display.push(msg.as_bytes());
     }
@@ -576,7 +589,7 @@ impl Shell {
         }
         if sys.interrupted() {
             self.interrupted = true;
-            self.say("interrupted");
+            self.say(t!("sh.sys.interrupted"));
             self.ctl = Ctl::Abort;
             return false;
         }
@@ -584,7 +597,7 @@ impl Shell {
         if self.steps > self.limits.max_steps {
             if !self.notified_limit {
                 self.notified_limit = true;
-                self.say("step limit exceeded, aborting");
+                self.say(t!("sh.exec.step_limit"));
             }
             self.ctl = Ctl::Abort;
             return false;
@@ -603,7 +616,7 @@ impl Shell {
                 b.push(bytes);
                 if b.truncated && !self.pipe_truncated {
                     self.pipe_truncated = true;
-                    self.say("pipe buffer limit reached, data dropped");
+                    self.say(t!("sh.exec.pipe_limit"));
                 }
             }
         }
@@ -672,7 +685,7 @@ impl Shell {
                 status = self.exec_command(cmd, &input, &mut Out::Buf(&mut buf), h);
                 if buf.truncated && !self.pipe_truncated {
                     self.pipe_truncated = true;
-                    self.say("pipe buffer limit reached, data dropped");
+                    self.say(t!("sh.exec.pipe_limit"));
                 }
                 input = buf.data;
             }
@@ -714,7 +727,7 @@ impl Shell {
                 let mut status = 0;
                 for (i, item) in items.into_iter().enumerate() {
                     if i >= self.limits.max_loop {
-                        self.say("loop iteration limit reached");
+                        self.say(t!("sh.exec.loop_limit"));
                         status = 1;
                         break;
                     }
@@ -734,7 +747,7 @@ impl Shell {
                 let mut iters = 0usize;
                 loop {
                     if iters >= self.limits.max_loop {
-                        self.say("loop iteration limit reached");
+                        self.say(t!("sh.exec.loop_limit"));
                         status = 1;
                         break;
                     }
@@ -758,7 +771,7 @@ impl Shell {
             }
             Command::Func { name, body } => {
                 if self.funcs.len() >= 256 && !self.funcs.contains_key(name) {
-                    self.say("too many functions");
+                    self.say(t!("sh.exec.too_many_funcs"));
                     return 1;
                 }
                 self.funcs.insert(name.clone(), body.clone());
@@ -821,7 +834,7 @@ impl Shell {
         for r in &s.redirs {
             let target = self.expand_string(&r.target, h);
             if target.is_empty() {
-                self.say("ambiguous redirect");
+                self.say(t!("sh.exec.ambiguous"));
                 return 1;
             }
             if target == "/dev/null" {
@@ -860,7 +873,7 @@ impl Shell {
             // Assignments only (or just redirections).
             for (n, v) in &assigns {
                 if !self.env.set(n, v) {
-                    self.say("cannot set variable");
+                    self.say(t!("sh.exec.cannot_set_var"));
                     return 1;
                 }
             }
@@ -950,10 +963,13 @@ impl Shell {
             && let Ok(st) = h.fs.stat(name)
             && st.kind == Kind::Dir
         {
-            self.say(&alloc::format!("{name}: Is a directory"));
+            self.say(&alloc::format!(
+                "{name}: {}",
+                super::fs::FsErr::IsADirectory.message()
+            ));
             return 126;
         }
-        self.say(&alloc::format!("{name}: command not found"));
+        self.say(&t!("sh.exec.not_found", name = name));
         127
     }
 
@@ -1020,7 +1036,7 @@ impl Shell {
         h: &mut Host<'_>,
     ) -> i32 {
         if self.depth >= self.limits.max_call_depth {
-            self.say("function call depth limit exceeded");
+            self.say(t!("sh.exec.depth_limit"));
             self.ctl = Ctl::Abort;
             return 1;
         }
@@ -1055,7 +1071,7 @@ impl Shell {
             }
         };
         if data.len() > self.limits.max_script {
-            self.say(&alloc::format!("{path}: script too large"));
+            self.say(&t!("sh.exec.script_big", path = path));
             return 126;
         }
         let src = String::from_utf8_lossy(&data).into_owned();
@@ -1067,7 +1083,7 @@ impl Shell {
             }
         };
         if self.depth >= self.limits.max_call_depth {
-            self.say("script nesting limit exceeded");
+            self.say(t!("sh.exec.nest_limit"));
             self.ctl = Ctl::Abort;
             return 1;
         }
@@ -1107,7 +1123,7 @@ impl Shell {
                     c & 0xFF
                 }
                 None => {
-                    self.say("exit: numeric argument required");
+                    self.say(t!("sh.exec.exit_numeric"));
                     self.ctl = Ctl::Exit(2);
                     2
                 }
@@ -1115,7 +1131,7 @@ impl Shell {
             "return" => match num(1, self.status) {
                 Some(c) => {
                     if self.frames.len() <= 1 && self.depth == 0 {
-                        self.say("return: only valid in a function or sourced script");
+                        self.say(t!("sh.exec.return_outside"));
                         1
                     } else {
                         self.ctl = Ctl::Return(c & 0xFF);
@@ -1123,7 +1139,7 @@ impl Shell {
                     }
                 }
                 None => {
-                    self.say("return: numeric argument required");
+                    self.say(t!("sh.exec.return_numeric"));
                     2
                 }
             },
@@ -1138,7 +1154,7 @@ impl Shell {
                     0
                 }
                 _ => {
-                    self.say(&alloc::format!("{}: bad loop count", args[0]));
+                    self.say(&t!("sh.exec.bad_loop_count", cmd = args[0].as_str()));
                     1
                 }
             },
@@ -1154,13 +1170,13 @@ impl Shell {
                     }
                 }
                 _ => {
-                    self.say("shift: bad count");
+                    self.say(t!("sh.exec.bad_shift"));
                     1
                 }
             },
             "source" | "." | "sh" => {
                 let Some(file) = args.get(1) else {
-                    self.say(&alloc::format!("{}: file name required", args[0]));
+                    self.say(&t!("sh.exec.file_required", cmd = args[0].as_str()));
                     return 2;
                 };
                 let file = file.clone();
@@ -1195,7 +1211,7 @@ impl Shell {
                     }
                 }
                 _ => {
-                    self.say(&alloc::format!("set: invalid argument `{a}`"));
+                    self.say(&t!("sh.exec.set_invalid", arg = a.as_str()));
                     status = 2;
                 }
             }
@@ -1227,7 +1243,7 @@ impl Shell {
 
     fn run_sub(&mut self, body: &[Stmt], h: &mut Host<'_>) -> String {
         if self.sub_depth >= self.limits.max_sub_depth {
-            self.say("command substitution nested too deeply");
+            self.say(t!("sh.exec.subst_deep"));
             self.ctl = Ctl::Abort;
             return String::new();
         }
@@ -1245,7 +1261,7 @@ impl Shell {
         }
         if buf.truncated && !self.pipe_truncated {
             self.pipe_truncated = true;
-            self.say("command substitution output truncated");
+            self.say(t!("sh.exec.subst_cut"));
         }
         self.status = st;
         self.last_sub = Some(st);
