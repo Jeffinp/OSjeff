@@ -268,3 +268,22 @@ fn look_changes_with_every_input_and_with_their_order() {
         }
     }
 }
+
+#[test]
+fn a_layer_below_a_window_is_painted_in_one_call_when_the_damage_allows() {
+    // Damage = the top window's rectangle; the layer under it shows only at its four corners.
+    // Four tiny paint calls cost more than one over the whole (damaged) rectangle.
+    let mut e = engine();
+    let top = Rect::new(100, 60, 200, 150);
+    let s = |look| {
+        scene(&[
+            l(1, Rect::new(0, 0, SCREEN_W, SCREEN_H)),
+            l(2, top).with_opaque(top.inflated(-8)).with_look(look),
+        ])
+    };
+    settled(&mut e, &s(0));
+    let p = e.plan(&s(1));
+    let under: Vec<_> = p.steps.iter().filter(|st| st.layer == LayerId(1)).collect();
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(p.damage.covers(&under[0].clip), "never outside the damage");
+}

@@ -119,6 +119,42 @@ impl From<&Layer> for Snap {
 /// for the plain damage-in-footprint one: many tiny paint calls cost more than the pixels saved.
 const MAX_VISIBLE_RECTS: usize = 6;
 
+/// Fewer paint calls for one layer: every pair of its rectangles whose bounding box lies entirely
+/// inside the damage is painted as one. Painting a pixel of the damage that the layer did not
+/// strictly need is harmless (the pixel was reset by the layers below, or an opaque layer above
+/// overwrites it), and a paint call has a fixed cost (an app lays its window out) that can be
+/// worth far more than a few extra pixels. Pixels outside the damage are never painted: they
+/// already hold their final colour and would get a shadow or a fill twice.
+fn merge_for_paint(rects: &[Rect], damage: &Region) -> Vec<Rect> {
+    let mut v: Vec<Rect> = rects.to_vec();
+    'again: loop {
+        for i in 0..v.len() {
+            for j in i + 1..v.len() {
+                // The box of the pair, grown over every other rectangle it touches so the
+                // rectangles stay disjoint (a pixel painted twice would get its shadow twice).
+                let mut bb = v[i].union(&v[j]);
+                let mut members = alloc::vec![i, j];
+                while let Some(k) =
+                    (0..v.len()).find(|k| !members.contains(k) && v[*k].intersection(&bb).is_some())
+                {
+                    bb = bb.union(&v[k]);
+                    members.push(k);
+                }
+                if !damage.covers(&bb) {
+                    continue;
+                }
+                members.sort_unstable_by(|a, b| b.cmp(a));
+                for m in &members {
+                    v.swap_remove(*m);
+                }
+                v.push(bb);
+                continue 'again;
+            }
+        }
+        return v;
+    }
+}
+
 /// Plans repaints. One per screen.
 pub struct Engine {
     screen: Rect,
@@ -307,8 +343,8 @@ impl Engine {
             } else {
                 scene.layers[idx - 1].id
             };
-            for r in region.rects() {
-                steps.push(Step { layer, clip: *r });
+            for clip in merge_for_paint(region.rects(), damage) {
+                steps.push(Step { layer, clip });
             }
         }
         steps

@@ -90,20 +90,36 @@ impl Desktop {
     /// Why a window must be repainted every frame: `Some(rect)` is the part that changes (the
     /// whole footprint, or a live window's chart); `None` when it is still.
     fn window_activity(&self, w: &Win, footprint: Rect) -> Option<(Rect, bool)> {
-        let busy = w.anim.is_some()
+        // The shape or the shadow changes (it moves, fades, zooms, is dragged, changes focus):
+        // everything, shadow included.
+        let shape_busy = w.anim.is_some()
             || w.zoom.is_some()
             || self.drag.as_ref().is_some_and(|d| d.win == w.id)
-            || self.focus_busy(w.id)
-            || w.app.kind() == Kind::WasmApp
-            || matches!(&w.app.app, App::Files(f) if f.job.is_some())
-            || matches!(&w.app.app, App::Terminal(t) if t.term.is_running());
-        if busy {
+            || self.focus_busy(w.id);
+        if shape_busy {
             return Some((footprint, false));
         }
+        // Only the content changes (a game, a running command, a copy): the shadow outside the
+        // rectangle stays as it is, so it is not repainted.
+        // A game redraws only its content area, well inside the window's opaque body, so nothing
+        // under the window is touched (and none of the windows below are painted at all).
+        if w.app.kind() == Kind::WasmApp {
+            let box_ = self.window_box(w);
+            let area = wasm_content(box_).inflated(2);
+            return Some((area.intersection(&box_).unwrap_or(box_), false));
+        }
+        let content_busy = matches!(&w.app.app, App::Files(f) if f.job.is_some())
+            || matches!(&w.app.app, App::Terminal(t) if t.term.is_running());
+        if content_busy {
+            return Some((self.window_box(w), false));
+        }
         if self.live_dynamic(w) {
-            return match self.live_rect(w) {
+            // The chart lies inside the window's opaque body: clipped to it, nothing under the
+            // window (not even behind its rounded corners) has to be painted again.
+            let body = self.window_box(w).inflated(-R_WINDOW);
+            return match self.live_rect(w).and_then(|r| r.intersection(&body)) {
                 Some(r) => Some((r, true)),
-                None => Some((footprint, false)),
+                None => Some((self.window_box(w), false)),
             };
         }
         None
