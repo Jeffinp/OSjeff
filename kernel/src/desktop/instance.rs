@@ -407,7 +407,11 @@ pub(crate) fn new_bookmark_store() -> Box<dyn osjeff_core::browser::BookmarkStor
             let _ = super::vfs::mkdir(b"/home");
         }
         if super::vfs::write_file(PATH, t).is_err() {
-            crate::klog!(Warn, "bookmarks: could not be saved");
+            crate::notify::notify_key(
+                crate::klog::Level::Warn,
+                osjeff_core::tk!("notify.bookmarks_unsaved"),
+                &[],
+            );
         }
     }))
 }

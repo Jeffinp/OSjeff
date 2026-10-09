@@ -40,9 +40,31 @@ pub fn notify(level: Level, args: fmt::Arguments<'_>) {
     if level >= Level::Warn {
         return; // the log watcher turns these into toasts
     }
+    enqueue(level, buf.as_bytes());
+}
+
+/// Show the catalog text `key` (filled in with `args`) as a toast of `level`, in the language
+/// of the interface. The log gets the English text at the same level, and its record is
+/// marked so the log watcher does not show it a second time in English. Unlike [`notify`]
+/// this allocates: call it from the desktop, not from an interrupt handler.
+pub fn notify_key(level: Level, key: &'static str, args: osjeff_core::i18n::Args<'_>) {
+    use osjeff_core::i18n::{Lang, tr_fmt, tr_fmt_in};
+    let english = tr_fmt_in(Lang::En, key, args);
+    klog::log_toasted(level, format_args!("{english}"));
+    let shown = tr_fmt(key, args);
+    // The toast keeps 64 bytes: cut at a character, never in the middle of one.
+    let mut n = shown.len().min(TEXT);
+    while !shown.is_char_boundary(n) {
+        n -= 1;
+    }
+    enqueue(level, &shown.as_bytes()[..n]);
+}
+
+/// Put one toast in the queue for the compositor (a full queue drops it).
+fn enqueue(level: Level, bytes: &[u8]) {
     let mut text = [0u8; TEXT];
-    let n = buf.as_bytes().len();
-    text[..n].copy_from_slice(buf.as_bytes());
+    let n = bytes.len().min(TEXT);
+    text[..n].copy_from_slice(&bytes[..n]);
     x86_64::instructions::interrupts::without_interrupts(|| {
         // SAFETY: interrupts are off on a single core, so no other push or drain runs meanwhile.
         let q = unsafe { &mut *QUEUE.get() };

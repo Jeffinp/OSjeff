@@ -8,8 +8,15 @@ use super::*;
 use crate::text::{self, BODY, CALLOUT, CAPTION, FOOTNOTE, TITLE1, TITLE2, TITLE3, Weight};
 use osjeff_core::iconart::Glyph;
 use osjeff_core::style::{LIGHT, Palette};
+use osjeff_core::{t, tk};
 
-const TABS: [&str; 5] = ["Controles", "Tipografia", "Cores", "Ícones", "Shell"];
+const TABS: [&str; 5] = [
+    tk!("kit.tab.controls"),
+    tk!("kit.tab.type"),
+    tk!("kit.tab.colors"),
+    tk!("kit.tab.icons"),
+    tk!("kit.tab.shell"),
+];
 
 /// State of the gallery window: the widgets it shows are real and interactive.
 pub(crate) struct GalleryState {
@@ -99,7 +106,8 @@ impl Desktop {
             theme::solid(p.window_bg),
         );
         let l = layout(body);
-        ui::segmented(c, l.tabs, &TABS, g.tab);
+        let tabs = TABS.map(osjeff_core::i18n::tr);
+        ui::segmented(c, l.tabs, &tabs, g.tab);
         let pad = 24;
         match g.tab {
             0 => self.gallery_controls(c, body, g, &l, p),
@@ -122,11 +130,27 @@ impl Desktop {
         let mut by = body.y + 60;
         // Buttons in their states.
         for (i, (label, kind, st)) in [
-            ("Padrão", ButtonKind::Secondary, Control::Normal),
-            ("Principal", ButtonKind::Primary, Control::Normal),
-            ("Excluir", ButtonKind::Destructive, Control::Normal),
-            ("Pressionado", ButtonKind::Secondary, Control::Pressed),
-            ("Desativado", ButtonKind::Primary, Control::Disabled),
+            (
+                t!("kit.btn.default"),
+                ButtonKind::Secondary,
+                Control::Normal,
+            ),
+            (t!("kit.btn.primary"), ButtonKind::Primary, Control::Normal),
+            (
+                t!("kit.btn.destructive"),
+                ButtonKind::Destructive,
+                Control::Normal,
+            ),
+            (
+                t!("kit.btn.pressed"),
+                ButtonKind::Secondary,
+                Control::Pressed,
+            ),
+            (
+                t!("kit.state.disabled"),
+                ButtonKind::Primary,
+                Control::Disabled,
+            ),
         ]
         .into_iter()
         .enumerate()
@@ -137,7 +161,12 @@ impl Desktop {
         }
         by += 40;
         let _ = by;
-        ui::segmented(c, l.segmented, &["Dia", "Semana", "Mês"], g.segment);
+        ui::segmented(
+            c,
+            l.segmented,
+            &[t!("kit.seg.day"), t!("kit.seg.week"), t!("kit.seg.month")],
+            g.segment,
+        );
         ui::switch(c, l.switch, if g.switch_on { 256 } else { 0 }, true);
         ui::slider(c, l.slider, g.slider, 0, 100, true);
         let v = alloc::format!("{}", g.slider);
@@ -149,7 +178,12 @@ impl Desktop {
             Weight::Regular,
             theme::solid(p.text_secondary),
         );
-        for (i, (cr, label)) in l.checks.iter().zip(["Lembrar", "Avisar"]).enumerate() {
+        for (i, (cr, label)) in l
+            .checks
+            .iter()
+            .zip([t!("kit.check.remember"), t!("kit.check.notify")])
+            .enumerate()
+        {
             ui::checkbox(c, cr.x, cr.y + 2, g.checks[i]);
             text::draw_left(
                 c,
@@ -160,7 +194,16 @@ impl Desktop {
                 theme::solid(p.text),
             );
         }
-        for (i, (rr, label)) in l.radios.iter().zip(["Um", "Dois", "Três"]).enumerate() {
+        for (i, (rr, label)) in l
+            .radios
+            .iter()
+            .zip([
+                t!("kit.radio.first"),
+                t!("kit.radio.second"),
+                t!("kit.radio.third"),
+            ])
+            .enumerate()
+        {
             ui::radio(c, rr.x, rr.y + 2, g.radio == i);
             text::draw_left(
                 c,
@@ -175,7 +218,7 @@ impl Desktop {
             c,
             l.field,
             &g.field,
-            "Campo de texto",
+            t!("kit.field"),
             g.field_focus,
             g.field_focus,
         );
@@ -184,9 +227,14 @@ impl Desktop {
         ui::progress(c, Rect::new(x, py, 300, 6), 640);
         // Right column: a grouped list, a menu preview and a tooltip.
         ui::group_box(c, l.list);
-        for (i, label) in ["Recentes", "Documentos", "Imagens", "Downloads"]
-            .iter()
-            .enumerate()
+        for (i, label) in [
+            t!("launcher.recents"),
+            t!("kit.list.documents"),
+            t!("kit.list.images"),
+            t!("kit.list.downloads"),
+        ]
+        .iter()
+        .enumerate()
         {
             let row = Rect::new(l.list.x + 4, l.list.y + 6 + i as i32 * 30, l.list.w - 8, 30);
             ui::list_row(c, row, g.list_sel == i, false, label);
@@ -208,7 +256,7 @@ impl Desktop {
         ui::menu_item(
             c,
             Rect::new(menu.x + 6, menu.y + 6, menu.w - 12, 24),
-            "Nova janela",
+            t!("menu.file.new_window"),
             "Ctrl+N",
             true,
             true,
@@ -217,7 +265,7 @@ impl Desktop {
         ui::menu_item(
             c,
             Rect::new(menu.x + 6, menu.y + 30, menu.w - 12, 24),
-            "Mostrar barra",
+            t!("kit.menu.show_bar"),
             "",
             false,
             true,
@@ -226,13 +274,13 @@ impl Desktop {
         ui::menu_item(
             c,
             Rect::new(menu.x + 6, menu.y + 54, menu.w - 12, 24),
-            "Desativado",
+            t!("kit.state.disabled"),
             "",
             false,
             false,
             false,
         );
-        ui::tooltip(c, mx + 60, my + menu.h + 44, "Dica de ferramenta");
+        ui::tooltip(c, mx + 60, my + menu.h + 44, t!("kit.tooltip"));
         let _ = (CAPTION, FOOTNOTE);
     }
 
@@ -311,12 +359,7 @@ impl Desktop {
         };
         let x = body.x + pad;
         let mut y = body.y + 60;
-        label(
-            c,
-            x,
-            y,
-            "Botões da janela: normal, ao passar, fechar ao passar, restaurar",
-        );
+        label(c, x, y, t!("kit.shell.window_buttons"));
         y += 22;
         for (i, (hover, restore)) in [
             (None, false),
@@ -334,14 +377,14 @@ impl Desktop {
             super::chrome::draw_title_buttons(c, &lay, hover, restore, 255, p);
         }
         y += 54;
-        label(c, x, y, "Configurações rápidas: desligado e ligado");
+        label(c, x, y, t!("kit.shell.quick"));
         y += 22;
         self.draw_tile(
             c,
             Rect::new(x, y, 152, 56),
             Glyph::Bell,
-            "Não perturbe",
-            "Desligado",
+            t!("quick.dnd"),
+            t!("quick.dnd.off"),
             false,
             false,
         );
@@ -349,14 +392,14 @@ impl Desktop {
             c,
             Rect::new(x + 160, y, 152, 56),
             Glyph::Wave,
-            "Movimento",
-            "Reduzido",
+            t!("quick.motion"),
+            t!("quick.motion.reduced"),
             true,
             false,
         );
         // The taskbar's indicators: the pill (focused) and the dot (running).
         let ix = x + 360;
-        label(c, ix, y - 22, "Indicadores da barra de tarefas");
+        label(c, ix, y - 22, t!("kit.shell.indicators"));
         for (k, kind) in [Icon::Files, Icon::Terminal, Icon::Editor]
             .into_iter()
             .enumerate()
@@ -382,13 +425,13 @@ impl Desktop {
             }
         }
         y += 84;
-        label(c, x, y, "Pré-visualização do encaixe");
+        label(c, x, y, t!("kit.shell.snap"));
         let prev = Rect::new(x, y + 22, 150, 90);
         let acc = theme::accent();
         c.fill_rrect(prev, osjeff_core::style::R_WINDOW, Corner::Circle, acc, 46);
         c.stroke_rrect(prev, osjeff_core::style::R_WINDOW, Corner::Circle, acc, 230);
         let px = x + 220;
-        label(c, px, y, "Ponteiros");
+        label(c, px, y, t!("kit.shell.pointers"));
         for (i, sh) in [
             osjeff_core::pointer::Shape::Arrow,
             osjeff_core::pointer::Shape::Hand,
@@ -406,16 +449,16 @@ impl Desktop {
 fn gallery_type(c: &mut Canvas, body: Rect, pad: i32, p: &Palette) {
     let mut y = body.y + 64;
     let fg = theme::solid(p.text);
-    let sample = "Rápida raposa marrom pula sobre o cão";
+    let sample = t!("kit.type.sample");
     for (name, px, w) in [
-        ("Título 1 · 28", TITLE1, Weight::Semibold),
-        ("Título 2 · 22", TITLE2, Weight::Semibold),
-        ("Título 3 · 17", TITLE3, Weight::Semibold),
-        ("Destaque · 15", CALLOUT, Weight::Regular),
-        ("Corpo · 13", BODY, Weight::Regular),
-        ("Corpo médio · 13", BODY, Weight::Medium),
-        ("Nota · 12", FOOTNOTE, Weight::Regular),
-        ("Legenda · 11", CAPTION, Weight::Medium),
+        (t!("kit.type.title1"), TITLE1, Weight::Semibold),
+        (t!("kit.type.title2"), TITLE2, Weight::Semibold),
+        (t!("kit.type.title3"), TITLE3, Weight::Semibold),
+        (t!("kit.type.callout"), CALLOUT, Weight::Regular),
+        (t!("kit.type.body"), BODY, Weight::Regular),
+        (t!("kit.type.body_medium"), BODY, Weight::Medium),
+        (t!("kit.type.footnote"), FOOTNOTE, Weight::Regular),
+        (t!("kit.type.caption"), CAPTION, Weight::Medium),
     ] {
         text::draw(c, body.x + pad, y, sample, px, w, fg);
         let lh = text::line_height(px);
@@ -431,30 +474,23 @@ fn gallery_type(c: &mut Canvas, body: Rect, pad: i32, p: &Palette) {
         y += lh + 8;
     }
     y += 6;
-    text::draw_mono(
-        c,
-        body.x + pad,
-        y,
-        "fn main() { println!(\"olá, mundo\"); }",
-        text::MONO_PX,
-        fg,
-    );
+    text::draw_mono(c, body.x + pad, y, t!("kit.type.mono"), text::MONO_PX, fg);
 }
 
 fn gallery_colors(c: &mut Canvas, body: Rect, pad: i32, p: &Palette) {
     let items: [(&str, u32); 12] = [
-        ("Janela", p.window_bg),
-        ("Conteúdo", p.content_bg),
-        ("Barra lateral", p.sidebar_bg),
-        ("Texto", p.text),
-        ("Texto 2", p.text_secondary),
-        ("Texto 3", p.text_tertiary),
-        ("Campo", p.field_bg),
-        ("Controle", p.control_bg),
-        ("Hover", p.hover),
-        ("Perigo", p.danger),
-        ("Menu", p.menu_tint),
-        ("Dica", p.tooltip_bg),
+        (t!("kit.color.window"), p.window_bg),
+        (t!("kit.color.content"), p.content_bg),
+        (t!("kit.color.sidebar"), p.sidebar_bg),
+        (t!("kit.color.text"), p.text),
+        (t!("kit.color.text2"), p.text_secondary),
+        (t!("kit.color.text3"), p.text_tertiary),
+        (t!("kit.color.field"), p.field_bg),
+        (t!("kit.color.control"), p.control_bg),
+        (t!("kit.color.hover"), p.hover),
+        (t!("kit.color.danger"), p.danger),
+        (t!("kit.color.menu"), p.menu_tint),
+        (t!("kit.color.tooltip"), p.tooltip_bg),
     ];
     for (i, (name, argb)) in items.iter().enumerate() {
         let (col, row) = ((i % 4) as i32, (i / 4) as i32);
@@ -497,7 +533,7 @@ fn gallery_colors(c: &mut Canvas, body: Rect, pad: i32, p: &Palette) {
         c,
         body.x + pad,
         ay,
-        "Cores de destaque",
+        t!("kit.accent_colors"),
         FOOTNOTE,
         Weight::Medium,
         theme::solid(p.text_secondary),
@@ -542,7 +578,7 @@ fn gallery_icons(c: &mut Canvas, body: Rect, pad: i32, p: &Palette) {
         c,
         body.x + pad,
         gy,
-        "Glifos",
+        t!("kit.glyphs"),
         FOOTNOTE,
         Weight::Medium,
         theme::solid(p.text_secondary),

@@ -49,8 +49,19 @@ fn with_ring<R>(f: impl FnOnce(&mut LogRing<RING_BYTES>) -> R) -> R {
     })
 }
 
-/// Store one record in `ring` and publish the counters. Caller holds the ring.
-fn record(ring: &mut LogRing<RING_BYTES>, level: Level, text: &[u8]) {
+/// `1 + seq` of the last few WARN-or-above records that already have a toast of their own (see
+/// [`log_toasted`]): the toast watcher skips them instead of showing the log text twice.
+static TOASTED: [AtomicU32; 4] = [
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+];
+static TOASTED_NEXT: AtomicU32 = AtomicU32::new(0);
+
+/// Store one record in `ring` and publish the counters. Caller holds the ring. Returns its
+/// sequence number.
+fn record(ring: &mut LogRing<RING_BYTES>, level: Level, text: &[u8]) -> u32 {
     let ts = ticks_to_ms(crate::interrupts::ticks(), crate::interrupts::TIMER_HZ);
     let origin = u8::try_from(crate::sched::current()).unwrap_or(255);
     let seq = ring.push(ts, level, origin, text);
@@ -58,6 +69,7 @@ fn record(ring: &mut LogRing<RING_BYTES>, level: Level, text: &[u8]) {
     if level >= Level::Warn {
         WARN_SEQ.store(seq.wrapping_add(1), Ordering::Release);
     }
+    seq
 }
 
 /// Sink for `core::fmt` that mirrors every piece to the UART (exactly as
@@ -86,6 +98,31 @@ pub fn log(level: Level, args: fmt::Arguments<'_>) {
     let _ = t.write_fmt(args);
     crate::serial::write_str_raw("\n");
     with_ring(|r| record(r, level, t.buf.as_bytes()));
+}
+
+/// [`log`] for a record that already has a toast of its own, shown by `notify::notify_key` in
+/// the language of the interface: the serial port and the ring get `args` as usual, and the
+/// toast watcher skips the record instead of showing the English text a second time. For a
+/// level below WARN there is nothing to skip.
+pub fn log_toasted(level: Level, args: fmt::Arguments<'_>) {
+    let mut t = Tee {
+        buf: FixedBuf::new(),
+    };
+    let _ = t.write_fmt(args);
+    crate::serial::write_str_raw("\n");
+    // Record and mark inside one critical section, so the watcher never sees one without the other.
+    with_ring(|r| {
+        let seq = record(r, level, t.buf.as_bytes());
+        if level >= Level::Warn {
+            let slot = TOASTED_NEXT.fetch_add(1, Ordering::Relaxed) as usize % TOASTED.len();
+            TOASTED[slot].store(seq.wrapping_add(1), Ordering::Release);
+        }
+    });
+}
+
+fn is_toasted(seq: u32) -> bool {
+    let tag = seq.wrapping_add(1);
+    TOASTED.iter().any(|t| t.load(Ordering::Acquire) == tag)
 }
 
 /// Log to the ring only (no serial). For events that must be visible in the
@@ -194,7 +231,7 @@ pub fn take_warnings(seen: &mut u32, out: &mut [Option<Warning>]) -> usize {
     let mut n = 0;
     with_ring(|r| {
         r.for_each_since(from, Level::Warn, |e| {
-            if n < out.len() {
+            if n < out.len() && !is_toasted(e.seq) {
                 let mut text = [0u8; 64];
                 let l = e.text.len().min(64);
                 text[..l].copy_from_slice(&e.text[..l]);

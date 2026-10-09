@@ -110,13 +110,24 @@ fn paint_preset(c: &mut Canvas, p: &osjeff_core::wallpaper::Preset) {
 fn paint_image(c: &mut Canvas, path: &[u8]) -> bool {
     let (w, h) = (c.width(), c.height());
     let Some(bytes) = read_path(path) else {
-        crate::klog!(Warn, "wallpaper: file not found, using the default");
+        crate::notify::notify_key(
+            crate::klog::Level::Warn,
+            osjeff_core::tk!("notify.wallpaper_missing"),
+            &[],
+        );
         return false;
     };
     let mut img = match osjeff_core::wallpaper::load(&bytes, w, h) {
         Ok(img) => img,
         Err(e) => {
-            crate::klog!(Warn, "wallpaper: {e}, using the default");
+            crate::notify::notify_key(
+                crate::klog::Level::Warn,
+                osjeff_core::tk!("notify.wallpaper_refused"),
+                &[(
+                    "why",
+                    osjeff_core::i18n::Arg::Str(osjeff_core::i18n::tr(e.why_key())),
+                )],
+            );
             return false;
         }
     };
