@@ -97,11 +97,18 @@ app.settings = Settings
 app.log = Log
 app.viewer = Images
 app.gallery = Components
+
+# Common words
+common.cancel = Cancel
 common.open = Open
+common.open_app = Open {app}
 
 # Power
 power.restart = Restart
 power.shutdown = Shut down
+power.restart_title = Restart the computer?
+power.shutdown_title = Shut down the computer?
+power.body = Documents with unsaved changes ask before closing.
 
 # Top panel
 panel.apps = Apps
@@ -114,6 +121,7 @@ menu.system.settings = System settings…
 menu.system.gallery = Components
 menu.system.restart = Restart…
 menu.system.shutdown = Shut down…
+menu.desktop.show_desktop = Show desktop
 
 # Window menu: File, Edit, View and window commands
 menu.file.new_window = New window
@@ -172,3 +180,28 @@ quick.accent = Accent color
 centre.notifications = Notifications
 centre.clear = Clear
 centre.empty = No notifications
+
+# Taskbar (Barra de apps)
+taskbar.apps = Apps
+taskbar.show_desktop = Show desktop
+taskbar.tip.one = {name}
+taskbar.tip.other = {name} · {n} windows
+taskbar.menu.new_window = New window
+taskbar.menu.pin = Pin to the bar
+taskbar.menu.unpin = Unpin from the bar
+taskbar.menu.close_window = Close window
+taskbar.menu.close_all = Close all windows
+
+# Apps overlay and Busca
+launcher.search_apps = Search apps
+launcher.recents = Recent
+launcher.empty = No apps found
+launcher.cat.all = All
+launcher.cat.system = System
+launcher.cat.internet = Internet
+launcher.cat.media = Media
+launcher.cat.utilities = Utilities
+search.placeholder = Search apps, files and calculations
+search.calc_hint = Calculator · Enter copies
+search.kind_app = App
+search.tasks_tab = {app} · {tab}

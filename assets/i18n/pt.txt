@@ -97,11 +97,18 @@ app.settings = Ajustes
 app.log = Registro
 app.viewer = Imagens
 app.gallery = Componentes
+
+# Common words
+common.cancel = Cancelar
 common.open = Abrir
+common.open_app = Abrir {app}
 
 # Power
 power.restart = Reiniciar
 power.shutdown = Desligar
+power.restart_title = Reiniciar o computador?
+power.shutdown_title = Desligar o computador?
+power.body = Os documentos com alterações sem salvar perguntam antes de fechar.
 
 # Top panel
 panel.apps = Apps
@@ -114,6 +121,7 @@ menu.system.settings = Ajustes do sistema…
 menu.system.gallery = Componentes
 menu.system.restart = Reiniciar…
 menu.system.shutdown = Desligar…
+menu.desktop.show_desktop = Mostrar área de trabalho
 
 # Window menu: File, Edit, View and window commands
 menu.file.new_window = Nova janela
@@ -172,3 +180,28 @@ quick.accent = Cor de destaque
 centre.notifications = Notificações
 centre.clear = Limpar
 centre.empty = Sem notificações
+
+# Taskbar (Barra de apps)
+taskbar.apps = Apps
+taskbar.show_desktop = Mostrar área de trabalho
+taskbar.tip.one = {name}
+taskbar.tip.other = {name} · {n} janelas
+taskbar.menu.new_window = Nova janela
+taskbar.menu.pin = Fixar na barra
+taskbar.menu.unpin = Desafixar da barra
+taskbar.menu.close_window = Fechar janela
+taskbar.menu.close_all = Fechar todas as janelas
+
+# Apps overlay and Busca
+launcher.search_apps = Buscar apps
+launcher.recents = Recentes
+launcher.empty = Nenhum app encontrado
+launcher.cat.all = Todos
+launcher.cat.system = Sistema
+launcher.cat.internet = Internet
+launcher.cat.media = Mídia
+launcher.cat.utilities = Utilitários
+search.placeholder = Buscar apps, arquivos e contas
+search.calc_hint = Calculadora · Enter copia
+search.kind_app = App
+search.tasks_tab = {app} · {tab}

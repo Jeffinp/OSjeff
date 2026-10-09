@@ -112,6 +112,11 @@ impl Kind {
         tr(self.name_key())
     }
 
+    /// Name in language `l` (Busca also matches the English name in Portuguese).
+    pub(crate) fn label_in(self, l: Lang) -> &'static str {
+        tr_in(l, self.name_key())
+    }
+
     pub(crate) const fn icon(self) -> Icon {
         match self {
             Kind::Terminal => Icon::Terminal,

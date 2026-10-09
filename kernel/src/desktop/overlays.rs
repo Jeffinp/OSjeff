@@ -216,13 +216,20 @@ impl Desktop {
                     },
                 );
             }
-            ui::text_field(c, g.field, &a.query, "Buscar apps", true, true);
+            ui::text_field(
+                c,
+                g.field,
+                &a.query,
+                osjeff_core::t!("launcher.search_apps"),
+                true,
+                true,
+            );
             let recents = self.recent_tiles(a);
             if !recents.is_empty() {
                 text::draw_left(
                     c,
                     g.recents_label,
-                    "Recentes",
+                    osjeff_core::t!("launcher.recents"),
                     FOOTNOTE,
                     Weight::Medium,
                     theme::solid(p.text_secondary),
@@ -287,7 +294,7 @@ impl Desktop {
             text::draw_centered(
                 c,
                 r,
-                "Nenhum app encontrado",
+                osjeff_core::t!("launcher.empty"),
                 CALLOUT,
                 Weight::Regular,
                 theme::solid(p.text_secondary),
@@ -450,7 +457,7 @@ impl Desktop {
                     0,
                     SearchHit {
                         title: alloc::format!("= {ans}"),
-                        sub: String::from("Calculadora · Enter copia"),
+                        sub: String::from(osjeff_core::t!("search.calc_hint")),
                         kind: HitKind::Calc,
                     },
                 ));
@@ -459,12 +466,16 @@ impl Desktop {
                 if k == Kind::WasmApp {
                     continue;
                 }
-                if let Some(r) = search::rank(&q, k.label()) {
+                if let Some(r) = search::rank(&q, k.label())
+                    .into_iter()
+                    .chain(search::rank(&q, k.label_in(osjeff_core::i18n::Lang::En)))
+                    .min()
+                {
                     hits.push((
                         r,
                         SearchHit {
                             title: String::from(k.label()),
-                            sub: String::from("App"),
+                            sub: String::from(osjeff_core::t!("search.kind_app")),
                             kind: HitKind::App(Target::Kind(k)),
                         },
                     ));
@@ -477,8 +488,12 @@ impl Desktop {
                     hits.push((
                         r.saturating_add(1),
                         SearchHit {
-                            title: alloc::format!("Tarefas · {}", tarefas::TAB_NAMES[tab as usize]),
-                            sub: String::from("App"),
+                            title: osjeff_core::t!(
+                                "search.tasks_tab",
+                                app = Kind::TaskMgr.label(),
+                                tab = tarefas::TAB_NAMES[tab as usize]
+                            ),
+                            sub: String::from(osjeff_core::t!("search.kind_app")),
                             kind: HitKind::Tab(tab),
                         },
                     ));
@@ -490,7 +505,7 @@ impl Desktop {
                         r,
                         SearchHit {
                             title: a.name.clone(),
-                            sub: String::from("App"),
+                            sub: String::from(osjeff_core::t!("search.kind_app")),
                             kind: HitKind::App(Target::Wasm(i)),
                         },
                     ));
@@ -584,7 +599,7 @@ impl Desktop {
                 c,
                 tx,
                 ty,
-                "Buscar apps, arquivos e contas",
+                osjeff_core::t!("search.placeholder"),
                 TITLE2,
                 Weight::Regular,
                 theme::solid(p.text_tertiary),
@@ -794,7 +809,13 @@ impl Desktop {
             }
         };
         let off = |rc: Rect| Rect::new(rc.x, rc.y + dy, rc.w, rc.h);
-        ui::push_button(c, off(cancel), "Cancelar", ui::ButtonKind::Secondary, st(0));
+        ui::push_button(
+            c,
+            off(cancel),
+            osjeff_core::t!("common.cancel"),
+            ui::ButtonKind::Secondary,
+            st(0),
+        );
         ui::push_button(
             c,
             off(ok),
@@ -1153,14 +1174,30 @@ impl Desktop {
     /// Context menu on the empty desktop.
     pub(crate) fn desktop_context(&mut self, x: i32, y: i32) {
         let entries = alloc::vec![
-            Entry::item("Mostrar apps", "", Cmd::ShowApps),
-            Entry::item("Buscar", "Ctrl+Espaço", Cmd::ShowSearch),
-            Entry::item("Mostrar área de trabalho", "Ctrl+Alt+D", Cmd::ShowDesktop),
+            Entry::item(osjeff_core::t!("menu.view.show_apps"), "", Cmd::ShowApps),
+            Entry::item(
+                osjeff_core::t!("menu.view.search"),
+                osjeff_core::t!("menu.shortcut.search"),
+                Cmd::ShowSearch,
+            ),
+            Entry::item(
+                osjeff_core::t!("menu.desktop.show_desktop"),
+                "Ctrl+Alt+D",
+                Cmd::ShowDesktop,
+            ),
             Entry::sep(),
-            Entry::item("Abrir Arquivos", "", Cmd::Launch(Kind::Files)),
-            Entry::item("Abrir Terminal", "", Cmd::Launch(Kind::Terminal)),
+            Entry::item(
+                &osjeff_core::t!("common.open_app", app = Kind::Files.label()),
+                "",
+                Cmd::Launch(Kind::Files),
+            ),
+            Entry::item(
+                &osjeff_core::t!("common.open_app", app = Kind::Terminal.label()),
+                "",
+                Cmd::Launch(Kind::Terminal),
+            ),
             Entry::sep(),
-            Entry::item("Ajustes do sistema…", "", Cmd::Settings),
+            Entry::item(osjeff_core::t!("menu.system.settings"), "", Cmd::Settings),
         ];
         self.open_menu(MenuOrigin::Context, entries, (x, y));
     }

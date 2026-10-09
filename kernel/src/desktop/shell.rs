@@ -617,14 +617,16 @@ impl Desktop {
         self.close_transients();
         self.shell.dialog = Some(Dialog {
             title: String::from(if shutdown {
-                "Desligar o computador?"
+                osjeff_core::t!("power.shutdown_title")
             } else {
-                "Reiniciar o computador?"
+                osjeff_core::t!("power.restart_title")
             }),
-            body: String::from(
-                "Os documentos com alterações sem salvar perguntam antes de fechar.",
-            ),
-            ok: String::from(if shutdown { "Desligar" } else { "Reiniciar" }),
+            body: String::from(osjeff_core::t!("power.body")),
+            ok: String::from(if shutdown {
+                osjeff_core::t!("power.shutdown")
+            } else {
+                osjeff_core::t!("power.restart")
+            }),
             cmd: if shutdown { Cmd::Shutdown } else { Cmd::Reboot },
             t: fade_in(MENU_FADE),
             closing: false,

@@ -30,14 +30,20 @@ pub const CATEGORIES: [Category; 5] = [
 ];
 
 impl Category {
-    pub const fn label(self) -> &'static str {
+    /// Catalog key of the category's name.
+    pub const fn key(self) -> &'static str {
         match self {
-            Category::All => "Todos",
-            Category::System => "Sistema",
-            Category::Internet => "Internet",
-            Category::Media => "Mídia",
-            Category::Utilities => "Utilitários",
+            Category::All => crate::tk!("launcher.cat.all"),
+            Category::System => crate::tk!("launcher.cat.system"),
+            Category::Internet => crate::tk!("launcher.cat.internet"),
+            Category::Media => crate::tk!("launcher.cat.media"),
+            Category::Utilities => crate::tk!("launcher.cat.utilities"),
         }
+    }
+
+    /// The name in the language in effect.
+    pub fn label(self) -> &'static str {
+        crate::i18n::tr(self.key())
     }
 
     /// Position in [`CATEGORIES`].
