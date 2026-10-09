@@ -90,7 +90,13 @@ fn label(k: u8) -> &'static str {
         b'+' => "+",
         b'=' => "=",
         b'n' => "±",
-        b'.' => ",",
+        b'.' => {
+            if osjeff_core::i18n::locale::decimal_sep(osjeff_core::i18n::lang()) == ',' {
+                ","
+            } else {
+                "."
+            }
+        }
         b'0' => "0",
         b'1' => "1",
         b'2' => "2",
@@ -104,7 +110,8 @@ fn label(k: u8) -> &'static str {
     }
 }
 
-/// A history line in Portuguese typography: `12 × 3 = 36`, decimal commas.
+/// A history line in the typography of the language in effect: `12 × 3 = 36`, with its
+/// decimal separator.
 fn pretty_line(line: &[u8]) -> String {
     let mut out = String::new();
     for part in line.split(|&b| b == b' ') {
@@ -277,7 +284,7 @@ impl Desktop {
             text::draw_right(
                 c,
                 Rect::new(g.history.x, g.copy.y, g.copy.x - g.history.x - 6, g.copy.h),
-                "Copiado",
+                osjeff_core::t!("calc.copied"),
                 FOOTNOTE,
                 Weight::Medium,
                 theme::accent(),

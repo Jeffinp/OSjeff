@@ -506,6 +506,8 @@ edit.status.read_only = SOMENTE LEITURA
 edit.status.modified = * modificado
 
 # ---- w31: terminal, tarefas, registro, calculadora ----
+calc.error = Erro
+calc.copied = Copiado
 log.search = Buscar no registro
 log.seg.all = Tudo
 log.seg.info = Info

@@ -506,6 +506,8 @@ edit.status.read_only = READ ONLY
 edit.status.modified = * modified
 
 # ---- w31: terminal, tarefas, registro, calculadora ----
+calc.error = Error
+calc.copied = Copied
 log.search = Search the log
 log.seg.all = All
 log.seg.info = Info

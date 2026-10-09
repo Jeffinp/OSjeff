@@ -413,14 +413,19 @@ fn render(v: f64) -> Option<([u8; ENTRY_MAX], usize)> {
     Some((buf, idx.max(1)))
 }
 
-/// A display string for people: the decimal comma, dots between thousands, `Erro` for
-/// the error state (`"-1234567.5"` -> `"-1.234.567,5"`, `"5."` -> `"5,"`). Text that is
-/// not a number is returned as it is.
+/// A display string for people, in the language in effect: the language's decimal
+/// separator and thousands grouping, `Erro`/`Error` for the error state
+/// (`"-1234567.5"` -> `"-1.234.567,5"` or `"-1,234,567.5"`, `"5."` -> `"5,"`). Text that
+/// is not a number is returned as it is.
 pub fn pretty(display: &[u8]) -> alloc::string::String {
     use alloc::string::String;
     if display == b"ERROR" {
-        return String::from("Erro");
+        return String::from(crate::t!("calc.error"));
     }
+    let (dec_sep, group_sep) = (
+        crate::i18n::locale::decimal_sep(crate::i18n::lang()),
+        crate::i18n::locale::group_sep(crate::i18n::lang()),
+    );
     let mut out = String::new();
     let (neg, rest) = match display.split_first() {
         Some((b'-', r)) => (true, r),
@@ -440,12 +445,12 @@ pub fn pretty(display: &[u8]) -> alloc::string::String {
     }
     for (i, &d) in int.iter().enumerate() {
         if i > 0 && (int.len() - i).is_multiple_of(3) {
-            out.push('.');
+            out.push(group_sep);
         }
         out.push(d as char);
     }
     if let Some(f) = frac {
-        out.push(',');
+        out.push(dec_sep);
         out.extend(f.iter().map(|&d| d as char));
     }
     out
@@ -746,6 +751,7 @@ mod tests {
 
     #[test]
     fn pretty_groups_thousands_with_a_decimal_comma() {
+        let _lang = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
         assert_eq!(pretty(b"0"), "0");
         assert_eq!(pretty(b"999"), "999");
         assert_eq!(pretty(b"1000"), "1.000");
@@ -756,5 +762,15 @@ mod tests {
         assert_eq!(pretty(b""), "");
         assert_eq!(pretty(b"abc"), "abc");
         assert_eq!(pretty(b"12.3.4"), "12.3.4");
+    }
+
+    #[test]
+    fn pretty_follows_the_language() {
+        let _lang = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::En);
+        assert_eq!(pretty(b"1000"), "1,000");
+        assert_eq!(pretty(b"-1234567.5"), "-1,234,567.5");
+        assert_eq!(pretty(b"5."), "5.");
+        assert_eq!(pretty(b"0.25"), "0.25");
+        assert_eq!(pretty(b"ERROR"), "Error");
     }
 }

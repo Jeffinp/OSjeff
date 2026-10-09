@@ -784,6 +784,11 @@ const ACCENT_STRICT: &[&str] = &[
     // w31: Terminal, Tarefas, Registro, Calculadora
     "kernel/src/desktop/term.rs",
     "kernel/src/desktop/shellhost.rs",
+    "kernel/src/desktop/tarefas.rs",
+    "kernel/src/desktop/logview.rs",
+    "kernel/src/desktop/calc_ui.rs",
+    "osjeff_core/src/activity.rs",
+    "osjeff_core/src/calc.rs",
     "osjeff_core/src/shell/builtins.rs",
     "osjeff_core/src/shell/exec.rs",
     "osjeff_core/src/shell/fs.rs",
@@ -793,9 +798,6 @@ const ACCENT_STRICT: &[&str] = &[
     "osjeff_core/src/shell/parse.rs",
     "osjeff_core/src/shell/regex.rs",
     "osjeff_core/src/shell/sys.rs",
-    "kernel/src/desktop/tarefas.rs",
-    "osjeff_core/src/activity.rs",
-    "kernel/src/desktop/logview.rs",
 ];
 
 fn unaccented_literals(file: &str, src: &str, a: &Accents) -> Vec<String> {
