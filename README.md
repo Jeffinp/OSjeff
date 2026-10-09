@@ -9,7 +9,7 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly--2026--10--05-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-2656%20passing-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-2790%20passing-success?style=for-the-badge)
 ![Fuzz](https://img.shields.io/badge/fuzz-15%20targets-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
@@ -97,7 +97,7 @@ que compila com `std` sob teste. O kernel só liga o hardware a ela.
 
 ```mermaid
 flowchart LR
-    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2656 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2790 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · unsafe documentado<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>builder da imagem BIOS/UEFI"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -107,7 +107,7 @@ flowchart LR
 
 | Verificação | Estado |
 |---|---|
-| Testes unitários | **2656** no `osjeff_core`; cobertura de linhas 96,6% (bruta, inclui os módulos de teste; medida com `cargo llvm-cov`) |
+| Testes unitários | **2790** no `osjeff_core`; cobertura de linhas 96,6% (bruta, inclui os módulos de teste; medida com `cargo llvm-cov`) |
 | Fuzzing | 15 alvos (rede, discos OJFS v2/v3, HTML/CSS/imagens/formulários, shell, editor, certificados X.509, manifesto e sandbox de apps); bugs achados são corrigidos com entrada mínima e teste de regressão |
 | `unsafe` | **100%** dos blocos do kernel com `// SAFETY:`, imposto por `clippy::undocumented_unsafe_blocks` |
 | Boot em QEMU | BIOS **e** UEFI em todo commit de kernel, desktop comparado pixel a pixel com a baseline (`tools/verify-boot.sh`) |
