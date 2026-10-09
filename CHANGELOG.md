@@ -3,6 +3,31 @@
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
 tem releases versionadas; as seções são marcos na `master`.
 
+## 2026-10 — Os apps do sistema (W25)
+
+- **Tarefas** reúne o Gerenciador de tarefas e o Monitor de recursos num monitor de atividade com
+  abas **CPU | Memória | Disco | Rede | Processos**: uso total e gráfico de 60 s que desliza a cada
+  amostra, barras por processo, carga média, medidor de pressão da memória, memória por app, leitura e
+  gravação do disco (contadores novos no driver ATA, sem lock e sem alocação), arquivos e pastas, IP,
+  roteador, DNS, concessão e tráfego da rede, e uma tabela de processos com nomes amigáveis (Interface,
+  Rede (busca), Aplicativos, Terminal (execução), Registro, Sistema), colunas ordenáveis, busca,
+  Reiniciar e Encerrar (um serviço do sistema pede confirmação). Valor ao passar o mouse sobre os
+  gráficos; números em português, alinhados; atualização suave e custo zero com a janela oculta.
+  O tipo `Monitor` saiu; a Busca ainda o encontra ("monitor", "memória", "disco", "rede").
+- **Registro**: tabela com hora, etiqueta colorida do nível, origem e mensagem em fonte mono; busca,
+  filtro de nível, chave Seguir, Limpar e Salvar; rolagem suave com barra que some.
+- **Ajustes** (eram as Configurações): barra lateral com Aparência, Papel de parede, Barra de apps,
+  Teclado, Data e hora, Rede, Disco, Energia e Sobre; chaves, controles deslizantes, amostras de cor com
+  anel, miniaturas ao vivo do papel de parede, lista de 52 cidades com busca, ampliação da barra de apps
+  e duração dos banners (campos novos no arquivo, leitor ainda total).
+- **Calculadora**: teclado arredondado com o destaque na coluna dos operadores, visor grande que encolhe,
+  faixa de histórico, copiar, porcentagem, troca de sinal e memória; o teclado funciona.
+- **Notificações**: ícone por nível, botão de fechar ao passar o mouse e linha que mostra o tempo que falta.
+- Núcleo: `osjeff_core::activity` (nomes, formatação pt-BR, suavização, taxas de contadores que dão a
+  volta, carga, pressão, tabela ordenável) e dez glifos novos; `FixedBuf` passou a imprimir UTF-8.
+  Testes: 2532 no `osjeff_core` (eram 2497). Detalhes e números em `docs/design/ui-macos.md` (seção 11),
+  `docs/design/sysmgmt.md` e `docs/TESTING.md`.
+
 ## 2026-10 — Nova interface (W22)
 
 - **Visual novo, claro e escuro.** Barra de menus com menu do sistema, nome e menus do app em

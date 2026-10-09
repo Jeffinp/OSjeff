@@ -20,7 +20,7 @@ e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espa�
 endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
 o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
 
-- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2497 testes
+- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2532 testes
   passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
 - **Multitarefa preemptiva** a 250 Hz, com bloqueio. Cinco threads: `compositor`,
@@ -414,9 +414,9 @@ sequenceDiagram
 ### 4.5 Contabilidade de CPU, guard pages e canário
 
 - **CPU:** a ISR soma 1 em `TICKS[atual]` só se `IDLE[atual]` for falso, isto é, só conta
-  o tick em que a thread **estava executando**, não parada em `hlt`. O Task Manager
-  mostra esses ticks acumulados (coluna `CPU`), não um percentual, ou `DEAD` se a thread
-  morreu. É amostragem a 250 Hz.
+  o tick em que a thread **estava executando**, não parada em `hlt`. O app **Tarefas**
+  transforma a variação por segundo em porcentagem (`CpuSampler`: threads + ocioso = 100,0 %
+  exato) e mostra a thread como Parado se ela morreu. É amostragem a 250 Hz.
 - **Guard page (mecanismo principal).** Estourar a pilha de `fetcher` ou `appd` acerta
   uma página não mapeada: #PF na IST[1], `sched::guard_owner(cr2)` reconhece a guarda de
   qual thread foi e a mensagem vira `stack overflow in thread '<nome>': guard page hit at
@@ -572,7 +572,7 @@ flowchart TD
   dock e cantos) + `tools/perf/w20-cursor-check.sh` (0 pixels diferentes entre a tela em
   repouso e a mesma tela depois de um repaint completo forçado).
   **Relógio:** o tique de 1 s repinta só o texto do relógio na barra de
-  menus (e a janela do Task Manager, se aberta), em vez de subir ~8 MiB. **Sombra:** não é misturada sob o corpo opaco da janela
+  menus (e as janelas vivas: Tarefas, Registro, Ajustes, se abertas), em vez de subir ~8 MiB. **Sombra:** não é misturada sob o corpo opaco da janela
   (`fill_round_rect_alpha_skip`): evita ~85% do blend com saída idêntica.
 
 ### 6.3 Primitivas (`fb.rs`, `osjeff_core::gfx`)
@@ -654,8 +654,8 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
   `pid`, número da instância e título. Vários Terminais, Editores, Gerenciadores de
   arquivos e Calculadoras podem coexistir, cada um com **processo próprio** na
   `ProcessTable` (`shell`, `shell 2`, `shell 3`... o menor número livre). Fechar a janela
-  encerra instância e processo; no Task Manager, `DEL` fecha de fato a janela da
-  instância. Navegador e Task Manager seguem **únicos** (uma NIC e uma thread de busca):
+  encerra instância e processo; em Tarefas, `Del` (ou o botão Encerrar) fecha de fato a janela da
+  instância. Navegador e Tarefas seguem **únicos** (uma NIC e uma thread de busca):
   lançá-los de novo foca a janela existente, mas passam pelo mesmo mecanismo. **Apps WASM são
   multi-instância** (cada janela é uma instância do `AppManager`, §10.4), com tamanho, mínimo e
   `resizable` vindos do manifesto; minimizar suspende o app (sem `render`), fechar o encerra.
@@ -684,18 +684,18 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
   (no terminal, Ctrl+Shift+C copia a linha digitada: Ctrl+C sozinho interrompe); Ctrl+V cola
   na janela focada. O Editor trata Ctrl+C/X/V/S ele mesmo (`editor2`).
 
-### 7.2 O "processo" do Task Manager
+### 7.2 O "processo" de Tarefas
 
 `ProcessTable` guarda até `MAX_PROC = 48` entradas (pid, nome, estado, ticks; cresce sob
-demanda): um **modelo de UI**, sem ligação com threads, mas agora **um processo por
-instância de janela** (mais `kernel` e `compositor`, do tipo `System`). A tabela de cima
-("PID NAME ST UP") mostra esse modelo e rola para manter a seleção visível; a de baixo
-("KERNEL THREADS CPU") mostra as threads reais com os ticks **executados** (§4.5), ou `DEAD`
-para uma thread morta (§3.4). `DEL` numa linha de app fecha a janela daquela instância e
-o processo some quando a animação termina; `Enter` foca (restaura) a janela do processo.
-Para um app WASM, fechar a janela (`wasm::close`) faz a `appd` descartar a `Store` de verdade
-(§10.4); a seção "APPS" do Task Manager mostra estado, CPU e memória de cada instância e `R`
-reinicia a selecionada.
+demanda): um **modelo de UI**, sem ligação com threads, mas **um processo por instância de janela**
+(mais `kernel`, do tipo `System`; o `compositor` aparece como thread). A aba **Processos** de Tarefas junta esse
+modelo, as threads reais do escalonador (com a fração de CPU medida por `CpuSampler`, §4.5, e o tamanho da pilha) e a
+linha Ocioso, com nomes amigáveis (`activity::friendly_name`), ordenação por coluna e seleção por id estável.
+**Encerrar** numa linha de app fecha a janela daquela instância e o processo some quando a animação termina; **Reiniciar**
+fecha e reabre (para um app WASM, `wasm::restart`); `Enter` foca (restaura) a janela do processo. Para um app WASM, fechar
+a janela (`wasm::close`) faz a `appd` descartar a `Store` de verdade (§10.4); a CPU e a memória de cada instância vêm do
+gerenciador (`wasm::statuses`). Encerrar um serviço do sistema pede confirmação: Aplicativos fecha todos os apps
+instalados, Terminal (execução) interrompe os comandos em andamento.
 
 ### 7.3 Apps
 
@@ -713,7 +713,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
 - **Editor** (`desktop/edit.rs`): `osjeff_core::editor2` (UTF-8, desfazer/refazer, buscar/substituir,
   números de linha, mouse, roda, arquivos de até 16 MiB inteiros) com abrir/salvar como pelo VFS
   (`Picker`, Ctrl+O, Ctrl+S, Ctrl+Shift+S) e a pergunta **Salvar / Descartar / Cancelar** em toda forma de
-  fechar uma janela com alterações (`request_close`: botão, Ctrl+Q, Task Manager, `kill`, Reiniciar/
+  fechar uma janela com alterações (`request_close`: botão, Ctrl+Q, Tarefas, `kill`, Reiniciar/
   Desligar). Cada janela tem seu buffer e seu caminho (`EditorState::path`, `None` = sem nome); o título
   mostra `nome *` enquanto há alterações. A grade acompanha a janela (`sync_editor`) e nada é desenhado
   fora dela.
@@ -758,10 +758,12 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   `Del` remove).
 
 - **App WASM:** §10.
-- **Monitor, Configurações e Log do sistema** (no overlay Apps e na Busca): monitor de recursos com abas Processos/Desempenho/Sistema, janela de
-  configurações (papel de parede, destaque, relógio, fuso, data/hora, teclado ABNT2, rede,
-  armazenamento, energia) e visualizador do log do kernel (`klog`), mais as notificações
-  em toast. Detalhes, formatos e traits de integração: `docs/design/sysmgmt.md`.
+- **Tarefas, Ajustes e Registro** (no overlay Apps e na Busca; Tarefas e Ajustes também na barra de apps): monitor
+  de atividade com abas CPU/Memória/Disco/Rede/Processos (reúne o antigo Gerenciador de tarefas e o Monitor de
+  recursos), janela de ajustes (aparência, papel de parede, barra de apps, teclado ABNT2, data e hora com lista de
+  fusos, rede, disco, energia, sobre) e visualizador do log do kernel (`klog`), mais as notificações em banner.
+  Detalhes, formatos e traits de integração: `docs/design/sysmgmt.md`; aparência: `docs/design/ui-macos.md`,
+  seção 11.
 
 ### 7.4 Como registrar um app novo
 
@@ -787,7 +789,7 @@ Cenários em `tools/perf/scen/w8-*.sh` (QEMU BIOS e UEFI), saída em `docs/img/w
 | `wm-maximized.png` | editor maximizado: texto na escala 3, barra de status presa à borda |
 | `wm-minimized.png` | terminal minimizado: ponto sob o ícone do dock |
 | `wm-alttab.png` | seletor Alt+Tab em ordem de uso recente |
-| `wm-many.png` | 32 janelas (31 terminais + Task Manager, o teto da tabela) sem pânico |
+| `wm-many.png` | 32 janelas (31 terminais + Tarefas, o teto da tabela) sem pânico |
 
 - **Vazamento:** `scen/w8-soak.sh` abre e fecha editor e calculadora 100 vezes cada (400
   trocas de quadro); em build `perf-trace` a ocupação exata do heap

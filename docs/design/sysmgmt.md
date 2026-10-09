@@ -1,5 +1,7 @@
 # Gerenciamento do sistema: log, monitor, configurações e notificações
 
+Frente W14, refeita na W25: o Monitor de recursos e o Gerenciador de tarefas viraram um app só, **Tarefas**; o visualizador de log é o **Registro**; as Configurações são os **Ajustes**; a Calculadora e os banners ganharam o visual novo. A aparência e os números da W25 estão em `docs/design/ui-macos.md`, seção 11, e nas seções marcadas "W25" abaixo; o resto descreve a W14 e continua valendo para a lógica.
+
 Frente W14. Quatro ferramentas que um SO precisa, no padrão do resto do projeto: a
 lógica pura e testada em `osjeff_core`, a cola de hardware no `kernel`, prova em QEMU
 (BIOS e UEFI) com capturas de tela. O desktop ocioso com as configurações padrão
@@ -8,14 +10,14 @@ de diferença nos dois modos).
 
 | Peça | Lógica pura (`osjeff_core`) | Cola (`kernel/src`) |
 |---|---|---|
-| Log do sistema | `klog` (anel, filtro, visão, `LineAsm`/`classify`, `dump_bounded`) | `klog.rs`, `desktop/logview.rs`, `logd.rs` (gravação em disco) |
-| Monitor de recursos | `sysmon` (séries, `CpuSampler`, ordenação, formatadores) | `desktop/monitor.rs`, `sysinfo.rs` (contadores de rede: `netd::stats()`) |
-| Configurações | `settings`, `wallpaper`, `hw::rtc` (data/hora/fuso), `keymap` (ABNT2) | `settings.rs`, `rtc.rs`, `desktop/settings_ui.rs`, `font.rs` (Latin-1) |
+| Registro (W25; era o Log do sistema) | `klog` (anel, filtro, visão, `LineAsm`/`classify`, `dump_bounded`) | `klog.rs`, `desktop/logview.rs`, `logd.rs` (gravação em disco) |
+| Tarefas (W25; era o Monitor de recursos) | `sysmon` (séries, `CpuSampler`), `activity` (nomes, formatação pt-BR, interpolação, taxas, carga, pressão, tabela ordenável) | `desktop/{tarefas,kit,live}.rs`, `ata::io_bytes`, `netd::stats()` |
+| Ajustes (W25; eram as Configurações) | `settings` (com `toast_secs`, `dock_zoom`, cidades de fuso), `wallpaper`, `hw::rtc` (data/hora/fuso), `keymap` (ABNT2) | `settings.rs`, `rtc.rs`, `desktop/settings_ui.rs`, `font.rs` (Latin-1) |
 | Notificações | `notify` (`Toasts`) | `notify.rs`, `desktop/toasts_ui.rs` |
 | Interfaces para outras frentes | `sysif` (traits) | `desktop/sysstore.rs` (implementações de hoje) |
 
-Os apps novos (**Monitor**, **Configurações**, **Log do sistema**) estão no Painel
-Iniciar e no menu de contexto do desktop; o **dock não mudou** (`DOCK_APPS = 7`).
+Os apps novos (**Tarefas**, **Ajustes**, **Registro**) estão no overlay Apps e na Busca; a barra de apps
+tem **Tarefas** e **Ajustes** (nove itens depois da W25).
 
 ## 1. Log do sistema (`klog`)
 
@@ -60,43 +62,62 @@ editor foram migrados para `klog!` com nível explícito; a saída serial é a m
 - O **caminho de pânico/exceção fatal não depende do klog**: `crash::die` congela o
   espelho (`klog::freeze`) e escreve só pela UART, como antes.
 
-**Visualizador** (`desktop/logview.rs`, janela única): botão de nível mínimo (clique ou
-Tab), caixa de busca (digite; Del limpa; Esc limpa e, vazia, fecha), rolagem por setas,
-Home/End, barra e meia-janela, "Limpar", "Salvar" (trait `LogSink`; grava
-`/var/log/syslog.txt` com o log filtrado, até 256 KiB, as últimas linhas inteiras se passar disso),
-cor por nível. Trabalha numa cópia (snapshot) do
-anel, renovada a cada segundo.
+**Registro** (W25, `desktop/logview.rs`): tabela com hora (fonte mono), nível (etiqueta colorida: TRACE, DEBUG,
+INFO, AVISO, ERRO, FATAL), origem (nome amigável da thread) e mensagem (mono); busca (digitar vai para o campo;
+`Del` limpa; `Esc` limpa e, vazia, fecha), filtro de nível segmentado (Tudo, Info, Aviso, Erro; `Tab` avança),
+chave **Seguir**, **Limpar** e **Salvar** (trait `LogSink`; grava `/var/log/syslog.txt` com o log filtrado, até 256 KiB, as
+últimas linhas inteiras se passar disso), rolagem em pixels com deslize (roda, setas, `PgUp`/`PgDn`, `Home`/`End`) e
+barra de rolagem que some. Trabalha numa cópia (snapshot) do anel, renovada a cada segundo; a janela
+visível mostra no máximo as linhas que cabem, então um anel cheio (64 KiB, ~770 linhas de teste) custa o mesmo
+que um vazio. O visualizador antigo (botão de nível, caixa de busca, linhas de 18 px, painel escuro) foi substituído.
 
-## 2. Monitor de recursos (`desktop/monitor.rs`)
+## 2. Tarefas (W25; reúne o Monitor de recursos e o Gerenciador de tarefas)
 
-Três abas. A amostragem é **uma vez por segundo**, no tique de relógio do laço do
-compositor (`Desktop::sample_system`): algumas operações inteiras, uma passada pela tabela
-de janelas e uma caminhada na free-list do heap. Sem monitor aberto não há trabalho
-extra além disso.
+Cinco abas: **CPU**, **Memória**, **Disco**, **Rede** e **Processos**. A amostragem é **uma vez por
+segundo**, no tique de relógio do laço do compositor (`Desktop::sample_system`): algumas operações
+inteiras, uma passada pela tabela de janelas e uma caminhada na free-list do heap. Sem a janela
+aberta não há trabalho extra além disso; minimizada ou oculta, a janela não desenha nada.
 
-- **Processos**: threads do kernel (CPU% real, tamanho da pilha, uptime) e processos dos
-  apps (uptime, **custo de desenho**, tamanho aproximado do estado), mais a linha
-  `(ocioso)`. Ordenação por nome/CPU/memória/uptime (clique no cabeçalho ou `n c m u`),
-  setas selecionam, `DEL` ou "Encerrar" fecha de verdade a janela do app (o Task Manager
-  antigo continua como era).
-- **Desempenho**: gráficos de linha dos últimos 60 s (`Series`, escala automática):
-  CPU total e por thread, heap (usado/livre/pico), rede (rx/tx por segundo), quadros
-  desenhados por segundo, custo do quadro, e a barra de uso do disco (`DiskUsage`).
-- **Sistema**: versão e perfil, uptime, CPU (CPUID: marca, fabricante, hipervisor,
-  recursos), nota de soft-float, TSC calibrado, RAM total (mapa do bootloader: usável +
-  do bootloader), imagem do kernel e heap, resolução, BIOS/UEFI, threads.
+- **CPU**: carga total e gráfico de 60 s (`Series`, suavizado por um filtro 1-2-1 só para desenhar), tempo
+  ligado, carga média de 1/5/15 min (`activity::LoadAvg`, média exponencial da fração ocupada),
+  threads e processos, o processador (CPUID) e barras por processo.
+- **Memória**: heap em uso (gráfico com eixo em potências de 2), medidor de **pressão** (`Pressure`: normal
+  abaixo de 60 %, atenção até 85 %, crítica acima), em uso/livre/total/pico/RAM física e a memória aproximada
+  de cada app (`App::approx_bytes`; apps WASM informam o valor real).
+- **Disco**: volume, barra de uso e porcentagem, usado/livre/total, arquivos e pastas (contadores de inodes do
+  `statfs`), leitura e gravação por segundo com gráfico (contadores atômicos do driver ATA, `ata::io_bytes`, sem
+  lock nem alocação, só bytes de transferências bem-sucedidas), totais desde o boot, modelo e tamanho do disco
+  (IDENTIFY).
+- **Rede**: estado do link, IP, máscara, roteador, DNS, tempo restante da concessão, taxas de recepção e envio com
+  gráfico, bytes e pacotes (`netd::stats()`); erros e descartes só aparecem quando existem.
+- **Processos**: PID, nome amigável (`friendly_name`: `compositor` é Interface, `fetcher` Rede (busca), `appd`
+  Aplicativos, `shelld`/`shelld2` Terminal (execução), `logd` Registro, `kernel` Sistema; o nome interno fica
+  na dica e na linha de detalhe), estado (Ativo, Em espera, Suspenso, Encerrado, Parado), CPU, memória e tempo ativo.
+  Ordenação por qualquer coluna (segundo clique inverte; empates mantêm a ordem anterior, a lista não pula entre
+  amostras), busca, seleção (pelo id estável da linha, que sobrevive a reordenar), **Encerrar** e **Reiniciar**: um
+  app fecha a janela de verdade (ou reinicia a instância WASM); um serviço do sistema pede confirmação numa folha
+  (Aplicativos fecha todos os apps instalados, Terminal (execução) interrompe os comandos em andamento; os demais não
+  podem ser encerrados e o botão fica desativado). Rodapé: processos, threads, CPU, memória e disco.
+
+**Movimento.** Cada amostra nova dispara 450 ms de animação: o gráfico desliza um passo (a ponta interpola entre as
+duas últimas amostras), o número do topo desliza (ease-out). Só o título e o gráfico são repintados (`live_rect`,
+um quadro a cada 20 ms); o resto da janela espera o quadro de acomodação do fim. Passar o mouse sobre um gráfico mostra
+o valor e "há N s". Ligado a *reduzir movimento*, tudo cai no valor final no mesmo quadro.
 
 **O que a coluna CPU significa.** Para as threads é real: o escalonador soma 1 tick em
 `TICKS[slot]` só quando o tick encontra a thread *executando* (não parada em `hlt`);
 `CpuSampler` transforma a variação em décimos de por cento pelo maior resto, de modo que
-**threads + ocioso somam exatamente 100,0 %** (conferido nas capturas: 98,0 % ocioso + 2,0 %
-compositor; 99,6 + 0,4). Os apps rodam todos dentro da thread do compositor, então não
+**threads + ocioso somam exatamente 100,0 %**. Os apps rodam todos dentro da thread do compositor, então não
 têm CPU própria: a coluna mostra o **tempo de desenho** do app (TSC acumulado em
-`draw_window`, em % do segundo), que é um subconjunto da linha `compositor`. Memória por
-app só existe como estimativa do estado da instância (`App::approx_bytes`); `—` quando o
-kernel não acompanha (Arquivos, WASM).
+`draw_window`, em % do segundo), que é um subconjunto da linha Interface; para apps WASM é a CPU real medida
+pelo gerenciador. Memória por app só existe como estimativa do estado da instância; `—` quando o kernel não acompanha.
 
-## 3. Configurações (`desktop/settings_ui.rs`)
+**Lógica pura (`osjeff_core::activity`, 16 testes).** Nomes amigáveis, formatação pt-BR (`12,3%`, `1,5 MiB`, `3 min 05 s`,
+`1.234.567`), `Glide`/`ease_toward` (aproximação exponencial que nunca passa do alvo e sempre termina), interpolação
+fracionária e filtro 1-2-1 da história, qual amostra está sob o ponteiro, **taxas a partir de contadores com volta
+ao zero** (`wrapping_delta`, `Rate`), carga média, nível de pressão, tabela ordenável estável (nomes sem acento).
+
+## 3. Ajustes (W25; eram as Configurações, `desktop/settings_ui.rs`)
 
 `Settings` (`osjeff_core::settings`) é um `Copy` com texto `chave=valor`:
 
@@ -110,11 +131,27 @@ clock=12                   # 12 ou 24
 tz=-120                    # minutos a leste de UTC (-720..840)
 keyboard=abnt2             # us | abnt2
 toasts=1
+appearance=auto            # auto | light | dark
+reduce_motion=0
+toast_secs=4               # quanto tempo um banner fica: 2..15
+dock_zoom=100              # ampliação da barra de apps: 0..100 %
+tz_city=17                 # cidade escolhida na lista de fusos (índice)
 ```
 
 `Settings::parse` é **total**: comentários, chaves desconhecidas e valores inválidos ou
 fora da faixa são ignorados (o campo fica no padrão), versão ausente ou nova não atrapalha,
 `wallpaper=image` sem caminho volta ao padrão. Os padrões reproduzem o desktop de sempre.
+
+Os Ajustes têm nove seções (Aparência, Papel de parede, Barra de apps, Teclado, Data e hora, Rede, Disco, Energia,
+Sobre) com os controles do toolkit; o texto abaixo é da W14 e vale para a lógica de cada coisa. Mudanças da W25: o tema
+é um controle segmentado (Automático, Claro, Escuro), a cor de destaque são oito amostras com anel de seleção, *Reduzir
+movimento* e *Notificações* são chaves com a duração dos banners num controle deslizante, o papel de parede é uma grade
+de miniaturas desenhadas ao vivo (aparência atual) mais uma imagem do usuário (campo de caminho e "Escolher imagem…",
+que abre o Arquivos), a barra de apps tem um controle de ampliação com pré-visualização, o fuso é uma lista de 52
+cidades com busca (`settings::TIMEZONES`), Rede e Disco leem ao vivo `netd::stats()` e o volume, Energia abre a folha
+de confirmação e Sobre mostra versão, processador, memória, tempo ligado, tela, como iniciou e uma linha sobre a fonte
+de números aleatórios. Cada página é uma função do construtor imediato `Ui` (`settings_ui.rs`): desenha, acha o clique e
+acha o hover pelo mesmo código. Um controle deslizante aplica ao vivo e **grava o arquivo uma vez, ao soltar**.
 
 - **Aparência**: papel de parede (o original *Indigo*, três gradientes novos, um sólido e
   uma **imagem do usuário** por caminho de arquivo: `wallpaper::load` limita o arquivo
@@ -130,8 +167,8 @@ fora da faixa são ignorados (o campo fica no padrão), versão ausente ou nova 
 - **Teclado**: US ou **ABNT2** (`ç`, acentos mortos ´ ` ~ ^ ¨ que se combinam com vogais e
   `n`, `Keymap::take_pending` entrega a segunda tecla de acento + letra que não combina);
   o `font.rs` ganhou as letras Latin-1 montadas a partir dos glifos ASCII.
-- **Rede** (somente leitura: placa, MAC, IP/máscara/gateway/DNS/lease da `NetConfig` que o
-  boot guardou; "Renovar DHCP" chama o trait `NetControl` e responde "indisponível"),
+- **Rede** (somente leitura: placa, MAC, IP/máscara/gateway/DNS/lease; a W25 tirou o botão
+  "Renovar DHCP", que só respondia "indisponível"),
   **Armazenamento** (`DiskUsage`, discos IDE), **Energia** (reiniciar/desligar com segundo
   clique para confirmar; bateria n/d), **Sobre**.
 
@@ -159,7 +196,12 @@ deixam um WARN no log (e um toast) em vez de falhar em silêncio.
 
 ## 4. Notificações (toasts)
 
-`osjeff_core::notify::Toasts`: no máximo 3 visíveis (4 s cada) empilhadas acima do relógio,
+W25: o banner tem disco com o glifo do nível, título e até duas linhas medidas, contador, botão de fechar enquanto o
+ponteiro está sobre ele e uma linha fina na base que diminui até o fim; o tempo vem dos Ajustes (`toast_secs`,
+`Toasts::set_lifetime_secs`, cada banner leva o seu). Enquanto há banner o compositor pede quadros (um por segundo com
+*reduzir movimento*).
+
+`osjeff_core::notify::Toasts`: no máximo 3 visíveis (4 s cada por padrão) empilhadas abaixo da barra de menus,
 fila de 8, uma repetição de mensagem visível só reinicia o tempo e incrementa um contador
 (`x3`), clique fecha. O compositor desenha direto no framebuffer depois do quadro
 (restaurando o fundo a partir do `back`, como o HUD) **só enquanto há toast na tela ou
@@ -182,7 +224,7 @@ hoje; a frente que trouxer algo melhor só implementa o trait e troca o objeto.
 |---|---|---|
 | `DiskUsage` (`label`, `usage() -> DiskUsageInfo{total,used,items}`) | `VfsUsage` (`desktop/sysstore.rs`): capacidade real do volume (`statfs`), "OJFS v3 (IDE)" ou "Memoria" | inodes livres (`items_*`) |
 | `NetStats` (`counters() -> Option<NetCounters>`) | `KernelNetStats` sobre `netd::stats()` (os contadores de `nic::STATS`, alimentados por **todos** os drivers; a página Rede das Configurações lê o mesmo `Snapshot`) | `NetCounters` pode ganhar campos (descartes, erros) |
-| `NetControl` (`renew_dhcp()`) | `NoNetControl` (sempre `Unsupported`) | renovação DHCP; o botão da página Rede já chama o trait |
+| `NetControl` (`renew_dhcp()`) | `NoNetControl` (sempre `Unsupported`) | renovação DHCP (a W25 tirou o botão até existir uma API) |
 | `LogSink` (`write_file(nome, dados)`) | `VfsSink`: `/var/log/<nome>` no volume; mantém as últimas linhas inteiras que cabem em 256 KiB (`SinkError::Truncated`) | rotação de logs |
 | `SettingsStore` (`load`/`save`) | `VfsStore`: `/etc/osjeff.conf` no volume | — |
 
@@ -190,8 +232,8 @@ Outros pontos de integração: `klog!`/`notify!` já podem ser usados em qualque
 (`netstack`, `fetch`, `ata`, `wasm` seguem com `serial_println!`, espelhado no log como INFO
 ou pela palavra-chave; trocar por `klog!(Warn, ...)` dá o nível exato);
 `Desktop::set_network(nic, NetConfig)` guarda a identidade de rede para a página Rede
-(chamar de novo quando houver uma renovação); `Kind`/`App` em `desktop/instance.rs` ganharam
-`Monitor`, `Settings` e `LogViewer` (em conflito de merge, manter as duas variantes).
+(chamar de novo quando houver uma renovação); `Kind`/`App` em `desktop/instance.rs` têm
+`TaskMgr` (Tarefas), `Settings` (Ajustes) e `LogViewer` (Registro); o `Monitor` deixou de existir na W25.
 
 ## 6. Como reproduzir as provas
 
@@ -203,8 +245,12 @@ configurações usa `FS_IMG=` com um disco que tem `papel.png`, preparado por
 | Cenário | Mostra |
 |---|---|
 | `w14-log.sh` | eventos de boot no visualizador, busca "net", filtro WARN+ |
-| `w14-mon.sh` (com gancho de carga) | processos ordenados, gráficos mudando, aba Sistema |
+| `w14-mon.sh` (com gancho de carga) | processos ordenados, gráficos mudando, aba Sistema (W14; a W25 usa `w25-tarefas*.sh`) |
 | `w14-endtask.sh` | `DEL` no monitor fecha a calculadora |
+| `w25-tarefas.sh`, `w25-tarefas2.sh`, `w25-tarefas3.sh` | todas as abas em claro e escuro, gráficos com valor ao passar o mouse, busca, ordenação, folha de confirmação, 32 processos com roda, troca rápida de abas, tamanho mínimo |
+| `w25-perf.sh`, `w25-perf-hidden.sh` | custo de uma janela Tarefas visível e minimizada (`perf-trace`) |
+| `w25-log.sh` | Registro: busca, níveis, seguir, rolagem, Salvar e Limpar (com um gancho temporário que enche o anel além de 64 KiB) |
+| `w25-settings.sh`, `w25-calc.sh` | todas as seções dos Ajustes em claro e escuro com as interações; teclado e mouse na Calculadora |
 | `w14-set.sh`, `w14-pages.sh` | papel de parede (gradiente e PNG), destaque, 12 h, fuso, data/hora, ABNT2, páginas Rede/Armazenamento/Energia/Sobre |
 | `w14-toast.sh` (com gancho) | toast WARN, expira em 4 s, toast ERROR, clique fecha |
 | `w18-settings-1.sh` / `-2.sh` | W18: configurações (imagem, destaque, 12 h, fuso, ABNT2) e log salvo no boot 1; tudo de volta no boot 2 com o mesmo disco; `/var/log/{boot,syslog}.log` e `/etc/osjeff.conf` no disco (`fs3_inject --ls`) |
@@ -251,9 +297,9 @@ ms por ser menor). Janelas vivas: Task Manager, Monitor, Configurações e Log.
 - A migração `serial_println!` → `klog!` com nível explícito foi feita nos arquivos que esta
   frente pode tocar; `ata`, `netstack`, `ne2000`, `fetch` e `wasm` ficam com o espelho
   automático (INFO / palavra-chave).
-- "Renovar DHCP" e a bateria são honestos: o primeiro responde que não há API, a segunda
-  mostra n/d (não há ACPI).
-- Sem roda do mouse no PS/2: a rolagem é por setas, barra e cliques.
+- Renovar DHCP e a bateria não aparecem: não há API de renovação nem ACPI (a W14 tinha botões que
+  respondiam "indisponível" e "n/d").
+- A roda do mouse rola o Registro, os Ajustes e a tabela de Processos (a W17 ligou a roda).
 - O lease DHCP "novo" só dispara toast quando houver renovação (a do boot acontece antes
   do desktop existir e não deve mudar o desktop ocioso).
 

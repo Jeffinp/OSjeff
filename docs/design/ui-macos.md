@@ -1,6 +1,7 @@
 # OSjeff shell: design system
 
-Status: wave 1 (foundation, system chrome, the toolkit). Wave 2 re-skins each app's
+Status: wave 1 (foundation, system chrome, the toolkit) and, for the system apps, wave 2 (section 11:
+Tarefas, Registro, Ajustes, Calculadora, notificações). The rest of wave 2 re-skins each app's
 content on top of the toolkit described here. The visual values are tokens that live in
 one place (`kernel/src/theme.rs`, backed by the pure tables in `osjeff_core::style`);
 the code paths named below are the stable API.
@@ -15,7 +16,7 @@ geometry, soft shadows, springy motion, generous spacing) and has its own identi
 | | OSjeff |
 |---|---|
 | Mark | a bold prompt chevron `>` (white) on an indigo squircle; the menu-bar version is the bare chevron. No fruit, no wordmark borrowed from anyone |
-| Names | **Apps** (the grid, replaces the start panel), **Busca** (one field for apps, files and sums), **Barra de apps** (the floating bar), **Controles** (network, appearance, switches), **Arquivos**, **Tarefas**, **Monitor**, **Registro**, **Imagens**, **Componentes** (the widget gallery) |
+| Names | **Apps** (the grid, replaces the start panel), **Busca** (one field for apps, files and sums), **Barra de apps** (the floating bar), **Controles** (network, appearance, switches), **Arquivos**, **Tarefas** (the activity monitor: CPU, Memória, Disco, Rede, Processos), **Registro** (the log), **Ajustes** (preferences), **Calculadora**, **Imagens**, **Componentes** (the widget gallery) |
 | Accent | indigo `5B5CF6` by default; eight choices (Indigo, Turquesa, Violeta, Rosa, Coral, Âmbar, Verde, Grafite) |
 | Icon language | a thick white glyph on a saturated vertical-gradient squircle with a faint top gloss; every glyph is drawn from our own vector paths (`osjeff_core::iconart`), none is a traced system icon |
 | Wallpaper | "Dinâmico": pale lilac and sky by day, deep indigo by night, with soft colour glows; four more presets or an image |
@@ -54,7 +55,7 @@ which follows the appearance in effect.
 | lights | close `FF6B63`, minimise `FFC24A`, zoom `3FD07C`; unfocused grey `D1D1D6` / `4A4A4E` | | window controls |
 
 Appearance setting: *Automática* (dark from 19:00 to 07:00 by the clock), *Clara*, *Escura*;
-applied live from Controles or Configurações. Contrast on `window_bg`: body text 15.6:1 (light) and 12.8:1 (dark), secondary text
+applied live from Controles or Ajustes. Contrast on `window_bg`: body text 15.6:1 (light) and 12.8:1 (dark), secondary text
 4.7:1 and 5.4:1 (all above 4.5:1).
 
 ### 2.2 Radii
@@ -115,6 +116,11 @@ its end in the next frame).
 | Apps | fade, icons rise 14 px | 220 ms |
 | banners | slide from the right edge, ease-out in, ease-in out | 260 / 220 ms |
 | tooltip | after 350 ms of rest, fade | 120 ms |
+| Tarefas, a new 1 Hz sample | the curve scrolls one step, the headline number glides (ease-out) | 450 ms |
+| Registro, Tarefas table | scrolling glides to its target (exponential, 80-90 ms constant); overlay scrollbar fades | ~250 ms |
+| Ajustes switches | the knob glides (60 ms constant) | ~200 ms |
+| Calculadora keyboard press | the key stays lit | 140 ms |
+| banners | the dismiss line runs down over the chosen time (2 to 15 s) | 4 s default |
 
 ## 3. The toolkit (the API for wave 2)
 
@@ -134,21 +140,26 @@ caller derives `Control::Hover` / `Pressed` from the pointer.
 | list row, group box, separator, progress | `ui::list_row`, `ui::group_box`, `ui::separator`, `ui::progress` | |
 | overlay scrollbar (fades) | `ui::overlay_scrollbar` | `widgets::ScrollbarFade`, `scroll_thumb` |
 | menu row, tooltip | `ui::menu_item`, `ui::tooltip` | `chrome::menu_geom` |
-| line graph, usage bar (for charts) | `ui::graph`, `ui::usage_bar` | |
+| line graph, usage bar (dark-panel, byte-string versions) | `ui::graph`, `ui::usage_bar` | |
+| smooth history chart with a hover value | `kit::chart(c, r, &Chart)` (curves, axis labels, scroll progress, hovered sample) | `kit::plot_of`, `osjeff_core::activity::{slice_at, sample_under, smooth121}` |
+| usage bar, pressure gauge, chip, card, stat and key/value rows | `kit::{bar, pressure_gauge, chip, card, stat, kv}` | |
+| search field, button with a glyph, sort arrow | `kit::{search_field, icon_button, sort_arrow}` | |
+| hover and press for a whole window | `Desktop::live_hover` (a key per control; the window repaints only when it changes), `live_step`, `live_busy` | `desktop/live.rs` |
 | glass panel (blurred backdrop, tint, edge, shadow) | `glass::panel`, `BackdropSlot` | |
 | text | `text::draw`, `draw_centered`, `draw_left`, `draw_right`, `draw_ellipsis`, `measure`, `wrap`, `draw_mono` | `osjeff_core::textlayout` |
 | icons and glyphs | `icons::blit(c, Icon, x, y, size, opacity)`, `ui::draw_glyph(c, Glyph, x, y, size, argb)` | `osjeff_core::iconart` |
 | colours | `theme::{pal, text, text_muted, window_body, toolbar, sidebar, surface, zebra, line, button_bg, tool_bg, ink, ink_dim, danger, ok, selection, accent}` | `osjeff_core::style` |
 
 The **gallery** (`Ctrl+Alt+G`, also in the system menu) shows all of it live in four tabs
-(controls, type, colours, icons) and is the reference for app authors. Tabs, a segmented
-control and charts are all in the toolkit on purpose: the Tarefas app is meant to become an
-activity monitor (CPU, memory, disk and network tabs with a process list).
+(controls, type, colours, icons) and is the reference for app authors. `desktop/kit.rs` holds
+the pieces the system apps needed beyond `ui.rs` (chart, gauge, chips, search field); like
+`ui.rs` they draw at a rectangle the caller computed, follow the palette and measure text with
+the real font.
 
 ## 4. System chrome
 
 * **Menu bar** (28 px, glass baked into the cached wallpaper): the OSjeff mark (menu: Sobre,
-  Configurações, Componentes, Reiniciar, Desligar, the last two behind a confirmation
+  Ajustes, Componentes, Reiniciar, Desligar, the last two behind a confirmation
   sheet), the focused app's name (Semibold; menu: Encerrar) and its menus Arquivo, Editar,
   Visualizar, Janela with real, enabled/disabled-aware entries (new window, close, minimise,
   zoom, undo/redo/cut/copy/paste/select all for the editor, browser zoom, open and save
@@ -222,7 +233,8 @@ blur capture, paid once.
 | motion | `osjeff_core/src/anim.rs` |
 | chrome geometry, search, cursor, widgets | `osjeff_core/src/{window,layout,chrome,widgets,search,cursor,iconart}.rs` |
 | chrome drawing | `kernel/src/desktop/{chrome,dock,menubar,overlays,shell,glass,cursor,render}.rs` |
-| toolkit and gallery | `kernel/src/desktop/{ui,gallery}.rs` |
+| toolkit and gallery | `kernel/src/desktop/{ui,kit,gallery}.rs` |
+| system apps (section 11) | `kernel/src/desktop/{tarefas,logview,settings_ui,calc_ui,toasts_ui,live}.rs`, `osjeff_core/src/{activity,calc,settings,notify,klog,layout}.rs` |
 | icons, glyphs | `kernel/src/{icons,glyphs}.rs` |
 
 ## 8. Compatibility rules for app content (wave 2)
@@ -244,11 +256,75 @@ sources plus the scaled copies; flushed when it passes 160 entries), the bar's b
 0.3 MiB, fonts 120 KiB embedded. The Apps backdrop (3.6 MiB at 1280x720) exists only while
 the overlay is open. Building the atlas takes about 34 ms at boot (logged).
 
-## 10. Known gaps after wave 1
+## 10. Known gaps
 
-* App interiors are token-driven but not redesigned: Tarefas, Imagens, the file list and
-  the log still use the old layouts and fixed-pitch measurements in places; the browser page
-  layout assumes fixed character widths. Wave 2 moves each app to the widgets above.
+* The system apps (section 11) are redesigned; Imagens, the file list, the editor, the terminal
+  and the browser page layout are the other half of wave 2 (fixed-pitch measurements remain
+  there).
 * No right-to-left or complex text; kerning is pair kerning only; no LCD text.
 * The pointer ghost left by a frame that both repaints a region and moves the pointer is
   owned by another change (`main.rs` cursor path) and untouched here.
+
+## 11. The system apps (wave 2)
+
+All five are drawn with the toolkit above, in Portuguese with accents, with real text measuring
+(numbers are right-aligned in their column instead of padded), and follow light and dark.
+Window sizes are on the 4 px grid; interiors use 16 px margins, 12 px card radius and 28 px
+controls.
+
+**Tarefas** (default 860 x 592, minimum 700 x 460). A segmented control (CPU, Memória, Disco,
+Rede, Processos) under the title bar. The first four share one layout: a section title with the
+headline number, a chart card, a column of stat cards on the right and a list under the chart.
+Processos is the table. The window has no Monitor sibling any more (`Kind::Monitor` is gone;
+Busca still answers "monitor", "desempenho", "memória", "disco", "rede" and opens the right tab).
+
+| Tab | What it shows | Source |
+|---|---|---|
+| CPU | total share and its 60 s chart; uptime; load average (1/5/15 min of the busy share); thread and process count; the processor; bars per process (threads: the scheduler's tick counters, apps: the time spent drawing their window) | `sysmon::CpuSampler`, `activity::LoadAvg` |
+| Memória | heap in use (chart, axis in powers of two), pressure gauge (normal under 60 %, attention under 85 %, critical above), in use / free / total / peak / physical RAM, approximate memory per app (`App::approx_bytes`, WASM apps report their real figure) | allocator, `activity::Pressure` |
+| Disco | volume, usage bar and percent, used / free / total, files and folders (inode counters), read and write per second with a chart, totals since boot, the disk's model and size | `vfs::statfs`, `ata::io_bytes`, IDENTIFY |
+| Rede | link state, IP, mask, router, DNS, lease time left, received and sent rate with a chart, bytes and packets, errors when there are any | `netd::stats()` |
+| Processos | PID, friendly name (the internal name in a tooltip and in the detail line), state, CPU, memory, time active; sort by any column (a second click reverses), search, selection; Reiniciar / Encerrar; a footer with processes, threads, CPU, memory and disk | process table, scheduler, `activity::{friendly_name, sort_tasks}` |
+
+Internal names are translated: `compositor` is Interface, `fetcher` Rede (busca), `appd`
+Aplicativos, `shelld` and `shelld2` Terminal (execução), `logd` Registro, `kernel` Sistema;
+`shell 2` becomes Terminal 2. Ending an app closes its window. A service asks first: ending
+Aplicativos closes every installed app, ending Terminal (execução) interrupts the running
+commands; the other services cannot be ended (the button is disabled).
+
+The sample arrives once a second. For 450 ms the chart scrolls by one step and the headline
+glides; only that part of the window is repainted, one frame every 20 ms, and a window that is
+minimised or closed costs nothing beyond the sampler. Hover over a chart shows the value and
+"há N s" in a bubble.
+
+**Registro** (880 x 540, minimum 720 x 360). Search field, segmented level filter (Tudo, Info,
+Aviso, Erro), Seguir switch, Limpar, Salvar; a table card with Hora (mono), Nível (chip), Origem
+and Mensagem (mono); a status line ("771 linhas", "3 de 45 linhas", what the last action did).
+Scrolling by the wheel, arrows, Page Up/Down, Home and End glides; scrolling up stops following,
+reaching the end resumes it. Salvar writes `/var/log/syslog.txt`.
+
+**Ajustes** (820 x 596, minimum 720 x 480). Sidebar with nine sections and a page of grouped
+cards: Aparência (theme, accent, reduce motion, notifications and their duration), Papel de
+parede (thumbnails of the presets drawn live in the current appearance, the user's image by path
+or through Arquivos), Barra de apps (magnification slider with a preview of real icons), Teclado
+(US / ABNT2, a test field), Data e hora (the clock, 24 h, a searchable city list, the editor),
+Rede, Disco, Energia (Reiniciar... and Desligar... open the sheet) and Sobre. Controls apply at
+once; a slider is stored when it is released. Pages longer than the window scroll.
+
+**Calculadora** (320 x 520, minimum 280 x 440). History strip, display (48 px shrinking to
+20 px), memory row, six rows of rounded keys; the operator column carries the accent and the
+pending operator is inverted. Percent follows the pocket-calculator rule (200 + 10 % adds 20),
+`n` or the sign key changes sign, M+ and M- accumulate in a register that C does not clear.
+Typed `x` and `:` are the multiplication and division keys, `,` is the decimal point.
+
+**Notificações.** A 344 x 68 banner: a disc in the level's colour with its glyph, title, two
+lines of text, a repeat counter, a close button while the pointer is over it and a hairline that
+runs down over the chosen time.
+
+Pointer feedback: every system window keeps a hover key (the control under the pointer plus the
+pressed bit) and the compositor repaints it only when the key changes, so moving over a window
+costs nothing unless something lights up.
+
+Captures (QEMU/UEFI, `tools/perf/scen/w25-shots.sh`): `docs/img/ui-tarefas-light.png` (CPU),
+`ui-tarefas-procs-dark.png`, `ui-ajustes-dark.png`, `ui-calc-light.png`, `ui-registro-dark.png`,
+`ui-toast-dark.png`.

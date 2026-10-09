@@ -199,7 +199,7 @@ tecla ─► Desktop::dispatch_key ─┬─► Terminal: Term::key ─► TermA
   documento já em uso abre o arquivo **em outra janela** (ou na que já o mostra): nada é substituído.
   A janela de um arquivo aberto pelo Arquivos (`open_path`) e por `edit` é a mesma coisa.
 * **Alterações não salvas:** título `OSJEFF EDIT - nome *`; fechar a janela (botão da barra, Ctrl+Q,
-  Task Manager, `kill`, Reiniciar/Desligar) mostra "Salvar alterações?" com **Salvar / Descartar /
+  Tarefas, `kill`, Reiniciar/Desligar) mostra "Salvar alterações?" com **Salvar / Descartar /
   Cancelar** (S, D, C, setas+Enter, clique; Esc cancela). Salvar sem nome abre "Salvar como" e só fecha
   se gravar; erro de gravação mantém a janela aberta com a mensagem.
 * **Limite conhecido:** a área de transferência tem 256 bytes (`clipboard::CAP`): copiar mais que isso

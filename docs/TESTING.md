@@ -382,6 +382,47 @@ O arrasto custa mais porque a janela agora tem cantos e sombra com anti-aliasing
 texto de verdade; fica abaixo da meta de 4 ms. Abrir o Apps paga uma vez a captura do fundo
 borrado (um quarto da resolução). O ocioso continua em zero quadros fora do tique do relógio.
 
+### Apps do sistema (W25): Tarefas, Registro, Ajustes, Calculadora, banners
+
+A contagem do `osjeff_core` passou de 2497 para 2532 testes (todos no host). A lógica nova mora no
+core; o kernel só desenha e liga a entrada:
+
+| Módulo | Testes | O que prova |
+|---|---|---|
+| `activity` (novo) | 16 | nomes amigáveis e de sistema, formatação pt-BR, suavização que nunca ultrapassa o alvo, deslizar e parar, amostras na ordem, ponteiro para amostra, contadores que voltam, taxa por segundo, média de carga, níveis de pressão da memória, tabela ordenável por toda coluna nos dois sentidos, estável e sem acento, busca e totais |
+| `calc` | 26 (eram 18) | percentual (de um operando para + e -, sozinho e com ×), troca de sinal, memória (guardar, somar, subtrair, recuperar, limpar), as quatro últimas operações, expressão pendente, vírgula decimal e negativos minúsculos sem sinal, `pretty` com separador de milhar |
+| `layout` | 17 (eram 16) | as regiões da calculadora empilham dentro da janela, teclado 6x4 e acerto por tecla |
+| `settings` | 19 (eram 15) | tempo do banner e zoom da barra dentro da faixa, campos novos ida e volta, a cidade concorda com o deslocamento, tabela de 52 cidades ordenada, válida e encontrável |
+| `notify`, `klog`, `chrome` | 12, 28, 13 | vida própria de cada banner (limitada) e a linha que se esgota; visão do registro a partir de qualquer linha e `FixedBuf` com UTF-8 (Latin-1 como reserva); o zoom da barra escala o relevo |
+
+Cenários (cada um fotografa, a imagem é revisada em claro e escuro): `w25-tarefas`, `w25-tarefas2`,
+`w25-tarefas3` (abas, passar o ponteiro sobre o gráfico, tabela com seleção e folha de confirmação,
+32 processos com a roda, troca rápida de abas, janela no tamanho mínimo), `w25-log`, `w25-calc`,
+`w25-settings` (nove seções, tema, destaque, papel de parede, zoom, teclado, busca de fuso),
+`w25-shots` (capturas do README, em UEFI; o banner precisa de um gancho temporário de build),
+`w25-perf` e `w25-perf-hidden` (custo de uma janela Tarefas visível e minimizada).
+O registro foi ainda testado com um gancho temporário que enche o anel de 771 linhas.
+
+Custo de quadro (QEMU/TCG sem KVM, 1280x720, `perf-trace`; base = `bc31f5e`, mesmos cenários e
+mesma máquina, execuções intercaladas; o hospedeiro é compartilhado, então repetições do mesmo
+cenário variam uns 8 %):
+
+| Cenário | base | depois |
+|---|---|---|
+| ocioso (um tique de relógio por segundo) | 0,30 a 0,33 ms | 0,31 a 0,36 ms |
+| arrastar a janela, quadro de dano (4 execuções cada) | 6,0 a 6,8 ms (média 6,3) | 6,5 a 7,5 ms (média 6,9) |
+| Tarefas visível na aba CPU, quadro do gráfico em movimento | n/a | média 0,77 ms (pior 8,5 ms), 96 quadros por segundo contando os pulados |
+| Tarefas visível, o primeiro e o último quadro de cada amostra de 1 s | n/a | 21 ms (reconstrução) e 15 ms (assentar), uma vez por segundo |
+| Tarefas visível, CPU ocupada | n/a | 8,2 % |
+| Tarefas minimizada | n/a | 0 além do tique de relógio (0,31 ms), CPU 0,07 % |
+
+A meta de 4 ms para o quadro do gráfico fica folgada (0,77 ms): enquanto o gráfico desliza, o
+compositor repinta só o título e o gráfico, um quadro a cada 20 ms. O arrasto ficou perto de 10 %
+mais caro: o tempo dos retângulos arredondados no rastro por primitiva dobra mesmo com o mesmo
+número de chamadas (a janela arrastada é o Terminal, que não mudou), e a soma da composição só sobe
+uns 5 %; não achei a causa e não é efeito do repintar parcial (desligado numa imagem de teste, o
+resultado é o mesmo). Fica como lacuna conhecida.
+
 ## 5. Lint e supply chain
 
 ```bash

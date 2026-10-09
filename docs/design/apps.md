@@ -214,15 +214,15 @@ combustível).
 
 **Contabilidade por app:** combustível consumido (`fuel_total`), ticks de CPU (medidos em
 torno de cada chamada com `interrupts::ticks()`), pico de memória linear, nº de chamadas.
-O Gerenciador de tarefas mostra, por app (seção "APPS"): nome e instância, estado (`INI`, `RUN`,
-`SUS`, `END`, `ERR`), CPU (% do tempo de relógio das fatias do app na última janela de 1 s,
-medido com o TSC; inclui preempção) e memória linear em KiB.
+O app Tarefas (aba Processos) mostra, por app: nome e instância, estado (Em espera, Ativo, Suspenso,
+Encerrado, Parado), CPU (% do tempo de relógio das fatias do app na última janela de 1 s,
+medido com o TSC; inclui preempção) e memória linear.
 
 **Isolamento de falhas:** qualquer erro de uma chamada ao guest (`OutOfFuel`, trap,
 ponteiro inválido, `memory.grow` negado que o guest transforma em trap) vira `Crashou`
 **só daquela instância**; as demais, o compositor e o desktop seguem. `memory.grow` acima de
 `mem_mib` é negado pelo `StoreLimits` (devolve -1 ao guest, como manda a especificação).
-Gerenciador de tarefas: `DEL` fecha a janela (e mata o app) e `R` **reinicia** a instância
+Tarefas: **Encerrar** (ou `Del`) fecha a janela (e mata o app) e **Reiniciar** (`R`) reinicia a instância
 selecionada (descarta a `Store` e instancia de novo o mesmo pacote, na mesma janela).
 Limite honesto: se a **thread** `appd` morrer (pânico dentro do `wasmi`), todos os apps
 morrem juntos e a janela mostra "App encerrado"; não há reinício automático (mesma TCB de hoje).
