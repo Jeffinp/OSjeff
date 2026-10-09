@@ -75,16 +75,16 @@ foi exercitado em uma máquina Windows real: se falhar, o WSL continua sendo o c
 ### Sem tela (CI, servidor, nuvem)
 
 ```bash
-# sobe, espera 25 s, salva serial.log e screen.png em /tmp/osj
-tools/qemu-headless.sh bios /tmp/osj 25
-QEMU_MEM=256M tools/qemu-headless.sh uefi /tmp/osj-uefi 40
+# sobe, espera 25 s, salva serial.log e screen.png em /tmp/kit
+tools/qemu-headless.sh bios /tmp/kit 25
+QEMU_MEM=256M tools/qemu-headless.sh uefi /tmp/kit-uefi 40
 
 # build + boot BIOS e UEFI + comparação do desktop com uma baseline
-tools/verify-boot.sh /tmp/osj-novo /tmp/osj-baseline
+tools/verify-boot.sh /tmp/kit-novo /tmp/kit-baseline
 ```
 
 Para mandar teclas e mouse enquanto roda:
-`echo "sendkey a" | socat - UNIX-CONNECT:$(cat /tmp/osj/mon.path)`
+`echo "sendkey a" | socat - UNIX-CONNECT:$(cat /tmp/kit/mon.path)`
 (o socket fica em `/tmp` porque caminhos de socket Unix têm limite de 107 bytes).
 
 ## 4. Apps WebAssembly

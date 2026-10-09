@@ -242,10 +242,10 @@ boot com o mesmo disco monta com `fsck clean`. Queda de energia no meio de uma c
 Sem tela e sem KVM (TCG), BIOS e UEFI:
 
 ```bash
-tools/qemu-headless.sh bios /tmp/osj 25      # serial.log + screen.png
-QEMU_MEM=256M tools/qemu-headless.sh uefi /tmp/osj-uefi 40
-KEEP_FS=1 tools/qemu-headless.sh bios /tmp/osj 25   # reaproveita fs.img (persistência, disco corrompido)
-FS_SIZE=64K tools/qemu-headless.sh bios /tmp/osj 25 # disco antigo de 64 KiB (fica no OJFS v2)
+tools/qemu-headless.sh bios /tmp/kit 25      # serial.log + screen.png
+QEMU_MEM=256M tools/qemu-headless.sh uefi /tmp/kit-uefi 40
+KEEP_FS=1 tools/qemu-headless.sh bios /tmp/kit 25   # reaproveita fs.img (persistência, disco corrompido)
+FS_SIZE=64K tools/qemu-headless.sh bios /tmp/kit 25 # disco antigo de 64 KiB (fica no OJFS v2)
 ```
 
 O disco do filesystem do runner (`<outdir>/fs.img`) é um arquivo esparso de **64 MiB** por
@@ -303,10 +303,10 @@ variáveis (documentadas no cabeçalho do script; `QEMU_RNG=none` tira o `-devic
 que os scripts passam por padrão):
 
 ```bash
-QEMU_NIC=virtio tools/qemu-headless.sh bios /tmp/osj 25     # virtio-net em vez do NE2000 (ne2k, padrão; none = sem NIC)
+QEMU_NIC=virtio tools/qemu-headless.sh bios /tmp/kit 25     # virtio-net em vez do NE2000 (ne2k, padrão; none = sem NIC)
 QEMU_NIC=virtio QEMU_NETDEV="user,id=n0,net=192.168.77.0/24,host=192.168.77.2,dhcpstart=192.168.77.15,dns=192.168.77.3" \
-  tools/qemu-headless.sh bios /tmp/osj 25                   # outra sub-rede; o convidado vê o host em 192.168.77.2
-python3 -I tools/pcapsum.py /tmp/osj/net.pcap               # resumo: ARP, DHCP (tipo, unicast/broadcast), DNS, TCP, ICMP
+  tools/qemu-headless.sh bios /tmp/kit 25                   # outra sub-rede; o convidado vê o host em 192.168.77.2
+python3 -I tools/pcapsum.py /tmp/kit/net.pcap               # resumo: ARP, DHCP (tipo, unicast/broadcast), DNS, TCP, ICMP
 ```
 
 O que cada prova mostra no resumo do pcap e na serial (todas feitas [M] com o commit que as
@@ -318,8 +318,8 @@ introduziu; a serial tem `net:` e `dns:`):
 | página por virtio-net | `python3 -m http.server 8077 --bind 127.0.0.1` no host + navegador em `http://192.168.77.2:8077/` | `fetch: 279 bytes (status 200)` e a página na tela |
 | NE2000 não regride | `tools/verify-boot.sh` (0 pixels diferentes) e a mesma página com `QEMU_NIC` padrão | idem |
 | sem NIC | `QEMU_NIC=none` | `net: no network interface found`; o navegador mostra a falha na hora |
-| entropia: com virtio-rng (padrão) | `tools/qemu-headless.sh bios /tmp/osj 22` | `virtio-rng @ pci ...`, `RNG: strong (256 bits from hardware ...)` |
-| entropia: só jitter de temporização | `QEMU_RNG=none tools/qemu-headless.sh bios /tmp/osj 25 -- -cpu qemu64` (sem RDRAND/RDSEED; `-cpu max` os liga) | `RNG: no hardware generator; collecting timing jitter`, depois `RNG: pool seeded from timing jitter (N bits credited)` (N >= 128, em ~1-2 s) |
+| entropia: com virtio-rng (padrão) | `tools/qemu-headless.sh bios /tmp/kit 22` | `virtio-rng @ pci ...`, `RNG: strong (256 bits from hardware ...)` |
+| entropia: só jitter de temporização | `QEMU_RNG=none tools/qemu-headless.sh bios /tmp/kit 25 -- -cpu qemu64` (sem RDRAND/RDSEED; `-cpu max` os liga) | `RNG: no hardware generator; collecting timing jitter`, depois `RNG: pool seeded from timing jitter (N bits credited)` (N >= 128, em ~1-2 s) |
 | *client random* do TLS | `openssl s_server -accept 4443 ...` no host + `tools/qemu-browse.sh <out> https://10.0.2.2:4443/` + `python3 -I tools/tls-hello.py <out>/net.pcap` | um *client random* por conexão, todos diferentes entre conexões e entre boots (`design/entropy.md` §5) |
 | RENEW / REBIND / expiração | gancho **temporário** que força `lease_secs = Some(20)` e, nas variantes, descarta as respostas durante RENEWING (e REBINDING) | pcap: REQUEST unicast `10.0.2.15 -> 10.0.2.2` em T1 (~10 s); com a resposta descartada, REQUEST broadcast em T2 (~17,5 s); descartando também essa, na expiração (20 s) DISCOVER e novo lease |
 | ping | gancho **temporário** no boot chamando `netd::ping_us` | `ping gateway (10.0.2.2): reply rtt 525 us = 1 ms`; pcap: ICMP tipo 8 e 0; alvo sem ARP: `host did not answer ARP`; o próprio IP: `invalid target address` |
@@ -328,10 +328,10 @@ introduziu; a serial tem `net:` e `dns:`):
 Os ganchos são do padrão acima (remova antes de commitar); o lease de 20 s existe só para
 a prova (o mínimo de retransmissão do RFC é 60 s, mas é limitado pelo fim da etapa).
 
-**Autoteste de armazenamento** (build `perf-trace` com `OSJ_STORAGE_SELFTEST=1`):
+**Autoteste de armazenamento** (build `perf-trace` com `KITSUNE_STORAGE_SELFTEST=1`):
 
 ```bash
-OSJ_STORAGE_SELFTEST=1 cargo build --release -p os --features perf-trace
+KITSUNE_STORAGE_SELFTEST=1 cargo build --release -p os --features perf-trace
 ```
 
 depois do mount o boot cria `/selftest`, escreve 2 MiB com um padrão, relê e compara,

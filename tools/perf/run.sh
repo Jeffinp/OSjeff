@@ -19,7 +19,7 @@ set -u
 img=$1; mode=$2; out=$3; secs=$4; scen=${5:-}
 rm -rf "$out"; mkdir -p "$out"
 # Unix socket paths are limited to 107 bytes, so keep the monitor socket short.
-export MON_SOCK=$(mktemp -u /tmp/osj-mon.XXXXXX)
+export MON_SOCK=$(mktemp -u /tmp/kit-mon.XXXXXX)
 echo "$MON_SOCK" > "$out/mon.path"
 if [ -n "${FS_IMG:-}" ]; then cp "$FS_IMG" "$out/fs.img"; else truncate -s "${FS_SIZE:-64M}" "$out/fs.img"; fi  # sparse 64 MiB (OJFS v3 needs >= 1 MiB)
 # Entropy device: QEMU_RNG=virtio (default) adds `-device virtio-rng-pci` so the kernel

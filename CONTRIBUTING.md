@@ -49,7 +49,7 @@ cargo test-core
 cargo lint-kernel
 cargo lint-host
 cargo deny check
-tools/verify-boot.sh /tmp/osj-novo /tmp/osj-baseline    # se tocou em kernel/
+tools/verify-boot.sh /tmp/kit-novo /tmp/kit-baseline    # se tocou em kernel/
 ```
 
 O CI roda os quatro primeiros. Mudou o `Cargo.lock`, o `bootloader` ou o nightly?

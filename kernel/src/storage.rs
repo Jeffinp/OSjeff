@@ -108,7 +108,11 @@ fn format_options() -> FormatOptions {
 /// logged and leaves the machine on the RAM/v2 path it had before.
 pub fn init() {
     init_volume();
-    if crate::trace::ON && option_env!("OSJ_STORAGE_SELFTEST").is_some() && is_v3() {
+    if crate::trace::ON
+        && (option_env!("KITSUNE_STORAGE_SELFTEST").is_some()
+            || option_env!("OSJ_STORAGE_SELFTEST").is_some())
+        && is_v3()
+    {
         selftest();
     }
 }
@@ -264,7 +268,7 @@ fn format_and_seed(dev: AtaDisk) {
     verify_and_install(fs, sectors);
 }
 
-/// Boot-time storage self-test (perf-trace builds with `OSJ_STORAGE_SELFTEST` set at
+/// Boot-time storage self-test (perf-trace builds with `KITSUNE_STORAGE_SELFTEST` (or the old `OSJ_STORAGE_SELFTEST`) set at
 /// compile time): create `/selftest`, write 2 MiB with a pattern, read it back and
 /// compare, `fsck`, a burst of small files, delete everything, `fsck` again. Logs
 /// times and MiB/s on the serial. Real ATA PIO, so under TCG it measures the whole

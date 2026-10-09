@@ -8,10 +8,15 @@ renomeio mantêm o nome da época.
 
 - **Nome.** OSjeff vira **Kitsune** (a raposa de nove caudas do folclore japonês). Detalhes do nome em
   `docs/brand/NAMING.md`.
+- **Marca.** Uma raposa geométrica de frente, vetorial e procedural (`kitsune_core::brand`: 12 polígonos, versões
+  ícone, silhueta de uma cor e com caudas, redesenhada e ajustada para 16 a 128 px). Ela aparece no botão Apps do
+  painel, na barra de tarefas, em Ajustes > Sobre, na vinheta de abertura (com fade), nas abas das páginas
+  `kitsune://` e como ícone de app sem ícone. Os SVG, a paleta e as regras de uso estão em `docs/brand/`.
 - **Renomeado:** o crate `osjeff_core` virou `kitsune_core` (diretório incluso), as imagens `osjeff-bios.img` e
   `osjeff-uefi.img` viram `kitsune-bios.img` e `kitsune-uefi.img`, e os scripts, o CI, o fuzzing, os benchmarks e o SDK dos
   apps acompanham. Todo texto visível, o `User-Agent` (`Kitsune/<versão>`), o nome de máquina padrão (`kitsune`) e os
-  catálogos de idioma usam o nome novo.
+  catálogos de idioma usam o nome novo; a tela de falha diz `KITSUNE - KERNEL PANIC`. As variáveis de ambiente de
+  desenvolvimento passam a `KITSUNE_*` (`KITSUNE_STORAGE_SELFTEST`; a antiga `OSJ_STORAGE_SELFTEST` ainda vale).
 - **Protocolos e formatos:** `osjeff://` vira `kitsune://`; `/etc/osjeff.conf` vira `/etc/kitsune.conf`; as seções
   WASM `osjeff.manifest` e `osjeff.icon` viram `kitsune.manifest` e `kitsune.icon`.
 - **Compatibilidade mantida:** o navegador ainda entende `osjeff://` (e mostra o endereço novo); o arquivo de

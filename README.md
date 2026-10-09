@@ -73,7 +73,7 @@ tools/run.sh uefi            # idem em UEFI
 > O repositório ainda se chama `OSjeff` no GitHub; a URL de clonagem pode mudar quando ele for renomeado para `Kitsune` (o GitHub redireciona a antiga).
 
 
-Windows com aceleração: `.\run.ps1`. Sem tela (CI): `tools/qemu-headless.sh bios /tmp/osj 25`.
+Windows com aceleração: `.\run.ps1`. Sem tela (CI): `tools/qemu-headless.sh bios /tmp/kit 25`.
 Pendrive e hardware real: [`docs/BOOT-USB.md`](docs/BOOT-USB.md). Guia completo,
 variantes (DOOM) e solução de problemas: [`docs/BUILDING.md`](docs/BUILDING.md).
 
