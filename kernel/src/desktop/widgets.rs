@@ -2,6 +2,7 @@
 //! functions shared across the app/input/render modules).
 
 use super::*;
+use osjeff_core::style::PANEL_H;
 
 pub(crate) use osjeff_core::layout::{BrowserChrome, browser_home_layout};
 
@@ -27,20 +28,24 @@ pub(crate) fn dock_glass(c: &mut Canvas, panel: Rect, radius: i32) {
 }
 
 /// Paint the wallpaper into `c` (the cached background) and bake what depends only on
-/// it: the glass menu bar and the blurred strip behind the app bar.
+/// it: the top panel and the blurred strip behind the app bar.
 pub fn paint_background(c: &mut Canvas) {
     paint_wallpaper(c, &crate::settings::get());
     let (w, h) = (c.width() as i32, c.height() as i32);
     let p = theme::pal();
 
-    // Menu bar: the (blurred) wallpaper strip, a tint and a hairline.
-    let bar = Rect::new(0, 0, w, MENUBAR_H);
-    let strip = super::glass::Backdrop::capture(c, bar, 8);
+    // Panel: a lightly blurred wallpaper strip under a mostly opaque tint and a hairline, so it
+    // reads as a flat bar (not a glass sheet).
+    let bar = Rect::new(0, 0, w, PANEL_H);
+    let strip = super::glass::Backdrop::capture(c, bar, 4);
     strip.draw(c, bar, 0, 256);
     let (tc, ta) = theme::tint(p.menubar_tint);
     c.blend_rect(bar, tc, ta);
     let (sc, sa) = theme::tint(p.separator);
-    c.blend_rect(Rect::new(0, MENUBAR_H - 1, w, 1), sc, sa);
+    c.blend_rect(Rect::new(0, PANEL_H - 1, w, 1), sc, sa);
+    // A faint light line over the hairline: the panel's inner highlight.
+    let (gc, ga) = theme::tint(p.glass_edge);
+    c.blend_rect(Rect::new(0, PANEL_H - 2, w, 1), gc, ga / 3);
 
     // App bar backdrop: a blurred copy of the wallpaper around its resting position.
     let (rest, _) = osjeff_core::chrome::dock_rest(w, h, shell::DOCK_ITEMS.len(), Some(0));

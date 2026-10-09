@@ -12,8 +12,7 @@ shot_apps() { # <tag>
   dock_icon settings; click; sleep 0.9; shot "$t-settings"
 }
 shot_apps dark
-goto 1100 14; click; sleep 0.6; goto 953 188; click; sleep 0.6
-key esc; sleep 0.6; goto 700 400; sleep 0.3
+light_mode; goto 700 400; sleep 0.3
 shot light-desk
 shot_apps light
 finish

@@ -14,7 +14,7 @@ for f in "$a"/*.png; do
   [ -f "$b/$n" ] || { echo "$n: missing in B"; continue; }
   for side in a b; do
     src=$a; [ $side = b ] && src=$b
-    convert "$src/$n" -fill black -draw "rectangle 1040,0 1280,80" \
+    convert "$src/$n" -fill black -draw "rectangle 1040,0 1280,80" -draw "rectangle 560,0 720,30" \
       -draw "rectangle 1152,$((PY+7)) 1252,$((PY+25))" "$tmp/m$side.png"
   done
   ae=$(compare -metric AE "$tmp/ma.png" "$tmp/mb.png" null: 2>&1)

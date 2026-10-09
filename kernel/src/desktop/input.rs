@@ -413,7 +413,7 @@ impl Desktop {
         }
     }
 
-    /// A Ctrl chord from the menu bar for browser window `id`.
+    /// A Ctrl chord from a menu for browser window `id`.
     pub(crate) fn browser_ctrl_chord(&mut self, id: WindowId, c: char) {
         if c.is_ascii() {
             self.browser_ctrl_key(id, Key::Char(c as u8));
@@ -982,7 +982,7 @@ impl Desktop {
         let right_pressed = right && !self.prev_right;
         let released = !left && self.prev_left;
 
-        // Hover of the shell layers (menu bar, menus, Apps, Busca) and the app bar.
+        // Hover of the shell layers (panel, menus, Apps, Busca) and the app bar.
         if cursor_moved {
             if self.shell_pointer(cx, cy) {
                 scene = true;
@@ -998,7 +998,11 @@ impl Desktop {
                     self.kind_of(w) == Some(Kind::Files)
                         && self.wm.get(w).is_some_and(|win| !win.rect.on_title(cx, cy))
                 });
-            if let Some(i) = self.dock_item_at(cx, cy).filter(|_| !self.modal_open()) {
+            if let Some((item, _)) = self.panel_item_at(cx, cy).filter(|_| !self.modal_open()) {
+                self.close_transients();
+                self.panel_context(item);
+                scene = true;
+            } else if let Some(i) = self.dock_item_at(cx, cy).filter(|_| !self.modal_open()) {
                 self.close_transients();
                 self.dock_context(i, cx, cy);
                 scene = true;

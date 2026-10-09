@@ -26,7 +26,7 @@ impl Desktop {
             }
         }
         self.draw_dock(&mut c);
-        self.draw_menubar(&mut c, time);
+        self.draw_panel(&mut c, time);
         self.draw_overlays_in(&mut c, None);
     }
 
@@ -137,7 +137,7 @@ impl Desktop {
                 self.draw_window(&mut c, w, w.rect, focused == Some(w.id), !w.maximized);
             }
         }
-        self.draw_menubar(&mut c, time);
+        self.draw_panel(&mut c, time);
     }
 
     /// Renders one animation frame using damage tracking: only the rectangle
@@ -241,8 +241,8 @@ impl Desktop {
                 copy_region(back, static_buf, info, clip);
             }
         }
-        // The menu bar is above every window (a shadow may have reached it).
-        if let Some(bar) = self.menubar_rect().intersection(&damage) {
+        // The panel is above every window (a shadow may have reached it).
+        if let Some(bar) = self.panel_rect().intersection(&damage) {
             copy_region(back, static_buf, info, bar);
         }
 

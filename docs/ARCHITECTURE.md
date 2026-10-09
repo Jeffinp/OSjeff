@@ -618,13 +618,14 @@ quadro (algumas dezenas de valores).
   reaponta sem salto, a animação de janela (`Anim`), o zoom e o salto de lançamento. Tudo avança
   por tempo real e reporta se ainda se move, e é isso que decide se o laço fica no caminho de
   animação (`has_animation`) ou volta a custar zero.
-- **Cromo e shell** (`chrome`, `widgets`, `style`, `search`, `iconart`): geometria da barra de
-  menus, dos menus, da barra de apps (disposição e curva de ampliação), do Apps, da Busca, dos
-  popovers e dos banners; paletas clara e escura; o ranqueamento e a calculadora da Busca; os
+- **Cromo e shell** (`chrome`, `widgets`, `style`, `search`, `iconart`): geometria do painel
+  superior (itens à esquerda, relógio centralizado, pílula de status), dos menus, da barra de apps
+  (disposição e curva de ampliação), do Apps, da Busca, dos popovers (Configurações rápidas,
+  calendário com centro de notificações) e dos banners; paletas clara e escura; o ranqueamento e a calculadora da Busca; os
   ícones e glifos vetoriais.
 
 No kernel: `desktop/shell.rs` guarda o estado (menus, popovers, folha, Apps, Busca, barra de
-apps) e executa os comandos (`Cmd`), `menubar.rs`, `dock.rs`, `overlays.rs`, `chrome.rs` e
+apps) e executa os comandos (`Cmd`), `panel.rs`, `dock.rs`, `overlays.rs`, `chrome.rs` e
 `cursor.rs` desenham e tratam entrada, `glass.rs` captura o fundo borrado **uma vez** quando uma
 superfície abre, e `ui.rs`/`gallery.rs` são o toolkit e sua vitrine. A janela do Alt+Tab, os
 banners e o HUD usam o mesmo vidro. Aparência (automática pelo relógio, clara, escura), cor de

@@ -457,9 +457,10 @@ impl Desktop {
         self.procs.tick();
         self.refresh_logs();
         self.refresh_date();
+        self.refresh_notifs();
     }
 
-    /// Read the local date once a second (the menu bar clock and the calendar).
+    /// Read the local date once a second (the panel clock and the calendar).
     fn refresh_date(&mut self) {
         let hour = crate::rtc::now().h;
         if hour != self.shell.last_hour {
@@ -862,8 +863,8 @@ mod instance;
 mod kit;
 mod live;
 mod logview;
-mod menubar;
 mod overlays;
+mod panel;
 mod render;
 mod settings_ui;
 mod shell;

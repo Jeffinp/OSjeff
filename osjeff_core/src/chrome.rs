@@ -1,44 +1,78 @@
-//! Geometry of the system chrome: menu bar, menu panels, dock (with
-//! magnification), Launchpad grid, Spotlight, popovers, toasts and the calendar.
+//! Geometry of the system chrome: the top panel, menu panels, the taskbar, the Apps grid,
+//! Busca, popovers (Quick Settings, the calendar and notification centre), toasts and the
+//! calendar.
 //!
-//! Pure integer layout (plus one `f32` magnification curve evaluated for a dozen
-//! dock icons per frame), shared by the kernel's drawing code and its hit
-//! testing so the two can never disagree. All sizes follow the 4 px grid of the
-//! design spec (`docs/design/ui-macos.md`).
+//! Pure integer layout shared by the kernel's drawing code and its hit testing so the two can
+//! never disagree. All sizes follow the 4 px grid of the design spec
+//! (`docs/design/ui-identity.md`, tokens in `docs/design/ui-macos.md`).
 
 use crate::window::Rect;
 use alloc::vec::Vec;
 
-pub use crate::style::MENUBAR_H;
+pub use crate::style::{MENUBAR_H, PANEL_H};
 
-// ------------------------------------------------------------------- menu bar
+// ---------------------------------------------------------------------- panel
 
-/// Horizontal padding inside a menu bar item (each side).
-pub const BAR_PAD: i32 = 8;
+/// Horizontal padding inside a panel item (each side).
+pub const PANEL_PAD: i32 = 10;
 /// Margin between the screen edge and the first / last item.
-pub const BAR_EDGE: i32 = 6;
+pub const PANEL_EDGE: i32 = 6;
+/// Gap between neighbouring panel items.
+pub const PANEL_GAP: i32 = 2;
+/// Padding of the status pill's icons and their pitch.
+pub const PILL_ICON: i32 = 16;
+pub const PILL_PITCH: i32 = 26;
+pub const PILL_PAD: i32 = 8;
 
-/// Lay the menu bar items out: `left` content widths run from the left edge,
-/// `right` ones from the right edge, in the order given (so the first of `right`
-/// is the leftmost of the right group). Each item is its content plus
-/// [`BAR_PAD`] on both sides and spans the whole bar height (a generous hit area).
-pub fn menubar_layout(sw: i32, left: &[i32], right: &[i32]) -> (Vec<Rect>, Vec<Rect>) {
+/// Where the panel's items sit: `left` ones flow from the left edge, the `center` one is centred on
+/// the screen and the `right` ones flow to the right edge. Every item is its content width plus
+/// [`PANEL_PAD`] on both sides and spans the whole panel height (a generous hit area).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PanelRects {
+    pub left: Vec<Rect>,
+    pub center: Rect,
+    pub right: Vec<Rect>,
+}
+
+pub fn panel_layout(sw: i32, left: &[i32], center_w: i32, right: &[i32]) -> PanelRects {
     let mut l = Vec::with_capacity(left.len());
-    let mut x = BAR_EDGE;
+    let mut x = PANEL_EDGE;
     for &w in left {
-        let iw = w + 2 * BAR_PAD;
-        l.push(Rect::new(x, 0, iw, MENUBAR_H));
-        x += iw;
+        let iw = w + 2 * PANEL_PAD;
+        l.push(Rect::new(x, 0, iw, PANEL_H));
+        x += iw + PANEL_GAP;
     }
-    let total: i32 = right.iter().map(|w| w + 2 * BAR_PAD).sum();
+    let cw = center_w + 2 * PANEL_PAD;
+    let center = Rect::new(sw / 2 - cw / 2, 0, cw, PANEL_H);
+    let total: i32 = right.iter().map(|w| w + 2 * PANEL_PAD).sum::<i32>()
+        + PANEL_GAP * right.len().saturating_sub(1) as i32;
     let mut r = Vec::with_capacity(right.len());
-    let mut x = sw - BAR_EDGE - total;
+    let mut x = sw - PANEL_EDGE - total;
     for &w in right {
-        let iw = w + 2 * BAR_PAD;
-        r.push(Rect::new(x, 0, iw, MENUBAR_H));
-        x += iw;
+        let iw = w + 2 * PANEL_PAD;
+        r.push(Rect::new(x, 0, iw, PANEL_H));
+        x += iw + PANEL_GAP;
     }
-    (l, r)
+    PanelRects {
+        left: l,
+        center,
+        right: r,
+    }
+}
+
+/// Content width of the status pill with `n` icons.
+pub fn pill_width(n: usize) -> i32 {
+    (n as i32 * PILL_PITCH - (PILL_PITCH - PILL_ICON)).max(0)
+}
+
+/// The rectangle of icon `i` inside the pill `r` (which already includes [`PANEL_PAD`]).
+pub fn pill_icon(r: Rect, i: usize) -> Rect {
+    Rect::new(
+        r.x + PANEL_PAD + i as i32 * PILL_PITCH,
+        r.y + (r.h - PILL_ICON) / 2,
+        PILL_ICON,
+        PILL_ICON,
+    )
 }
 
 /// Index of the rectangle containing `(x, y)`.
@@ -322,68 +356,97 @@ pub fn spotlight_geom(sw: i32, sh: i32, n: usize) -> SpotGeom {
 /// aligned with the item's (clamped to the screen).
 pub fn popover_rect(anchor: Rect, w: i32, h: i32, sw: i32) -> Rect {
     let x = (anchor.right() - w).clamp(8, (sw - w - 8).max(8));
-    Rect::new(x, MENUBAR_H + 6, w, h)
+    Rect::new(x, PANEL_H + 6, w, h)
 }
 
-// ------------------------------------------------------------- Control popover
+// ---------------------------------------------------------------- Quick Settings
 
-pub const CONTROL_W: i32 = 320;
-pub const CONTROL_H: i32 = 352;
+pub const QUICK_W: i32 = 344;
+pub const QUICK_H: i32 = 360;
+/// Tiles of the Quick Settings grid, in reading order.
+pub const QUICK_TILES: usize = 6;
+pub const QUICK_TILE_H: i32 = 56;
 
-/// Rectangles inside the Controls popover `r`.
+/// What a Quick Settings tile does (the order of [`QuickGeom::tiles`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum QuickTile {
+    Network,
+    Appearance,
+    ReduceMotion,
+    DoNotDisturb,
+    Clock24,
+    Settings,
+}
+
+pub const QUICK_ORDER: [QuickTile; QUICK_TILES] = [
+    QuickTile::Network,
+    QuickTile::Appearance,
+    QuickTile::ReduceMotion,
+    QuickTile::DoNotDisturb,
+    QuickTile::Clock24,
+    QuickTile::Settings,
+];
+
+/// Rectangles inside the Quick Settings popover `r`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ControlGeom {
-    /// Title row.
+pub struct QuickGeom {
     pub title: Rect,
-    /// The network card (icon, status, address).
-    pub net: Rect,
-    /// Appearance label and its segmented control (Auto / Claro / Escuro).
-    pub appearance_label: Rect,
-    pub appearance: Rect,
-    /// Accent label and the eight swatches.
+    /// Two columns by three rows of tiles.
+    pub tiles: [Rect; QUICK_TILES],
     pub accent_label: Rect,
     pub swatches: [Rect; 8],
-    /// The three switch rows: label rect and switch rect (reduce motion, 24 h clock, banners).
-    pub rows: [(Rect, Rect); 3],
+    /// Restart and shut down.
+    pub restart: Rect,
+    pub shutdown: Rect,
 }
 
-pub fn control_geom(r: Rect) -> ControlGeom {
+pub fn quick_geom(r: Rect) -> QuickGeom {
     let pad = 16;
     let w = r.w - 2 * pad;
     let title = Rect::new(r.x + pad, r.y + 14, w, 24);
-    let net = Rect::new(r.x + pad, title.bottom() + 8, w, 56);
-    let appearance_label = Rect::new(r.x + pad, net.bottom() + 16, w, 18);
-    let appearance = Rect::new(r.x + pad, appearance_label.bottom() + 4, w, 28);
-    let accent_label = Rect::new(r.x + pad, appearance.bottom() + 16, w, 18);
+    let gap = 8;
+    let tw = (w - gap) / 2;
+    let top = title.bottom() + 10;
+    let mut tiles = [Rect::new(0, 0, 0, 0); QUICK_TILES];
+    for (i, t) in tiles.iter_mut().enumerate() {
+        let (row, col) = (i as i32 / 2, i as i32 % 2);
+        *t = Rect::new(
+            r.x + pad + col * (tw + gap),
+            top + row * (QUICK_TILE_H + gap),
+            if col == 1 { w - tw - gap } else { tw },
+            QUICK_TILE_H,
+        );
+    }
+    let accent_label = Rect::new(r.x + pad, tiles[QUICK_TILES - 1].bottom() + 14, w, 18);
     let sw = 24;
-    let gap = (w - 8 * sw) / 7;
+    let sgap = (w - 8 * sw) / 7;
     let mut swatches = [Rect::new(0, 0, 0, 0); 8];
     for (i, s) in swatches.iter_mut().enumerate() {
         *s = Rect::new(
-            r.x + pad + i as i32 * (sw + gap),
+            r.x + pad + i as i32 * (sw + sgap),
             accent_label.bottom() + 6,
             sw,
             sw,
         );
     }
-    let mut rows = [(Rect::new(0, 0, 0, 0), Rect::new(0, 0, 0, 0)); 3];
-    let mut y = swatches[0].bottom() + 14;
-    for row in rows.iter_mut() {
-        let label = Rect::new(r.x + pad, y, w - 48, 24);
-        let sw_rect =
-            crate::widgets::switch_rect(r.right() - pad - crate::widgets::SWITCH_W, y + 1);
-        *row = (label, sw_rect);
-        y += 30;
-    }
-    ControlGeom {
+    let by = swatches[0].bottom() + 16;
+    let bw = (w - gap) / 2;
+    QuickGeom {
         title,
-        net,
-        appearance_label,
-        appearance,
+        tiles,
         accent_label,
         swatches,
-        rows,
+        restart: Rect::new(r.x + pad, by, bw, 32),
+        shutdown: Rect::new(r.x + pad + bw + gap, by, w - bw - gap, 32),
     }
+}
+
+/// The tile under `(x, y)`.
+pub fn quick_tile_at(g: &QuickGeom, x: i32, y: i32) -> Option<QuickTile> {
+    g.tiles
+        .iter()
+        .position(|t| t.contains(x, y))
+        .map(|i| QUICK_ORDER[i])
 }
 
 // ------------------------------------------------------------- Calendar popover
@@ -433,6 +496,77 @@ pub fn calendar_geom(r: Rect) -> CalendarGeom {
     }
 }
 
+// ------------------------------------------------- calendar and notification centre
+
+pub const CENTRE_W: i32 = 640;
+pub const CENTRE_H: i32 = 364;
+/// Notification rows shown at once.
+pub const CENTRE_ROWS: usize = 4;
+pub const CENTRE_ROW_H: i32 = 48;
+
+/// Rectangles inside the calendar and notification centre popover `r`: notifications at the
+/// left (GNOME's arrangement), the calendar at the right.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CentreGeom {
+    /// Big weekday and the date line under it.
+    pub day: Rect,
+    pub date: Rect,
+    pub notif_title: Rect,
+    pub clear: Rect,
+    pub rows: [Rect; CENTRE_ROWS],
+    /// Shown instead of the rows when there are no notifications.
+    pub empty: Rect,
+    pub dnd_label: Rect,
+    pub dnd_switch: Rect,
+    /// The calendar's own rectangle (feed it to [`calendar_geom`]).
+    pub calendar: Rect,
+}
+
+pub fn centre_geom(r: Rect) -> CentreGeom {
+    let pad = 16;
+    let left_w = r.w - CAL_W - 3 * pad;
+    let day = Rect::new(r.x + pad, r.y + 14, left_w, 28);
+    let date = Rect::new(r.x + pad, day.bottom(), left_w, 18);
+    let notif_title = Rect::new(r.x + pad, date.bottom() + 16, left_w - 72, 24);
+    let clear = Rect::new(r.x + pad + left_w - 68, notif_title.y, 68, 24);
+    let mut rows = [Rect::new(0, 0, 0, 0); CENTRE_ROWS];
+    for (i, row) in rows.iter_mut().enumerate() {
+        *row = Rect::new(
+            r.x + pad,
+            notif_title.bottom() + 6 + i as i32 * CENTRE_ROW_H,
+            left_w,
+            CENTRE_ROW_H - 4,
+        );
+    }
+    let empty = Rect::new(
+        r.x + pad,
+        notif_title.bottom() + 6,
+        left_w,
+        CENTRE_ROWS as i32 * CENTRE_ROW_H - 4,
+    );
+    let dnd_y = r.bottom() - pad - 28;
+    let dnd_label = Rect::new(r.x + pad, dnd_y, left_w - 56, 28);
+    let dnd_switch =
+        crate::widgets::switch_rect(r.x + pad + left_w - crate::widgets::SWITCH_W, dnd_y + 2);
+    CentreGeom {
+        day,
+        date,
+        notif_title,
+        clear,
+        rows,
+        empty,
+        dnd_label,
+        dnd_switch,
+        calendar: Rect::new(r.right() - CAL_W - pad, r.y + 8, CAL_W, CAL_H),
+    }
+}
+
+/// A popover of size `w x h` centred under the panel item `anchor` (kept on screen).
+pub fn popover_centered(anchor: Rect, w: i32, h: i32, sw: i32) -> Rect {
+    let x = (anchor.x + anchor.w / 2 - w / 2).clamp(8, (sw - w - 8).max(8));
+    Rect::new(x, PANEL_H + 6, w, h)
+}
+
 // --------------------------------------------------------------------- toasts
 
 pub const TOAST_W: i32 = 344;
@@ -476,19 +610,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn menubar_items_flow_from_both_edges() {
-        let (l, r) = menubar_layout(1280, &[20, 60, 40], &[30, 100]);
-        assert_eq!(l[0], Rect::new(BAR_EDGE, 0, 36, MENUBAR_H));
-        assert_eq!(l[1].x, l[0].right());
-        assert_eq!(l[2].x, l[1].right());
-        assert_eq!(r[1].right(), 1280 - BAR_EDGE);
-        assert_eq!(r[0].right(), r[1].x);
-        assert!(l[2].right() < r[0].x);
-        assert!(l.iter().chain(&r).all(|x| x.h == MENUBAR_H && x.y == 0));
-        assert_eq!(rect_at(&l, l[1].x + 3, 10), Some(1));
-        assert_eq!(rect_at(&l, 600, 10), None);
-        assert_eq!(rect_at(&r, r[0].x, 27), Some(0));
-        assert_eq!(rect_at(&r, r[0].x, 28), None);
+    fn panel_items_flow_from_both_edges_and_the_clock_is_centred() {
+        let g = panel_layout(1280, &[60, 16], 110, &[pill_width(3)]);
+        assert_eq!(
+            g.left[0],
+            Rect::new(PANEL_EDGE, 0, 60 + 2 * PANEL_PAD, PANEL_H)
+        );
+        assert_eq!(g.left[1].x, g.left[0].right() + PANEL_GAP);
+        // The clock sits on the screen's centre line, whatever the sides hold.
+        let cx = g.center.x + g.center.w / 2;
+        assert!((cx - 640).abs() <= 1);
+        assert_eq!(g.right[0].right(), 1280 - PANEL_EDGE);
+        assert!(g.left[1].right() < g.center.x && g.center.right() < g.right[0].x);
+        for r in g.left.iter().chain(&g.right).chain([&g.center]) {
+            assert_eq!((r.y, r.h), (0, PANEL_H));
+        }
+        assert_eq!(rect_at(&g.left, g.left[1].x + 3, 10), Some(1));
+        assert_eq!(rect_at(&g.left, 600, 10), None);
+        assert_eq!(rect_at(&g.right, g.right[0].x, PANEL_H - 1), Some(0));
+        assert_eq!(rect_at(&g.right, g.right[0].x, PANEL_H), None);
+        // Several right items keep their order with the gap between them.
+        let two = panel_layout(1280, &[], 100, &[20, 30]);
+        assert_eq!(two.right[1].right(), 1280 - PANEL_EDGE);
+        assert_eq!(two.right[0].right() + PANEL_GAP, two.right[1].x);
+    }
+
+    #[test]
+    fn the_status_pill_places_its_icons_on_a_pitch() {
+        let g = panel_layout(1280, &[], 100, &[pill_width(3)]);
+        let pill = g.right[0];
+        assert_eq!(pill.w, pill_width(3) + 2 * PANEL_PAD);
+        let icons: Vec<Rect> = (0..3).map(|i| pill_icon(pill, i)).collect();
+        assert_eq!(icons[1].x - icons[0].x, PILL_PITCH);
+        assert_eq!(icons[0].x, pill.x + PANEL_PAD);
+        assert_eq!(icons[2].right() + PANEL_PAD, pill.right());
+        for i in &icons {
+            assert_eq!((i.w, i.h), (PILL_ICON, PILL_ICON));
+            assert_eq!(i.y - pill.y, pill.bottom() - i.bottom());
+        }
     }
 
     #[test]
@@ -694,38 +853,72 @@ mod tests {
 
     #[test]
     fn popover_contents_fit_their_popovers() {
-        let r = Rect::new(900, 34, CONTROL_W, CONTROL_H);
-        let g = control_geom(r);
-        let all = [
-            g.title,
-            g.net,
-            g.appearance_label,
-            g.appearance,
-            g.accent_label,
-        ];
-        for x in all.iter().chain(g.swatches.iter()) {
-            assert!(
-                x.x >= r.x && x.right() <= r.right() && x.y >= r.y && x.bottom() <= r.bottom(),
-                "{x:?}"
-            );
+        let r = Rect::new(900, 36, QUICK_W, QUICK_H);
+        let g = quick_geom(r);
+        let inside = |x: &Rect, r: &Rect| {
+            x.x >= r.x && x.right() <= r.right() && x.y >= r.y && x.bottom() <= r.bottom()
+        };
+        for x in [g.title, g.accent_label, g.restart, g.shutdown]
+            .iter()
+            .chain(g.tiles.iter())
+            .chain(g.swatches.iter())
+        {
+            assert!(inside(x, &r), "{x:?}");
         }
-        for (l, s) in g.rows {
-            assert!(l.right() <= s.x && s.right() <= r.right() && s.bottom() <= r.bottom());
-        }
-        // Rows go top to bottom without overlap.
-        assert!(
-            g.net.bottom() <= g.appearance_label.y && g.appearance.bottom() <= g.accent_label.y
-        );
-        assert!(g.swatches[0].bottom() <= g.rows[0].0.y);
+        // Tiles: two columns, three rows, no overlap, in reading order.
+        assert_eq!(g.tiles[1].x, g.tiles[0].right() + 8);
+        assert_eq!(g.tiles[2].y, g.tiles[0].bottom() + 8);
+        assert_eq!(g.tiles[1].right(), r.right() - 16);
+        assert!(g.tiles[QUICK_TILES - 1].bottom() <= g.accent_label.y);
+        assert!(g.swatches[0].bottom() <= g.restart.y);
         for w in g.swatches.windows(2) {
             assert!(w[0].right() <= w[1].x);
         }
-        let cr = Rect::new(900, 34, CAL_W, CAL_H);
-        let c = calendar_geom(cr);
-        assert!(c.cells[5][6].bottom() <= cr.bottom() && c.cells[5][6].right() <= cr.right());
-        assert!(c.prev.right() <= c.next.x && c.next.right() <= cr.right());
-        assert!(c.title.right() <= c.prev.x);
-        assert_eq!(c.cells[0][1].x - c.cells[0][0].x, c.cells[0][0].w);
+        assert!(g.restart.right() < g.shutdown.x);
+        assert_eq!(
+            quick_tile_at(&g, g.tiles[3].x + 4, g.tiles[3].y + 4),
+            Some(QuickTile::DoNotDisturb)
+        );
+        assert_eq!(quick_tile_at(&g, r.x, r.y), None);
+
+        let cr = Rect::new(300, 36, CENTRE_W, CENTRE_H);
+        let c = centre_geom(cr);
+        for x in [
+            c.day,
+            c.date,
+            c.notif_title,
+            c.clear,
+            c.empty,
+            c.dnd_label,
+            c.dnd_switch,
+            c.calendar,
+        ]
+        .iter()
+        .chain(c.rows.iter())
+        {
+            assert!(inside(x, &cr), "{x:?}");
+        }
+        // Notifications at the left, the calendar at the right, the rows stacked.
+        assert!(c.empty.right() < c.calendar.x);
+        assert!(c.rows[CENTRE_ROWS - 1].bottom() <= c.dnd_label.y);
+        assert!(c.notif_title.right() <= c.clear.x);
+        assert!(c.dnd_label.right() <= c.dnd_switch.x);
+        for w in c.rows.windows(2) {
+            assert!(w[0].bottom() <= w[1].y);
+        }
+        let cal = calendar_geom(c.calendar);
+        assert!(cal.cells[5][6].bottom() <= cr.bottom() && cal.cells[5][6].right() <= cr.right());
+        assert!(cal.prev.right() <= cal.next.x && cal.next.right() <= c.calendar.right());
+        assert!(cal.title.right() <= cal.prev.x);
+        assert_eq!(cal.cells[0][1].x - cal.cells[0][0].x, cal.cells[0][0].w);
+        // The centred popover stays under the panel and on the screen.
+        let p = popover_centered(Rect::new(560, 0, 160, PANEL_H), CENTRE_W, CENTRE_H, 1280);
+        assert_eq!((p.y, p.w), (PANEL_H + 6, CENTRE_W));
+        assert!(((p.x + p.w / 2) - 640).abs() <= 1);
+        assert_eq!(
+            popover_centered(Rect::new(0, 0, 40, PANEL_H), CENTRE_W, CENTRE_H, 1280).x,
+            8
+        );
     }
 
     #[test]

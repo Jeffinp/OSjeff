@@ -24,7 +24,6 @@ pub(crate) enum Cmd {
     Shutdown,
     NewWindow,
     CloseWindow,
-    Quit,
     Minimize,
     Zoom,
     Copy,
@@ -77,25 +76,22 @@ impl Entry {
     }
 }
 
-/// An item of the menu bar.
+/// An item of the top panel.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum BarItem {
-    /// The system menu (the OSjeff mark).
-    System,
-    /// The focused app's name (bold): its quit command.
-    AppName,
-    /// One of the focused app's menus (File, Edit, ...), by position.
-    Menu(usize),
-    Network,
-    Control,
+pub(crate) enum PanelItem {
+    /// The OSjeff mark and "Apps": opens the launcher.
+    Apps,
+    /// Busca.
     Search,
+    /// The date and time: the calendar and notification centre.
     Clock,
+    /// The status pill: Quick Settings.
+    Tray,
 }
 
 /// Where an open menu came from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum MenuOrigin {
-    Bar(BarItem),
     /// The menu button in a window's title bar.
     Window(WindowId),
     /// A right-click menu (desktop or an app-bar icon).
@@ -116,11 +112,13 @@ pub(crate) struct OpenMenu {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum PopKind {
-    Control,
-    Calendar,
+    /// Quick Settings, under the status pill.
+    Quick,
+    /// The calendar and notification centre, under the clock.
+    Centre,
 }
 
-/// A popover under a menu-bar item.
+/// A popover under a panel item.
 pub(crate) struct Popover {
     pub kind: PopKind,
     pub rect: Rect,
@@ -273,13 +271,18 @@ pub(crate) struct Shell {
     pub apps: Option<AppsView>,
     pub search: Option<SearchView>,
     pub dock: DockState,
-    /// Menu-bar item under the pointer (highlight).
-    pub bar_hover: Option<BarItem>,
+    /// Panel item under the pointer (highlight).
+    pub panel_hover: Option<PanelItem>,
+    /// The notification centre's history (oldest first), the log cursor that feeds it and how
+    /// many entries arrived since the centre was last opened.
+    pub notifs: Vec<super::panel::Notif>,
+    pub notif_seen: u32,
+    pub notif_unread: usize,
     /// The performance HUD (Ctrl+Alt+H).
     pub hud: bool,
     /// Region of the Apps overlay that changed since it was last painted.
     pub dirty: Cell<Rect>,
-    /// Control Center: the 12-hour / 24-hour and similar toggles animate here.
+    /// Quick Settings and the notification centre: their switches animate here.
     pub knobs: [Tween; 3],
     /// Last time of day (seconds) the appearance was resolved for (Auto).
     pub last_hour: u8,
@@ -297,7 +300,10 @@ impl Shell {
             apps: None,
             search: None,
             dock: DockState::new(),
-            bar_hover: None,
+            panel_hover: None,
+            notifs: Vec::new(),
+            notif_seen: crate::klog::seq(),
+            notif_unread: 0,
             hud: false,
             dirty: Cell::new(Rect::new(0, 0, 0, 0)),
             knobs: [Tween::at(0.0); 3],
@@ -519,20 +525,6 @@ impl Desktop {
             Cmd::CloseWindow => {
                 if let Some((id, _)) = target {
                     self.request_close(id);
-                }
-            }
-            Cmd::Quit => {
-                if let Some((_, kind)) = target {
-                    let ids: Vec<WindowId> = self
-                        .wm
-                        .windows()
-                        .iter()
-                        .filter(|w| w.app.kind() == kind)
-                        .map(|w| w.id)
-                        .collect();
-                    for id in ids {
-                        self.request_close(id);
-                    }
                 }
             }
             Cmd::Minimize => {

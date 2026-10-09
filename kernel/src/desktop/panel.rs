@@ -1,16 +1,31 @@
-//! The menu bar (system menu, app name, the focused app's menus, status items,
-//! clock), the menus and the popovers (Controls, calendar) that hang from it.
+//! The top panel: the Apps button and Busca at the left, the date and time in the centre
+//! (opening the calendar and notification centre) and the status pill at the right (opening
+//! Quick Settings); plus the menus (the system menu, a window's menu button, context menus) and
+//! the popovers that hang from the panel. See `docs/design/ui-identity.md`.
 
-use super::glass::panel;
+use super::glass::panel as glass_panel;
 use super::shell::*;
 use super::*;
-use crate::text::{self, BODY, FOOTNOTE, TITLE3, Weight};
-use osjeff_core::chrome::{self, MenuRow, menu_geom, menubar_layout, popover_rect};
+use crate::text::{self, BODY, FOOTNOTE, TITLE2, TITLE3, Weight};
+use osjeff_core::chrome::PANEL_PAD;
+use osjeff_core::chrome::{
+    self, MenuRow, QuickTile, centre_geom, menu_geom, panel_layout, popover_centered, popover_rect,
+    quick_geom,
+};
 use osjeff_core::iconart::Glyph;
 use osjeff_core::snap::SnapZone;
-use osjeff_core::style::{R_MENU, R_POPOVER};
+use osjeff_core::style::{PANEL_H, R_CONTROL, R_MENU, R_POPOVER};
 
 const WEEKDAYS: [&str; 7] = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+const WEEKDAYS_LONG: [&str; 7] = [
+    "Domingo",
+    "Segunda-feira",
+    "Terça-feira",
+    "Quarta-feira",
+    "Quinta-feira",
+    "Sexta-feira",
+    "Sábado",
+];
 const MONTHS: [&str; 12] = [
     "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez",
 ];
@@ -32,10 +47,52 @@ const MONTH_NAMES: [&str; 12] = [
 /// Widest the clock text can be: reserves the item's width so it never reflows.
 const CLOCK_TEMPLATE: &str = "qua 00 out  00:00";
 const CLOCK_TEMPLATE_12: &str = "qua 00 out  00:00 PM";
+/// Room kept left of the clock text for the unread-notifications dot.
+const CLOCK_DOT_W: i32 = 14;
+/// Most notifications kept for the centre.
+const NOTIF_MAX: usize = 24;
+
+/// One entry of the notification centre's history.
+pub(crate) struct Notif {
+    pub level: crate::klog::Level,
+    pub text: String,
+    pub ms: u32,
+}
+
+fn level_title(l: crate::klog::Level) -> &'static str {
+    use crate::klog::Level;
+    match l {
+        Level::Trace | Level::Debug | Level::Info => "Informação",
+        Level::Warn => "Aviso",
+        Level::Error => "Erro",
+        Level::Fatal => "Falha grave",
+    }
+}
+
+fn level_color(l: crate::klog::Level) -> Color {
+    use crate::klog::Level;
+    match l {
+        Level::Warn => Color::rgb(0xF5, 0xA6, 0x23),
+        Level::Error => theme::CLOSE,
+        Level::Fatal => Color::rgb(0xFF, 0x4D, 0x9D),
+        _ => theme::accent(),
+    }
+}
+
+/// "agora", "3 min", "2 h": how long ago a notification arrived.
+fn age_text(now_ms: u32, ms: u32) -> String {
+    let secs = now_ms.wrapping_sub(ms) / 1000;
+    match secs {
+        0..=44 => String::from("agora"),
+        45..=3599 => alloc::format!("{} min", (secs + 30) / 60),
+        _ => alloc::format!("{} h", secs / 3600),
+    }
+}
 
 impl Desktop {
-    pub fn menubar_rect(&self) -> Rect {
-        Rect::new(0, 0, self.sw, MENUBAR_H)
+    /// The panel's rectangle (its glass is baked into the cached wallpaper).
+    pub fn panel_rect(&self) -> Rect {
+        Rect::new(0, 0, self.sw, PANEL_H)
     }
 
     /// The text of the clock item (`qui 8 out  18:09`).
@@ -81,54 +138,38 @@ impl Desktop {
         } else {
             CLOCK_TEMPLATE_12
         };
-        text::measure(t, BODY, Weight::Regular)
+        text::measure(t, BODY, Weight::Medium) + CLOCK_DOT_W
     }
 
-    /// Names of the focused app's menus and its display name.
-    fn bar_names(&self) -> (String, Vec<&'static str>) {
-        match self.focused().and_then(|id| self.kind_of(id)) {
-            Some(k) => (
-                String::from(k.label()),
-                alloc::vec!["Arquivo", "Editar", "Visualizar", "Janela"],
-            ),
-            None => (String::from("Mesa"), alloc::vec!["Arquivo", "Janela"]),
-        }
+    /// Every panel item with its rectangle.
+    pub(crate) fn panel_items(&self) -> Vec<(PanelItem, Rect)> {
+        let apps_w = 16 + 8 + text::measure("Apps", BODY, Weight::Medium);
+        let left = [apps_w, 16];
+        let right = [chrome::pill_width(3)];
+        let g = panel_layout(self.sw, &left, self.clock_width(), &right);
+        alloc::vec![
+            (PanelItem::Apps, g.left[0]),
+            (PanelItem::Search, g.left[1]),
+            (PanelItem::Clock, g.center),
+            (PanelItem::Tray, g.right[0]),
+        ]
     }
 
-    /// Every menu-bar item with its rectangle.
-    pub(crate) fn bar_items(&self) -> Vec<(BarItem, Rect)> {
-        let (app, menus) = self.bar_names();
-        let mut left_w = alloc::vec![18, text::measure(&app, BODY, Weight::Semibold)];
-        for m in &menus {
-            left_w.push(text::measure(m, BODY, Weight::Regular));
+    /// The item under `(x, y)`.
+    pub(crate) fn panel_item_at(&self, x: i32, y: i32) -> Option<(PanelItem, Rect)> {
+        if y >= PANEL_H {
+            return None;
         }
-        let right_w = [16, 16, 16, self.clock_width()];
-        let (l, r) = menubar_layout(self.sw, &left_w, &right_w);
-        let mut out = Vec::with_capacity(l.len() + r.len());
-        for (i, rect) in l.into_iter().enumerate() {
-            let item = match i {
-                0 => BarItem::System,
-                1 => BarItem::AppName,
-                n => BarItem::Menu(n - 2),
-            };
-            out.push((item, rect));
-        }
-        for (rect, item) in r.into_iter().zip([
-            BarItem::Network,
-            BarItem::Control,
-            BarItem::Search,
-            BarItem::Clock,
-        ]) {
-            out.push((item, rect));
-        }
-        out
+        self.panel_items()
+            .into_iter()
+            .find(|(_, r)| r.contains(x, y))
     }
 
     /// Screen rectangle of the clock item (what the per-second tick repaints).
     pub fn clock_rect(&self) -> Rect {
-        self.bar_items()
+        self.panel_items()
             .iter()
-            .find(|(i, _)| *i == BarItem::Clock)
+            .find(|(i, _)| *i == PanelItem::Clock)
             .map_or(Rect::new(0, 0, 0, 0), |(_, r)| *r)
     }
 
@@ -138,7 +179,7 @@ impl Desktop {
         self.task_window_rect().is_none()
     }
 
-    /// Redo only the clock item in `back`: restore the wallpaper glass under it, then
+    /// Redo only the clock item in `back`: restore the wallpaper's panel under it, then
     /// draw the text. Valid when [`clock_repaint_is_local`] holds.
     pub fn repaint_clock(
         &self,
@@ -150,128 +191,136 @@ impl Desktop {
         let r = self.clock_rect();
         copy_region(back, bg, info, r);
         let mut c = Canvas::new(back, info);
-        self.draw_bar_item(&mut c, BarItem::Clock, r, time);
+        self.draw_panel_item(&mut c, PanelItem::Clock, r, time);
     }
 
-    /// Menu bar content over the glass strip baked into the wallpaper.
-    pub(crate) fn draw_menubar(&self, c: &mut Canvas, time: Time) {
-        for (item, rect) in self.bar_items() {
-            self.draw_bar_item(c, item, rect, time);
+    /// Panel content over the strip baked into the wallpaper.
+    pub(crate) fn draw_panel(&self, c: &mut Canvas, time: Time) {
+        for (item, rect) in self.panel_items() {
+            self.draw_panel_item(c, item, rect, time);
         }
     }
 
-    fn bar_item_active(&self, item: BarItem) -> bool {
+    fn panel_item_active(&self, item: PanelItem) -> bool {
         let sh = &self.shell;
-        sh.menu
-            .as_ref()
-            .is_some_and(|m| !m.closing && m.origin == MenuOrigin::Bar(item))
-            || sh.pop.as_ref().is_some_and(|p| {
-                !p.closing
-                    && matches!(
-                        (p.kind, item),
-                        (PopKind::Control, BarItem::Control) | (PopKind::Calendar, BarItem::Clock)
-                    )
-            })
-            || (item == BarItem::Search && sh.search.as_ref().is_some_and(|s| !s.closing))
+        sh.pop.as_ref().is_some_and(|p| {
+            !p.closing
+                && matches!(
+                    (p.kind, item),
+                    (PopKind::Quick, PanelItem::Tray) | (PopKind::Centre, PanelItem::Clock)
+                )
+        }) || (item == PanelItem::Search && sh.search.as_ref().is_some_and(|s| !s.closing))
+            || (item == PanelItem::Apps && sh.apps.as_ref().is_some_and(|a| !a.closing))
     }
 
-    fn draw_bar_item(&self, c: &mut Canvas, item: BarItem, rect: Rect, time: Time) {
+    fn draw_panel_item(&self, c: &mut Canvas, item: PanelItem, rect: Rect, time: Time) {
         let p = theme::pal();
         let fg = theme::solid(p.bar_text);
-        let active = self.bar_item_active(item);
-        let hover = self.shell.bar_hover == Some(item);
-        if active || hover {
-            let pill = Rect::new(rect.x + 2, rect.y + 3, rect.w - 4, rect.h - 6);
-            let (hc, ha) = theme::tint(p.hover);
+        let active = self.panel_item_active(item);
+        let hover = self.shell.panel_hover == Some(item);
+        let pill = Rect::new(rect.x + 1, rect.y + 3, rect.w - 2, rect.h - 6);
+        let (hc, ha) = theme::tint(p.hover);
+        if item == PanelItem::Tray {
+            // The status pill is always a pill; it darkens with hover and while its popover is open.
+            let a = if active {
+                ha * 3
+            } else if hover {
+                ha * 2
+            } else {
+                ha
+            };
+            c.fill_rrect(pill, pill.h / 2, Corner::Circle, hc, a.min(256));
+        } else if active || hover {
             c.fill_rrect(
                 pill,
-                6,
+                R_CONTROL,
                 Corner::Circle,
                 hc,
                 if active { (ha * 2).min(256) } else { ha },
             );
         }
-        let ty = text::center_y(rect.y, rect.h, BODY, Weight::Regular);
         let argb = 0xFF00_0000 | pack(fg);
+        let ty = text::center_y(rect.y, rect.h, BODY, Weight::Medium);
         match item {
-            BarItem::System => ui::draw_glyph(
-                c,
-                Glyph::Brand,
-                rect.x + (rect.w - 16) / 2,
-                rect.y + 6,
-                16,
-                argb,
-            ),
-            BarItem::AppName => {
-                let name = self.bar_names().0;
+            PanelItem::Apps => {
+                ui::draw_glyph(c, Glyph::Brand, rect.x + PANEL_PAD, rect.y + 7, 16, argb);
                 text::draw(
                     c,
-                    rect.x + chrome::BAR_PAD,
-                    text::center_y(rect.y, rect.h, BODY, Weight::Semibold),
-                    &name,
+                    rect.x + PANEL_PAD + 16 + 8,
+                    ty,
+                    "Apps",
                     BODY,
-                    Weight::Semibold,
+                    Weight::Medium,
                     fg,
                 );
             }
-            BarItem::Menu(i) => {
-                let names = self.bar_names().1;
-                if let Some(n) = names.get(i) {
-                    text::draw(
-                        c,
-                        rect.x + chrome::BAR_PAD,
-                        ty,
-                        n,
-                        BODY,
-                        Weight::Regular,
-                        fg,
-                    );
-                }
+            PanelItem::Search => {
+                ui::draw_glyph(c, Glyph::Search, rect.x + PANEL_PAD, rect.y + 7, 16, argb)
             }
-            BarItem::Network => {
+            PanelItem::Clock => {
+                let t = self.clock_text(time);
+                let w = text::measure(&t, BODY, Weight::Medium);
+                let dot = self.shell.notif_unread > 0;
+                let room = rect.w - 2 * PANEL_PAD - CLOCK_DOT_W;
+                let x = rect.x + PANEL_PAD + CLOCK_DOT_W + (room - w) / 2;
+                if dot {
+                    let d = Rect::new(x - 12, rect.y + (rect.h - 6) / 2, 6, 6);
+                    c.fill_rrect(d, 3, Corner::Circle, theme::accent(), 256);
+                }
+                text::draw(c, x, ty, &t, BODY, Weight::Medium, fg);
+            }
+            PanelItem::Tray => {
                 let up = crate::netd::stats().link_up;
-                let g = if up {
+                let net = if up {
                     Glyph::Network
                 } else {
                     Glyph::NetworkOff
                 };
-                ui::draw_glyph(c, g, rect.x + (rect.w - 16) / 2, rect.y + 6, 16, argb);
+                let look = if theme::dark() {
+                    Glyph::Moon
+                } else {
+                    Glyph::Sun
+                };
+                for (i, g) in [net, look, Glyph::Power].into_iter().enumerate() {
+                    let r = chrome::pill_icon(rect, i);
+                    ui::draw_glyph(c, g, r.x, r.y, r.w, argb);
+                }
             }
-            BarItem::Control => ui::draw_glyph(
-                c,
-                Glyph::Control,
-                rect.x + (rect.w - 16) / 2,
-                rect.y + 6,
-                16,
-                argb,
-            ),
-            BarItem::Search => ui::draw_glyph(
-                c,
-                Glyph::Search,
-                rect.x + (rect.w - 16) / 2,
-                rect.y + 6,
-                16,
-                argb,
-            ),
-            BarItem::Clock => {
-                let t = self.clock_text(time);
-                let w = text::measure(&t, BODY, Weight::Regular);
-                text::draw(
-                    c,
-                    rect.right() - chrome::BAR_PAD - w,
-                    ty,
-                    &t,
-                    BODY,
-                    Weight::Regular,
-                    fg,
-                );
+        }
+    }
+
+    // ---- notification history ----
+
+    /// Collect new warnings and errors of the system log into the notification centre's list.
+    pub(crate) fn refresh_notifs(&mut self) {
+        let mut warns = [None; 4];
+        let n = crate::klog::take_warnings(&mut self.shell.notif_seen, &mut warns);
+        let now = crate::klog::ticks_to_ms_now();
+        for w in warns.iter().take(n).flatten() {
+            let open = self
+                .shell
+                .pop
+                .as_ref()
+                .is_some_and(|p| p.kind == PopKind::Centre && !p.closing);
+            let text = String::from(&*crate::text::from_bytes(w.text()));
+            if self.shell.notifs.len() >= NOTIF_MAX {
+                self.shell.notifs.remove(0);
             }
+            self.shell.notifs.push(Notif {
+                level: w.level,
+                text,
+                ms: now,
+            });
+            if !open {
+                self.shell.notif_unread += 1;
+            }
+            self.force_full |= open;
         }
     }
 
     // ---- menus ----
 
-    fn system_menu(&self) -> Vec<Entry> {
+    pub(crate) fn system_menu(&self) -> Vec<Entry> {
         alloc::vec![
             Entry::item("Sobre o OSjeff", "", Cmd::About),
             Entry::sep(),
@@ -281,23 +330,6 @@ impl Desktop {
             Entry::item("Reiniciar…", "", Cmd::Reboot),
             Entry::item("Desligar…", "", Cmd::Shutdown),
         ]
-    }
-
-    fn app_menu(&self) -> Vec<Entry> {
-        match self.focused().and_then(|id| self.kind_of(id)) {
-            Some(k) => alloc::vec![Entry::item(
-                &alloc::format!("Encerrar {}", k.label()),
-                "",
-                Cmd::Quit
-            ),],
-            None => alloc::vec![Entry::item("Mostrar apps", "", Cmd::ShowApps)],
-        }
-    }
-
-    /// The focused app's menu number `i` (File, Edit, View, Window).
-    fn kind_menu(&self, i: usize) -> Vec<Entry> {
-        let name = self.bar_names().1.get(i).copied().unwrap_or("");
-        self.named_menu(name)
     }
 
     /// The focused app's menu called `name` ("Arquivo", "Editar", "Visualizar", "Janela").
@@ -470,20 +502,6 @@ impl Desktop {
         );
     }
 
-    /// Open (or switch to) the menu of bar item `item`, anchored under it.
-    pub(crate) fn open_bar_menu(&mut self, item: BarItem) {
-        let Some((_, rect)) = self.bar_items().into_iter().find(|(i, _)| *i == item) else {
-            return;
-        };
-        let entries = match item {
-            BarItem::System => self.system_menu(),
-            BarItem::AppName => self.app_menu(),
-            BarItem::Menu(i) => self.kind_menu(i),
-            _ => return,
-        };
-        self.open_menu(MenuOrigin::Bar(item), entries, (rect.x, MENUBAR_H));
-    }
-
     /// Open a menu with its top-left near `at`.
     pub(crate) fn open_menu(&mut self, origin: MenuOrigin, entries: Vec<Entry>, at: (i32, i32)) {
         self.open_menu_at(origin, entries, at, false);
@@ -549,7 +567,7 @@ impl Desktop {
         let slide = ((256 - fade) as i32 * 6) / 256;
         let mut g = m.geom.rect;
         g.y -= slide;
-        panel(
+        glass_panel(
             c,
             g,
             R_MENU,
@@ -592,23 +610,25 @@ impl Desktop {
 
     // ---- popovers ----
 
-    /// Open the popover of `kind` under its bar item.
+    /// Open the popover of `kind` under its panel item.
     pub(crate) fn open_popover(&mut self, kind: PopKind) {
         let item = match kind {
-            PopKind::Control => BarItem::Control,
-            PopKind::Calendar => BarItem::Clock,
+            PopKind::Quick => PanelItem::Tray,
+            PopKind::Centre => PanelItem::Clock,
         };
-        let Some((_, anchor)) = self.bar_items().into_iter().find(|(i, _)| *i == item) else {
+        let Some((_, anchor)) = self.panel_items().into_iter().find(|(i, _)| *i == item) else {
             return;
         };
-        let (w, h) = match kind {
-            PopKind::Control => (chrome::CONTROL_W, chrome::CONTROL_H),
-            PopKind::Calendar => (chrome::CAL_W, chrome::CAL_H),
+        let rect = match kind {
+            PopKind::Quick => popover_rect(anchor, chrome::QUICK_W, chrome::QUICK_H, self.sw),
+            PopKind::Centre => {
+                popover_centered(anchor, chrome::CENTRE_W, chrome::CENTRE_H, self.sw)
+            }
         };
         self.shell.menu = None;
         self.shell.pop = Some(Popover {
             kind,
-            rect: popover_rect(anchor, w, h, self.sw),
+            rect,
             t: fade_in(MENU_FADE),
             closing: false,
             glass: Default::default(),
@@ -617,8 +637,11 @@ impl Desktop {
         self.shell.knobs = [
             tween_at(crate::settings::get().reduce_motion),
             tween_at(crate::settings::get().clock24),
-            tween_at(crate::settings::get().toasts),
+            tween_at(!crate::settings::get().toasts),
         ];
+        if kind == PopKind::Centre {
+            self.shell.notif_unread = 0;
+        }
         self.force_full = true;
     }
 
@@ -627,12 +650,12 @@ impl Desktop {
         let fade = level(&pop.t);
         let mut r = pop.rect;
         r.y -= ((256 - fade) as i32 * 6) / 256;
-        panel(
+        glass_panel(
             c,
             r,
             R_POPOVER,
             &pop.glass,
-            12,
+            10,
             p.menu_tint,
             p.separator,
             Shadow {
@@ -646,112 +669,309 @@ impl Desktop {
             return;
         }
         match pop.kind {
-            PopKind::Control => self.draw_control(c, r),
-            PopKind::Calendar => self.draw_calendar(c, r, pop.month_off),
+            PopKind::Quick => self.draw_quick(c, r),
+            PopKind::Centre => self.draw_centre(c, r, pop.month_off),
         }
     }
 
-    fn draw_control(&self, c: &mut Canvas, r: Rect) {
+    /// Quick Settings: a tile grid, the accent swatches and the power buttons.
+    fn draw_quick(&self, c: &mut Canvas, r: Rect) {
         let p = theme::pal();
-        let g = chrome::control_geom(r);
+        let g = quick_geom(r);
         let s = crate::settings::get();
         text::draw_left(
             c,
             g.title,
-            "Controles",
+            "Configurações rápidas",
             TITLE3,
             Weight::Semibold,
             theme::solid(p.text),
         );
-        // Network card.
-        ui::group_box(c, g.net);
         let st = crate::netd::stats();
         let up = st.link_up;
-        ui::draw_glyph(
-            c,
-            if up {
-                Glyph::Network
-            } else {
-                Glyph::NetworkOff
-            },
-            g.net.x + 14,
-            g.net.y + (g.net.h - 20) / 2,
-            20,
-            0xFF00_0000
-                | pack(if up {
-                    theme::accent()
-                } else {
-                    theme::solid(p.text_secondary)
-                }),
-        );
-        let (line1, line2) = match (&st.config, up) {
-            (Some(cfg), true) => (String::from("Conectado"), alloc::format!("{}", cfg.ip)),
-            (None, true) => (
-                String::from("Conectando..."),
-                String::from("Sem endereco ainda"),
-            ),
-            _ => (String::from("Sem rede"), String::from("Cabo desconectado")),
-        };
-        let tx = g.net.x + 46;
-        text::draw(
-            c,
-            tx,
-            g.net.y + 10,
-            &line1,
-            BODY,
-            Weight::Medium,
-            theme::solid(p.text),
-        );
-        text::draw(
-            c,
-            tx,
-            g.net.y + 30,
-            &line2,
-            FOOTNOTE,
-            Weight::Regular,
-            theme::solid(p.text_secondary),
-        );
-        // Appearance.
-        ui::caption(c, g.appearance_label.x, g.appearance_label.y, "Aparência");
-        let sel = match s.appearance {
-            osjeff_core::style::AppearanceSetting::Auto => 0,
-            osjeff_core::style::AppearanceSetting::Light => 1,
-            osjeff_core::style::AppearanceSetting::Dark => 2,
-        };
-        ui::segmented(c, g.appearance, &["Automática", "Clara", "Escura"], sel);
-        // Accent swatches.
+        for (rect, tile) in g.tiles.iter().zip(chrome::QUICK_ORDER) {
+            let (glyph, label, sub, on): (Glyph, &str, String, bool) = match tile {
+                QuickTile::Network => (
+                    if up {
+                        Glyph::Network
+                    } else {
+                        Glyph::NetworkOff
+                    },
+                    "Rede",
+                    match (&st.config, up) {
+                        (Some(cfg), true) => alloc::format!("{}", cfg.ip),
+                        (None, true) => String::from("Conectando..."),
+                        _ => String::from("Sem rede"),
+                    },
+                    up,
+                ),
+                QuickTile::Appearance => (
+                    if theme::dark() {
+                        Glyph::Moon
+                    } else {
+                        Glyph::Sun
+                    },
+                    "Aparência",
+                    String::from(match s.appearance {
+                        osjeff_core::style::AppearanceSetting::Auto => "Automática",
+                        osjeff_core::style::AppearanceSetting::Light => "Clara",
+                        osjeff_core::style::AppearanceSetting::Dark => "Escura",
+                    }),
+                    theme::dark(),
+                ),
+                QuickTile::ReduceMotion => (
+                    Glyph::Wave,
+                    "Movimento",
+                    String::from(if s.reduce_motion {
+                        "Reduzido"
+                    } else {
+                        "Completo"
+                    }),
+                    s.reduce_motion,
+                ),
+                QuickTile::DoNotDisturb => (
+                    Glyph::Bell,
+                    "Não perturbe",
+                    String::from(if s.toasts { "Desligado" } else { "Ligado" }),
+                    !s.toasts,
+                ),
+                QuickTile::Clock24 => (
+                    Glyph::Clock,
+                    "Relógio 24 h",
+                    String::from(if s.clock24 { "24 horas" } else { "12 horas" }),
+                    s.clock24,
+                ),
+                QuickTile::Settings => (
+                    Glyph::Control,
+                    "Configurações",
+                    String::from("Abrir"),
+                    false,
+                ),
+            };
+            let hover = rect.contains(self.cursor_x, self.cursor_y);
+            self.draw_tile(c, *rect, glyph, label, &sub, on, hover);
+        }
         ui::caption(c, g.accent_label.x, g.accent_label.y, "Cor de destaque");
         for (i, sw) in g.swatches.iter().enumerate() {
             let rgb = osjeff_core::settings::ACCENTS[i];
             let col = Color::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
             if s.accent as usize == i {
-                c.stroke_rrect(
-                    sw.inflated(3),
-                    15,
-                    Corner::Circle,
-                    theme::solid(p.text),
-                    200,
-                );
+                c.stroke_rrect(sw.inflated(3), 9, Corner::Circle, theme::solid(p.text), 200);
             }
-            c.fill_rrect(*sw, sw.w / 2, Corner::Circle, col, 256);
+            c.fill_rrect(*sw, 7, Corner::Circle, col, 256);
         }
-        // Switch rows.
-        let rows = [
-            ("Reduzir movimento", s.reduce_motion),
-            ("Relógio de 24 horas", s.clock24),
-            ("Notificações", s.toasts),
-        ];
-        for (i, ((label_r, sw_r), (label, _on))) in g.rows.iter().zip(rows).enumerate() {
-            text::draw_left(
+        let hov = |r: Rect| {
+            if r.contains(self.cursor_x, self.cursor_y) {
+                ui::Control::Hover
+            } else {
+                ui::Control::Normal
+            }
+        };
+        ui::push_button(
+            c,
+            g.restart,
+            "Reiniciar",
+            ui::ButtonKind::Secondary,
+            hov(g.restart),
+        );
+        ui::push_button(
+            c,
+            g.shutdown,
+            "Desligar",
+            ui::ButtonKind::Secondary,
+            hov(g.shutdown),
+        );
+    }
+
+    /// One Quick Settings tile: a disc with a glyph, a label and a status line; accent when on.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_tile(
+        &self,
+        c: &mut Canvas,
+        r: Rect,
+        glyph: Glyph,
+        label: &str,
+        sub: &str,
+        on: bool,
+        hover: bool,
+    ) {
+        let p = theme::pal();
+        let rad = 10;
+        if on {
+            c.fill_rrect(r, rad, Corner::Circle, theme::accent(), 256);
+            if hover {
+                c.fill_rrect(r, rad, Corner::Circle, theme::WHITE, 28);
+            }
+        } else {
+            ui::fill_token(c, r, rad, p.control_bg);
+            if hover {
+                ui::fill_token(c, r, rad, p.hover);
+            }
+            ui::stroke_token(c, r, rad, p.control_border);
+        }
+        let disc = Rect::new(r.x + 10, r.y + (r.h - 32) / 2, 32, 32);
+        let (dc, da) = if on {
+            (theme::WHITE, 56)
+        } else {
+            theme::tint(p.hover)
+        };
+        c.fill_rrect(disc, 8, Corner::Circle, dc, da);
+        let ink = if on {
+            theme::WHITE
+        } else {
+            theme::solid(p.text)
+        };
+        ui::draw_glyph(
+            c,
+            glyph,
+            disc.x + 7,
+            disc.y + 7,
+            18,
+            0xFF00_0000 | pack(ink),
+        );
+        let tx = disc.right() + 10;
+        let tw = r.right() - tx - 8;
+        let (c1, c2) = if on {
+            (theme::WHITE, theme::WHITE)
+        } else {
+            (theme::solid(p.text), theme::solid(p.text_secondary))
+        };
+        draw_fit(
+            c,
+            Rect::new(tx, r.y + 11, tw, 18),
+            label,
+            BODY,
+            Weight::Medium,
+            c1,
+        );
+        draw_fit(
+            c,
+            Rect::new(tx, r.y + 29, tw, 16),
+            sub,
+            FOOTNOTE,
+            Weight::Regular,
+            if on { Color::rgb(0xE8, 0xE8, 0xFF) } else { c2 },
+        );
+    }
+
+    /// The calendar and notification centre: the date and the notification list at the left, the
+    /// month at the right.
+    fn draw_centre(&self, c: &mut Canvas, r: Rect, month_off: i32) {
+        let p = theme::pal();
+        let g = centre_geom(r);
+        let (_, month, day) = self.today.get();
+        let wd = self.weekday.get() as usize % 7;
+        text::draw_left(
+            c,
+            g.day,
+            WEEKDAYS_LONG[wd],
+            TITLE2,
+            Weight::Semibold,
+            theme::solid(p.text),
+        );
+        let (year, _, _) = self.today.get();
+        let date = alloc::format!(
+            "{} de {} de {}",
+            day,
+            MONTH_NAMES[(month as usize).clamp(1, 12) - 1].to_lowercase(),
+            year
+        );
+        text::draw_left(
+            c,
+            g.date,
+            &date,
+            BODY,
+            Weight::Regular,
+            theme::solid(p.text_secondary),
+        );
+        text::draw_left(
+            c,
+            g.notif_title,
+            "Notificações",
+            BODY,
+            Weight::Semibold,
+            theme::solid(p.text),
+        );
+        let notifs = &self.shell.notifs;
+        if !notifs.is_empty() {
+            let hov = g.clear.contains(self.cursor_x, self.cursor_y);
+            if hov {
+                ui::fill_token(c, g.clear, 6, p.hover);
+            }
+            text::draw_centered(
                 c,
-                *label_r,
-                label,
+                g.clear,
+                "Limpar",
+                FOOTNOTE,
+                Weight::Medium,
+                theme::accent(),
+            );
+        }
+        if notifs.is_empty() {
+            text::draw_centered(
+                c,
+                g.empty,
+                "Sem notificações",
                 BODY,
                 Weight::Regular,
-                theme::solid(p.text),
+                theme::solid(p.text_tertiary),
             );
-            ui::switch(c, *sw_r, (self.shell.knobs[i].value() * 256.0) as i32, true);
+        } else {
+            let now = crate::klog::ticks_to_ms_now();
+            // Newest first.
+            for (row, n) in g.rows.iter().zip(notifs.iter().rev()) {
+                ui::fill_token(c, *row, 8, p.control_bg);
+                ui::stroke_token(c, *row, 8, p.control_border);
+                let disc = Rect::new(row.x + 10, row.y + (row.h - 24) / 2, 24, 24);
+                c.fill_rrect(disc, 12, Corner::Circle, level_color(n.level), 256);
+                text::draw_centered(c, disc, "!", BODY, Weight::Semibold, theme::WHITE);
+                let tx = disc.right() + 10;
+                let age = age_text(now, n.ms);
+                let aw = text::measure(&age, FOOTNOTE, Weight::Regular) + 8;
+                draw_fit(
+                    c,
+                    Rect::new(tx, row.y + 5, row.right() - tx - aw - 8, 18),
+                    level_title(n.level),
+                    BODY,
+                    Weight::Medium,
+                    theme::solid(p.text),
+                );
+                text::draw_right(
+                    c,
+                    Rect::new(row.x, row.y + 5, row.w - 10, 18),
+                    &age,
+                    FOOTNOTE,
+                    Weight::Regular,
+                    theme::solid(p.text_tertiary),
+                );
+                draw_fit(
+                    c,
+                    Rect::new(tx, row.y + 23, row.right() - tx - 10, 16),
+                    &n.text,
+                    FOOTNOTE,
+                    Weight::Regular,
+                    theme::solid(p.text_secondary),
+                );
+            }
         }
+        text::draw_left(
+            c,
+            g.dnd_label,
+            "Não perturbe",
+            BODY,
+            Weight::Regular,
+            theme::solid(p.text),
+        );
+        ui::switch(
+            c,
+            g.dnd_switch,
+            (self.shell.knobs[2].value() * 256.0) as i32,
+            true,
+        );
+        // A hairline between the two columns.
+        let (sc, sa) = theme::tint(p.separator);
+        c.blend_rect(Rect::new(g.calendar.x - 12, r.y + 14, 1, r.h - 28), sc, sa);
+        self.draw_calendar(c, g.calendar, month_off);
     }
 
     fn draw_calendar(&self, c: &mut Canvas, r: Rect, month_off: i32) {
@@ -840,48 +1060,63 @@ impl Desktop {
             return false;
         }
         match pop.kind {
-            PopKind::Control => {
-                let g = chrome::control_geom(pop.rect);
+            PopKind::Quick => {
+                let g = quick_geom(pop.rect);
                 let mut s = crate::settings::get();
-                if let Some(i) = osjeff_core::widgets::segmented_hit(g.appearance, 3, x, y) {
-                    use osjeff_core::style::AppearanceSetting as A;
-                    s.appearance = [A::Auto, A::Light, A::Dark][i];
+                if let Some(tile) = chrome::quick_tile_at(&g, x, y) {
+                    match tile {
+                        QuickTile::Network | QuickTile::Settings => {
+                            self.close_transients();
+                            self.open_settings(0);
+                            return true;
+                        }
+                        QuickTile::Appearance => s.appearance = s.appearance.next(),
+                        QuickTile::ReduceMotion => s.reduce_motion = !s.reduce_motion,
+                        QuickTile::DoNotDisturb => s.toasts = !s.toasts,
+                        QuickTile::Clock24 => s.clock24 = !s.clock24,
+                    }
                 } else if let Some(i) = g.swatches.iter().position(|r| r.inflated(3).contains(x, y))
                 {
                     s.accent = i as u8;
-                } else if let Some(i) = g
-                    .rows
-                    .iter()
-                    .position(|(l, sw)| l.contains(x, y) || sw.contains(x, y))
-                {
-                    match i {
-                        0 => s.reduce_motion = !s.reduce_motion,
-                        1 => s.clock24 = !s.clock24,
-                        _ => s.toasts = !s.toasts,
-                    }
-                    let target = match i {
-                        0 => s.reduce_motion,
-                        1 => s.clock24,
-                        _ => s.toasts,
-                    };
-                    self.shell.knobs[i].retarget(
-                        if target { 1.0 } else { 0.0 },
-                        0.18,
-                        osjeff_core::anim::curves::ENTER,
-                    );
+                } else if g.restart.contains(x, y) {
+                    self.close_transients();
+                    self.execute(Cmd::Reboot);
+                    return true;
+                } else if g.shutdown.contains(x, y) {
+                    self.close_transients();
+                    self.execute(Cmd::Shutdown);
+                    return true;
                 } else {
                     return true;
                 }
+                let look = s.appearance != crate::settings::get().appearance;
                 let _ = self.settings_apply(s);
+                if look {
+                    // The look changed: the popover's blurred backdrop is stale, so it comes up again.
+                    self.open_popover(PopKind::Quick);
+                }
                 true
             }
-            PopKind::Calendar => {
-                let g = chrome::calendar_geom(pop.rect);
-                if g.prev.contains(x, y) {
+            PopKind::Centre => {
+                let g = centre_geom(pop.rect);
+                let cal = chrome::calendar_geom(g.calendar);
+                if g.clear.contains(x, y) {
+                    self.shell.notifs.clear();
+                    self.shell.notif_unread = 0;
+                } else if g.dnd_label.contains(x, y) || g.dnd_switch.contains(x, y) {
+                    let mut s = crate::settings::get();
+                    s.toasts = !s.toasts;
+                    self.shell.knobs[2].retarget(
+                        if s.toasts { 0.0 } else { 1.0 },
+                        0.18,
+                        osjeff_core::anim::curves::ENTER,
+                    );
+                    let _ = self.settings_apply(s);
+                } else if cal.prev.contains(x, y) {
                     if let Some(p) = self.shell.pop.as_mut() {
                         p.month_off -= 1;
                     }
-                } else if g.next.contains(x, y)
+                } else if cal.next.contains(x, y)
                     && let Some(p) = self.shell.pop.as_mut()
                 {
                     p.month_off += 1;
@@ -913,6 +1148,12 @@ impl Entry {
 
 fn tween_at(on: bool) -> osjeff_core::anim::Tween {
     osjeff_core::anim::Tween::at(if on { 1.0 } else { 0.0 })
+}
+
+/// Draw `label` left-aligned in `r`, cut with an ellipsis if it does not fit.
+fn draw_fit(c: &mut Canvas, r: Rect, label: &str, px: u16, w: Weight, col: Color) {
+    let t = text::ellipsize(label, px, w, r.w);
+    text::draw_left(c, r, &t, px, w, col);
 }
 
 fn pack(c: Color) -> u32 {

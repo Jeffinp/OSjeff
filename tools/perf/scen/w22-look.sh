@@ -7,8 +7,8 @@ dock_icon files; click; sleep 1.0; shot look-files
 dock_icon calc; click; sleep 1.0; shot look-calc
 dock_icon apps; click; sleep 1.0; shot look-apps
 key esc; sleep 0.8
-goto 40 14; click; sleep 0.6; shot look-sysmenu
+panel_item apps; rclick; sleep 0.6; shot look-sysmenu
 key esc; sleep 0.5
-goto 1090 14; click; sleep 0.6; shot look-control
+panel_item tray; click; sleep 0.6; shot look-control
 key esc; sleep 0.5
 finish

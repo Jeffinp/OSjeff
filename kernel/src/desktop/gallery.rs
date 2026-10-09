@@ -451,6 +451,10 @@ fn gallery_icons(c: &mut Canvas, body: Rect, pad: i32, p: &Palette) {
         Glyph::Sun,
         Glyph::Moon,
         Glyph::Info,
+        Glyph::Power,
+        Glyph::Bell,
+        Glyph::Wave,
+        Glyph::Clock,
     ];
     let col = 0xFF00_0000
         | (((p.text >> 16) & 0xFF) << 16)

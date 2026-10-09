@@ -5,7 +5,7 @@ wait_first_frame
 t=dark
 if [ "${LIGHT:-0}" = 1 ]; then
   t=light
-  goto 1100 14; click; sleep 0.6; goto 953 188; click; sleep 0.6; key esc; sleep 0.6
+  light_mode
 fi
 key ctrl-w; sleep 0.8                              # the terminal opened at boot
 dock_icon files; click; sleep 1.0; goto 900 700; shot "$t-files"; key ctrl-w; sleep 0.6
@@ -14,7 +14,7 @@ dock_icon settings; click; sleep 1.0; goto 900 700; shot "$t-settings"; key ctrl
 dock_icon tasks; click; sleep 1.5; goto 900 700; shot "$t-tarefas"; key ctrl-w; sleep 0.6
 dock_icon apps; click; sleep 1.2; goto 900 700; shot "$t-apps"; key esc; sleep 0.7
 key ctrl-spc; sleep 0.5; typestr "12*7"; sleep 0.6; shot "$t-busca"; key esc; sleep 0.5
-goto 1100 14; click; sleep 0.8; shot "$t-controls"; key esc; sleep 0.5
+panel_item tray; click; sleep 0.8; shot "$t-controls"; key esc; sleep 0.5
 key ctrl-alt-g; sleep 1.0; goto 900 700; shot "$t-gallery"; key ctrl-w; sleep 0.6
 dock_icon terminal; click; sleep 0.9
 typestr "ls"; key ret; sleep 0.3

@@ -41,6 +41,22 @@ dock_x() {
 }
 dock_icon() { goto "$(dock_x "$1")" "$DOCK_Y_CENTER"; }
 dock() { goto "$1" "$DOCKY"; }
+# The top panel (30 px): Apps and Busca at the left, the clock centred, the status pill at the
+# right. `panel_item <apps|search|clock|tray>` moves the pointer onto an item.
+PANEL_Y=15
+panel_x() { case "$1" in apps) echo 45 ;; search) echo 107 ;; clock) echo 640 ;; tray) echo 1230 ;; *) echo 640 ;; esac; }
+panel_item() { goto "$(panel_x "$1")" "$PANEL_Y"; }
+# Quick Settings (open under the pill at x 928..1272, y 36): tile centres, two columns by three rows.
+quick_tile() {
+  case "$1" in
+    network) goto 1020 112 ;; appearance) goto 1180 112 ;; motion) goto 1020 176 ;;
+    dnd) goto 1180 176 ;; clock24) goto 1020 240 ;; settings) goto 1180 240 ;;
+    restart) goto 1020 362 ;; shutdown) goto 1180 362 ;;
+  esac
+}
+# Switch from Auto (the clock decides; dark at night) to the light appearance: the Aparência tile
+# cycles Automática -> Clara -> Escura.
+light_mode() { panel_item tray; click; sleep 0.6; quick_tile appearance; click; sleep 0.6; key esc; sleep 0.6; }
 dock_to() { move "$1" "$DY"; sleep 0.3; }
 shot() { mon "screendump $OUT/$1.ppm"; sleep 1.2; convert "$OUT/$1.ppm" "$OUT/$1.png" 2>/dev/null; rm -f "$OUT/$1.ppm"; }
 finish() { touch "$OUT/done"; }

@@ -688,7 +688,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                         up(r);
                     }
                     up(desk.clock_rect());
-                    up(desk.menubar_rect());
+                    up(desk.panel_rect());
                 }
             } else if clock_tick {
                 let tc = trace::t();

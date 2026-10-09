@@ -9,8 +9,8 @@ typestr "OSjeff"; key ret; typestr "um desktop de verdade"; sleep 0.4; snap d06
 key ctrl-spc; sleep 0.5; typestr "cal"; sleep 0.6; snap d07
 key ret; sleep 0.18; snap d08; sleep 0.9; snap d09
 typestr "7*6"; key ret; sleep 0.4; snap d10
-goto 1100 14; click; sleep 0.7; snap d11
-goto 953 188; click; sleep 0.7; snap d12
+panel_item tray; click; sleep 0.7; snap d11
+quick_tile appearance; click; sleep 0.7; snap d12
 key esc; sleep 0.6; snap d13
 dock_icon apps; click; sleep 1.0; snap d14
 key esc; sleep 0.7; snap d15

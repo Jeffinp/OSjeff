@@ -72,8 +72,7 @@ window-corner repair.
 
 ### 2.3 Spacing and sizes
 
-`4 8 12 16 20 24 32`. Menu bar 28 · title bar 32 (`window::TITLE_H`) · lights 12 px, pitch 20,
-12 inset, 16 px hit area · menu row 24, separator 9 · bar icon 48 (magnified up to 76 over a
+`4 8 12 16 20 24 32`. Panel 30 · title bar 32 (`window::TITLE_H`) · title buttons 40x32, menu button 32 · menu row 24, separator 9 · bar icon 48 (magnified up to 76 over a
 bump of 104 px), gap 8, padding 12/8, 8 from the bottom · Apps cell 136x128, icon 72 ·
 Busca 640 wide, field 56, rows 40 · banners 344x68.
 
@@ -87,7 +86,7 @@ SIL OFL) for the terminal and the editor, both through the same glyph atlas
 |---|---|---|
 | caption | 11 | badges, scrollbar labels |
 | footnote | 12 | secondary lines, tooltips |
-| body | 13 | menu bar, buttons, lists, window titles (Medium) |
+| body | 13 | panel, buttons, lists, window titles (Medium) |
 | callout | 15 | Busca rows |
 | title3 / title2 / title1 | 17 / 22 / 28 | sheet and popover titles, Busca field, big numbers |
 | mono | 15 (9 px pitch, 20 px line) | terminal, editor |
@@ -176,6 +175,25 @@ the real font.
   hover), centred Medium title that never reaches the lights, 12 px corners, hairline,
   two-layer shadow, focus cross-fade, double click on the title zooms, resize edges and
   minimum sizes as before. Zoom fills the area between the menu bar and the bar.
+* **Top panel** (30 px, the strip is baked into the cached wallpaper under a mostly opaque tint,
+  a hairline and an inner highlight): at the left **Apps** (the OSjeff mark and the word; a right
+  click opens the system menu: Sobre, Configurações, Componentes, Reiniciar, Desligar) and the Busca
+  magnifier; in the **centre** the day, month and time (a dot beside it when there are unread
+  notifications); at the right the **status pill** (network, appearance, power) that opens Quick
+  Settings. There is no app name and no per-app menu strip: the app's menus are behind the menu
+  button of its own title bar.
+* **Quick Settings** (popover under the pill): a tile grid (Rede, Aparência, Movimento, Não perturbe,
+  Relógio 24 h, Configurações), the eight accent swatches and Reiniciar / Desligar (both ask first).
+  Tiles are accent-filled when on.
+* **Calendar and notification centre** (popover centred under the clock, two columns): the date and the
+  notification history (warnings and errors of the system log, newest first, *Limpar*, a
+  *Não perturbe* switch that mutes the banners) at the left, the month at the right.
+* **Windows**: a flat title bar with the app icon and a left-aligned Medium title; the menu button and
+  the minimise, maximise / restore and close buttons at the **right** (40x32 cells, a 36x26 rounded
+  hover fill, red close, dimmed when unfocused), a 2 px accent line on the focused bar, 12 px
+  corners, hairline, two-layer shadow, focus cross-fade, double click on the title zooms, resize
+  edges and minimum sizes as before. Dragging a title to an edge snaps (see `ui-identity.md`);
+  zoom fills the work area between the panel and the bar.
 * **Barra de apps**: floating glass panel centred at the bottom, an Apps button, a
   separator and the apps; magnification, running dots, tooltips, launch hop, a context
   menu per icon (Abrir / Nova janela / Encerrar). The backdrop is blurred once when the
@@ -196,10 +214,10 @@ the real font.
 
 Bottom to top, in every compose path:
 
-1. the wallpaper with the menu-bar glass and the bar's blurred strip (cached in `BG`);
+1. the wallpaper with the panel strip and the bar's blurred strip (cached in `BG`);
 2. windows in z-order, each with its shadow (the static ones cached in `STATIC`);
 3. the bar (live: its icons magnify; excluded from `STATIC`);
-4. the menu-bar content (names, status items, clock);
+4. the panel content (Apps, Busca, clock, status pill);
 5. overlays: menus, popovers, Apps, Busca, sheet, Alt+Tab;
 6. banners, then the pointer, straight onto the framebuffer.
 
@@ -240,6 +258,8 @@ blur capture, paid once.
 | chrome drawing | `kernel/src/desktop/{chrome,dock,menubar,overlays,shell,glass,cursor,render}.rs` |
 | toolkit and gallery | `kernel/src/desktop/{ui,kit,gallery}.rs` |
 | system apps (section 11) | `kernel/src/desktop/{tarefas,logview,settings_ui,calc_ui,toasts_ui,live}.rs`, `osjeff_core/src/{activity,calc,settings,notify,klog,layout}.rs` |
+| chrome drawing | `kernel/src/desktop/{chrome,dock,panel,overlays,shell,glass,cursor,render}.rs` |
+| toolkit and gallery | `kernel/src/desktop/{ui,gallery}.rs` |
 | icons, glyphs | `kernel/src/{icons,glyphs}.rs` |
 
 ## 8. Compatibility rules for app content (wave 2)

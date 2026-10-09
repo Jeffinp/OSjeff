@@ -2,8 +2,8 @@
 
 /// Title bar height in pixels (unified title bar: same colour as the body).
 pub const TITLE_H: i32 = 32;
-/// Menu bar height: no window may cover it.
-pub const MENUBAR_H: i32 = 28;
+/// Height of the top panel: no window may cover it.
+pub use crate::style::{MENUBAR_H, PANEL_H};
 /// Width of the minimise, maximise and close buttons at the right of the title bar. The hit area
 /// is the whole 40 x 32 cell (the close button reaches the very corner of the window).
 pub const BTN_W: i32 = 40;

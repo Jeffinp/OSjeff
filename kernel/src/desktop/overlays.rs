@@ -10,6 +10,7 @@ use crate::text::{self, BODY, CALLOUT, FOOTNOTE, TITLE2, TITLE3, Weight};
 use osjeff_core::chrome::{self, LP_ICON, launchpad_cell_at, launchpad_grid, spotlight_geom};
 use osjeff_core::iconart::Glyph;
 use osjeff_core::search;
+use osjeff_core::style::PANEL_H;
 
 /// Corner radius of the Busca panel and of the confirmation sheet.
 const R_PANEL: i32 = 16;
@@ -734,29 +735,14 @@ impl Desktop {
     /// The pointer moved to `(x, y)`: update hover states of the shell layers.
     pub(crate) fn shell_pointer(&mut self, x: i32, y: i32) -> bool {
         let mut changed = false;
-        // Menu-bar item under the pointer.
-        let bar = if y < MENUBAR_H {
-            self.bar_items()
-                .into_iter()
-                .find(|(_, r)| r.contains(x, y))
-                .map(|(i, _)| i)
-        } else {
-            None
-        };
-        if bar != self.shell.bar_hover {
-            self.shell.bar_hover = bar;
-            self.mark_dirty(self.menubar_rect());
+        // Panel item under the pointer.
+        let item = self.panel_item_at(x, y).map(|(i, _)| i);
+        if item != self.shell.panel_hover {
+            self.shell.panel_hover = item;
+            self.mark_dirty(self.panel_rect());
             changed = true;
         }
-        // Moving along the bar with a menu open switches to the item's menu.
-        if let (Some(item), Some(m)) = (bar, self.shell.menu.as_ref())
-            && let MenuOrigin::Bar(cur) = m.origin
-            && cur != item
-            && !m.closing
-            && matches!(item, BarItem::System | BarItem::AppName | BarItem::Menu(_))
-        {
-            self.open_bar_menu(item);
-        }
+        // (The hover washes inside a popover repaint with the overlay on every pointer move.)
         if let Some(m) = self.shell.menu.as_mut() {
             let hover = osjeff_core::chrome::menu_row_at(&m.geom, &m.rows, x, y);
             if hover != m.hover {
@@ -818,7 +804,7 @@ impl Desktop {
                         .map(|t| t.target)
                 })
             };
-            if y < MENUBAR_H && self.bar_item_at(x, y).is_some() {
+            if y < PANEL_H && self.panel_item_at(x, y).is_some() {
                 self.close_apps();
                 return false;
             }
@@ -842,7 +828,7 @@ impl Desktop {
             };
             if !inside {
                 self.close_search();
-                return y >= MENUBAR_H;
+                return y >= PANEL_H;
             }
             if let Some(h) = hit {
                 self.close_search();
@@ -852,12 +838,11 @@ impl Desktop {
         }
         // Menu.
         if self.shell.menu.as_ref().is_some_and(|m| !m.closing) {
-            let (row, inside, origin) = {
+            let (row, inside) = {
                 let m = self.shell.menu.as_ref().expect("checked");
                 (
                     osjeff_core::chrome::menu_row_at(&m.geom, &m.rows, x, y),
                     m.geom.rect.contains(x, y),
-                    m.origin,
                 )
             };
             if let Some(i) = row {
@@ -867,12 +852,10 @@ impl Desktop {
             if inside {
                 return true;
             }
-            // A click on the item that opened it closes it; on another item switches.
-            if let Some((item, _)) = self.bar_item_at(x, y) {
+            // A click on a panel item closes the menu and acts on the item.
+            if let Some((item, _)) = self.panel_item_at(x, y) {
                 self.close_transients();
-                if origin != MenuOrigin::Bar(item) {
-                    self.bar_click(item);
-                }
+                self.panel_click(item);
                 return true;
             }
             self.close_transients();
@@ -885,42 +868,48 @@ impl Desktop {
             }
             let was = self.shell.pop.as_ref().map(|p| p.kind);
             self.close_transients();
-            if let Some((item, _)) = self.bar_item_at(x, y) {
+            if let Some((item, _)) = self.panel_item_at(x, y) {
                 let same = matches!(
                     (was, item),
-                    (Some(PopKind::Control), BarItem::Control | BarItem::Network)
-                        | (Some(PopKind::Calendar), BarItem::Clock)
+                    (Some(PopKind::Quick), PanelItem::Tray)
+                        | (Some(PopKind::Centre), PanelItem::Clock)
                 );
                 if !same {
-                    self.bar_click(item);
+                    self.panel_click(item);
                 }
                 return true;
             }
             return false;
         }
-        // Menu bar.
-        if let Some((item, _)) = self.bar_item_at(x, y) {
-            self.bar_click(item);
+        // The panel.
+        if let Some((item, _)) = self.panel_item_at(x, y) {
+            self.panel_click(item);
             return true;
         }
         false
     }
 
-    fn bar_item_at(&self, x: i32, y: i32) -> Option<(BarItem, Rect)> {
-        if y >= MENUBAR_H {
-            return None;
-        }
-        self.bar_items().into_iter().find(|(_, r)| r.contains(x, y))
-    }
-
-    fn bar_click(&mut self, item: BarItem) {
+    /// A left click on panel item `item`.
+    pub(crate) fn panel_click(&mut self, item: PanelItem) {
         match item {
-            BarItem::System | BarItem::AppName | BarItem::Menu(_) => self.open_bar_menu(item),
-            BarItem::Network | BarItem::Control => self.open_popover(PopKind::Control),
-            BarItem::Clock => self.open_popover(PopKind::Calendar),
-            BarItem::Search => self.open_search(),
+            PanelItem::Apps => self.open_apps(),
+            PanelItem::Search => self.open_search(),
+            PanelItem::Tray => self.open_popover(PopKind::Quick),
+            PanelItem::Clock => self.open_popover(PopKind::Centre),
         }
         self.force_full = true;
+    }
+
+    /// A right click on the Apps button: the system menu.
+    pub(crate) fn panel_context(&mut self, item: PanelItem) {
+        if item != PanelItem::Apps {
+            return;
+        }
+        let Some((_, rect)) = self.panel_items().into_iter().find(|(i, _)| *i == item) else {
+            return;
+        };
+        let entries = self.system_menu();
+        self.open_menu(MenuOrigin::Context, entries, (rect.x, PANEL_H));
     }
 
     /// A wheel step while Apps is up: scroll its grid.
@@ -981,27 +970,6 @@ impl Desktop {
                 Key::Enter => {
                     if let Some(i) = cur {
                         self.menu_pick(i);
-                    }
-                }
-                Key::Left | Key::Right => {
-                    if let MenuOrigin::Bar(cur_item) = m.origin {
-                        let items: Vec<BarItem> = self
-                            .bar_items()
-                            .into_iter()
-                            .map(|(i, _)| i)
-                            .filter(|i| {
-                                matches!(i, BarItem::System | BarItem::AppName | BarItem::Menu(_))
-                            })
-                            .collect();
-                        if let Some(pos) = items.iter().position(|i| *i == cur_item) {
-                            let n = items.len();
-                            let next = if key == Key::Right {
-                                (pos + 1) % n
-                            } else {
-                                (pos + n - 1) % n
-                            };
-                            self.open_bar_menu(items[next]);
-                        }
                     }
                 }
                 _ => {}

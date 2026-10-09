@@ -39,6 +39,14 @@ tem releases versionadas; as seções são marcos na `master`.
   restauram e minimizam; arrastar uma janela maximizada ou encaixada pela barra a solta sob o
   ponteiro. Geometria pura em `osjeff_core::snap`.
 
+- **Painel superior no lugar da barra de menus.** Sem nome de app em negrito nem menus por app:
+  **Apps** e Busca à esquerda, data e hora no **centro** (abre o calendário com o centro de
+  notificações: histórico de avisos e erros, *Limpar*, chave *Não perturbe*) e, à direita, a pílula
+  de status (rede, aparência, energia) que abre as **Configurações rápidas**, uma grade de blocos
+  (Rede, Aparência, Movimento, Não perturbe, Relógio 24 h, Configurações), cores de destaque e
+  Reiniciar / Desligar. Isso substitui a barra de menus e o popover de Controles. Botão direito em
+  *Apps*: menu do sistema.
+
 ## 2026-10 — Nova interface (W22)
 
 - **Visual novo, claro e escuro.** Barra de menus com menu do sistema, nome e menus do app em

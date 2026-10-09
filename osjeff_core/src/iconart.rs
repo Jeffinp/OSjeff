@@ -517,6 +517,8 @@ pub enum Glyph {
     Power,
     Image,
     Dock,
+    Bell,
+    Wave,
 }
 
 /// Draw `g` at `px` x `px` in straight ARGB colour `c`.
@@ -670,6 +672,38 @@ pub fn glyph(g: Glyph, px: usize, c: u32) -> Surface {
             p.ellipse_hole(u(11), u(6), u(4) + 128, u(4) + 128);
             s.fill_path(&p, Paint::Solid(c));
         }
+        Glyph::Power => {
+            // A ring open at the top with the bar through the gap.
+            let pts: Vec<(i32, i32)> = (40..=320)
+                .step_by(20)
+                .map(|d| rot(u(8), u(9), 0, -(u(5) + 64), d))
+                .collect();
+            s.fill_path(&stroke_path(&pts, w(2) - 32, true), Paint::Solid(c));
+            stroke(&mut s, &[(8, 2), (8, 8)], 2);
+        }
+        Glyph::Bell => {
+            let mut pts = quad_points(pt(4, 11), pt(4, 3), pt(8, 3), 8);
+            pts.extend(quad_points(pt(8, 3), pt(12, 3), pt(12, 11), 8));
+            pts.push(pt(14, 12));
+            pts.push(pt(2, 12));
+            pts.push(pt(4, 11));
+            s.fill_path(&stroke_path(&pts, w(1) + 96, true), Paint::Solid(c));
+            let mut clap = Path::new();
+            clap.ellipse(u(8), u(14) + 64, u(1) + 64, u(1));
+            s.fill_path(&clap, Paint::Solid(c));
+        }
+        Glyph::Wave => {
+            let mut pts = quad_points(pt(1, 8), pt(4, 2), pt(8, 8), 8);
+            pts.extend(quad_points(pt(8, 8), pt(12, 14), pt(15, 8), 8));
+            s.fill_path(&stroke_path(&pts, w(2) - 32, true), Paint::Solid(c));
+        }
+        Glyph::Clock => {
+            let mut ring = Path::new();
+            ring.ellipse(u(8), u(8), u(7), u(7));
+            ring.ellipse_hole(u(8), u(8), u(7) - 96, u(7) - 96);
+            s.fill_path(&ring, Paint::Solid(c));
+            stroke(&mut s, &[(8, 4), (8, 8), (11, 10)], 2);
+        }
         Glyph::Info => {
             let mut p = Path::new();
             p.ellipse(u(8), u(8), u(7), u(7));
@@ -707,6 +741,40 @@ mod tests {
             let (s, c) = (sin_q14(d) as i64, cos_q14(d) as i64);
             let n = s * s + c * c;
             assert!((n - 16384 * 16384).abs() < 16384 * 8, "deg {d}");
+        }
+    }
+
+    #[test]
+    fn every_glyph_draws_ink_inside_its_box_at_every_size() {
+        let all = [
+            Glyph::Search,
+            Glyph::Network,
+            Glyph::NetworkOff,
+            Glyph::Control,
+            Glyph::Check,
+            Glyph::ChevronRight,
+            Glyph::ChevronDown,
+            Glyph::Close,
+            Glyph::Plus,
+            Glyph::Minus,
+            Glyph::Brand,
+            Glyph::Sun,
+            Glyph::Moon,
+            Glyph::Info,
+            Glyph::Power,
+            Glyph::Bell,
+            Glyph::Wave,
+            Glyph::Clock,
+        ];
+        for g in all {
+            for px in [12usize, 16, 20, 24] {
+                let s = glyph(g, px, 0xFFFF_FFFF);
+                assert_eq!((s.w, s.h), (px, px));
+                let ink = s.px.iter().filter(|&&p| p >> 24 > 24).count();
+                assert!(ink >= px / 2, "{g:?} at {px}: {ink} inked pixels");
+                // Not a filled box: the glyph leaves room around itself.
+                assert!(ink < px * px * 3 / 4, "{g:?} at {px}: {ink}");
+            }
         }
     }
 

@@ -22,7 +22,7 @@ cargo build --release -p os 2>&1 | tail -1
 
 mask() { # in out
   local h; h=$(identify -format %h "$1")
-  convert "$1" -fill black -draw "rectangle 1040,0 1280,90" \
+  convert "$1" -fill black -draw "rectangle 1040,0 1280,90" -draw "rectangle 560,0 720,30" \
     -draw "rectangle 1130,$((h - 62)) 1275,$((h - 5))" "$2"
 }
 

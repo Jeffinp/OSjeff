@@ -171,8 +171,10 @@ pub const LIGHT_ZOOM: u32 = 0xFF3F_D07C;
 
 // ----------------------------------------------------------------- dimensions
 
-/// Menu bar height.
-pub const MENUBAR_H: i32 = 28;
+/// Height of the top panel: no window may cover it. (`MENUBAR_H` is the old name, kept for the
+/// code that predates the panel.)
+pub const PANEL_H: i32 = 30;
+pub const MENUBAR_H: i32 = PANEL_H;
 /// Corner radii.
 pub const R_WINDOW: i32 = 12;
 pub const R_POPOVER: i32 = 12;
