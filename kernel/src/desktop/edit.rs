@@ -26,6 +26,7 @@ use osjeff_core::editor2::{
 use osjeff_core::input::{KeyCode, KeyEvent};
 use osjeff_core::settings::{FONT_MAX, FONT_MIN, font_step};
 use osjeff_core::sysif::SettingsStore;
+use osjeff_core::t;
 use osjeff_core::vfs::VfsError;
 use osjeff_core::widgets::ScrollbarFade;
 
@@ -147,7 +148,7 @@ impl EditorState {
     pub(crate) fn name(&self) -> String {
         match &self.path {
             Some(p) => String::from_utf8_lossy(vfs::base_name(p)).into_owned(),
-            None => String::from("sem nome"),
+            None => String::from(t!("edit.untitled")),
         }
     }
 
@@ -193,7 +194,7 @@ pub(crate) fn geom(r: Rect, ed: &Ed2) -> Lay {
 /// Widths of the two buttons of the replace row.
 fn replace_widths() -> (i32, i32) {
     let w = |s: &str| text::measure(s, BODY, Weight::Medium) + 28;
-    (w("Substituir"), w("Todos"))
+    (w(t!("edit.replace")), w(t!("edit.all")))
 }
 
 /// The controls of the find bar, if one is open.
@@ -207,7 +208,11 @@ pub(crate) fn find_lay(lay: &Lay, ed: &Ed2) -> Option<FindLay> {
 /// Widths of the buttons of the close question, in the order Descartar, Cancelar, Salvar.
 fn close_widths() -> [i32; 3] {
     let w = |s: &str| (text::measure(s, BODY, Weight::Medium) + 32).max(76);
-    [w("Descartar"), w("Cancelar"), w("Salvar")]
+    [
+        w(CloseAsk::label(CloseChoice::Discard)),
+        w(CloseAsk::label(CloseChoice::Cancel)),
+        w(CloseAsk::label(CloseChoice::Save)),
+    ]
 }
 
 /// The close question's buttons (Descartar, Cancelar, Salvar) in its panel.
@@ -218,13 +223,13 @@ pub(crate) fn close_rects(panel: Rect) -> [Rect; 3] {
 /// Labels of the picker's two buttons.
 pub(crate) fn picker_labels(picker: &Picker) -> [&'static str; 2] {
     [
-        "Cancelar",
+        t!("common.cancel"),
         if picker.asking().is_some() {
-            "Substituir"
+            t!("edit.replace")
         } else if picker.mode == PickMode::Open {
-            "Abrir"
+            t!("common.open")
         } else {
-            "Salvar"
+            t!("edit.save")
         },
     ]
 }
@@ -313,6 +318,31 @@ impl Desktop {
         for id in ids {
             self.sync_editor(id);
         }
+    }
+
+    /// The language changed: drop every editor's status message and dialog error (written in the
+    /// old language) and rebuild the title (the name of an unnamed document is a word).
+    pub(crate) fn editor_language_changed_all(&mut self) {
+        let ids: Vec<WindowId> = self
+            .wm
+            .windows()
+            .iter()
+            .filter(|w| matches!(w.app.app, App::Editor(_)))
+            .map(|w| w.id)
+            .collect();
+        for id in ids {
+            self.editor_language_changed(id);
+        }
+    }
+
+    fn editor_language_changed(&mut self, id: WindowId) {
+        if let Some(e) = self.editor_mut(id) {
+            e.msg = None;
+            if let Some(EdModal::Open(p) | EdModal::SaveAs { picker: p, .. }) = e.modal.as_mut() {
+                p.clear_error();
+            }
+        }
+        self.refresh_editor_title(id);
     }
 
     /// Title-bar text: `Editor — name`, with a dot after the name while there are unsaved
@@ -593,13 +623,13 @@ impl Desktop {
             };
             if let Some(e) = self.editor_mut(id) {
                 e.path = Some(bytes);
-                e.msg = Some((String::from("Novo arquivo"), false));
+                e.msg = Some((String::from(t!("edit.new_file")), false));
             }
             self.refresh_editor_title(id);
             return;
         }
         if let Err(e) = self.fs_load_path(bytes) {
-            crate::notify!(Warn, "Editor: {}", e.message());
+            crate::notify!(Warn, "{}", t!("edit.notify", msg = e.message()));
         }
     }
 
@@ -635,7 +665,10 @@ impl Desktop {
         e.ed.mark_saved();
         e.path = Some(path.to_vec());
         e.msg = Some((
-            alloc::format!("Salvo: {}", String::from_utf8_lossy(vfs::base_name(path))),
+            t!(
+                "edit.saved",
+                name = &String::from_utf8_lossy(vfs::base_name(path)).into_owned()
+            ),
             false,
         ));
         self.fs_changed();
@@ -657,7 +690,7 @@ impl Desktop {
                 String::from_utf8_lossy(&vfs::parent(p)).into_owned(),
                 String::from_utf8_lossy(vfs::base_name(p)).into_owned(),
             ),
-            None => (String::from("/"), String::from("sem-nome.txt")),
+            None => (String::from("/"), String::from(t!("edit.untitled_file"))),
         };
         let mut picker = Picker::new(PickMode::SaveAs, &dir, &name);
         picker_go(&mut picker, &dir);

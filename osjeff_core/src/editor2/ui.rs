@@ -263,13 +263,18 @@ impl PickLay {
     }
 }
 
-/// The sidebar places of the sheet: label and folder.
+/// The sidebar places of the sheet: label key (look it up with [`place_label`]) and folder.
 pub const PLACES: [(&str, &str); 4] = [
-    ("Início", "/home"),
-    ("Documentos", "/Documentos"),
-    ("Imagens", "/Imagens"),
-    ("Disco", "/"),
+    (crate::tk!("files.place.home"), "/home"),
+    (crate::tk!("files.place.documents"), "/Documentos"),
+    (crate::tk!("files.place.images"), "/Imagens"),
+    (crate::tk!("files.place.disk"), "/"),
 ];
+
+/// The label of sidebar place `i` in the language in effect.
+pub fn place_label(i: usize) -> &'static str {
+    PLACES.get(i).map_or("", |(key, _)| crate::i18n::tr(key))
+}
 
 /// The place that holds `dir` (the sheet highlights it), if any: the deepest match.
 pub fn place_of(dir: &str) -> Option<usize> {

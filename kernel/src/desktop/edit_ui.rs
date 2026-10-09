@@ -19,6 +19,7 @@ use osjeff_core::editor2::ui::{self as eui, FindHit, FindLay, Lay};
 use osjeff_core::editor2::{CloseAsk, CloseChoice, Notice, Picker, PromptKind, status_bar};
 use osjeff_core::fileman;
 use osjeff_core::fileman::ui as fui;
+use osjeff_core::{t, tp};
 
 fn tertiary() -> Color {
     theme::solid(theme::pal().text_tertiary)
@@ -48,9 +49,9 @@ impl Desktop {
         self.draw_editor_status(c, &lay, e);
         match &e.modal {
             Some(EdModal::Close(ask)) => self.draw_close_sheet(c, r, e, ask),
-            Some(EdModal::Open(p)) => self.draw_picker_sheet(c, r, e, p, "Abrir"),
+            Some(EdModal::Open(p)) => self.draw_picker_sheet(c, r, e, p, t!("edit.open_title")),
             Some(EdModal::SaveAs { picker, .. }) => {
-                self.draw_picker_sheet(c, r, e, picker, "Salvar como");
+                self.draw_picker_sheet(c, r, e, picker, t!("edit.save_as_title"));
             }
             None => {}
         }
@@ -242,8 +243,8 @@ impl Desktop {
         let caret = appui::caret_alpha(e.last_input);
         let goto = p.kind == PromptKind::Goto;
         let find_ph = match p.kind {
-            PromptKind::Goto => "Ir para a linha",
-            _ => "Buscar",
+            PromptKind::Goto => t!("edit.find.goto"),
+            _ => t!("edit.find.search"),
         };
         appui::field(
             c,
@@ -269,7 +270,7 @@ impl Desktop {
                     caret: t2.len(),
                     selection: None,
                 },
-                "Substituir por",
+                t!("edit.find.replace_with"),
                 p.active == 1,
                 caret,
                 Some(Tool::Replace),
@@ -304,8 +305,8 @@ impl Desktop {
         );
         if let (Some(one), Some(all)) = (fl.replace_one, fl.replace_all) {
             for (r, label, hit) in [
-                (one, "Substituir", FindHit::ReplaceOne),
-                (all, "Todos", FindHit::ReplaceAll),
+                (one, t!("edit.replace"), FindHit::ReplaceOne),
+                (all, t!("edit.all"), FindHit::ReplaceAll),
             ] {
                 appui::sheet_button(
                     c,
@@ -320,11 +321,10 @@ impl Desktop {
         // What the last search found.
         let (note, bad) = match p.notice {
             Notice::None => (String::new(), false),
-            Notice::NotFound => (String::from("Nenhum resultado"), true),
-            Notice::Wrapped => (String::from("Recomeçou do início"), false),
-            Notice::Replaced(1) => (String::from("1 substituição"), false),
-            Notice::Replaced(n) => (alloc::format!("{n} substituições"), false),
-            Notice::InvalidLine => (String::from("Linha inválida"), true),
+            Notice::NotFound => (String::from(t!("edit.notice.not_found")), true),
+            Notice::Wrapped => (String::from(t!("edit.notice.wrapped")), false),
+            Notice::Replaced(n) => (tp!("edit.notice.replaced", n), false),
+            Notice::InvalidLine => (String::from(t!("edit.notice.invalid_line")), true),
         };
         if !note.is_empty() && fl.notice.w > 8 {
             let col = if bad { theme::danger() } else { secondary() };
@@ -370,15 +370,12 @@ impl Desktop {
             c,
             panel.x + appui::SHEET_PAD,
             ty,
-            "Deseja salvar as alterações?",
+            t!("edit.close.title"),
             text::TITLE3,
             Weight::Semibold,
             theme::text(),
         );
-        let msg = alloc::format!(
-            "As alterações em “{}” serão perdidas se você não as salvar.",
-            e.name()
-        );
+        let msg = t!("edit.close.body", name = &e.name());
         let mut y = ty + text::line_height(text::TITLE3) + 8;
         for (a, b) in text::wrap(&msg, BODY, Weight::Regular, inner, 3) {
             text::draw(
@@ -395,9 +392,9 @@ impl Desktop {
         let btns = close_rects(panel);
         let sel = ask.selected();
         let items = [
-            ("Descartar", CloseChoice::Discard),
-            ("Cancelar", CloseChoice::Cancel),
-            ("Salvar", CloseChoice::Save),
+            (CloseAsk::label(CloseChoice::Discard), CloseChoice::Discard),
+            (CloseAsk::label(CloseChoice::Cancel), CloseChoice::Cancel),
+            (CloseAsk::label(CloseChoice::Save), CloseChoice::Save),
         ];
         for (i, (label, choice)) in items.into_iter().enumerate() {
             let kind = if choice == sel {
@@ -446,14 +443,15 @@ impl Desktop {
             c,
             lay.sidebar.x + 8,
             lay.sidebar.y + 2,
-            "Favoritos",
+            t!("edit.dir.favorites"),
             CAPTION,
             Weight::Semibold,
             tertiary(),
         );
         let here = eui::place_of(p.dir());
         let tools = [Tool::Home, Tool::Folder, Tool::Photo, Tool::Disk];
-        for (i, (label, _)) in eui::PLACES.iter().enumerate() {
+        for (i, tool) in tools.iter().enumerate() {
+            let label = eui::place_label(i);
             let rr = lay.place_rect(i);
             let active = here == Some(i);
             if active {
@@ -466,7 +464,7 @@ impl Desktop {
             let col = if active { theme::accent() } else { secondary() };
             appui::blit_tool_dim(
                 c,
-                tools[i],
+                *tool,
                 rr.x + 8,
                 rr.y + (rr.h - 16) / 2,
                 16,
@@ -580,7 +578,7 @@ impl Desktop {
                 c,
                 lay.list,
                 EmptyIcon::File(FileKind::Folder),
-                "Pasta vazia",
+                t!("edit.dir.empty"),
                 "",
             );
         }
@@ -598,7 +596,7 @@ impl Desktop {
                     caret: byte,
                     selection: p.field_fresh().then_some((0, txt.len())),
                 },
-                "Nome do arquivo",
+                t!("edit.dir.file_name"),
                 true,
                 appui::caret_alpha(e.last_input),
                 None,
@@ -608,9 +606,9 @@ impl Desktop {
         // The overwrite question or the reason something failed.
         let hint: Option<(String, Color)> = if let Some(path) = p.asking() {
             Some((
-                alloc::format!(
-                    "Já existe “{}”. Substituir?",
-                    String::from_utf8_lossy(vfs::base_name(path.as_bytes()))
+                t!(
+                    "edit.dir.overwrite",
+                    name = &String::from_utf8_lossy(vfs::base_name(path.as_bytes())).into_owned()
                 ),
                 theme::danger(),
             ))

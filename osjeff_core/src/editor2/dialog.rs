@@ -170,6 +170,11 @@ impl Picker {
         self.error = Some(String::from(msg));
     }
 
+    /// Forget the error shown (its text was written in the language of the time).
+    pub fn clear_error(&mut self) {
+        self.error = None;
+    }
+
     /// Ask "replace it?" about `path` (after [`PickEvent::Choose`]).
     pub fn confirm_overwrite(&mut self, path: &str) {
         self.ask = Some(String::from(path));
@@ -458,12 +463,21 @@ impl CloseAsk {
         self.sel
     }
 
-    /// Button labels, in order (ASCII Portuguese like the rest of the UI).
+    /// Button label keys, in order; look them up with [`CloseAsk::label`].
     pub const LABELS: [(CloseChoice, &'static str); 3] = [
-        (CloseChoice::Save, "Salvar"),
-        (CloseChoice::Discard, "Descartar"),
-        (CloseChoice::Cancel, "Cancelar"),
+        (CloseChoice::Save, crate::tk!("edit.save")),
+        (CloseChoice::Discard, crate::tk!("edit.close.discard")),
+        (CloseChoice::Cancel, crate::tk!("common.cancel")),
     ];
+
+    /// The label of a button in the language in effect.
+    pub fn label(choice: CloseChoice) -> &'static str {
+        match choice {
+            CloseChoice::Save => crate::t!("edit.save"),
+            CloseChoice::Discard => crate::t!("edit.close.discard"),
+            CloseChoice::Cancel => crate::t!("common.cancel"),
+        }
+    }
 
     fn index(&self) -> usize {
         match self.sel {
@@ -513,43 +527,41 @@ impl CloseAsk {
     }
 }
 
-/// `1234` -> `1,2 KB` style size with integer arithmetic only.
-fn size_text(bytes: usize) -> String {
-    if bytes < 1024 {
-        alloc::format!("{bytes} B")
-    } else if bytes < 1024 * 1024 {
-        alloc::format!("{}.{} KB", bytes / 1024, bytes % 1024 * 10 / 1024)
-    } else {
-        alloc::format!(
-            "{}.{} MB",
-            bytes / (1024 * 1024),
-            bytes % (1024 * 1024) * 10 / (1024 * 1024)
-        )
+/// The status bar text: position, size, encoding, line ending, state (in the language in
+/// effect).
+pub fn status_line(st: &Status, read_only: bool) -> String {
+    let mut s = crate::t!(
+        "edit.status.line",
+        line = st.line,
+        col = st.col,
+        lines = &lines_text(st.total_lines),
+        size = &crate::fileman::format_size(st.bytes as u64),
+        eol = eol_text(st.eol)
+    );
+    if st.selected_chars > 0 {
+        s.push_str("   ");
+        s.push_str(&crate::t!("edit.status.sel", n = st.selected_chars));
+    }
+    if read_only {
+        s.push_str("   ");
+        s.push_str(crate::t!("edit.status.read_only"));
+    } else if st.modified {
+        s.push_str("   ");
+        s.push_str(crate::t!("edit.status.modified"));
+    }
+    s
+}
+
+fn eol_text(eol: Eol) -> &'static str {
+    match eol {
+        Eol::Lf => "LF",
+        Eol::Crlf => "CRLF",
     }
 }
 
-/// The status bar text: position, size, encoding, line ending, state.
-pub fn status_line(st: &Status, read_only: bool) -> String {
-    let mut s = alloc::format!(
-        "Ln {}, Col {}   {} linhas   {}   UTF-8   {}",
-        st.line,
-        st.col,
-        st.total_lines,
-        size_text(st.bytes),
-        match st.eol {
-            Eol::Lf => "LF",
-            Eol::Crlf => "CRLF",
-        }
-    );
-    if st.selected_chars > 0 {
-        s.push_str(&alloc::format!("   sel {}", st.selected_chars));
-    }
-    if read_only {
-        s.push_str("   SO LEITURA");
-    } else if st.modified {
-        s.push_str("   * modificado");
-    }
-    s
+/// `1 linha` / `3 linhas` (`1 line` / `3 lines`).
+fn lines_text(n: usize) -> String {
+    crate::tp!("edit.status.lines", n)
 }
 
 /// The pieces of the editor's status bar, ready to lay out: the cursor position on the left, the
@@ -564,34 +576,20 @@ pub struct StatusBar {
     pub modified: bool,
 }
 
-/// Build the status bar pieces of `st`.
+/// Build the status bar pieces of `st` in the language in effect.
 pub fn status_bar(st: &Status) -> StatusBar {
-    let mut position = alloc::format!("Ln {}, Col {}", st.line, st.col);
+    let mut position = crate::t!("edit.status.pos", line = st.line, col = st.col);
     if st.selected_chars > 0 {
-        position.push_str(&alloc::format!(
-            " ({} {})",
-            st.selected_chars,
-            if st.selected_chars == 1 {
-                "selecionado"
-            } else {
-                "selecionados"
-            }
-        ));
+        position.push(' ');
+        position.push_str(&crate::tp!("edit.status.selected", st.selected_chars));
     }
     StatusBar {
         position,
         facts: [
             String::from("UTF-8"),
-            String::from(match st.eol {
-                Eol::Lf => "LF",
-                Eol::Crlf => "CRLF",
-            }),
+            String::from(eol_text(st.eol)),
             crate::fileman::format_size(st.bytes as u64),
-            if st.total_lines == 1 {
-                String::from("1 linha")
-            } else {
-                alloc::format!("{} linhas", st.total_lines)
-            },
+            lines_text(st.total_lines),
         ],
         modified: st.modified,
     }
@@ -601,6 +599,7 @@ pub fn status_bar(st: &Status) -> StatusBar {
 mod tests {
     use super::*;
     use crate::editor2::Editor;
+    use crate::i18n::{Lang, testlang::LangGuard};
     use crate::input::Mods;
 
     fn k(code: KeyCode) -> KeyEvent {
@@ -841,7 +840,7 @@ mod tests {
         assert_eq!(p.scroll(), 8);
         p.scroll_by(-100);
         assert_eq!(p.scroll(), 0);
-        assert_eq!(p.selected(), 12, "the wheel does not move the selection");
+        assert_eq!(p.selected(), 12, "the wheel leaves the selection alone");
         p.scroll_by(1000);
         assert_eq!(p.scroll(), 25);
         // Shrinking the window keeps the selection in view.
@@ -852,8 +851,8 @@ mod tests {
     #[test]
     fn errors_show_until_the_next_key() {
         let mut p = picker(PickMode::Open, "/", "");
-        p.set_error("Pasta nao encontrada");
-        assert_eq!(p.error(), Some("Pasta nao encontrada"));
+        p.set_error("Pasta não encontrada");
+        assert_eq!(p.error(), Some("Pasta não encontrada"));
         p.key(KeyEvent::ch('x'));
         assert_eq!(p.error(), None);
         // A listing that fails leaves the old rows in place.
@@ -927,6 +926,7 @@ mod tests {
 
     #[test]
     fn status_bar_pieces_follow_the_editor() {
+        let _g = LangGuard::new(Lang::Pt);
         let mut e = Editor::from_bytes(b"ola\nmundo\n");
         e.set_cursor(1, 2);
         let b = status_bar(&e.status());
@@ -959,6 +959,7 @@ mod tests {
 
     #[test]
     fn status_line_reports_position_size_and_state() {
+        let _g = LangGuard::new(Lang::Pt);
         let mut e = Editor::from_bytes(b"one\r\ntwo\r\nthree");
         e.set_cursor(1, 2);
         let s = status_line(&e.status(), false);
@@ -970,13 +971,43 @@ mod tests {
         e.insert_str("x");
         let s = status_line(&e.status(), false);
         assert!(s.ends_with("* modificado"), "{s}");
-        assert!(status_line(&e.status(), true).ends_with("SO LEITURA"));
+        assert!(status_line(&e.status(), true).ends_with("SOMENTE LEITURA"));
         e.select_all();
         assert!(status_line(&e.status(), false).contains("sel 16"));
         let big = Editor::from_bytes(&alloc::vec![b'a'; 1_572_864]);
-        assert!(status_line(&big.status(), false).contains("1.5 MB"));
-        assert_eq!(size_text(1536), "1.5 KB");
-        assert_eq!(size_text(0), "0 B");
+        assert!(status_line(&big.status(), false).contains("1,5 MiB"));
+    }
+
+    #[test]
+    fn status_texts_in_english() {
+        let _g = LangGuard::new(Lang::En);
+        let mut e = Editor::from_bytes(b"one\r\ntwo\r\nthree");
+        e.set_cursor(1, 2);
+        let s = status_line(&e.status(), false);
+        assert!(
+            s.starts_with("Ln 2, Col 3   3 lines   15 B   UTF-8   CRLF"),
+            "{s}"
+        );
+        e.insert_str("x");
+        assert!(status_line(&e.status(), false).ends_with("* modified"));
+        assert!(status_line(&e.status(), true).ends_with("READ ONLY"));
+        let b = status_bar(&Editor::from_bytes(b"x").status());
+        assert_eq!(b.facts[3], "1 line");
+        let big = status_bar(&Editor::from_bytes(&alloc::vec![b'x'; 1536]).status());
+        assert_eq!(big.facts[2], "1.5 KiB");
+        let mut e = Editor::from_bytes(b"ab");
+        e.select_range(0, 2);
+        assert!(status_bar(&e.status()).position.ends_with("(2 selected)"));
+        assert_eq!(CloseAsk::label(CloseChoice::Discard), "Discard");
+        assert_eq!(CloseAsk::label(CloseChoice::Cancel), "Cancel");
+    }
+
+    #[test]
+    fn close_labels_in_portuguese() {
+        let _g = LangGuard::new(Lang::Pt);
+        assert_eq!(CloseAsk::label(CloseChoice::Save), "Salvar");
+        assert_eq!(CloseAsk::label(CloseChoice::Discard), "Descartar");
+        assert_eq!(CloseAsk::label(CloseChoice::Cancel), "Cancelar");
     }
 
     #[test]

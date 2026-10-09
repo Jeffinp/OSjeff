@@ -360,15 +360,15 @@ impl Editor {
         Some(PromptView {
             kind: p.kind,
             label: match p.kind {
-                PromptKind::Find => "Find: ",
+                PromptKind::Find => crate::t!("edit.find.search"),
                 PromptKind::Replace => {
                     if p.active == 0 {
-                        "Find: "
+                        crate::t!("edit.find.search")
                     } else {
-                        "Replace with: "
+                        crate::t!("edit.find.replace_with")
                     }
                 }
-                PromptKind::Goto => "Go to line: ",
+                PromptKind::Goto => crate::t!("edit.find.goto"),
             },
             text: &p.fields[0],
             text2: (p.kind == PromptKind::Replace).then_some(p.fields[1].as_str()),
