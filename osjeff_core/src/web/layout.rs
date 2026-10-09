@@ -276,6 +276,7 @@ impl Doc {
             r.author = false;
         }
         sheet.rules.extend(parse_css(&css).rules);
+        sheet.build_index();
         let title = find_title(&dom, 0)
             .map(|t| fold_display(&t))
             .unwrap_or_default();
@@ -307,6 +308,8 @@ impl Doc {
             budget: STYLE_BUDGET,
             chars: 0,
             items: Vec::new(),
+            spare_items: Vec::new(),
+            fm: core::cell::RefCell::new(Vec::new()),
             space: None,
             link: None,
             pending: 0,
@@ -487,6 +490,11 @@ struct Painter<'a> {
     chars: usize,
     /// Inline content waiting for its line boxes.
     items: Vec<Item>,
+    /// An empty item list with room kept, swapped in while a flush reads the real one.
+    spare_items: Vec<Item>,
+    /// What the metrics answered for the fonts seen so far: `(font, space q8, ascent, line)`.
+    /// A page uses a handful of fonts and asks for these once per word.
+    fm: core::cell::RefCell<Vec<(Font, i32, i32, i32)>>,
     /// A collapsible space precedes the next word (and the font of the text it came from).
     space: Option<Font>,
     /// The `<a href>` the content belongs to.
@@ -506,12 +514,34 @@ impl Painter<'_> {
     /// Natural line height of `f`, sanitised: the metrics are the caller's, and layout must
     /// stay in range whatever they answer.
     fn nat(&self, f: Font) -> i32 {
-        self.m.line_height(f).clamp(1, 1 << 16)
+        self.metrics_of(f).2
     }
 
     /// Ascent of `f`, sanitised like [`Painter::nat`].
     fn asc(&self, f: Font) -> i32 {
-        self.m.ascent(f).clamp(0, 1 << 16)
+        self.metrics_of(f).1
+    }
+
+    /// Width of one space in `f`, q8.
+    fn space_q8(&self, f: Font) -> i32 {
+        self.metrics_of(f).0
+    }
+
+    /// `(space q8, ascent, line height)` of `f`, asked of the metrics once.
+    fn metrics_of(&self, f: Font) -> (i32, i32, i32) {
+        let mut c = self.fm.borrow_mut();
+        if let Some(e) = c.iter().find(|e| e.0 == f) {
+            return (e.1, e.2, e.3);
+        }
+        let v = (
+            self.m.width_q8(" ", f).clamp(0, 1 << 26),
+            self.m.ascent(f).clamp(0, 1 << 16),
+            self.m.line_height(f).clamp(1, 1 << 16),
+        );
+        if c.len() < 32 {
+            c.push((f, v.0, v.1, v.2));
+        }
+        v
     }
 
     /// Scale a length by the zoom (integer arithmetic).
@@ -631,6 +661,7 @@ fn push_word(p: &mut Painter, text: String, st: Style, any: bool, nb: bool) {
 
 /// Turn the text of a DOM node into words (collapsing whitespace) or, in
 /// preformatted text, lines.
+#[allow(unused_assignments)]
 fn push_text(p: &mut Painter, text: &str, c: &Computed) {
     if p.chars >= MAX_TEXT_CHARS {
         return;
@@ -668,43 +699,53 @@ fn push_text(p: &mut Painter, text: &str, c: &Computed) {
         return;
     }
     let nowrap = c.ws == Ws::NoWrap;
-    let mut word = String::new();
+    // The word being read is `text[start..]` up to the current position.
+    let mut start: Option<usize> = None;
     let mut word_any = false;
     let mut emitted = 0usize;
     let mut count = 0usize;
     macro_rules! finish {
-        () => {
-            if !word.is_empty() {
-                let w = core::mem::take(&mut word);
-                p.chars += w.chars().count();
+        ($end:expr) => {
+            if let Some(from) = start.take() {
+                p.chars += count;
+                count = 0;
                 emitted += 1;
-                push_word(p, w, st, word_any, nowrap && emitted > 1);
+                push_word(
+                    p,
+                    String::from(&text[from..$end]),
+                    st,
+                    word_any,
+                    nowrap && emitted > 1,
+                );
             }
         };
     }
-    for ch in text.chars() {
+    let mut stop = text.len();
+    for (i, ch) in text.char_indices() {
         if ch != '\u{a0}' && (ch.is_whitespace() || (ch.is_ascii() && is_html_space(ch as u8))) {
-            finish!();
+            finish!(i);
             p.space = Some(st.font);
             continue;
         }
         if ch == '\u{200b}' {
-            finish!();
+            finish!(i);
             continue;
         }
         let any = breaks_anywhere(ch);
-        if !word.is_empty() && (any != word_any || count >= MAX_WORD_CHARS) {
-            finish!();
-            count = 0;
+        if start.is_some() && (any != word_any || count >= MAX_WORD_CHARS) {
+            finish!(i);
         }
         if p.chars + count >= MAX_TEXT_CHARS {
+            stop = i;
             break;
         }
         word_any = any;
-        word.push(ch);
+        if start.is_none() {
+            start = Some(i);
+        }
         count += 1;
     }
-    finish!();
+    finish!(stop);
 }
 
 fn expand_tabs(line: &str) -> String {
@@ -801,13 +842,14 @@ fn flush_inline(
     // The margin waiting above the first line.
     y = adv(y, core::mem::take(&mut p.pending));
     p.space = None;
-    let items = core::mem::take(&mut p.items);
+    let spare = core::mem::take(&mut p.spare_items);
+    let mut items = core::mem::replace(&mut p.items, spare);
     let align = align_override.unwrap_or(container.align);
     let strut = strut_of(p, container);
     let avail = area.w.max(1).saturating_mul(Q);
     let mut line = Line::new(strut);
 
-    for item in items {
+    for item in items.drain(..) {
         match item {
             Item::Br(st) => {
                 if line.pieces.is_empty() {
@@ -822,7 +864,7 @@ fn flush_inline(
                 let (w, h) = obj_size(p, &obj, area.w);
                 let below = obj_below(p, &obj, h);
                 let space = match sp {
-                    Some(f) if !line.pieces.is_empty() => wq(p, " ", f),
+                    Some(f) if !line.pieces.is_empty() => p.space_q8(f),
                     _ => 0,
                 };
                 let wq_ = w.saturating_mul(Q);
@@ -846,7 +888,7 @@ fn flush_inline(
             Item::Gap(w, st, sp) => {
                 let wq_ = w.max(0).saturating_mul(Q);
                 let space = match sp {
-                    Some(f) if !line.pieces.is_empty() => wq(p, " ", f),
+                    Some(f) if !line.pieces.is_empty() => p.space_q8(f),
                     _ => 0,
                 };
                 let x = line.w.saturating_add(space);
@@ -869,7 +911,7 @@ fn flush_inline(
                 loop {
                     let ww = wq(p, &text, st.font);
                     let space = match sp {
-                        Some(f) if !line.pieces.is_empty() => wq(p, " ", f),
+                        Some(f) if !line.pieces.is_empty() => p.space_q8(f),
                         _ => 0,
                     };
                     if line.w.saturating_add(space).saturating_add(ww) <= avail
@@ -918,7 +960,12 @@ fn flush_inline(
     if !line.pieces.is_empty() {
         y = emit_line(p, &mut line, area, align, y, strut);
     }
-    // A marker whose item had no text still shows, on a line of its own height.
+    // Keep the list's room for the next flush (nothing was queued while this one ran).
+    if p.items.is_empty() {
+        p.spare_items = core::mem::replace(&mut p.items, items);
+    } else {
+        p.spare_items = items;
+    }
     y
 }
 
@@ -945,7 +992,10 @@ fn emit_line(
     y: i32,
     strut: (i32, i32),
 ) -> i32 {
-    let done = core::mem::replace(line, Line::new(strut));
+    let mut done = core::mem::replace(line, Line::new(strut));
+    // The pieces are read out of this vector, which then goes back to the next line empty
+    // but with the room it grew to.
+    let mut pieces = core::mem::take(&mut done.pieces);
     let line_h = (done.top + done.bottom).max(1);
     let baseline = y.saturating_add(done.top);
     let slack = (area.w.saturating_mul(Q) - done.w).max(0);
@@ -958,8 +1008,7 @@ fn emit_line(
 
     // A marker belongs to the first line of its item.
     if let Some(mk) = p.marker.take() {
-        let f = done
-            .pieces
+        let f = pieces
             .iter()
             .find_map(|pc| matches!(pc.kind, PieceKind::Text(_)).then_some(pc.st.font))
             .unwrap_or(p.style(&Computed::root()).font);
@@ -967,7 +1016,7 @@ fn emit_line(
     }
 
     // Merge neighbouring text pieces that look the same into one run.
-    let mut runs: Vec<(i32, i32, String, Style)> = Vec::new(); // x q8, w q8, text, style
+    let mut runs: Vec<(i32, i32, String, Style)> = Vec::with_capacity(pieces.len().min(8)); // x q8, w q8, text, style
     let mut objs: Vec<(i32, Obj, i32, i32, i32, Style)> = Vec::new();
     // Backgrounds of inline boxes: (left, right, top, height, colour), joined when they touch.
     let mut bgs: Vec<(i32, i32, i32, i32, Rgb)> = Vec::new();
@@ -984,13 +1033,13 @@ fn emit_line(
             }
             bgs.push((l, r, t, h, c));
         };
-    for pc in done.pieces {
+    for pc in pieces.drain(..) {
         match pc.kind {
             PieceKind::Text(t) => {
                 if let Some(last) = runs.last_mut()
                     && last.3 == pc.st
                     && last.0 + last.1 <= pc.x
-                    && pc.x - (last.0 + last.1) <= wq(p, " ", pc.st.font) + Q
+                    && pc.x - (last.0 + last.1) <= p.space_q8(pc.st.font) + Q
                 {
                     // The gap between the pieces is the collapsed space.
                     if pc.x > last.0 + last.1 {
@@ -1079,6 +1128,7 @@ fn emit_line(
         let px = (x0.saturating_add(x).saturating_add(Q / 2)) / Q;
         emit_obj(p, &obj, px, baseline - (h - below), w, h, st);
     }
+    line.pieces = pieces;
     adv(y, line_h)
 }
 

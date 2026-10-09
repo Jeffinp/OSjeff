@@ -99,7 +99,7 @@ fn intrinsic<'a>(
                 let f = p.font(parent);
                 let pre = parent.ws == Ws::Pre;
                 let nowrap = parent.ws == Ws::NoWrap;
-                let space = wq(p, " ", f);
+                let space = p.space_q8(f);
                 if pre {
                     for (i, line) in t.split('\n').enumerate() {
                         if i > 0 {

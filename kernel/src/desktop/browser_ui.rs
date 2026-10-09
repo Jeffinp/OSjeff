@@ -128,6 +128,13 @@ impl Desktop {
             self.draw_start_page(c, content, bs, focused);
         } else if let Some(page) = &t.page {
             self.paint_web_page(c, page, content, t.scroll, bs);
+            if crate::trace::ON && t.trace_t0.get() != 0 {
+                crate::trace::note(
+                    "load to first paint",
+                    t.trace_t0.replace(0),
+                    page.cmds.len() as u64,
+                );
+            }
             self.draw_page_banner(c, content, t);
             self.draw_page_scrollbar(c, content, page, t);
         } else if status == Status::Error {

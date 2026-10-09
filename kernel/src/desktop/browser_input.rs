@@ -28,6 +28,9 @@ impl Desktop {
         let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
             return;
         };
+        // Whatever a key does here stays inside the client area, unless a handler below says
+        // otherwise (the title changes, the window closes).
+        self.client_dirty = Some(id);
         let Some(b) = self.browser_state_mut(id) else {
             return;
         };

@@ -253,6 +253,8 @@ pub(crate) struct TabData {
     pub star: osjeff_core::anim::Tween,
     /// The load in flight was stopped: its result is dropped when it arrives.
     pub cancelled: bool,
+    /// `perf-trace`: when the page was handed over, until its first paint is reported.
+    pub trace_t0: core::cell::Cell<u64>,
 }
 
 /// A tab as the strip shows it: it grows when it opens and shrinks when it closes (a closed
@@ -357,6 +359,7 @@ impl TabData {
             load: osjeff_core::browser::motion::LoadBar::new(),
             star: osjeff_core::anim::Tween::at(0.0),
             cancelled: false,
+            trace_t0: core::cell::Cell::new(0),
         }
     }
 }

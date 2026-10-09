@@ -24,6 +24,21 @@ pub struct Element {
     pub ws_before: bool,
 }
 
+/// A cheap identity for an element name on the stack of open elements (FNV-1a): the stack
+/// only decides whether a stray close tag closes an ancestor, so it need not hold the names.
+fn name_key(name: &str) -> u64 {
+    name_key_bytes(name.as_bytes())
+}
+
+/// [`name_key`] of a name as it stands in the source, any case.
+fn name_key_bytes(name: &[u8]) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for b in name {
+        h = (h ^ u64::from(b.to_ascii_lowercase())).wrapping_mul(0x0100_0000_01b3);
+    }
+    h
+}
+
 impl Element {
     pub fn id(&self) -> Option<&str> {
         self.attrs.get("id").map(|s| s.as_str())
@@ -139,7 +154,7 @@ impl HtmlParser<'_> {
 
     /// Parse sibling nodes until EOF or an unmatched close tag whose name is on
     /// the `open` stack (so the caller can pop to it).
-    fn parse_nodes(&mut self, open: &mut Vec<String>) -> Vec<Node> {
+    fn parse_nodes(&mut self, open: &mut Vec<u64>) -> Vec<Node> {
         let mut nodes = Vec::new();
         while !self.eof() {
             if self.nodes >= MAX_NODES {
@@ -189,10 +204,10 @@ impl HtmlParser<'_> {
         decode_text(core::str::from_utf8(&self.b[start..self.i]).unwrap_or(""))
     }
 
-    fn parse_element(&mut self, open: &mut Vec<String>) -> Option<Node> {
+    fn parse_element(&mut self, open: &mut Vec<u64>) -> Option<Node> {
         // '<'
         self.i += 1;
-        let tag = self.parse_name().to_ascii_lowercase();
+        let tag = self.parse_name_lower();
         if tag.is_empty() {
             self.skip_until(b'>');
             return None;
@@ -230,7 +245,8 @@ impl HtmlParser<'_> {
         }
 
         self.nodes += 1;
-        open.push(tag.clone());
+        let tag_key = name_key(&tag);
+        open.push(tag_key);
         let is_pre = tag == "pre";
         if is_pre {
             self.pre_depth += 1;
@@ -249,11 +265,14 @@ impl HtmlParser<'_> {
         if self.starts_with(b"</") {
             let save = self.i;
             self.i += 2;
-            let close = self.parse_name().to_ascii_lowercase();
+            let (ca, cb) = self.name_range();
+            let close = &self.b[ca..cb];
+            let same = close.eq_ignore_ascii_case(tag.as_bytes());
+            let key = name_key_bytes(close);
             self.skip_until(b'>');
             // Mismatched close tag that an ancestor opened: rewind so it can
             // handle the close (auto-closing this element).
-            if close != tag && open.contains(&close) {
+            if !same && open.contains(&key) {
                 self.i = save;
             }
         }
@@ -266,7 +285,8 @@ impl HtmlParser<'_> {
         }))
     }
 
-    fn parse_name(&mut self) -> String {
+    /// Skip a name (letters, digits, `-`, `_`, `:`) and return its byte range.
+    fn name_range(&mut self) -> (usize, usize) {
         let start = self.i;
         while !self.eof() {
             let c = self.peek();
@@ -276,7 +296,15 @@ impl HtmlParser<'_> {
                 break;
             }
         }
-        String::from_utf8_lossy(&self.b[start..self.i]).into_owned()
+        (start, self.i)
+    }
+
+    /// A name, lower case. Names are ASCII, so one allocation of the exact size.
+    fn parse_name_lower(&mut self) -> String {
+        let (a, b) = self.name_range();
+        let mut v = Vec::with_capacity(b - a);
+        v.extend(self.b[a..b].iter().map(u8::to_ascii_lowercase));
+        String::from_utf8(v).unwrap_or_default()
     }
 
     fn parse_attrs(&mut self) -> BTreeMap<String, String> {
@@ -286,7 +314,7 @@ impl HtmlParser<'_> {
             if self.eof() || self.peek() == b'>' || self.starts_with(b"/>") {
                 break;
             }
-            let name = self.parse_name().to_ascii_lowercase();
+            let name = self.parse_name_lower();
             if name.is_empty() {
                 // Stray character (e.g. a lone '/'): skip it to make progress.
                 self.i += 1;

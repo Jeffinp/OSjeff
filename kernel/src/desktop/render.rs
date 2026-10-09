@@ -168,10 +168,21 @@ impl Desktop {
         let (sw, sh) = (info.width as i32, info.height as i32);
         let wins = self.wm.windows();
 
+        // Only a browser's page area is moving: repaint just its client area (about a third
+        // of the cost of redoing the frame, shadow and bar around it).
+        if let Some(client) = self.client_only_frame(back, info, prev_damage) {
+            return client;
+        }
+
+        // A rebuild starts from nothing; after a client-only frame `prev_damage` is only the
+        // client area, so what the last full frame touched is added back.
+        if prev_damage.is_empty() {
+            self.anim_full.set(Rect::new(0, 0, 0, 0));
+        }
         // Damage = last frame's region + every animating window's box now. When the only
         // thing animating is the inside of windows that stay where they are (Tarefas gliding
         // between samples), last frame's region is the same part again: it need not grow.
-        let mut damage = prev_damage;
+        let mut damage = prev_damage.union(&self.anim_full.get());
         let live_only = !prev_damage.is_empty()
             && !self.overlay_open()
             && !self.dock_animating()
@@ -272,7 +283,87 @@ impl Desktop {
                 self.draw_overlays_in(&mut c, None);
             }
         }
+        self.anim_full.set(damage);
+        let solo = self.solo_browser().map(|w| self.window_box(w));
+        self.anim_solo_box
+            .set(solo.unwrap_or(Rect::new(0, 0, 0, 0)));
         damage
+    }
+
+    /// The frame of a lone moving browser window: its client area redrawn over what the last
+    /// full frame left in `back`, `None` when anything else changed (then the caller does the
+    /// full damage frame).
+    fn client_only_frame(
+        &self,
+        back: &mut [u8],
+        info: bootloader_api::info::FrameBufferInfo,
+        prev_damage: Rect,
+    ) -> Option<Rect> {
+        let solo_box = self.anim_solo_box.get();
+        if prev_damage.is_empty() || solo_box.is_empty() {
+            return None;
+        }
+        let w = self.solo_browser()?;
+        if self.window_box(w) != solo_box {
+            return None;
+        }
+        self.draw_client_only(back, info, w)
+    }
+
+    /// The steady-state version: window `id` is the only thing that changed, nothing moves,
+    /// and `back` holds the scene as the last frame left it.
+    pub fn render_client_only(
+        &self,
+        back: &mut [u8],
+        info: bootloader_api::info::FrameBufferInfo,
+        id: WindowId,
+    ) -> Option<Rect> {
+        if self.drag.is_some() || self.overlay_open() || self.shell_animating() {
+            return None;
+        }
+        let w = self.wm.get(id).filter(|w| w.shown())?;
+        if !matches!(w.app.app, App::Browser(_)) || w.anim.is_some() || w.zoom.is_some() {
+            return None;
+        }
+        self.draw_client_only(back, info, w)
+    }
+
+    /// Redraw the client area of browser window `w` (clip, window body and content; no shadow,
+    /// no title bar) unless something is in front of it. Returns the rect to upload.
+    fn draw_client_only(
+        &self,
+        back: &mut [u8],
+        info: bootloader_api::info::FrameBufferInfo,
+        w: &Win,
+    ) -> Option<Rect> {
+        let wbox = self.window_box(w);
+        let (sw, sh) = (info.width as i32, info.height as i32);
+        let client = Self::client_rect(wbox).clamped_to(sw, sh);
+        if client.is_empty() {
+            return None;
+        }
+        // Whatever is in front of the client area (another window, or its shadow) would be
+        // painted over.
+        let z = self.wm.windows().iter().position(|x| x.id == w.id)?;
+        if self.wm.windows()[z + 1..].iter().any(|x| {
+            x.shown()
+                && shadow_box(self.window_box(x))
+                    .intersection(&client)
+                    .is_some()
+        }) {
+            return None;
+        }
+        let mut c = Canvas::new(back, info);
+        c.set_clip(client);
+        let focused = self.focused() == Some(w.id);
+        self.draw_window(&mut c, w, wbox, focused, false);
+        // The app bar can reach up over the bottom of a tall window.
+        let dock = self.dock_paint_zone();
+        if let Some(part) = client.intersection(&dock) {
+            c.set_clip(part);
+            self.draw_dock(&mut c);
+        }
+        Some(client)
     }
 
     /// Draws the mouse cursor. Called as an overlay directly onto the

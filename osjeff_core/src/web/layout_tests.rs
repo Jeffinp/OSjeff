@@ -1328,3 +1328,22 @@ fn a_full_width_table_keeps_pixel_width_columns_and_widens_the_others() {
         x_of(&p, "bb") - x_of(&p, "a")
     );
 }
+
+#[test]
+fn a_long_paragraph_of_short_words_keeps_its_words_whole() {
+    // More characters than one word may have: the count is per word, so ordinary words
+    // late in a long text node are not cut in two.
+    let text = "palavra ".repeat(1200);
+    let p = lay(&alloc::format!("<p>{text}</p>"), 400);
+    let all: Vec<String> = p
+        .cmds
+        .iter()
+        .filter_map(|c| match c {
+            Cmd::Text { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    let joined = all.join(" ");
+    assert!(joined.split(' ').all(|w| w == "palavra"), "{joined:.80}");
+    assert_eq!(joined.split(' ').count(), 1200);
+}

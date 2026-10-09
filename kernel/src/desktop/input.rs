@@ -302,7 +302,14 @@ impl Desktop {
                 Key::Esc => self.request_close(top),
                 _ => {}
             },
-            Kind::Browser => self.browser_key(top, key),
+            Kind::Browser => {
+                self.browser_key(top, key);
+                // A key that only changed the page area or the bar needs no new scene.
+                if self.client_dirty == Some(top) && !self.force_full {
+                    return false;
+                }
+                self.client_dirty = None;
+            }
             // Forward keystrokes to the guest (printable bytes as-is, Enter as
             // LF, Esc as 0x1B so apps like DOOM get their menu key). A WASM app is
             // closed with the title-bar button, not Esc, so the guest keeps Esc.
@@ -464,7 +471,12 @@ impl Desktop {
         };
         let notches = dz.clamp(-8, 8);
         let changed = match kind {
-            Kind::Browser => self.browser_wheel(w, notches),
+            Kind::Browser => {
+                if self.browser_wheel(w, notches) {
+                    self.client_dirty = Some(w);
+                }
+                false
+            }
             Kind::TaskMgr => {
                 self.tarefas_wheel(w, notches);
                 true
@@ -924,8 +936,11 @@ impl Desktop {
         }
 
         // A link under the pointer is underlined.
-        if cursor_moved && self.browser_hover_update(cx, cy) {
-            scene = true;
+        if cursor_moved
+            && self.browser_hover_update(cx, cy)
+            && let Some(id) = self.browser_id()
+        {
+            self.client_dirty = Some(id);
         }
 
         // Moving over an open menu / start panel updates the hover highlight,

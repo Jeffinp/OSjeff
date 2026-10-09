@@ -485,6 +485,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
 
+        // A browser window whose client area is the only thing that changed.
+        let client_dirty = desk.take_client_dirty();
         let input_irq_tsc = if got_input { trace::input_taken() } else { 0 };
         let mut report_due = false;
         if rt.s != last_sec {
@@ -546,10 +548,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         cursor_moved |= desk.hud_visible() != hud_was_on;
 
         // Did this iteration do real rendering work? (Used to time frames.)
-        let work = any_anim || scene_dirty || clock_tick || cursor_moved || was_anim;
+        let work = any_anim
+            || scene_dirty
+            || client_dirty.is_some()
+            || clock_tick
+            || cursor_moved
+            || was_anim;
         let frame_start = io::rdtsc();
         let cpu_start = trace::cpu_now();
         let mut path: Option<trace::Path> = None;
+        let mut client_done = false;
 
         // CURSOR INVARIANT (see `osjeff_core::cursor`): the sprite lives only in the
         // framebuffer, never in `back`. Every frame that renders anything first erases it
@@ -586,7 +594,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 prev_damage = dmg;
             }
 
-            if tick_changed || cursor_moved {
+            if tick_changed || cursor_moved || client_dirty.is_some() {
                 path.get_or_insert(trace::Path::AnimDamage);
                 let tc = trace::t();
                 let damage = desk.render_anim_frame(back, static_buf, info, prev_damage);
@@ -648,13 +656,33 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         } else {
             static_valid = false;
+            // Only a browser's client area changed (and nothing moves): repaint that rect over
+            // the scene `back` still holds; anything in front of it means a full recompose.
+            if let Some(id) = client_dirty
+                && !scene_dirty
+                && !was_anim
+                && !clock_tick
+            {
+                let tc = trace::t();
+                match desk.render_client_only(back, info, id) {
+                    Some(r) => {
+                        path = Some(trace::Path::Steady);
+                        trace::stage(trace::Stage::Compose, tc);
+                        fb_blit_rect(framebuffer.buffer_mut(), back, info, r.x, r.y, r.w, r.h, n);
+                        client_done = true;
+                    }
+                    None => scene_dirty = true,
+                }
+            }
             // A finished animation needs one final full recompose to settle.
             if was_anim {
                 scene_dirty = true;
             }
             let settle = was_anim || force_full;
 
-            if scene_dirty {
+            if client_done {
+                // Painted above.
+            } else if scene_dirty {
                 path = Some(if settle {
                     trace::Path::Settle
                 } else {

@@ -74,6 +74,17 @@ pub fn mark(name: &'static str) {
     }
 }
 
+/// Print `label` with the microseconds since `t0` (see [`t`]) and the extra `detail`
+/// (`perf-trace` builds only; used by the browser for load, layout and first paint).
+pub fn note(label: &str, t0: u64, detail: u64) {
+    if ON {
+        // SAFETY: as in `mark`: compositor thread only, nothing else holds `&mut Marks`.
+        let khz = unsafe { &*MARKS.get() }.khz.max(1);
+        let us = io::rdtsc().wrapping_sub(t0) * 1000 / khz;
+        crate::serial_println!("[trace] browser {label}: {us} us ({detail})");
+    }
+}
+
 /// Provide the calibrated TSC rate and flush the milestones buffered so far.
 /// Also reports how long the VM had been running when the kernel started
 /// (TSC counts from reset, so `tsc[0]` is the firmware + bootloader time).

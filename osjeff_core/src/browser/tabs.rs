@@ -193,15 +193,19 @@ pub fn tab_title(title: &str, url: &str) -> String {
 }
 
 /// The letter on a tab's badge (there is no favicon): the first letter of the host, or of the
-/// title when the host has none (an IP address), upper case; `•` when there is none.
+/// title when the host has none (an IP address), else its first digit; upper case; `•` when
+/// there is nothing.
 pub fn tab_badge(title: &str, url: &str) -> char {
     let host = host_of(url.trim());
-    let from = |s: &str| {
+    let from = |s: &str, f: fn(&char) -> bool| {
         s.chars()
-            .find(|c| c.is_alphabetic())
+            .find(f)
             .map(|c| c.to_uppercase().next().unwrap_or(c))
     };
-    from(host).or_else(|| from(title)).unwrap_or('\u{2022}')
+    from(host, |c| c.is_alphabetic())
+        .or_else(|| from(title, |c| c.is_alphabetic()))
+        .or_else(|| from(host, |c| c.is_alphanumeric()))
+        .unwrap_or('\u{2022}')
 }
 
 #[cfg(test)]
@@ -329,6 +333,7 @@ mod tests {
         assert_eq!(tab_badge("", "https://www.exemplo.com"), 'E');
         assert_eq!(tab_badge("x", "http://123.test/"), 'T');
         assert_eq!(tab_badge("Tipografia", "http://203.0.113.5:8079/"), 'T');
+        assert_eq!(tab_badge("", "http://203.0.113.5:8079/"), '2');
         assert_eq!(tab_badge("Título", ""), 'T');
         assert_eq!(tab_badge("", ""), '\u{2022}');
         assert_eq!(tab_badge("", "https://émile.test/"), 'É');

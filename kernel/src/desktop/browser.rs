@@ -191,6 +191,59 @@ impl Desktop {
         }
     }
 
+    /// The window to repaint on its own: the only one that has to be redrawn every frame,
+    /// when what moves is inside a browser (page scroll, progress bar, tab strip) and nothing
+    /// else on screen is animating. Its frame, shadow and everything around stay as the last
+    /// full frame left them.
+    pub(crate) fn solo_browser(&self) -> Option<&Win> {
+        if self.drag.is_some()
+            || self.overlay_open()
+            || self.shell_animating()
+            || self.dock_animating()
+        {
+            return None;
+        }
+        let mut found: Option<&Win> = None;
+        for w in self.wm.windows().iter().filter(|w| w.shown()) {
+            if !self.is_dynamic(w) {
+                continue;
+            }
+            let own = w.anim.is_none()
+                && w.zoom.is_none()
+                && !self.focus_busy(w.id)
+                && self.browser_busy(w);
+            if !own || found.is_some() {
+                return None;
+            }
+            found = Some(w);
+        }
+        found
+    }
+
+    /// Set the window title; the title bar is outside the client area, so a client-only
+    /// frame would leave the old one: the next frame is a full one.
+    fn browser_set_title(&mut self, id: WindowId, title: String) {
+        if let Some(w) = self.wm.get_mut(id)
+            && w.app.title != title
+        {
+            w.app.title = title;
+            self.anim_solo_box.set(Rect::new(0, 0, 0, 0));
+            // The title bar is outside the client area.
+            self.client_dirty = None;
+            self.force_full = true;
+        }
+    }
+
+    /// The client area of `w` (below the title bar).
+    pub(crate) fn client_rect(w_box: Rect) -> Rect {
+        Rect::new(
+            w_box.x,
+            w_box.y + TITLE_H,
+            w_box.w,
+            (w_box.h - TITLE_H).max(0),
+        )
+    }
+
     // ---- network hand-off (driven by the kernel main loop) ----
 
     /// If a tab has a pending navigation, copy its target URL into `out`, return the length
@@ -278,7 +331,10 @@ impl Desktop {
         if core::mem::take(&mut t.cancelled) {
             return;
         }
+        let t0 = crate::trace::t();
         t.doc = Some(osjeff_core::web::Doc::parse(&body));
+        crate::trace::note("parse", t0, body.len() as u64);
+        t.trace_t0.set(t0);
         t.page = None;
         t.cert = cert;
         t.sel = None;
@@ -378,8 +434,8 @@ impl Desktop {
             b.ctx = None;
             b.notice = None;
         }
-        if active && let Some(w) = self.wm.get_mut(id) {
-            w.app.title = title;
+        if active {
+            self.browser_set_title(id, title);
         }
     }
 
@@ -408,8 +464,8 @@ impl Desktop {
                 set_title = t.id == active_id;
             }
         }
-        if set_title && let Some(w) = self.wm.get_mut(id) {
-            w.app.title = String::from("Navegador");
+        if set_title {
+            self.browser_set_title(id, String::from("Navegador"));
         }
     }
 
@@ -608,6 +664,7 @@ impl Desktop {
             return;
         };
         if b.tabs.len() <= 1 {
+            self.client_dirty = None;
             self.request_close(id);
             return;
         }
@@ -724,9 +781,7 @@ impl Desktop {
         };
         b.touch();
         b.cache.borrow_mut().invalidate();
-        if let Some(w) = self.wm.get_mut(id) {
-            w.app.title = title;
-        }
+        self.browser_set_title(id, title);
     }
 
     /// Stop the load of the active tab.
@@ -983,7 +1038,9 @@ pub(crate) fn layout_browser(t: &mut TabData, images: &mut ImageCache, width: i3
             metrics: &browser_paint::KernelMetrics,
         })
     };
+    let t0 = crate::trace::t();
     let mut page = lay(images);
+    crate::trace::note("layout", t0, page.cmds.len() as u64);
     if register {
         t.forms = osjeff_core::web::form::FormState::new(&page.forms);
         t.img_keys.clear();

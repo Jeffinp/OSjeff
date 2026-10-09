@@ -609,7 +609,7 @@ fn matched_decls<'a>(
     budget: &mut u32,
 ) -> (Vec<&'a Decl>, Vec<&'a Decl>) {
     let mut hit: Vec<(Specificity, &'a super::css::Rule)> = Vec::new();
-    for r in &sheet.rules {
+    let mut test = |r: &'a super::css::Rule| {
         let mut best: Option<Specificity> = None;
         for s in &r.selectors {
             // The cheap test first: most selectors fail on the element itself.
@@ -622,6 +622,18 @@ fn matched_decls<'a>(
         }
         if let Some(sp) = best {
             hit.push((sp, r));
+        }
+    };
+    match sheet.candidates(&el.tag) {
+        Some(ix) => {
+            for &i in ix {
+                test(&sheet.rules[i as usize]);
+            }
+        }
+        None => {
+            for r in &sheet.rules {
+                test(r);
+            }
         }
     }
     hit.sort_by_key(|(sp, _)| *sp);

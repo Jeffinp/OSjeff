@@ -36,6 +36,54 @@ const MAX_CSS_BYTES: usize = 512 * 1024;
 #[derive(Debug, Default)]
 pub struct Stylesheet {
     pub rules: Vec<Rule>,
+    /// Per element name, the indices (in rule order) of the rules that can match it: those
+    /// whose selectors name it plus those that name nothing. Empty until [`build_index`].
+    by_tag: alloc::collections::BTreeMap<String, Vec<u32>>,
+    /// The rules that can match any element name.
+    generic: Vec<u32>,
+    indexed: bool,
+}
+
+impl Stylesheet {
+    /// Index the rules by the element name their selectors end in, so the cascade tests an
+    /// element against the few rules that can match it instead of every rule. Call after the
+    /// rule list is final.
+    pub fn build_index(&mut self) {
+        self.by_tag.clear();
+        self.generic.clear();
+        for (i, r) in self.rules.iter().enumerate() {
+            let any = r
+                .selectors
+                .iter()
+                .any(|s| s.tag.as_deref().is_none_or(|t| t == "*"));
+            if any {
+                self.generic.push(i as u32);
+                continue;
+            }
+            for s in &r.selectors {
+                if let Some(t) = &s.tag {
+                    let v = self.by_tag.entry(t.clone()).or_default();
+                    if v.last() != Some(&(i as u32)) {
+                        v.push(i as u32);
+                    }
+                }
+            }
+        }
+        for v in self.by_tag.values_mut() {
+            v.extend_from_slice(&self.generic);
+            v.sort_unstable();
+        }
+        self.indexed = true;
+    }
+
+    /// Indices of the rules worth testing for an element called `tag`, in rule order; `None`
+    /// when the sheet was not indexed (test them all).
+    pub fn candidates(&self, tag: &str) -> Option<&[u32]> {
+        if !self.indexed {
+            return None;
+        }
+        Some(self.by_tag.get(tag).map_or(&self.generic[..], |v| &v[..]))
+    }
 }
 
 #[derive(Debug)]
@@ -168,17 +216,12 @@ pub struct Decl {
 pub type Specificity = (usize, usize, usize);
 
 impl Selector {
-    fn own(&self) -> Compound {
-        Compound {
-            tag: self.tag.clone(),
-            id: self.id.clone(),
-            classes: self.classes.clone(),
-            attrs: self.attrs.clone(),
-        }
-    }
-
     pub fn specificity(&self) -> Specificity {
-        let mut s = self.own().specificity();
+        let mut s = (
+            usize::from(self.id.is_some()),
+            self.classes.len() + self.attrs.len(),
+            usize::from(self.tag.as_deref().is_some_and(|t| t != "*")),
+        );
         for (_, c) in &self.ancestors {
             let a = c.specificity();
             s = (s.0 + a.0, s.1 + a.1, s.2 + a.2);
@@ -322,7 +365,10 @@ pub fn parse_css(input: &str) -> Stylesheet {
             });
         }
     }
-    Stylesheet { rules }
+    Stylesheet {
+        rules,
+        ..Default::default()
+    }
 }
 
 fn skip_css_ws(b: &[u8], mut i: usize) -> usize {
@@ -717,5 +763,33 @@ mod css_tests {
         assert!(!sel("div p").matches(p, &[div], &mut none));
         let mut some = 5;
         assert!(sel("div p").matches(p, &[div], &mut some));
+    }
+
+    #[test]
+    fn the_tag_index_offers_every_rule_that_can_match_in_rule_order() {
+        let mut ss = parse_css(
+            "p{a:1} .x{a:2} div p{a:3} h1,p{a:4} *{a:5} [id]{a:6} span > b{a:7} a, .y{a:8}",
+        );
+        // Without an index every rule is a candidate.
+        assert!(ss.candidates("p").is_none());
+        ss.build_index();
+        let names = |t: &str| -> Vec<usize> {
+            ss.candidates(t)
+                .unwrap()
+                .iter()
+                .map(|&i| i as usize)
+                .collect()
+        };
+        // Rules ending in `p` plus the ones that name no element.
+        assert_eq!(names("p"), [0, 1, 2, 3, 4, 5, 7]);
+        // An element no rule names still gets the generic ones, in order.
+        assert_eq!(names("section"), [1, 4, 5, 7]);
+        assert_eq!(names("h1"), [1, 3, 4, 5, 7]);
+        assert_eq!(names("b"), [1, 4, 5, 6, 7]);
+        assert_eq!(names("a"), [1, 4, 5, 7]);
+        for t in ["p", "section", "h1", "b", "a"] {
+            let v = names(t);
+            assert!(v.windows(2).all(|w| w[0] < w[1]), "{t}: {v:?}");
+        }
     }
 }

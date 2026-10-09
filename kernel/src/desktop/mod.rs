@@ -128,6 +128,14 @@ pub struct Desktop {
     /// Set by operations that change pixels outside the focused window (maximize,
     /// restore, ...); makes the next steady frame upload the whole screen.
     force_full: bool,
+    /// A browser window whose client area is the only thing that changed since the last frame
+    /// (a scroll, a hover, a keystroke in its bar): the compositor repaints just that area.
+    client_dirty: Option<WindowId>,
+    /// What the last full animation frame repainted (a client-only frame leaves it alone).
+    anim_full: core::cell::Cell<Rect>,
+    /// The box of the browser window the last full animation frame drew when it was the only
+    /// moving thing on screen: a frame that only repaints its client area needs it unchanged.
+    anim_solo_box: core::cell::Cell<Rect>,
     /// Region to upload on the next steady frame besides the focused window.
     extra_dirty: Rect,
     cursor_x: i32,
@@ -183,6 +191,9 @@ impl Desktop {
             tex_key: core::cell::Cell::new(None),
             clicks: ClickTracker::new(DOUBLE_CLICK_TICKS),
             force_full: false,
+            client_dirty: None,
+            anim_full: core::cell::Cell::new(Rect::new(0, 0, 0, 0)),
+            anim_solo_box: core::cell::Cell::new(Rect::new(0, 0, 0, 0)),
             extra_dirty: Rect::new(0, 0, 0, 0),
             cursor_x: sw / 2,
             cursor_y: sh / 2,
@@ -546,6 +557,11 @@ impl Desktop {
                         || matches!(&w.app.app, App::Terminal(t) if t.term.is_running() || t.animating(self.focused() == Some(w.id)))
                         || self.browser_busy(w))
             })
+    }
+
+    /// Consume the "only this window's client area changed" note.
+    pub fn take_client_dirty(&mut self) -> Option<WindowId> {
+        self.client_dirty.take()
     }
 
     /// Consume the "repaint everything" request (maximize, restore, ...).
