@@ -72,6 +72,11 @@ date.monl.10 = outubro
 date.monl.11 = novembro
 date.monl.12 = dezembro
 
+# Relative times (notification centre)
+time.ago.now = agora
+time.ago.min = {n} min
+time.ago.hour = {n} h
+
 # Severity titles of notifications and banners
 level.info = Informação
 level.warn = Aviso
@@ -92,3 +97,78 @@ app.settings = Ajustes
 app.log = Registro
 app.viewer = Imagens
 app.gallery = Componentes
+common.open = Abrir
+
+# Power
+power.restart = Reiniciar
+power.shutdown = Desligar
+
+# Top panel
+panel.apps = Apps
+panel.clock_template_24 = qua 00 out  00:00
+panel.clock_template_12 = qua 00 out  00:00 PM
+
+# System menu (Apps button area) and desktop context menu
+menu.system.about = Sobre o OSjeff
+menu.system.settings = Ajustes do sistema…
+menu.system.gallery = Componentes
+menu.system.restart = Reiniciar…
+menu.system.shutdown = Desligar…
+
+# Window menu: File, Edit, View and window commands
+menu.file.new_window = Nova janela
+menu.file.open = Abrir…
+menu.file.save = Salvar
+menu.file.new_tab = Nova aba
+menu.file.close_tab = Fechar aba
+menu.file.close_window = Fechar janela
+menu.edit.undo = Desfazer
+menu.edit.redo = Refazer
+menu.edit.cut = Recortar
+menu.edit.copy = Copiar
+menu.edit.paste = Colar
+menu.edit.select_all = Selecionar tudo
+menu.view.zoom_in = Ampliar
+menu.view.zoom_out = Reduzir
+menu.view.zoom_reset = Tamanho real
+menu.view.as_list = Como lista
+menu.view.as_icons = Como ícones
+menu.view.preview = Pré-visualização
+menu.view.window_zoom = Zoom da janela
+menu.view.show_apps = Mostrar apps
+menu.view.search = Buscar
+menu.window.minimize = Minimizar
+menu.window.zoom = Zoom
+menu.window.maximize = Maximizar
+menu.window.restore = Restaurar
+menu.window.snap_left = Ajustar à esquerda
+menu.window.snap_right = Ajustar à direita
+menu.window.move_to_workspace = Mover para a área de trabalho {n}
+menu.shortcut.search = Ctrl+Espaço
+menu.shortcut.preview = Espaço
+
+# Quick settings popover
+quick.title = Configurações rápidas
+quick.network = Rede
+quick.network.connecting = Conectando…
+quick.network.offline = Sem rede
+quick.appearance = Aparência
+quick.appearance.auto = Automática
+quick.appearance.light = Clara
+quick.appearance.dark = Escura
+quick.motion = Movimento
+quick.motion.reduced = Reduzido
+quick.motion.full = Completo
+quick.dnd = Não perturbe
+quick.dnd.on = Ligado
+quick.dnd.off = Desligado
+quick.clock24 = Relógio 24 h
+quick.clock24.on = 24 horas
+quick.clock24.off = 12 horas
+quick.settings = Configurações
+quick.accent = Cor de destaque
+
+# Calendar and notification centre
+centre.notifications = Notificações
+centre.clear = Limpar
+centre.empty = Sem notificações
