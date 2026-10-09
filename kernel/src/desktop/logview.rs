@@ -15,9 +15,11 @@ use super::*;
 use crate::text::{self, BODY, FOOTNOTE, Weight};
 use core::cell::Cell;
 use osjeff_core::activity::{self, Glide};
+use osjeff_core::i18n;
 use osjeff_core::klog::{Filter, Level, LogView, render_text};
 use osjeff_core::sysif::{LogSink, SinkError};
 use osjeff_core::widgets::ScrollbarFade;
+use osjeff_core::{t, tk, tp};
 
 const ROW_H: i32 = 24;
 const HEAD_H: i32 = 28;
@@ -25,7 +27,13 @@ const HEAD_H: i32 = 28;
 const MONO: u16 = 12;
 /// Longest file name the dump is saved under.
 const SAVE_NAME: &[u8] = b"syslog.txt";
-const LEVELS: [&str; 4] = ["Tudo", "Info", "Aviso", "Erro"];
+/// The level segments (catalog keys, looked up when drawn).
+const LEVELS: [&str; 4] = [
+    tk!("log.seg.all"),
+    tk!("log.seg.info"),
+    tk!("log.seg.warn"),
+    tk!("log.seg.error"),
+];
 /// The minimum level of each segment.
 const SEG_LEVEL: [Level; 4] = [Level::Trace, Level::Info, Level::Warn, Level::Error];
 
@@ -44,7 +52,9 @@ pub(crate) struct LogState {
     filter: Filter,
     /// `klog::seq()` when `snap` was taken.
     seen: u32,
-    status: Option<(String, bool)>,
+    /// The last action's message (a catalog key, so it follows the language) and whether it is an
+    /// error.
+    status: Option<(&'static str, bool)>,
     scroll: Glide,
     sb: ScrollbarFade,
     /// The auto-follow switch (0..=256), animated.
@@ -89,8 +99,8 @@ impl LogState {
         true
     }
 
-    fn say(&mut self, msg: &str, error: bool) {
-        self.status = Some((String::from(msg), error));
+    fn say(&mut self, key: &'static str, error: bool) {
+        self.status = Some((key, error));
     }
 
     /// Largest scroll position in pixels for a list `h` high.
@@ -145,8 +155,16 @@ impl LogLayout {
         let save = Rect::new(body.right() - pad - 80, y, 80, 28);
         let clear = Rect::new(save.x - 8 - 80, y, 80, 28);
         let follow_sw = osjeff_core::widgets::switch_rect(clear.x - 14 - 38, y + 3);
-        let follow_label = Rect::new(follow_sw.x - 8 - 46, y, 46, 28);
-        let seg = Rect::new(follow_label.x - 16 - 232, y, 232, 28);
+        // The widths follow the words of the language in effect.
+        let follow_w = text::measure(t!("log.follow"), BODY, Weight::Regular).max(46) + 2;
+        let seg_label = LEVELS
+            .iter()
+            .map(|k| text::measure(i18n::tr(k), BODY, Weight::Medium))
+            .max()
+            .unwrap_or(0);
+        let seg_w = (4 * (seg_label + 28)).max(232);
+        let follow_label = Rect::new(follow_sw.x - 8 - follow_w, y, follow_w, 28);
+        let seg = Rect::new(follow_label.x - 16 - seg_w, y, seg_w, 28);
         let search = Rect::new(body.x + pad, y, (seg.x - 12 - (body.x + pad)).max(60), 28);
         let top = y + 28 + 12;
         let status = Rect::new(body.x + pad, body.bottom() - 16 - 18, body.w - 2 * pad, 18);
@@ -319,7 +337,7 @@ impl Desktop {
             crate::klog::clear();
             l.reload(lay.rows);
             l.aim(lay.list.h);
-            l.say("Registro limpo.", false);
+            l.say(tk!("log.cleared"), false);
         } else if lay.save.contains(px, py) {
             let mut text = Vec::new();
             render_text(
@@ -328,13 +346,11 @@ impl Desktop {
                 |o| crate::sched::thread_name(o as usize),
                 &mut text,
             );
-            let (msg, err): (&str, bool) = match VfsSink.write_file(SAVE_NAME, &text) {
-                Ok(()) => ("Salvo em /var/log/syslog.txt.", false),
-                Err(SinkError::Truncated { .. }) => {
-                    ("Salvo em /var/log/syslog.txt (só o final).", false)
-                }
-                Err(SinkError::NoSpace) => ("Disco cheio: não foi possível salvar.", true),
-                Err(_) => ("Não foi possível salvar.", true),
+            let (msg, err): (&'static str, bool) = match VfsSink.write_file(SAVE_NAME, &text) {
+                Ok(()) => (tk!("log.saved"), false),
+                Err(SinkError::Truncated { .. }) => (tk!("log.saved_tail"), false),
+                Err(SinkError::NoSpace) => (tk!("log.disk_full"), true),
+                Err(_) => (tk!("log.save_failed"), true),
             };
             l.say(msg, err);
             crate::klog::log_quiet(Level::Info, format_args!("log saved to syslog.txt"));
@@ -446,19 +462,13 @@ impl Desktop {
         // Toolbar.
         let focused = true;
         let needle = String::from_utf8_lossy(l.filter.needle()).into_owned();
-        kit::search_field(
-            c,
-            lay.search,
-            &needle,
-            "Buscar no registro",
-            focused,
-            focused,
-        );
-        ui::segmented(c, lay.seg, &LEVELS, l.seg_index());
+        kit::search_field(c, lay.search, &needle, t!("log.search"), focused, focused);
+        let levels = LEVELS.map(i18n::tr);
+        ui::segmented(c, lay.seg, &levels, l.seg_index());
         text::draw_right(
             c,
             lay.follow_label,
-            "Seguir",
+            t!("log.follow"),
             BODY,
             Weight::Regular,
             kit::ink(),
@@ -468,7 +478,7 @@ impl Desktop {
             c,
             lay.clear,
             osjeff_core::iconart::Glyph::Trash,
-            "Limpar",
+            t!("log.clear"),
             ButtonKind::Secondary,
             kit::control_state(key == H_CLEAR, down, true),
         );
@@ -476,14 +486,19 @@ impl Desktop {
             c,
             lay.save,
             osjeff_core::iconart::Glyph::Save,
-            "Salvar",
+            t!("log.save"),
             ButtonKind::Secondary,
             kit::control_state(key == H_SAVE, down, true),
         );
 
         // The table.
         kit::card(c, lay.card);
-        let heads = ["Hora", "Nível", "Origem", "Mensagem"];
+        let heads = [
+            t!("log.col.time"),
+            t!("log.col.level"),
+            t!("log.col.source"),
+            t!("log.col.message"),
+        ];
         for (i, h) in heads.iter().enumerate() {
             let col = lay.cols[i];
             if col.w == 0 {
@@ -588,9 +603,9 @@ impl Desktop {
         }
         if l.view.is_empty() {
             let msg = if l.snap.is_empty() {
-                "O registro está vazio."
+                t!("log.empty")
             } else {
-                "Nenhuma linha corresponde ao filtro."
+                t!("log.no_match")
             };
             text::draw_left(
                 c,
@@ -614,9 +629,9 @@ impl Desktop {
         // Status line: counts on the left, the last action on the right.
         let total = osjeff_core::klog::records(&l.snap).count();
         let counts = if l.view.len() == total {
-            alloc::format!("{} linhas", activity::fmt_count(total as u64))
+            tp!("log.count", total)
         } else {
-            alloc::format!("{} de {} linhas", l.view.len(), total)
+            tp!("log.count_of", total, shown = l.view.len())
         };
         text::draw_left(
             c,
@@ -630,7 +645,7 @@ impl Desktop {
             text::draw_right(
                 c,
                 lay.status,
-                m,
+                i18n::tr(m),
                 FOOTNOTE,
                 Weight::Regular,
                 if *err { kit::red() } else { kit::ink2() },
