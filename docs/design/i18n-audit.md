@@ -29,6 +29,20 @@ de falha ficam em inglês de propósito e não entram na conta.
 | Sistema (logs e tela de falha: ficam em inglês) | 9 | 75 | 0 | 25 | 1 | 0 |
 | Outros | 5 | 13 | 0 | 6 | 1 | 63 |
 | **Total** | 64 | 576 | 33 | 169 | 18 | 942 |
+| Ajustes | 3 | 5 | 0 | 3 | 0 | 210 |
+| Arquivos | 13 | 220 | 14 | 43 | 5 | 0 |
+| Editor | 6 | 54 | 0 | 11 | 0 | 0 |
+| Terminal | 11 | 203 | 0 | 177 | 5 | 0 |
+| Tarefas | 3 | 89 | 0 | 3 | 1 | 0 |
+| Registro | 1 | 19 | 0 | 0 | 0 | 4 |
+| Calculadora | 2 | 2 | 0 | 0 | 0 | 0 |
+| Imagens | 7 | 90 | 0 | 33 | 9 | 0 |
+| Navegador | 11 | 36 | 0 | 20 | 1 | 90 |
+| Apps de terceiros (WASM) | 8 | 46 | 0 | 40 | 1 | 83 |
+| Kit de componentes | 0 | 0 | 0 | 0 | 0 | 75 |
+| Sistema (logs e tela de falha: ficam em inglês) | 7 | 32 | 0 | 25 | 1 | 46 |
+| Outros | 4 | 12 | 0 | 5 | 1 | 63 |
+| **Total** | 79 | 814 | 14 | 360 | 24 | 677 |
 
 Cada app só mexe nos arquivos da sua linha; os arquivos de `Kit de componentes` e do `Shell` já
 foram tratados (Shell) ou só mudam se um app precisar de uma chave nova (use o prefixo do próprio app).
@@ -51,9 +65,9 @@ janela de Ajustes e o modelo de configurações.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `kernel/src/desktop/settings_ui.rs` | 109 | 0 | 1 | 0 |
-| `osjeff_core/src/settings.rs` | 14 | 0 | 0 | 0 |
-| `osjeff_core/src/wallpaper.rs` | 6 | 0 | 3 | 0 |
+| `kernel/src/desktop/settings_ui.rs` | 1 | 0 | 0 | 0 |
+| `osjeff_core/src/settings.rs` | 1 | 0 | 0 | 0 |
+| `osjeff_core/src/wallpaper.rs` | 3 | 0 | 3 | 0 |
 
 ### Arquivos
 
@@ -117,6 +131,7 @@ navegador, páginas internas, erros de rede e TLS (outro agente está editando).
 | `kernel/src/netd.rs` | 2 | 0 | 0 | 0 |
 | `kernel/src/netstack.rs` | 1 | 0 | 1 | 0 |
 | `osjeff_core/src/browser.rs` | 20 | 0 | 0 | 0 |
+| `osjeff_core/src/browser.rs` | 4 | 0 | 0 | 0 |
 | `osjeff_core/src/browser/body_tests.rs` | 1 | 0 | 0 | 0 |
 | `osjeff_core/src/browser/errors.rs` | 29 | 0 | 0 | 0 |
 | `osjeff_core/src/browser/pages.rs` | 24 | 0 | 1 | 1 |
@@ -128,6 +143,10 @@ navegador, páginas internas, erros de rede e TLS (outro agente está editando).
 | `osjeff_core/src/web/form.rs` | 8 | 0 | 0 | 0 |
 | `osjeff_core/src/web/imgcache.rs` | 5 | 0 | 0 | 0 |
 | `osjeff_core/src/web/style.rs` | 3 | 1 | 2 | 1 |
+| `osjeff_core/src/tlsverify.rs` | 7 | 0 | 7 | 0 |
+| `osjeff_core/src/web/form.rs` | 5 | 0 | 0 | 0 |
+| `osjeff_core/src/web/imgcache.rs` | 1 | 0 | 0 | 0 |
+| `osjeff_core/src/web/style.rs` | 2 | 0 | 2 | 0 |
 
 ### Apps de terceiros (WASM)
 
@@ -135,11 +154,8 @@ janela de app, manifesto, instalação, SDK.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `kernel/src/desktop/wasmwin.rs` | 2 | 1 | 0 | 0 |
-| `kernel/src/wasm/abi2.rs` | 9 | 6 | 0 | 0 |
-| `kernel/src/wasm/manager.rs` | 5 | 2 | 0 | 0 |
-| `kernel/src/wasm/manager/runtime.rs` | 7 | 4 | 0 | 0 |
-| `kernel/src/wasm/mod.rs` | 13 | 3 | 3 | 0 |
+| `kernel/src/desktop/wasmwin.rs` | 1 | 0 | 0 | 0 |
+| `kernel/src/wasm/mod.rs` | 4 | 0 | 3 | 0 |
 | `kernel/src/wasm/wasi.rs` | 1 | 0 | 1 | 0 |
 | `osjeff_core/src/appfs/mod.rs` | 11 | 0 | 10 | 0 |
 | `osjeff_core/src/appfs/volume_tests.rs` | 2 | 0 | 1 | 0 |
@@ -166,6 +182,7 @@ boot, falha grave, drivers.
 | `kernel/src/desktop/browser.rs` | 7 | 0 | 0 | 0 |
 | `kernel/src/desktop/browser_input.rs` | 11 | 0 | 0 | 0 |
 | `kernel/src/desktop/browser_ui.rs` | 26 | 0 | 1 | 0 |
+| `kernel/src/desktop/browser_ui.rs` | 1 | 0 | 1 | 0 |
 | `kernel/src/interrupts.rs` | 2 | 0 | 2 | 0 |
 | `kernel/src/io.rs` | 6 | 0 | 6 | 0 |
 | `kernel/src/main.rs` | 12 | 0 | 12 | 0 |
@@ -220,6 +237,20 @@ núcleo sem dono claro.
 | `osjeff_core/src/tlsverify.rs:112` | `Certificado inválido: restricao da cadeia violada` | restricao → (acento) |
 | `osjeff_core/src/tlsverify.rs:113` | `Certificado inválido: algoritmo nao suportado` | nao → não |
 | `osjeff_core/src/web/style.rs:17` | `\nhtml,body,div,p,h1,h2,h3,h4,h5,h6,ul,ol,dl,dt,dd,header,footer,article,section,nav,main,aside,blockquote,...` | area → área |
+| `kernel/src/desktop/sysstore.rs:65` | `Memoria (sem disco v3)` | Memoria → memória |
+| `kernel/src/desktop/vfs.rs:94` | `Disco pequeno demais: arquivos so na memoria` | memoria → memória |
+| `kernel/src/desktop/vfs.rs:95` | `Sem disco: arquivos so na memoria` | memoria → memória |
+| `kernel/src/desktop/vfs.rs:96` | `Disco desconhecido (intocado): arquivos so na memoria` | memoria → memória |
+| `kernel/src/desktop/vfs.rs:97` | `Falha no disco: arquivos so na memoria` | memoria → memória |
+| `osjeff_core/src/fs3/mod.rs:827` | `block range outside the data area` | area → área |
+| `osjeff_core/src/vfs.rs:73` | `Item nao encontrado` | nao → não |
+| `osjeff_core/src/vfs.rs:75` | `O destino nao e uma pasta` | nao → não |
+| `osjeff_core/src/vfs.rs:77` | `A pasta nao esta vazia` | nao → não |
+| `osjeff_core/src/vfs.rs:78` | `Nome invalido` | invalido → inválido |
+| `osjeff_core/src/vfs.rs:79` | `Nome longo demais (maximo 255 bytes)` | maximo → máximo |
+| `osjeff_core/src/vfs.rs:80` | `Caminho invalido` | invalido → inválido |
+| `osjeff_core/src/vfs.rs:82` | `Nao e possivel mover uma pasta para dentro dela mesma` | Nao → não, possivel → possível |
+| `osjeff_core/src/vfs.rs:90` | `Operacao cancelada` | Operacao → operação |
 
 ## Inglês e textos mistos numa interface em português
 
@@ -230,6 +261,28 @@ núcleo sem dono claro.
 | `kernel/src/crash.rs:280` | `The system is halted. Reset or power-cycle the machine to restart.\nThe same report was written to the seri...` | misto |
 | `kernel/src/desktop/browser_ui.rs:133` | `load to first paint` | en |
 | `kernel/src/desktop/settings_ui.rs:1233` | `Total` | en |
+| `kernel/src/desktop/browser_ui.rs:134` | `load to first paint` | en |
+| `kernel/src/desktop/files.rs:350` | `{name} aberto` | en |
+| `kernel/src/desktop/files.rs:354` | `{name} instalado e aberto` | en |
+| `kernel/src/desktop/files.rs:358` | `{name} instalado` | en |
+| `kernel/src/desktop/files.rs:361` | `{name} removido` | en |
+| `kernel/src/desktop/files.rs:1818` | `Tamanho total: {}` | misto |
+| `kernel/src/desktop/files.rs:1887` | `Estado: não instalado (Enter instala e abre)` | misto |
+| `kernel/src/desktop/files_ui.rs:1008` | `Enter abre  ·  I instala  ·  Del remove` | en |
+| `kernel/src/desktop/shellhost.rs:302` | `boot disk` | en |
+| `kernel/src/desktop/shellhost.rs:484` | `{p}: Is a directory` | en |
+| `kernel/src/desktop/shellhost.rs:490` | `usage: edit [FILE]` | en |
+| `kernel/src/desktop/shellhost.rs:528` | `edit [FILE]: open the text editor` | en |
+| `kernel/src/desktop/shellhost.rs:529` | `files: open the file manager` | en |
+| `kernel/src/desktop/shellhost.rs:530` | `tasks: open the task manager` | en |
+| `kernel/src/desktop/shellhost.rs:531` | `calc: open the calculator` | en |
+| `kernel/src/desktop/shellhost.rs:532` | `reboot: restart the machine` | en |
+| `kernel/src/desktop/shellhost.rs:533` | `shutdown: power the machine off` | en |
+| `kernel/src/desktop/tarefas.rs:1419` | `Total` | en |
+| `kernel/src/desktop/tarefas.rs:1578` | `Total` | en |
+| `kernel/src/desktop/tarefas.rs:2264` | `Encerrar “{name}”?` | en |
+| `kernel/src/desktop/term.rs:254` | `sh: too many commands waiting` | en |
+| `kernel/src/desktop/term.rs:259` | `sh: the command thread stopped` | en |
 | `kernel/src/interrupts.rs:314` | `stack overflow in thread '{owner}': guard page hit at {cr2:#x} ({code:?})` | en |
 | `kernel/src/interrupts.rs:321` | `page fault accessing {cr2:#x}: {code:?}` | en |
 | `kernel/src/io.rs:12` | `in al, dx` | en |
@@ -256,39 +309,45 @@ núcleo sem dono claro.
 | `kernel/src/wasm/mod.rs:343` | `link host.draw_text` | en |
 | `kernel/src/wasm/mod.rs:364` | `link host.time_ms` | en |
 | `kernel/src/wasm/mod.rs:400` | `trap in entry` | en |
+| `kernel/src/netstack.rs:700` | `tcp stream error` | en |
+| `kernel/src/trace.rs:658` | `The quick brown fox jumps over the lazy dog 0123` | en |
+| `kernel/src/trace.rs:736` | `The quick brown fox jumps over the lazy dog 0123` | en |
+| `kernel/src/wasm/mod.rs:396` | `link host.draw_text` | en |
+| `kernel/src/wasm/mod.rs:417` | `link host.time_ms` | en |
+| `kernel/src/wasm/mod.rs:453` | `trap in entry` | en |
 | `kernel/src/wasm/wasi.rs:381` | `link env.system` | en |
-| `osjeff_core/src/appfs/mod.rs:75` | `not found` | en |
-| `osjeff_core/src/appfs/mod.rs:76` | `already exists` | en |
-| `osjeff_core/src/appfs/mod.rs:77` | `not a directory` | en |
-| `osjeff_core/src/appfs/mod.rs:78` | `is a directory` | en |
-| `osjeff_core/src/appfs/mod.rs:79` | `directory not empty` | en |
-| `osjeff_core/src/appfs/mod.rs:81` | `invalid argument` | en |
-| `osjeff_core/src/appfs/mod.rs:82` | `permission denied` | en |
-| `osjeff_core/src/appfs/mod.rs:83` | `bad file descriptor` | en |
-| `osjeff_core/src/appfs/mod.rs:84` | `too many open files` | en |
-| `osjeff_core/src/appfs/mod.rs:85` | `i/o error` | en |
+| `osjeff_core/src/appfs/mod.rs:94` | `not found` | en |
+| `osjeff_core/src/appfs/mod.rs:95` | `already exists` | en |
+| `osjeff_core/src/appfs/mod.rs:96` | `not a directory` | en |
+| `osjeff_core/src/appfs/mod.rs:97` | `is a directory` | en |
+| `osjeff_core/src/appfs/mod.rs:98` | `directory not empty` | en |
+| `osjeff_core/src/appfs/mod.rs:100` | `invalid argument` | en |
+| `osjeff_core/src/appfs/mod.rs:101` | `permission denied` | en |
+| `osjeff_core/src/appfs/mod.rs:102` | `bad file descriptor` | en |
+| `osjeff_core/src/appfs/mod.rs:103` | `too many open files` | en |
+| `osjeff_core/src/appfs/mod.rs:104` | `i/o error` | en |
 | `osjeff_core/src/appfs/volume_tests.rs:347` | `id={id}\nname={id}\nversion=1.0.0\n{extra}` | en |
-| `osjeff_core/src/appinstall.rs:48` | `package is larger than 4 MiB` | en |
-| `osjeff_core/src/appinstall.rs:50` | `an app with this id is already installed` | en |
-| `osjeff_core/src/appinstall.rs:51` | `app is not installed` | en |
-| `osjeff_core/src/appinstall.rs:52` | `invalid app id` | en |
-| `osjeff_core/src/appinstall.rs:53` | `too many installed apps` | en |
-| `osjeff_core/src/appinstall.rs:54` | `file system: {e}` | en |
-| `osjeff_core/src/appmanifest.rs:162` | `manifest is too large` | en |
-| `osjeff_core/src/appmanifest.rs:163` | `manifest is not valid UTF-8` | en |
-| `osjeff_core/src/appmanifest.rs:164` | `manifest has too many lines` | en |
-| `osjeff_core/src/appmanifest.rs:165` | `manifest syntax error` | en |
-| `osjeff_core/src/appmanifest.rs:167` | `unknown manifest key` | en |
-| `osjeff_core/src/appmanifest.rs:168` | `manifest key '{k}' is required` | en |
-| `osjeff_core/src/appmanifest.rs:169` | `invalid value for '{k}'` | en |
-| `osjeff_core/src/appmanifest.rs:170` | `'{k}' is above the system limit` | en |
-| `osjeff_core/src/appmanifest.rs:577` | `icon is larger than 64 KiB` | en |
-| `osjeff_core/src/appmanifest.rs:578` | `icon is not a PNG` | en |
-| `osjeff_core/src/appmanifest.rs:579` | `icon is larger than 64x64` | en |
-| `osjeff_core/src/appmanifest.rs:580` | `icon PNG is corrupt` | en |
-| `osjeff_core/src/appmanifest.rs:613` | `package has no osjeff.manifest section` | misto |
-| `osjeff_core/src/appmanifest.rs:614` | `package has two manifests` | en |
-| `osjeff_core/src/appmanifest.rs:615` | `package has two icons` | en |
+| `osjeff_core/src/appinstall.rs:78` | `package is larger than 4 MiB` | en |
+| `osjeff_core/src/appinstall.rs:80` | `an app with this id is already installed` | en |
+| `osjeff_core/src/appinstall.rs:81` | `app is not installed` | en |
+| `osjeff_core/src/appinstall.rs:82` | `invalid app id` | en |
+| `osjeff_core/src/appinstall.rs:83` | `too many installed apps` | en |
+| `osjeff_core/src/appinstall.rs:84` | `file system: {e}` | en |
+| `osjeff_core/src/appmanifest.rs:168` | `manifest is too large` | en |
+| `osjeff_core/src/appmanifest.rs:169` | `manifest is not valid UTF-8` | en |
+| `osjeff_core/src/appmanifest.rs:170` | `manifest has too many lines` | en |
+| `osjeff_core/src/appmanifest.rs:171` | `manifest syntax error` | en |
+| `osjeff_core/src/appmanifest.rs:173` | `unknown manifest key` | en |
+| `osjeff_core/src/appmanifest.rs:174` | `manifest key '{k}' is required` | en |
+| `osjeff_core/src/appmanifest.rs:175` | `invalid value for '{k}'` | en |
+| `osjeff_core/src/appmanifest.rs:176` | `'{k}' is above the system limit` | en |
+| `osjeff_core/src/appmanifest.rs:686` | `icon is larger than 64 KiB` | en |
+| `osjeff_core/src/appmanifest.rs:687` | `icon is not a PNG` | en |
+| `osjeff_core/src/appmanifest.rs:688` | `icon is larger than 64x64` | en |
+| `osjeff_core/src/appmanifest.rs:689` | `icon PNG is corrupt` | en |
+| `osjeff_core/src/appmanifest.rs:742` | `package has no osjeff.manifest section` | misto |
+| `osjeff_core/src/appmanifest.rs:743` | `package has two manifests` | en |
+| `osjeff_core/src/appmanifest.rs:744` | `package has two icons` | en |
 | `osjeff_core/src/base64.rs:29` | `invalid base64 character` | en |
 | `osjeff_core/src/base64.rs:30` | `invalid base64 length` | en |
 | `osjeff_core/src/base64.rs:31` | `base64 padding before the end` | en |
@@ -352,6 +411,8 @@ núcleo sem dono claro.
 | `osjeff_core/src/fs3/ops.rs:190` | `inode missing from its parent` | en |
 | `osjeff_core/src/fs3/ops.rs:321` | `directory entry changed under us` | en |
 | `osjeff_core/src/i18n/audit.rs:812` | `{file}:{line}: {w:?} should be {r} in {s:?}` | en |
+| `osjeff_core/src/fs3/ops.rs:376` | `directory tree does not terminate` | en |
+| `osjeff_core/src/i18n/audit.rs:819` | `{file}:{line}: {w:?} should be {r} in {s:?}` | en |
 | `osjeff_core/src/icmp.rs:247` | `destination unreachable (code {c})` | en |
 | `osjeff_core/src/icmp.rs:248` | `time exceeded` | en |
 | `osjeff_core/src/icmp.rs:249` | `no route to host` | misto |
@@ -410,6 +471,21 @@ núcleo sem dono claro.
 | `osjeff_core/src/wasmsec.rs:54` | `unknown section id` | en |
 | `osjeff_core/src/wasmsec.rs:55` | `too many sections` | en |
 | `osjeff_core/src/web/style.rs:17` | `\nhtml,body,div,p,h1,h2,h3,h4,h5,h6,ul,ol,dl,dt,dd,header,footer,article,section,nav,main,aside,blockquote,...` | misto |
+| `osjeff_core/src/tlsverify.rs:83` | `certificate too large` | en |
+| `osjeff_core/src/tlsverify.rs:84` | `chain too long` | en |
+| `osjeff_core/src/tlsverify.rs:86` | `not yet valid` | en |
+| `osjeff_core/src/tlsverify.rs:87` | `name mismatch` | en |
+| `osjeff_core/src/tlsverify.rs:90` | `bad signature` | en |
+| `osjeff_core/src/tlsverify.rs:91` | `invalid CA in chain` | en |
+| `osjeff_core/src/tlsverify.rs:94` | `system clock wrong` | en |
+| `osjeff_core/src/wallpaper.rs:384` | `file too big` | en |
+| `osjeff_core/src/wallpaper.rs:385` | `not PNG/BMP/PPM` | en |
+| `osjeff_core/src/wallpaper.rs:386` | `image too big` | en |
+| `osjeff_core/src/wasmsec.rs:64` | `not a wasm module (too short)` | en |
+| `osjeff_core/src/wasmsec.rs:65` | `not a wasm module (bad magic)` | en |
+| `osjeff_core/src/wasmsec.rs:68` | `section extends past the end of the file` | en |
+| `osjeff_core/src/wasmsec.rs:69` | `unknown section id` | en |
+| `osjeff_core/src/wasmsec.rs:70` | `too many sections` | en |
 | `osjeff_core/src/web/style.rs:460` | `courier new` | en |
 | `osjeff_core/src/web/style.rs:468` | `source code pro` | en |
 
@@ -444,149 +520,25 @@ decida caso a caso se vão para o catálogo.
 
 ### Ajustes
 
-**`kernel/src/desktop/settings_ui.rs`** (109)
+**`kernel/src/desktop/settings_ui.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 454 | `Aparência` | pt | `settings.aparencia` |
-| 455 | `Tema` | pt | `settings.tema` |
-| 458 | `Tema` | pt | `settings.tema_2` |
-| 465 | `Automático` | pt | `settings.automatico` |
-| 465 | `Claro` | pt | `settings.claro` |
-| 465 | `Escuro` | pt | `settings.escuro` |
-| 467 | `Cor de destaque` | pt | `settings.cor_destaque` |
-| 509 | `Movimento` | neutro | `settings.movimento` |
-| 515 | `Reduzir movimento` | neutro | `settings.reduzir_movimento` |
-| 516 | `As transições terminam na hora` | pt | `settings.as_transicoes_terminam_na` |
-| 521 | `Notificações` | pt | `settings.notificacoes` |
-| 524 | `Mostrar notificações` | pt | `settings.mostrar_notificacoes` |
-| 529 | `Duração` | pt | `settings.duracao` |
-| 540 | `Papel de parede` | pt | `settings.papel_parede` |
-| 584 | `Sua imagem` | pt | `settings.sua_imagem` |
-| 604 | `Imagem do usuário` | pt | `settings.imagem_usuario` |
-| 609 | `ex.: /Imagens/praia.png` | pt | `settings.ex_imagens_praia_png` |
-| 612 | `Aplicar` | pt | `settings.aplicar` |
-| 619 | `Escolher imagem…` | pt | `settings.escolher_imagem` |
-| 650 | `Barra de apps` | pt | `settings.barra_apps` |
-| 651 | `Uso` | neutro | `settings.uso` |
-| 654 | `Arraste um ícone fixado para outra posição` | pt | `settings.arraste_icone_fixado_para` |
-| 657 | `Botão direito no ícone, em Fixar ou Desafixar` | pt | `settings.botao_direito_no_icone` |
-| 659 | `Nova janela` | pt | `settings.nova_janela` |
-| 659 | `Shift + clique no ícone do app` | pt | `settings.shift_clique_no_icone` |
-| 740 | `Teclado` | pt | `settings.teclado` |
-| 741 | `Disposição` | pt | `settings.disposicao` |
-| 744 | `Padrão internacional` | pt | `settings.padrao_internacional` |
-| 745 | `Português do Brasil: ç e acentos` | pt | `settings.portugues_brasil_c_acentos` |
-| 759 | `Teste` | neutro | `settings.teste` |
-| 764 | `Digite aqui para experimentar` | pt | `settings.digite_aqui_para_experimentar` |
-| 769 | `Data e hora` | pt | `settings.data_hora` |
-| 772 | `Agora` | pt | `settings.agora` |
-| 825 | `{}, {} de {} de {}` | pt | `settings.text` |
-| 840 | `UTC {:02}:{:02}:{:02}` | neutro | `settings.utc_02_02_02` |
-| 850 | `Formato` | neutro | `settings.formato` |
-| 853 | `Relógio de 24 horas` | pt | `settings.relogio_24_horas` |
-| 856 | `Fuso horário` | pt | `settings.fuso_horario` |
-| 863 | `Buscar cidade` | pt | `settings.buscar_cidade` |
-| 919 | `Nenhuma cidade encontrada.` | pt | `settings.nenhuma_cidade_encontrada` |
-| 931 | `Ajustar data e hora` | pt | `settings.ajustar_data_hora` |
-| 934 | `Dia` | pt | `settings.dia` |
-| 935 | `Mês` | pt | `settings.mes` |
-| 936 | `Ano` | pt | `settings.ano` |
-| 937 | `Hora` | pt | `settings.hora` |
-| 1000 | `Ler do relógio` | pt | `settings.ler_relogio` |
-| 1007 | `Ajustar` | neutro | `settings.ajustar` |
-| 1039 | `Rede` | pt | `settings.rede` |
-| 1043 | `Sem placa de rede` | pt | `settings.sem_placa_rede` |
-| 1045 | `Sem sinal` | pt | `settings.sem_sinal` |
-| 1047 | `Procurando endereço` | pt | `settings.procurando_endereco` |
-| 1049 | `Conectado` | pt | `settings.conectado` |
-| 1051 | `Conexão` | pt | `settings.conexao` |
-| 1069 | `Endereços` | pt | `settings.enderecos` |
-| 1116 | `Estático` | pt | `settings.estatico` |
-| 1118 | `{} restantes` | neutro | `settings.restantes` |
-| 1120 | `Sem expiração` | pt | `settings.sem_expiracao` |
-| 1123 | `Endereço IP` | pt | `settings.endereco_ip` |
-| 1124 | `Máscara` | pt | `settings.mascara` |
-| 1125 | `Roteador` | neutro | `settings.roteador` |
-| 1127 | `Concessão` | pt | `settings.concessao` |
-| 1128 | `Dispositivo e tráfego` | pt | `settings.dispositivo_trafego` |
-| 1134 | `Endereço físico` | pt | `settings.endereco_fisico` |
-| 1147 | `Recebido` | pt | `settings.recebido` |
-| 1148 | `Enviado` | pt | `settings.enviado` |
-| 1150 | `{} recebidos · {} enviados` | neutro | `settings.recebidos_enviados` |
-| 1154 | `Pacotes` | neutro | `settings.pacotes` |
-| 1158 | `Disco` | pt | `settings.disco` |
-| 1163 | `Disco principal` | pt | `settings.disco_principal` |
-| 1164 | `Sistema de arquivos OJFS v3` | pt | `settings.sistema_arquivos_ojfs_v3` |
-| 1167 | `Memória (sem disco)` | pt | `settings.memoria_sem_disco` |
-| 1168 | `Os arquivos somem ao desligar` | pt | `settings.os_arquivos_somem_ao` |
-| 1172 | `Volume` | neutro | `settings.volume` |
-| 1219 | `Usado` | neutro | `settings.usado` |
-| 1226 | `Livre` | neutro | `settings.livre` |
-| 1233 | `Total` | en | `settings.total` |
-| 1241 | `Arquivos e pastas` | pt | `settings.arquivos_pastas` |
-| 1242 | `Dispositivos` | neutro | `settings.dispositivos` |
-| 1244 | `Disco de inicialização` | pt | `settings.disco_inicializacao` |
-| 1244 | `Disco de arquivos` | pt | `settings.disco_arquivos` |
-| 1261 | `Energia` | neutro | `settings.energia` |
-| 1264 | `Reiniciar` | pt | `settings.reiniciar` |
-| 1264 | `Reiniciar…` | pt | `settings.reiniciar_2` |
-| 1265 | `Desligar` | pt | `settings.desligar` |
-| 1265 | `Desligar…` | pt | `settings.desligar_2` |
-| 1287 | `Sobre` | pt | `settings.sobre` |
-| 1302 | `Versão {} · compilação {}` | pt | `settings.versao_compilacao` |
-| 1305 | `de depuração` | pt | `settings.depuracao` |
-| 1334 | `Processador` | neutro | `settings.processador` |
-| 1338 | `Memória` | pt | `settings.memoria` |
-| 1340 | `Tempo ligado` | pt | `settings.tempo_ligado` |
-| 1342 | `{} × {} pixels` | neutro | `settings.pixels` |
-| 1344 | `Tela` | pt | `settings.tela` |
-| 1349 | ` · máquina virtual` | pt | `settings.maquina_virtual` |
-| 1353 | `Inicialização` | pt | `settings.inicializacao` |
-| 1355 | `Fonte forte de números aleatórios` | pt | `settings.fonte_forte_numeros_aleatorios` |
-| 1356 | `Números aleatórios de fonte mista` | pt | `settings.numeros_aleatorios_fonte_mista` |
-| 1357 | `Números aleatórios de fonte fraca` | pt | `settings.numeros_aleatorios_fonte_fraca` |
-| 1359 | `Segurança` | pt | `settings.seguranca` |
-| 1476 | `Caminho inválido para papel de parede (use letras, números . _ - /).` | pt | `settings.caminho_invalido_para_papel` |
-| 1480 | `Arquivo não encontrado.` | pt | `settings.arquivo_nao_encontrado` |
-| 1483 | `Imagem recusada: {e}` | pt | `settings.imagem_recusada` |
-| 1490 | `Papel de parede aplicado, mas não foi salvo.` | pt | `settings.papel_parede_aplicado_mas` |
-| 1517 | `Papel de parede aplicado.` | pt | `settings.papel_parede_aplicado` |
-| 1708 | `Escolha uma imagem: digite o caminho abaixo ou use o Arquivos.` | pt | `settings.escolha_imagem_digite_caminho` |
-| 1727 | `No Arquivos, clique com o botão direito na imagem e escolha “Definir como papel de parede”.` | pt | `settings.no_arquivos_clique_com` |
-| 1786 | `Lido do relógio.` | pt | `settings.lido_relogio` |
-| 1793 | `Relógio ajustado.` | pt | `settings.relogio_ajustado` |
-| 1796 | `Data inválida.` | pt | `settings.data_invalida` |
+| 814 | `UTC {:02}:{:02}:{:02}` | neutro | `settings.utc_02_02_02` |
 
-**`osjeff_core/src/settings.rs`** (14)
+**`osjeff_core/src/settings.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 65 | `Cidade do México` | pt | `settings.cidade_mexico` |
-| 67 | `Nova York` | pt | `settings.nova_york` |
-| 68 | `Bogotá` | pt | `settings.bogota` |
-| 75 | `São Paulo` | pt | `settings.sao_paulo` |
-| 76 | `Brasília` | pt | `settings.brasilia` |
-| 77 | `Fernando de Noronha` | pt | `settings.fernando_noronha` |
-| 78 | `Açores` | pt | `settings.acores` |
-| 91 | `Nairóbi` | pt | `settings.nairobi` |
-| 92 | `Teerã` | pt | `settings.teera` |
-| 96 | `Nova Délhi` | pt | `settings.nova_delhi` |
-| 102 | `Tóquio` | pt | `settings.toquio` |
-| 106 | `Ilhas Salomão` | pt | `settings.ilhas_salomao` |
-| 121 | `UTC{}{:02}:{:02}` | neutro | `settings.utc_02_02` |
-| 198 | `Âmbar` | pt | `settings.ambar` |
+| 139 | `UTC{}{:02}:{:02}` | neutro | `settings.utc_02_02` |
 
-**`osjeff_core/src/wallpaper.rs`** (6)
+**`osjeff_core/src/wallpaper.rs`** (3)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 247 | `Crepúsculo` | pt | `settings.crepusculo` |
-| 290 | `Papel` | pt | `settings.papel` |
-| 308 | `Pôr do sol` | pt | `settings.por_sol` |
-| 359 | `file too big` | en | `settings.file_too_big` |
-| 360 | `not PNG/BMP/PPM` | en | `settings.not_png_bmp_ppm` |
-| 361 | `image too big` | en | `settings.image_too_big` |
+| 384 | `file too big` | en | `settings.file_too_big` |
+| 385 | `not PNG/BMP/PPM` | en | `settings.not_png_bmp_ppm` |
+| 386 | `image too big` | en | `settings.image_too_big` |
 
 ### Arquivos
 
@@ -812,8 +764,9 @@ decida caso a caso se vão para o catálogo.
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 721 | `tcp stream error` | en | `web.tcp_stream_error` |
+| 700 | `tcp stream error` | en | `web.tcp_stream_error` |
 
-**`osjeff_core/src/browser.rs`** (20)
+**`osjeff_core/src/browser.rs`** (4)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -837,6 +790,10 @@ decida caso a caso se vão para o catálogo.
 | 940 | `&lt;` | neutro | `web.lt` |
 | 941 | `&gt;` | neutro | `web.gt` |
 | 942 | `&quot;` | neutro | `web.quot` |
+| 931 | `&amp;` | neutro | `web.amp` |
+| 932 | `&lt;` | neutro | `web.lt` |
+| 933 | `&gt;` | neutro | `web.gt` |
+| 934 | `&quot;` | neutro | `web.quot` |
 
 **`osjeff_core/src/browser/body_tests.rs`** (1)
 
@@ -945,35 +902,19 @@ decida caso a caso se vão para o catálogo.
 | 150 | `bad server timestamps` | en | `web.bad_server_timestamps` |
 | 152 | `implausible date` | en | `web.implausible_date` |
 
-**`osjeff_core/src/tlsverify.rs`** (23)
+**`osjeff_core/src/tlsverify.rs`** (7)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 86 | `ainda nao valido` | pt sem-acento | `web.ainda_nao_valido` |
-| 87 | `nome nao confere` | pt sem-acento | `web.nome_nao_confere` |
-| 88 | `autoassinado, cadeia nao confiavel` | pt sem-acento | `web.autoassinado_cadeia_nao_confiavel` |
-| 89 | `cadeia nao confiavel` | pt sem-acento | `web.cadeia_nao_confiavel` |
-| 90 | `assinatura invalida` | pt sem-acento | `web.assinatura_invalida` |
-| 91 | `autoridade invalida na cadeia` | pt sem-acento | `web.autoridade_invalida_na_cadeia` |
-| 92 | `restricao da cadeia violada` | pt sem-acento | `web.restricao_cadeia_violada` |
-| 93 | `algoritmo nao suportado` | pt sem-acento | `web.algoritmo_nao_suportado` |
-| 94 | `hora do sistema incorreta` | pt | `web.hora_sistema_incorreta` |
-| 102 | `Certificado inválido: certificado malformado` | pt | `web.certificado_invalido_certificado_malformado` |
-| 103 | `Certificado inválido: certificado grande demais` | pt | `web.certificado_invalido_certificado_grande` |
-| 104 | `Certificado inválido: cadeia longa demais` | pt | `web.certificado_invalido_cadeia_longa` |
-| 105 | `Certificado inválido: expirado` | pt | `web.certificado_invalido_expirado` |
-| 106 | `Certificado inválido: ainda nao valido` | pt sem-acento | `web.certificado_invalido_ainda_nao` |
-| 107 | `Certificado inválido: nome nao confere com o site` | pt sem-acento | `web.certificado_invalido_nome_nao` |
-| 108 | `Certificado inválido: autoassinado, cadeia nao confiavel` | pt sem-acento | `web.certificado_invalido_autoassinado_cadeia` |
-| 109 | `Certificado inválido: cadeia nao confiavel` | pt sem-acento | `web.certificado_invalido_cadeia_nao` |
-| 110 | `Certificado inválido: assinatura invalida` | pt sem-acento | `web.certificado_invalido_assinatura_invalida` |
-| 111 | `Certificado inválido: autoridade invalida na cadeia` | pt sem-acento | `web.certificado_invalido_autoridade_invalida` |
-| 112 | `Certificado inválido: restricao da cadeia violada` | pt sem-acento | `web.certificado_invalido_restricao_cadeia` |
-| 113 | `Certificado inválido: algoritmo nao suportado` | pt sem-acento | `web.certificado_invalido_algoritmo_nao` |
-| 114 | `Certificado inválido: hora do sistema incorreta` | pt | `web.certificado_invalido_hora_sistema` |
-| 115 | `Certificado inválido: cadeia rejeitada` | pt | `web.certificado_invalido_cadeia_rejeitada` |
+| 83 | `certificate too large` | en | `web.certificate_too_large` |
+| 84 | `chain too long` | en | `web.chain_too_long` |
+| 86 | `not yet valid` | en | `web.not_yet_valid` |
+| 87 | `name mismatch` | en | `web.name_mismatch` |
+| 90 | `bad signature` | en | `web.bad_signature` |
+| 91 | `invalid CA in chain` | en | `web.invalid_ca_in_chain` |
+| 94 | `system clock wrong` | en | `web.system_clock_wrong` |
 
-**`osjeff_core/src/web/form.rs`** (8)
+**`osjeff_core/src/web/form.rs`** (5)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -985,8 +926,13 @@ decida caso a caso se vão para o catálogo.
 | 186 | `AÃOÕNÑ` | pt | `web.aaoonn` |
 | 189 | `AÂEÊIÎOÔUÛ` | pt | `web.aaeeiioouu_2` |
 | 193 | `AÄEËIÏOÖUÜ` | pt | `web.aaeeiioouu_3` |
+| 186 | `AÁEÉIÍOÓUÚCÇYÝ` | pt | `web.aaeeiioouuccyy` |
+| 190 | `AÀEÈIÌOÒUÙ` | pt | `web.aaeeiioouu` |
+| 192 | `AÃOÕNÑ` | pt | `web.aaoonn` |
+| 195 | `AÂEÊIÎOÔUÛ` | pt | `web.aaeeiioouu_2` |
+| 199 | `AÄEËIÏOÖUÜ` | pt | `web.aaeeiioouu_3` |
 
-**`osjeff_core/src/web/imgcache.rs`** (5)
+**`osjeff_core/src/web/imgcache.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -995,6 +941,14 @@ decida caso a caso se vão para o catálogo.
 | 74 | `imagem grande demais` | pt | `web.imagem_grande_demais` |
 | 75 | `limite de imagens` | pt | `web.limite_imagens` |
 | 241 | `data:#{:016x}-{}` | pt | `web.data_016x` |
+| 248 | `data:#{:016x}-{}` | pt | `web.data_016x` |
+
+**`osjeff_core/src/web/style.rs`** (2)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 460 | `courier new` | en | `web.courier_new` |
+| 468 | `source code pro` | en | `web.source_code_pro` |
 
 **`osjeff_core/src/web/style.rs`** (3)
 
@@ -1006,66 +960,20 @@ decida caso a caso se vão para o catálogo.
 
 ### Apps de terceiros (WASM)
 
-**`kernel/src/desktop/wasmwin.rs`** (2)
+**`kernel/src/desktop/wasmwin.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 94 | `{}/{}.wasm` | neutro | `apps.wasm` |
-| 172 | `pacote nao encontrado` | pt sem-acento | `apps.pacote_nao_encontrado` |
+| 95 | `{}/{}.wasm` | neutro | `apps.wasm` |
 
-**`kernel/src/wasm/abi2.rs`** (9)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 89 | `sem ABI v2` | pt | `apps.sem_abi_v2` |
-| 94 | `sem memoria exportada` | pt sem-acento | `apps.sem_memoria_exportada` |
-| 95 | `ponteiro invalido` | pt sem-acento | `apps.ponteiro_invalido` |
-| 101 | `sem memoria exportada` | pt sem-acento | `apps.sem_memoria_exportada_2` |
-| 103 | `ponteiro invalido` | pt sem-acento | `apps.ponteiro_invalido_2` |
-| 316 | `ponteiro invalido` | pt sem-acento | `apps.ponteiro_invalido_3` |
-| 322 | `sem ABI v2` | pt | `apps.sem_abi_v2_2` |
-| 335 | `ponteiro invalido` | pt sem-acento | `apps.ponteiro_invalido_4` |
-| 341 | `sem ABI v2` | pt | `apps.sem_abi_v2_3` |
-
-**`kernel/src/wasm/manager.rs`** (5)
+**`kernel/src/wasm/mod.rs`** (4)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 511 | `App nao encontrado` | pt sem-acento | `apps.app_nao_encontrado` |
-| 515 | `O app encerrou: {}` | neutro | `apps.app_encerrou` |
-| 518 | `O app encerrou: {}` | neutro | `apps.app_encerrou_2` |
-| 523 | `Carregando app...` | pt | `apps.carregando_app` |
-| 878 | `sem memoria para a janela` | pt sem-acento | `apps.sem_memoria_para_janela` |
-
-**`kernel/src/wasm/manager/runtime.rs`** (7)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 19 | `instancia inexistente` | neutro sem-acento | `apps.instancia_inexistente` |
-| 22 | `modulo invalido: {e}` | pt sem-acento | `apps.modulo_invalido` |
-| 25 | `id de app invalido` | pt sem-acento | `apps.id_app_invalido` |
-| 50 | `instanciacao falhou: {}` | pt sem-acento | `apps.instanciacao_falhou` |
-| 56 | `_initialize: {}` | neutro | `apps.initialize` |
-| 156 | `sem runtime` | pt | `apps.sem_runtime` |
-| 187 | `sem framebuffer` | pt | `apps.sem_framebuffer` |
-
-**`kernel/src/wasm/mod.rs`** (13)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 343 | `link host.draw_text` | en | `apps.link_host_draw_text` |
-| 364 | `link host.time_ms` | en | `apps.link_host_time_ms` |
-| 399 | `no entry export` | pt | `apps.no_entry_export` |
-| 400 | `trap in entry` | en | `apps.trap_in_entry` |
-| 408 | `falta de combustivel (laco infinito?)` | pt | `apps.falta_combustivel_laco_infinito` |
-| 411 | `saiu com codigo {code}` | pt sem-acento | `apps.saiu_com_codigo_code` |
-| 417 | `acesso fora da memoria` | pt sem-acento | `apps.acesso_fora_memoria` |
-| 418 | `panico (unreachable)` | neutro | `apps.panico_unreachable` |
-| 419 | `estouro de pilha` | pt | `apps.estouro_pilha` |
-| 420 | `divisao por zero` | pt | `apps.divisao_por_zero` |
-| 421 | `chamada indireta nula` | neutro | `apps.chamada_indireta_nula` |
-| 422 | `assinatura de chamada invalida` | pt sem-acento | `apps.assinatura_chamada_invalida` |
-| 424 | `erro do guest` | pt | `apps.erro_guest` |
+| 396 | `link host.draw_text` | en | `apps.link_host_draw_text` |
+| 417 | `link host.time_ms` | en | `apps.link_host_time_ms` |
+| 452 | `no entry export` | pt | `apps.no_entry_export` |
+| 453 | `trap in entry` | en | `apps.trap_in_entry` |
 
 **`kernel/src/wasm/wasi.rs`** (1)
 
@@ -1077,17 +985,17 @@ decida caso a caso se vão para o catálogo.
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 75 | `not found` | en | `apps.not_found` |
-| 76 | `already exists` | en | `apps.already_exists` |
-| 77 | `not a directory` | en | `apps.not_directory` |
-| 78 | `is a directory` | en | `apps.is_directory` |
-| 79 | `directory not empty` | en | `apps.directory_not_empty` |
-| 80 | `no space left (quota)` | pt | `apps.no_space_left_quota` |
-| 81 | `invalid argument` | en | `apps.invalid_argument` |
-| 82 | `permission denied` | en | `apps.permission_denied` |
-| 83 | `bad file descriptor` | en | `apps.bad_file_descriptor` |
-| 84 | `too many open files` | en | `apps.too_many_open_files` |
-| 85 | `i/o error` | en | `apps.i_error` |
+| 94 | `not found` | en | `apps.not_found` |
+| 95 | `already exists` | en | `apps.already_exists` |
+| 96 | `not a directory` | en | `apps.not_directory` |
+| 97 | `is a directory` | en | `apps.is_directory` |
+| 98 | `directory not empty` | en | `apps.directory_not_empty` |
+| 99 | `no space left (quota)` | pt | `apps.no_space_left_quota` |
+| 100 | `invalid argument` | en | `apps.invalid_argument` |
+| 101 | `permission denied` | en | `apps.permission_denied` |
+| 102 | `bad file descriptor` | en | `apps.bad_file_descriptor` |
+| 103 | `too many open files` | en | `apps.too_many_open_files` |
+| 104 | `i/o error` | en | `apps.i_error` |
 
 **`osjeff_core/src/appfs/volume_tests.rs`** (2)
 
@@ -1100,33 +1008,33 @@ decida caso a caso se vão para o catálogo.
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 48 | `package is larger than 4 MiB` | en | `apps.package_is_larger_than` |
-| 50 | `an app with this id is already installed` | en | `apps.an_app_with_this` |
-| 51 | `app is not installed` | en | `apps.app_is_not_installed` |
-| 52 | `invalid app id` | en | `apps.invalid_app_id` |
-| 53 | `too many installed apps` | en | `apps.too_many_installed_apps` |
-| 54 | `file system: {e}` | en | `apps.file_system` |
+| 78 | `package is larger than 4 MiB` | en | `apps.package_is_larger_than` |
+| 80 | `an app with this id is already installed` | en | `apps.an_app_with_this` |
+| 81 | `app is not installed` | en | `apps.app_is_not_installed` |
+| 82 | `invalid app id` | en | `apps.invalid_app_id` |
+| 83 | `too many installed apps` | en | `apps.too_many_installed_apps` |
+| 84 | `file system: {e}` | en | `apps.file_system` |
 
 **`osjeff_core/src/appmanifest.rs`** (16)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 162 | `manifest is too large` | en | `apps.manifest_is_too_large` |
-| 163 | `manifest is not valid UTF-8` | en | `apps.manifest_is_not_valid` |
-| 164 | `manifest has too many lines` | en | `apps.manifest_has_too_many` |
-| 165 | `manifest syntax error` | en | `apps.manifest_syntax_error` |
-| 166 | `duplicate manifest key '{k}'` | neutro | `apps.duplicate_manifest_key_k` |
-| 167 | `unknown manifest key` | en | `apps.unknown_manifest_key` |
-| 168 | `manifest key '{k}' is required` | en | `apps.manifest_key_k_is` |
-| 169 | `invalid value for '{k}'` | en | `apps.invalid_value_for_k` |
-| 170 | `'{k}' is above the system limit` | en | `apps.k_is_above_system` |
-| 577 | `icon is larger than 64 KiB` | en | `apps.icon_is_larger_than` |
-| 578 | `icon is not a PNG` | en | `apps.icon_is_not_png` |
-| 579 | `icon is larger than 64x64` | en | `apps.icon_is_larger_than_2` |
-| 580 | `icon PNG is corrupt` | en | `apps.icon_png_is_corrupt` |
-| 613 | `package has no osjeff.manifest section` | misto | `apps.package_has_no_osjeff` |
-| 614 | `package has two manifests` | en | `apps.package_has_two_manifests` |
-| 615 | `package has two icons` | en | `apps.package_has_two_icons` |
+| 168 | `manifest is too large` | en | `apps.manifest_is_too_large` |
+| 169 | `manifest is not valid UTF-8` | en | `apps.manifest_is_not_valid` |
+| 170 | `manifest has too many lines` | en | `apps.manifest_has_too_many` |
+| 171 | `manifest syntax error` | en | `apps.manifest_syntax_error` |
+| 172 | `duplicate manifest key '{k}'` | neutro | `apps.duplicate_manifest_key_k` |
+| 173 | `unknown manifest key` | en | `apps.unknown_manifest_key` |
+| 174 | `manifest key '{k}' is required` | en | `apps.manifest_key_k_is` |
+| 175 | `invalid value for '{k}'` | en | `apps.invalid_value_for_k` |
+| 176 | `'{k}' is above the system limit` | en | `apps.k_is_above_system` |
+| 686 | `icon is larger than 64 KiB` | en | `apps.icon_is_larger_than` |
+| 687 | `icon is not a PNG` | en | `apps.icon_is_not_png` |
+| 688 | `icon is larger than 64x64` | en | `apps.icon_is_larger_than_2` |
+| 689 | `icon PNG is corrupt` | en | `apps.icon_png_is_corrupt` |
+| 742 | `package has no osjeff.manifest section` | misto | `apps.package_has_no_osjeff` |
+| 743 | `package has two manifests` | en | `apps.package_has_two_manifests` |
+| 744 | `package has two icons` | en | `apps.package_has_two_icons` |
 
 **`osjeff_core/src/wasmsec.rs`** (5)
 
@@ -1176,6 +1084,11 @@ decida caso a caso se vão para o catálogo.
 | 447 | `Conteúdo` | pt | `kit.conteudo` |
 | 500 | `Cores de destaque` | pt | `kit.cores_destaque` |
 | 545 | `Glifos` | neutro | `kit.glifos` |
+| 64 | `not a wasm module (too short)` | en | `apps.not_wasm_module_too` |
+| 65 | `not a wasm module (bad magic)` | en | `apps.not_wasm_module_bad` |
+| 68 | `section extends past the end of the file` | en | `apps.section_extends_past_end` |
+| 69 | `unknown section id` | en | `apps.unknown_section_id` |
+| 70 | `too many sections` | en | `apps.too_many_sections` |
 
 ### Sistema (logs e tela de falha: ficam em inglês)
 
@@ -1256,6 +1169,11 @@ decida caso a caso se vão para o catálogo.
 | 1228 | `Conexão segura` | pt | `sys.conexao_segura` |
 | 1229 | `Certificado inválido` | pt | `sys.certificado_invalido` |
 | 1230 | `Conexão não segura` | pt | `sys.conexao_nao_segura` |
+**`kernel/src/desktop/browser_ui.rs`** (1)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 134 | `load to first paint` | en | `sys.load_first_paint` |
 
 **`kernel/src/interrupts.rs`** (2)
 
@@ -1327,6 +1245,7 @@ decida caso a caso se vão para o catálogo.
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 812 | `{file}:{line}: {w:?} should be {r} in {s:?}` | en | `misc.file_line_w_should` |
+| 819 | `{file}:{line}: {w:?} should be {r} in {s:?}` | en | `misc.file_line_w_should` |
 
 **`osjeff_core/src/i18n/template.rs`** (6)
 

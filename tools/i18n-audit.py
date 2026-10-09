@@ -354,6 +354,8 @@ def looks_like_text(s):
         return False
     if s.startswith(("/", "http", "osjeff://", ".", "#", "<", "%", "$", "--")):
         return False
+    if "{" in s and "}" in s and ":" in s and ";" in s:
+        return False  # a style sheet: selectors such as `area` are tag names, not words
     if re.fullmatch(r"[A-Za-z0-9_.:/\-+*=<>!&|^~%@#\\]+", s) and " " not in s:
         # identifiers, paths, commands, keys: text only if capitalised words
         return bool(re.fullmatch(r"[A-ZÀ-Ý][a-zà-ÿ]{2,}(-[A-Za-z]+)?", s)) and not s.isupper()

@@ -252,7 +252,7 @@ fn listing_skips_names_an_app_cannot_address() {
     Backend::mkdir(&mut v, b"/home", NOW).unwrap();
     for name in [
         "ok.txt",
-        "com espaco.txt",
+        "my file.txt",
         "a\u{e7}\u{e3}o.txt", // non-ASCII, made by the file manager
         "trailing.",          // not a valid component
     ] {
@@ -266,7 +266,7 @@ fn listing_skips_names_an_app_cannot_address() {
             None => break,
         }
     }
-    assert_eq!(names, ["com espaco.txt", "ok.txt"]);
+    assert_eq!(names, ["my file.txt", "ok.txt"]);
     // They still count against space accounting of the tree.
     assert_eq!(fs.tree_size("/home").unwrap(), 4 * (ENTRY_OVERHEAD + 1));
 }

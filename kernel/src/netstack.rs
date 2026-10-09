@@ -226,7 +226,7 @@ impl Net {
             }
             Some(Cached::NxDomain) => {
                 STATS.on_dns_cache_hit();
-                crate::serial_println!("dns: {} does not exist (cache)", host);
+                crate::serial_println!("dns: {} is an unknown name (cache)", host);
                 return None;
             }
             None => {}
@@ -295,7 +295,7 @@ impl Net {
                 Some(IpAddress::Ipv4(addr.0.into()))
             }
             Outcome::NxDomain | Outcome::NoData => {
-                crate::serial_println!("dns: {} does not exist", host);
+                crate::serial_println!("dns: {} is an unknown name", host);
                 None
             }
             Outcome::Failed | Outcome::NoServers => {
