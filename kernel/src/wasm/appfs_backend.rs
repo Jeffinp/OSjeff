@@ -1,7 +1,7 @@
 //! The filesystem behind the app sandbox: the **single swap point**.
 //!
 //! Apps and the installer talk to an [`AppFs`] through [`with`]. It is
-//! [`VolumeFs`] over the desktop VFS volume (`desktop/vfs.rs`): the OJFS v3 disk
+//! [`VolumeFs`] over the desktop VFS volume (`desktop/services/vfs.rs`): the OJFS v3 disk
 //! when it is mounted, so `/apps/<id>.wasm`, `/data/<id>` and `/home` **persist
 //! across reboots** and live in the same namespace as the user's files; when only
 //! the RAM volume exists (no disk, a 64 KiB disk, an unknown or failed one) the

@@ -2,7 +2,7 @@
 //! Terminal): toolbar buttons with glyphs, the path-bar pill, a text field with a selection
 //! and an eased caret, the window-attached sheet, empty states and a few time helpers.
 //!
-//! They sit next to the toolkit in `ui.rs` rather than inside it, so the toolkit stays as the
+//! They sit next to the toolkit in `ui/` rather than inside it, so the toolkit stays as the
 //! wave-1 API; everything reads the palette of the current appearance and measures text.
 
 // Not every helper is used by every app.

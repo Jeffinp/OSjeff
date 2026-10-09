@@ -113,7 +113,7 @@ pub(crate) struct BrowserState {
     /// The frame where the omnibox suggestions, the popover, the find bar and the menu take
     /// their blurred backdrop from.
     pub glass: [crate::desktop::kit::glass::BackdropSlot; 4],
-    /// The page area as last painted (see `browser_paint`).
+    /// The page area as last painted (see `paint/`).
     pub cache: core::cell::RefCell<crate::desktop::apps::browser::PaintCache>,
     /// Bumped by everything that changes how the page area looks, so the cache knows.
     pub rev: u64,

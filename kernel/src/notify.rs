@@ -10,7 +10,7 @@
 //! nothing queued that costs one atomic load.
 //!
 //! The overlay itself (stacking, timing, drawing) is `kitsune_core::notify` and
-//! `desktop/toasts_ui.rs`.
+//! `desktop/shell/toasts.rs`.
 
 use crate::klog::{self, Level};
 use crate::sync::RacyCell;

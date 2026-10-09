@@ -12,7 +12,7 @@
 //! | blank, >= 1 MiB                        | `format` v3 + welcome files (the v2 area stays blank) |
 //! | `OJF3` magic with a bad checksum, or unknown content | log and **write nothing** |
 //!
-//! The desktop reaches the volume through `desktop/vfs.rs` (file manager, viewer,
+//! The desktop reaches the volume through `desktop/services/vfs.rs` (file manager, viewer,
 //! editor, terminal commands), which also builds the RAM fallback when this module
 //! leaves the disk alone. Sectors 0..127 are never written by this module (the v3
 //! library guarantees it), so a v2 image there stays byte-for-byte as it was. The

@@ -1,0 +1,287 @@
+//! Basic drawing primitives of the toolkit: text, fills, buttons, graphs and bars.
+
+use super::controls::ButtonKind;
+use super::controls::Control;
+use super::controls::draw_button;
+use super::controls::draw_field;
+use crate::desktop::*;
+
+pub(crate) const PANEL_DARK: Color = Color::rgb(0x0E, 0x16, 0x28);
+pub(crate) const GRID: Color = Color::rgb(0x23, 0x2E, 0x4A);
+pub(crate) const DIM_TEXT: Color = Color::rgb(0x8C, 0x9A, 0xB6);
+
+/// Glyph cell of the UI font (scale 2).
+pub(crate) const CELL_W: i32 = 12;
+pub(crate) const CELL_H: i32 = 14;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Btn {
+    Normal,
+    /// Selected / toggled on: filled with the accent colour.
+    On,
+    Disabled,
+}
+
+fn us(v: i32) -> usize {
+    v.max(0) as usize
+}
+
+/// Draw `text` at `(x, y)` (the top of a [`CELL_H`]-high row), cut with an ellipsis to
+/// `max_w` pixels. Proportional 13 px UI font; `t` is UTF-8 (or Latin-1) bytes.
+pub(crate) fn text(c: &mut Canvas, x: i32, y: i32, max_w: i32, t: &[u8], color: Color) {
+    let s = crate::text::from_bytes(t);
+    let ty = crate::text::center_y(y, CELL_H, crate::text::BODY, crate::text::Weight::Regular);
+    crate::text::draw_ellipsis(
+        c,
+        x,
+        ty,
+        max_w.max(0),
+        &s,
+        crate::text::BODY,
+        crate::text::Weight::Regular,
+        color,
+    );
+}
+
+/// Text centered in `r`.
+pub(crate) fn text_center(c: &mut Canvas, r: Rect, t: &[u8], color: Color) {
+    let s = crate::text::from_bytes(t);
+    crate::text::draw_centered(
+        c,
+        r,
+        &s,
+        crate::text::BODY,
+        crate::text::Weight::Regular,
+        color,
+    );
+}
+
+/// Text right-aligned to `r`'s right edge.
+pub(crate) fn text_right(c: &mut Canvas, r: Rect, t: &[u8], color: Color) {
+    let s = crate::text::from_bytes(t);
+    crate::text::draw_right(
+        c,
+        r,
+        &s,
+        crate::text::BODY,
+        crate::text::Weight::Regular,
+        color,
+    );
+}
+
+pub(crate) fn fill_round(c: &mut Canvas, r: Rect, radius: i32, color: Color) {
+    if r.w > 0 && r.h > 0 {
+        c.fill_rrect(r, radius, Corner::Circle, color, 256);
+    }
+}
+
+pub(crate) fn fill(c: &mut Canvas, r: Rect, color: Color) {
+    if r.w > 0 && r.h > 0 {
+        c.fill_rect(us(r.x), us(r.y), us(r.w), us(r.h), color);
+    }
+}
+
+/// A push button with a centered label (legacy light-surface look; new code uses
+/// [`push_button`], which follows the appearance).
+pub(crate) fn button(c: &mut Canvas, r: Rect, label: &[u8], state: Btn) {
+    let kind = match state {
+        Btn::On => ButtonKind::Primary,
+        _ => ButtonKind::Secondary,
+    };
+    let st = if state == Btn::Disabled {
+        Control::Disabled
+    } else {
+        Control::Normal
+    };
+    draw_button(
+        c,
+        r,
+        &crate::text::from_bytes(label),
+        kind,
+        st,
+        theme::pal(),
+    );
+}
+
+/// A single-line text box: white field with a hairline (accent ring when the caret is
+/// on), the text (or a muted placeholder) and a caret after the text. Legacy light look.
+pub(crate) fn input_box(c: &mut Canvas, r: Rect, t: &[u8], placeholder: &[u8], caret: bool) {
+    draw_field(
+        c,
+        r,
+        &crate::text::from_bytes(t),
+        &crate::text::from_bytes(placeholder),
+        caret,
+        caret,
+        theme::pal(),
+    );
+}
+
+/// A vertical scrollbar in `track`: a thin rounded thumb sized and placed for `top`
+/// of `total` lines with `rows` visible (legacy signature; always visible).
+pub(crate) fn scrollbar(c: &mut Canvas, track: Rect, top: usize, total: usize, rows: usize) {
+    if total <= rows || track.h <= 0 {
+        return;
+    }
+    let (off, len) = kitsune_core::widgets::scroll_thumb(track.h, total, rows, top, 24);
+    let w = 6.min(track.w);
+    let thumb = Rect::new(track.right() - w - 1, track.y + off, w, len);
+    c.fill_rrect(
+        thumb,
+        w / 2,
+        Corner::Circle,
+        Color::rgb(0x6E, 0x6E, 0x73),
+        150,
+    );
+}
+
+/// Map a click `y` inside a scrollbar `track` to a first-visible line.
+pub(crate) fn scrollbar_pos(track: Rect, y: i32, total: usize, rows: usize) -> usize {
+    if total <= rows || track.h <= 0 {
+        return 0;
+    }
+    let frac = (y - track.y).clamp(0, track.h) as i64;
+    ((total - rows) as i64 * frac / track.h as i64) as usize
+}
+
+/// One line of a graph; a non-empty `label` adds it to the legend.
+pub(crate) struct Line<'a> {
+    pub series: &'a kitsune_core::sysmon::Series,
+    pub color: Color,
+    pub label: &'a [u8],
+}
+
+/// What a [`graph`] panel shows.
+pub(crate) struct Graph<'a> {
+    pub title: &'a [u8],
+    /// Headline value, right-aligned on the title row (accent colour).
+    pub value: &'a [u8],
+    /// Dim text under the title.
+    pub sub: &'a [u8],
+    pub lines: &'a [Line<'a>],
+    /// Top of the Y axis (the value drawn at the panel's plot top).
+    pub ceiling: u64,
+    /// Text printed at the top of the axis.
+    pub ceiling_label: &'a [u8],
+}
+
+/// A dark panel: `title` (left) and `value` (right, accent) on the first row,
+/// `sub` (dim) under it, then a faint grid with one line per series on a
+/// `0..ceiling` axis (`ceiling_label` is printed at the top of the axis), and
+/// the legend along the bottom.
+pub(crate) fn graph(c: &mut Canvas, r: Rect, g: &Graph<'_>) {
+    let (title, value, sub, lines, ceiling, ceiling_label) =
+        (g.title, g.value, g.sub, g.lines, g.ceiling, g.ceiling_label);
+    use kitsune_core::sysmon::{HIST, scale_to};
+    fill_round(c, r, 10, PANEL_DARK);
+    let inner = r.w - 20;
+    text(c, r.x + 10, r.y + 8, inner, title, theme::HEADER_TEXT);
+    text_right(
+        c,
+        Rect::new(r.x, r.y + 8, r.w - 10, CELL_H),
+        value,
+        theme::accent(),
+    );
+    text(c, r.x + 10, r.y + 26, inner, sub, DIM_TEXT);
+    let plot = Rect::new(r.x + 10, r.y + 46, r.w - 20, r.h - 46 - 26);
+    if plot.w <= 4 || plot.h <= 4 {
+        return;
+    }
+    for i in 0..=4 {
+        let y = plot.y + plot.h * i / 4;
+        fill(
+            c,
+            Rect::new(plot.x, y.min(plot.bottom() - 1), plot.w, 1),
+            GRID,
+        );
+    }
+    text_right(
+        c,
+        Rect::new(plot.x, plot.y + 2, plot.w - 2, CELL_H),
+        ceiling_label,
+        DIM_TEXT,
+    );
+    for line in lines {
+        let n = line.series.len();
+        if n < 2 {
+            continue;
+        }
+        let den = (HIST - 1) as i32;
+        let mut prev: Option<(i32, i32)> = None;
+        for i in 0..n {
+            let v = line.series.get(i).unwrap_or(0) as u64;
+            // The newest sample sits at the right edge; a short history is
+            // right-aligned, so the line grows leftwards like a task manager.
+            let slot = (HIST - n + i) as i32;
+            let x = plot.x + (plot.w - 2) * slot / den;
+            let h = scale_to(v, ceiling, plot.h as u32) as i32;
+            let y = plot.bottom() - 2 - h.min(plot.h - 2);
+            if let Some((px, py)) = prev {
+                segment(c, px, py, x, y, line.color);
+            }
+            prev = Some((x, y));
+        }
+    }
+    // Legend.
+    let mut lx = r.x + 10;
+    let ly = r.bottom() - 20;
+    for line in lines.iter().filter(|l| !l.label.is_empty()) {
+        // Caption text keeps four or five labels on one row.
+        let label = crate::text::from_bytes(line.label);
+        let w =
+            crate::text::measure(&label, crate::text::CAPTION, crate::text::Weight::Regular) + 14;
+        if lx + w > r.right() - 6 {
+            break;
+        }
+        fill_round(c, Rect::new(lx, ly + 3, 8, 8), 4, line.color);
+        let ty = crate::text::center_y(ly, 14, crate::text::CAPTION, crate::text::Weight::Regular);
+        crate::text::draw(
+            c,
+            lx + 12,
+            ty,
+            &label,
+            crate::text::CAPTION,
+            crate::text::Weight::Regular,
+            DIM_TEXT,
+        );
+        lx += w + 10;
+    }
+}
+
+/// A 2-pixel-thick line between two points (graph segments are near-horizontal,
+/// so a column-wise walk is enough and never divides by zero).
+fn segment(c: &mut Canvas, x0: i32, y0: i32, x1: i32, y1: i32, color: Color) {
+    let dx = (x1 - x0).max(1);
+    let (ylo, yhi) = (y0.min(y1), y0.max(y1));
+    for x in x0..=x1 {
+        let y = y0 + (y1 - y0) * (x - x0) / dx;
+        // Steep segments get a vertical run so the line stays connected.
+        let next = y0 + (y1 - y0) * (x + 1 - x0) / dx;
+        let (a, b) = if x == x1 {
+            (y, y)
+        } else {
+            (y.min(next), y.max(next))
+        };
+        c.fill_rect(
+            us(x),
+            us(a.clamp(ylo, yhi)),
+            2,
+            (b.clamp(ylo, yhi) - a.clamp(ylo, yhi) + 2) as usize,
+            color,
+        );
+    }
+}
+
+/// A horizontal usage bar: `permille` (0..=1000) of `track` filled.
+pub(crate) fn usage_bar(c: &mut Canvas, track: Rect, permille: u32, color: Color) {
+    fill_round(c, track, track.h / 2, GRID);
+    let w = (track.w as i64 * permille.min(1000) as i64 / 1000) as i32;
+    if w > 0 {
+        fill_round(
+            c,
+            Rect::new(track.x, track.y, w.max(track.h), track.h),
+            track.h / 2,
+            color,
+        );
+    }
+}

@@ -6,7 +6,7 @@
 use super::super::*;
 
 impl Desktop {
-    /// Draws an animating window: see `chrome.rs` / `Canvas::blit_scaled`. The window
+    /// Draws an animating window: see `windows/chrome.rs` / `Canvas::blit_scaled`. The window
     /// is rendered once at its resting size into the offscreen texture, then
     /// resampled into this frame's rectangle with its fade and rounded corners,
     /// under a shadow that fades with it.

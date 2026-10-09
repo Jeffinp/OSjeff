@@ -11,8 +11,8 @@
 //!    process name, default size, minimum size, `multi`, `resizable`, icon).
 //! 2. Add an [`App`] variant holding the per-window state (box big states so
 //!    moving a window record stays cheap) and construct it in [`App::new`].
-//! 3. Draw it in `Desktop::draw_window` (`render.rs`) and handle keys / clicks in
-//!    `input.rs`. Everything else — z-order, focus, minimize / maximize / resize,
+//! 3. Draw it in `Desktop::draw_window` (`windows/chrome.rs`) and handle keys / clicks in
+//!    `input/keys.rs` and `input/click.rs`. Everything else — z-order, focus, minimize / maximize / resize,
 //!    Alt+Tab, the dock indicator, the process entry (`name`, `name 2`, ...) and
 //!    teardown on close — is generic and needs no change.
 //! 4. Add it to `taskbar::DEFAULT_PINNED` if it should start pinned to the taskbar; every app

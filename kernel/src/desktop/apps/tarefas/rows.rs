@@ -13,7 +13,7 @@ impl App {
         let n = match self {
             App::Terminal(_) => size_of::<TermState>(),
             App::Editor(_) => size_of::<EditorState>(),
-            App::Calculator(_) => size_of::<apps::calculadora::logic::CalcState>(),
+            App::Calculator(_) => size_of::<apps::calculadora::CalcState>(),
             App::Browser(b) => {
                 size_of::<BrowserState>()
                     + b.images.bytes()

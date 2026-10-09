@@ -6,5 +6,8 @@
 
 pub(super) mod chrome;
 pub(super) mod cursor;
+pub(super) mod drag;
+pub(super) mod geometry;
 pub(super) mod instance;
+pub(super) mod lifecycle;
 pub(super) mod switcher;

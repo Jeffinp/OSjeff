@@ -3,7 +3,7 @@
 //! search field, cards and a few drawing helpers. Everything follows the palette of the
 //! current appearance and measures its text with the real font.
 //!
-//! Like `ui.rs`, each function draws at a rectangle the caller computed; geometry that
+//! Like `ui/`, each function draws at a rectangle the caller computed; geometry that
 //! hit testing shares (`plot_of`) is a plain function.
 
 #![allow(dead_code)]
