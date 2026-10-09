@@ -66,6 +66,7 @@ pub mod schedule;
 pub mod search;
 pub mod settings;
 pub mod shell;
+pub mod snap;
 pub mod sntp;
 pub mod style;
 pub mod sysif;

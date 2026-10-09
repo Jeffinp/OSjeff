@@ -659,8 +659,10 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
   lançá-los de novo foca a janela existente, mas passam pelo mesmo mecanismo. **Apps WASM são
   multi-instância** (cada janela é uma instância do `AppManager`, §10.4), com tamanho, mínimo e
   `resizable` vindos do manifesto; minimizar suspende o app (sem `render`), fechar o encerra.
-- **Geometria** (`osjeff_core::window`, `layout`): barra de título unificada de 32 px com os três
-  botões de 12 px à esquerda (fechar, minimizar, zoom; área de clique de 16 px), faixa de
+- **Geometria** (`osjeff_core::window`, `snap`, `layout`): barra de título plana de 32 px com o
+  ícone do app e o título à esquerda e, à direita, o botão de menu (32 px) e minimizar,
+  maximizar/restaurar e fechar (células de 40x32; o pixel do canto é o fechar; sem botão de
+  maximizar numa janela fixa), `Rect::title_layout`/`title_button_at`, faixa de
   redimensionar de 5 px em volta da janela (cantos de 14 px), `Rect::resized`, `layout::work_area`
   (a tela abaixo da barra de menus de 28 px, até a barra de apps) e `winman::cascade_rect`
   (novas instâncias descem 28 px por índice, com volta a cada 8). Nenhuma janela cobre a barra
@@ -671,10 +673,16 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
   apenas foca), o menu Arquivo do app ou o botão direito no ícone, "Nova janela". O overlay
   **Apps**, a **Busca** (`Ctrl+Space`) e o menu de contexto da área de trabalho usam a mesma
   regra de foco. `Ctrl+W` fecha e `Ctrl+M` minimiza a janela focada.
-- **Mouse.** Os três botões ficam coloridos na janela focada e cinzas nas outras; os glifos
-  aparecem com o ponteiro sobre eles; duplo clique na barra de título alterna o zoom (`ClickTracker`, 500 ms); arrastar a barra move (não com a janela
-  maximizada); arrastar qualquer borda ou canto redimensiona.
-- **Teclado.** `Alt+Tab` / `Alt+Shift+Tab` abrem o seletor (`Switcher`) em ordem de uso
+- **Mouse.** Botões de glifo plano (desbotados na janela sem foco, preenchimento suave ao passar,
+  vermelho no fechar); duplo clique na barra de título alterna o zoom (`ClickTracker`, 500 ms);
+  arrastar a barra move, e arrastar uma janela maximizada ou encaixada a solta sob o ponteiro
+  (`WindowManager::restore_for_drag`). **Encaixe** (`osjeff_core::snap`): levar o ponteiro à borda de
+  cima maximiza, às laterais encaixa a metade, aos cantos o quarto, com um contorno
+  translúcido animado (`SnapPreview`) até soltar; `Window::snap` guarda o estado e o retângulo
+  livre fica em `restore`. Arrastar qualquer borda ou canto redimensiona.
+- **Teclado.** `Alt+setas` encaixam, maximizam, restauram ou minimizam a janela focada
+  (`snap::key_action`; `Alt+Shift+setas` valem também no Navegador, onde `Alt+←/→` seguem
+  voltando e avançando). `Alt+Tab` / `Alt+Shift+Tab` abrem o seletor (`Switcher`) em ordem de uso
   recente, mostrando também as minimizadas; soltar o Alt confirma, Esc cancela. O
   `Keymap` passou a rastrear Alt (`0x38`, esquerdo e estendido).
 - **Reiniciar/Desligar** (`power.rs`): 8042 (`0x64 <- 0xFE`) e `0xCF9`; desligar usa as

@@ -7,6 +7,7 @@ use super::*;
 use crate::text::{self, BODY, FOOTNOTE, TITLE3, Weight};
 use osjeff_core::chrome::{self, MenuRow, menu_geom, menubar_layout, popover_rect};
 use osjeff_core::iconart::Glyph;
+use osjeff_core::snap::SnapZone;
 use osjeff_core::style::{R_MENU, R_POPOVER};
 
 const WEEKDAYS: [&str; 7] = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
@@ -295,8 +296,13 @@ impl Desktop {
 
     /// The focused app's menu number `i` (File, Edit, View, Window).
     fn kind_menu(&self, i: usize) -> Vec<Entry> {
-        let kind = self.focused().and_then(|id| self.kind_of(id));
         let name = self.bar_names().1.get(i).copied().unwrap_or("");
+        self.named_menu(name)
+    }
+
+    /// The focused app's menu called `name` ("Arquivo", "Editar", "Visualizar", "Janela").
+    fn named_menu(&self, name: &str) -> Vec<Entry> {
+        let kind = self.focused().and_then(|id| self.kind_of(id));
         let wasm = kind == Some(Kind::WasmApp);
         match name {
             "Arquivo" => {
@@ -379,6 +385,91 @@ impl Desktop {
         }
     }
 
+    /// The menu behind a window's title-bar button: the app's File, Edit and View entries
+    /// (disabled ones left out), then the window commands. `id` must be the focused window.
+    fn window_menu(&self, id: WindowId) -> Vec<Entry> {
+        let mut v: Vec<Entry> = Vec::new();
+        let section = |v: &mut Vec<Entry>, items: Vec<Entry>, keep_disabled: bool| {
+            let items: Vec<Entry> = items
+                .into_iter()
+                .filter(|e| e.cmd == Cmd::Sep || e.enabled || keep_disabled)
+                .collect();
+            // Drop separators that would lead, trail or double up.
+            let mut out: Vec<Entry> = Vec::new();
+            for e in items {
+                if e.cmd == Cmd::Sep && out.last().is_none_or(|l| l.cmd == Cmd::Sep) {
+                    continue;
+                }
+                out.push(e);
+            }
+            while out.last().is_some_and(|l| l.cmd == Cmd::Sep) {
+                out.pop();
+            }
+            if out.is_empty() {
+                return;
+            }
+            if !v.is_empty() {
+                v.push(Entry::sep());
+            }
+            v.extend(out);
+        };
+        section(&mut v, self.named_menu("Arquivo"), true);
+        section(&mut v, self.named_menu("Editar"), false);
+        let view: Vec<Entry> = self
+            .named_menu("Visualizar")
+            .into_iter()
+            .filter(|e| !matches!(e.cmd, Cmd::Zoom | Cmd::ShowApps | Cmd::ShowSearch))
+            .collect();
+        section(&mut v, view, false);
+        let state = self
+            .wm
+            .get(id)
+            .map(|w| (w.snap_state().is_some(), w.resizable));
+        let (tiled, resizable) = state.unwrap_or((false, false));
+        let mut win = alloc::vec![Entry::item("Minimizar", "Ctrl+M", Cmd::Minimize)];
+        let mut zoom = Entry::item(
+            if tiled { "Restaurar" } else { "Maximizar" },
+            "Alt+↑",
+            Cmd::Zoom,
+        );
+        zoom.enabled = resizable;
+        win.push(zoom);
+        let mut left = Entry::item("Ajustar à esquerda", "Alt+←", Cmd::Snap(SnapZone::Left));
+        left.enabled = resizable;
+        let mut right = Entry::item("Ajustar à direita", "Alt+→", Cmd::Snap(SnapZone::Right));
+        right.enabled = resizable;
+        win.push(left);
+        win.push(right);
+        section(&mut v, win, true);
+        v
+    }
+
+    /// Open the menu button's menu of window `id`, under the button, right edge aligned.
+    pub(crate) fn open_window_menu(&mut self, id: WindowId) {
+        if self
+            .shell
+            .menu
+            .as_ref()
+            .is_some_and(|m| !m.closing && m.origin == MenuOrigin::Window(id))
+        {
+            self.close_transients();
+            return;
+        }
+        let Some((rect, resizable)) = self.wm.get(id).map(|w| (w.rect, w.resizable)) else {
+            return;
+        };
+        let Some(btn) = rect.title_layout(resizable, true).menu else {
+            return;
+        };
+        let entries = self.window_menu(id);
+        self.open_menu_at(
+            MenuOrigin::Window(id),
+            entries,
+            (btn.right(), btn.bottom() + 2),
+            true,
+        );
+    }
+
     /// Open (or switch to) the menu of bar item `item`, anchored under it.
     pub(crate) fn open_bar_menu(&mut self, item: BarItem) {
         let Some((_, rect)) = self.bar_items().into_iter().find(|(i, _)| *i == item) else {
@@ -395,6 +486,17 @@ impl Desktop {
 
     /// Open a menu with its top-left near `at`.
     pub(crate) fn open_menu(&mut self, origin: MenuOrigin, entries: Vec<Entry>, at: (i32, i32)) {
+        self.open_menu_at(origin, entries, at, false);
+    }
+
+    /// Open a menu near `at`: with its top-left there, or (`right_edge`) its top-right.
+    pub(crate) fn open_menu_at(
+        &mut self,
+        origin: MenuOrigin,
+        entries: Vec<Entry>,
+        at: (i32, i32),
+        right_edge: bool,
+    ) {
         let rows: Vec<MenuRow> = entries
             .iter()
             .map(|e| {
@@ -408,7 +510,10 @@ impl Desktop {
                 }
             })
             .collect();
-        let geom = menu_geom(&rows, at, self.sw, self.sh);
+        let mut geom = menu_geom(&rows, at, self.sw, self.sh);
+        if right_edge {
+            geom = menu_geom(&rows, (at.0 - geom.rect.w, at.1), self.sw, self.sh);
+        }
         // Opening a menu closes whatever else was transient.
         if let Some(p) = self.shell.pop.as_mut() {
             p.closing = true;

@@ -27,6 +27,17 @@ tem releases versionadas; as seções são marcos na `master`.
   volta, carga, pressão, tabela ordenável) e dez glifos novos; `FixedBuf` passou a imprimir UTF-8.
   Testes: 2532 no `osjeff_core` (eram 2497). Detalhes e números em `docs/design/ui-macos.md` (seção 11),
   `docs/design/sysmgmt.md` e `docs/TESTING.md`.
+## 2026-10 — Identidade própria do shell (W26)
+
+- **Janelas sem cara de macOS.** Botões de minimizar, maximizar/restaurar e fechar à **direita**,
+  planos (células de 40x32, vermelho ao passar no fechar, apagados na janela sem foco), ícone do
+  app e título alinhado à esquerda, botão de menu na barra de título com as mesmas entradas de
+  Arquivo, Editar e Visualizar, e um fio de destaque na borda de cima da janela em foco. Pesquisa e
+  decisões em `docs/design/ui-identity.md`.
+- **Encaixe de janelas.** Arrastar à borda de cima maximiza, às laterais encaixa a metade, aos
+  cantos o quarto, com um contorno animado; `Alt+setas` (e `Alt+Shift+setas`) encaixam, maximizam,
+  restauram e minimizam; arrastar uma janela maximizada ou encaixada pela barra a solta sob o
+  ponteiro. Geometria pura em `osjeff_core::snap`.
 
 ## 2026-10 — Nova interface (W22)
 

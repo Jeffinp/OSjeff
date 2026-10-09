@@ -4,6 +4,7 @@
 
 use super::shell::Cmd;
 use super::*;
+use osjeff_core::window::TitleBtn;
 
 /// Keys the [`Keymap`] has no `Key` for; read from the raw scancode.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -138,9 +139,17 @@ impl Desktop {
                     self.force_full = true;
                     return true;
                 }
-                // Alt+Left / Alt+Right: back / forward in the focused browser.
-                Key::Left | Key::Right => {
+                // Alt+arrows tile, maximise, restore or minimise the focused window (Alt+Shift+
+                // arrows always do; plain Alt+Left / Alt+Right go back / forward in the browser).
+                Key::Left | Key::Right | Key::Up | Key::Down => {
+                    if self.switcher.is_some() {
+                        return true;
+                    }
+                    use osjeff_core::snap::Arrow;
+                    let shift = self.keymap.shift();
                     if let Some(f) = self.focused()
+                        && !shift
+                        && matches!(key, Key::Left | Key::Right)
                         && self.kind_of(f) == Some(Kind::Browser)
                         && let Some(b) = self.browser_state_mut(f)
                     {
@@ -151,7 +160,13 @@ impl Desktop {
                         }
                         return true;
                     }
-                    return self.switcher.is_some();
+                    let arrow = match key {
+                        Key::Left => Arrow::Left,
+                        Key::Right => Arrow::Right,
+                        Key::Up => Arrow::Up,
+                        _ => Arrow::Down,
+                    };
+                    return self.snap_key(arrow);
                 }
                 // The editor's find bar uses Alt+A (replace all), Alt+R and Alt+C (case).
                 Key::Char(_) if self.switcher.is_none() => {
@@ -811,10 +826,49 @@ impl Desktop {
     pub(crate) fn toggle_maximize(&mut self, id: WindowId) {
         let work = self.work_area();
         if self.wm.toggle_maximize(id, work) {
-            self.force_full = true;
-            self.relayout_browser(id);
-            self.relayout_viewer(id);
+            self.geometry_changed(id);
         }
+    }
+
+    /// A window's rectangle changed by more than a drag step (maximise, snap, restore): repaint
+    /// the screen and lay out the apps whose content depends on their width.
+    pub(crate) fn geometry_changed(&mut self, id: WindowId) {
+        self.force_full = true;
+        self.relayout_browser(id);
+        self.relayout_viewer(id);
+    }
+
+    /// Tile window `id` to `zone` of the work area (animated).
+    pub(crate) fn snap_window(&mut self, id: WindowId, zone: osjeff_core::snap::SnapZone) {
+        let work = self.work_area();
+        if self.wm.snap_to(id, zone, work) {
+            self.geometry_changed(id);
+        }
+    }
+
+    /// `Alt+arrow` on the focused window. `true` when there was a window to act on.
+    fn snap_key(&mut self, arrow: osjeff_core::snap::Arrow) -> bool {
+        use osjeff_core::snap::{SnapAct, key_action};
+        let Some(id) = self.focused() else {
+            return false;
+        };
+        let Some(state) = self.wm.get(id).map(|w| w.snap_state()) else {
+            return false;
+        };
+        match key_action(state, arrow) {
+            SnapAct::Zone(z) => self.snap_window(id, z),
+            SnapAct::Restore => {
+                if self.wm.unmaximize(id) {
+                    self.geometry_changed(id);
+                }
+            }
+            SnapAct::Minimize => {
+                self.wm.minimize(id);
+                self.force_full = true;
+            }
+            SnapAct::Stay => {}
+        }
+        true
     }
 
     /// A left press on window `w` at `(cx, cy)`: title-bar buttons, resize
@@ -824,22 +878,32 @@ impl Desktop {
             return;
         };
         let (rect, resizable, maximized) = (win.rect, win.resizable, win.maximized);
+        let tiled = win.snap_state().is_some();
         let kind = win.app.kind();
-        if rect.on_close(cx, cy) {
-            self.request_close(w);
-            self.drag = None;
-            return;
-        }
-        if rect.on_min(cx, cy) {
-            self.wm.minimize(w);
-            self.drag = None;
-            self.clicks.reset();
-            return;
-        }
-        if resizable && rect.on_max(cx, cy) {
-            self.toggle_maximize(w);
-            self.clicks.reset();
-            return;
+        match rect.title_button_at(resizable, true, cx, cy) {
+            Some(TitleBtn::Close) => {
+                self.request_close(w);
+                self.drag = None;
+                return;
+            }
+            Some(TitleBtn::Minimize) => {
+                self.wm.minimize(w);
+                self.drag = None;
+                self.clicks.reset();
+                return;
+            }
+            Some(TitleBtn::Maximize) => {
+                self.toggle_maximize(w);
+                self.clicks.reset();
+                return;
+            }
+            Some(TitleBtn::Menu) => {
+                self.wm.raise(w);
+                self.clicks.reset();
+                self.open_window_menu(w);
+                return;
+            }
+            None => {}
         }
         self.wm.raise(w);
         if resizable
@@ -857,11 +921,17 @@ impl Desktop {
             });
             return;
         }
-        if rect.on_title(cx, cy) {
+        if cy >= rect.y && cy < rect.y + TITLE_H {
             let double = self.clicks.press(crate::interrupts::ticks(), cx, cy, w);
             if double && resizable {
                 self.toggle_maximize(w);
-            } else if !maximized {
+            } else if maximized || tiled {
+                // Dragging a maximised or tiled window frees it once the pointer has moved.
+                self.drag = Some(Drag {
+                    win: w,
+                    mode: DragMode::Unsnap { ox: cx, oy: cy },
+                });
+            } else {
                 self.drag = Some(Drag {
                     win: w,
                     mode: DragMode::Move {
@@ -977,6 +1047,11 @@ impl Desktop {
                 self.relayout_browser(d.win);
                 self.relayout_viewer(d.win);
             }
+            // Dropped on an edge: tile the window where the preview showed.
+            if let Some(p) = self.shell.snap.take() {
+                self.snap_window(d.win, p.zone);
+                self.force_full = true;
+            }
         }
 
         if let Some(d) = &self.drag {
@@ -997,6 +1072,24 @@ impl Desktop {
                     DragMode::Select => self.editor_drag(w, cx, cy),
                     DragMode::Move { grab_dx, grab_dy } => {
                         self.wm.move_to(w, cx - grab_dx, cy - grab_dy, sw, sh);
+                        self.update_snap_preview(w, cx, cy);
+                    }
+                    DragMode::Unsnap { ox, oy } => {
+                        if (cx - ox).abs() >= 4 || (cy - oy).abs() >= 4 {
+                            if let Some((gx, gy)) = self.wm.restore_for_drag(w, cx, cy) {
+                                self.drag = Some(Drag {
+                                    win: w,
+                                    mode: DragMode::Move {
+                                        grab_dx: gx,
+                                        grab_dy: gy,
+                                    },
+                                });
+                                self.geometry_changed(w);
+                                self.wm.move_to(w, cx - gx, cy - gy, sw, sh);
+                            } else {
+                                self.drag = None;
+                            }
+                        }
                     }
                     DragMode::Resize {
                         edge,
@@ -1017,6 +1110,7 @@ impl Desktop {
                 // (see `is_dynamic`), so moving it never touches the others.
             } else {
                 self.drag = None;
+                self.shell.snap = None;
             }
         }
 
@@ -1039,6 +1133,27 @@ impl Desktop {
                     }
                 }
                 self.hover = hov;
+                scene = true;
+            }
+            // Which title-bar button the pointer is on (its hover fill).
+            let btn = hov
+                .and_then(|id| self.wm.get(id))
+                .and_then(|w| {
+                    w.rect
+                        .title_button_at(w.resizable, true, cx, cy)
+                        .map(|b| (w.id, b))
+                })
+                .filter(|_| !self.overlay_open());
+            if btn != self.title_hover {
+                for id in [self.title_hover.map(|t| t.0), btn.map(|t| t.0)]
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(r) = self.wm.get(id).map(|w| self.window_box(w)) {
+                        self.mark_dirty(r);
+                    }
+                }
+                self.title_hover = btn;
                 scene = true;
             }
         }

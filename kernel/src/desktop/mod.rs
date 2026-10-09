@@ -56,6 +56,9 @@ pub struct MouseResult {
 pub(crate) enum DragMode {
     /// Moving the window: offset of the grab point inside it.
     Move { grab_dx: i32, grab_dy: i32 },
+    /// A maximised or tiled window's title was pressed at `(ox, oy)`: once the pointer moves it
+    /// is restored under the pointer and becomes a [`DragMode::Move`].
+    Unsnap { ox: i32, oy: i32 },
     /// Dragging the image of a viewer window: last pointer position.
     Pan { last_x: i32, last_y: i32 },
     /// Extending a text selection in an editor window.
@@ -112,8 +115,10 @@ pub struct Desktop {
     weekday: core::cell::Cell<u8>,
     /// The Alt+Tab switcher while Alt is held.
     switcher: Option<Switcher>,
-    /// Window under the cursor (its title-bar buttons are shown).
+    /// Window under the cursor.
     hover: Option<WindowId>,
+    /// The title-bar button under the pointer (hover fill).
+    title_hover: Option<(WindowId, osjeff_core::window::TitleBtn)>,
     /// Which window (and size) the offscreen texture currently holds.
     tex_key: core::cell::Cell<Option<(WindowId, i32, i32)>>,
     clicks: ClickTracker,
@@ -171,6 +176,7 @@ impl Desktop {
             weekday: core::cell::Cell::new(4),
             switcher: None,
             hover: None,
+            title_hover: None,
             tex_key: core::cell::Cell::new(None),
             clicks: ClickTracker::new(DOUBLE_CLICK_TICKS),
             force_full: false,
@@ -431,6 +437,9 @@ impl Desktop {
             }
             if self.hover == Some(w.id) {
                 self.hover = None;
+            }
+            if self.title_hover.is_some_and(|(id, _)| id == w.id) {
+                self.title_hover = None;
             }
             if self.drag.as_ref().is_some_and(|d| d.win == w.id) {
                 self.drag = None;

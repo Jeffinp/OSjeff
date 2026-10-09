@@ -15,6 +15,7 @@
 use alloc::vec::Vec;
 
 use crate::anim::{Anim, Zoom};
+use crate::snap::{self, SnapZone};
 use crate::window::{Rect, ResizeEdge, WindowId};
 
 /// Default cap on simultaneously open windows.
@@ -60,6 +61,8 @@ pub struct Window<A> {
     pub restore: Rect,
     pub minimized: bool,
     pub maximized: bool,
+    /// Tiled to a half or a quarter of the work area (never `Maximize`: that is `maximized`).
+    pub snap: Option<SnapZone>,
     pub anim: Option<Anim>,
     /// A maximise / restore in flight: the rectangle to draw travels from the old
     /// one to `rect` (see [`Zoom`]).
@@ -79,6 +82,16 @@ impl<A> Window<A> {
             WinState::Maximized
         } else {
             WinState::Normal
+        }
+    }
+
+    /// Where the window sits in the snap model: `None` = free, `Some(Maximize)` = maximised,
+    /// otherwise the half or quarter it is tiled to.
+    pub fn snap_state(&self) -> Option<SnapZone> {
+        if self.maximized {
+            Some(SnapZone::Maximize)
+        } else {
+            self.snap
         }
     }
 
@@ -197,6 +210,7 @@ impl<A> WindowManager<A> {
             restore: spec.rect,
             minimized: false,
             maximized: false,
+            snap: None,
             anim: Some(Anim::open()),
             zoom: None,
             leaving: Leaving::Destroy,
@@ -358,42 +372,78 @@ impl<A> WindowManager<A> {
     /// Maximizes to `work`, remembering the current rect. No-op (`false`) for
     /// a non-resizable or already maximized window.
     pub fn maximize(&mut self, id: WindowId, work: Rect) -> bool {
+        self.snap_to(id, SnapZone::Maximize, work)
+    }
+
+    /// Puts the window in `zone` of `work` (a half, a quarter or the whole area), remembering the
+    /// free rectangle it came from (an already tiled or maximised window keeps the one it had).
+    /// The move animates like a maximise. `false` for a non-resizable window or when it is
+    /// already there.
+    pub fn snap_to(&mut self, id: WindowId, zone: SnapZone, work: Rect) -> bool {
         let Some(w) = self.get_mut(id) else {
             return false;
         };
-        if !w.resizable || w.maximized {
+        if !w.resizable || w.snap_state() == Some(zone) {
             return false;
         }
-        w.restore = w.rect;
+        let target = snap::zone_rect_min(zone, work, w.min_w, w.min_h);
+        if w.maximized || w.snap.is_some() {
+            // Keep the original free rectangle.
+        } else {
+            w.restore = w.rect;
+        }
         let from = w.visual_rect();
-        w.rect = work;
-        w.maximized = true;
+        w.rect = target;
+        w.maximized = zone == SnapZone::Maximize;
+        w.snap = (zone != SnapZone::Maximize).then_some(zone);
         w.start_zoom(from);
         true
     }
 
-    /// Leaves the maximized state, returning to the remembered rect.
+    /// Leaves the maximized or tiled state, returning to the remembered rect.
     pub fn unmaximize(&mut self, id: WindowId) -> bool {
         let Some(w) = self.get_mut(id) else {
             return false;
         };
-        if !w.maximized {
+        if !w.maximized && w.snap.is_none() {
             return false;
         }
         let from = w.visual_rect();
         w.rect = w.restore;
         w.maximized = false;
+        w.snap = None;
         w.start_zoom(from);
         true
     }
 
-    /// Maximize if normal, restore if maximized.
+    /// Maximize if free, restore if maximized or tiled.
     pub fn toggle_maximize(&mut self, id: WindowId, work: Rect) -> bool {
-        match self.get(id).map(|w| w.maximized) {
+        match self.get(id).map(|w| w.snap_state().is_some()) {
             Some(true) => self.unmaximize(id),
             Some(false) => self.maximize(id, work),
             None => false,
         }
+    }
+
+    /// A drag grabbed the title of a maximised or tiled window at `(px, py)`: restore it
+    /// *without animation* to the size it had, put under the pointer so the grab keeps its
+    /// proportional place on the bar, and return the new grab offset `(dx, dy)` for the move that
+    /// follows. `None` when the window is free (nothing to restore).
+    pub fn restore_for_drag(&mut self, id: WindowId, px: i32, py: i32) -> Option<(i32, i32)> {
+        let w = self.get_mut(id)?;
+        if !w.maximized && w.snap.is_none() {
+            return None;
+        }
+        let cur = w.rect;
+        let size = w.restore;
+        let frac = ((px - cur.x).clamp(0, cur.w.max(1)) * 256) / cur.w.max(1);
+        let dx = (size.w * frac / 256).clamp(0, size.w);
+        let dy = (py - cur.y).clamp(0, crate::window::TITLE_H - 1);
+        w.rect = Rect::new(px - dx, py - dy, size.w, size.h);
+        w.maximized = false;
+        w.snap = None;
+        w.zoom = None;
+        Some((dx, dy))
     }
 
     // ------------------------------------------------------ move / resize
@@ -408,6 +458,7 @@ impl<A> WindowManager<A> {
             return false;
         }
         let (cx, cy) = Rect::new(x, y, w.rect.w, w.rect.h).clamped_pos(sw, sh);
+        w.snap = None;
         w.rect.x = cx;
         w.rect.y = cy;
         true
@@ -430,6 +481,7 @@ impl<A> WindowManager<A> {
             return false;
         }
         w.rect = start.resized(edge, delta, (w.min_w, w.min_h), screen);
+        w.snap = None;
         true
     }
 
@@ -464,7 +516,8 @@ impl<A> WindowManager<A> {
                     | ((w.anim.is_some() as u32) << 1)
                     | ((w.is_leaving() as u32) << 2)
                     | ((w.maximized as u32) << 3)
-                    | ((w.zoom.is_some() as u32) << 4),
+                    | ((w.zoom.is_some() as u32) << 4)
+                    | ((w.snap.is_some() as u32) << 5),
             );
         }
         // +1 so "no drag" and "dragging window 0" differ.
@@ -841,6 +894,120 @@ mod tests {
         assert!(!m.move_to(a, 0, 0, 1280, 720));
         assert!(!m.resize(a, ResizeEdge::E, WORK, (10, 0), (1280, 720)));
         assert_eq!(m.get(a).unwrap().rect, WORK);
+    }
+
+    #[test]
+    fn snapping_tiles_the_work_area_and_restore_goes_back() {
+        let (mut m, [a, ..]) = table();
+        let before = m.get(a).unwrap().rect;
+        assert!(m.snap_to(a, SnapZone::Left, WORK));
+        let w = m.get(a).unwrap();
+        assert_eq!(w.rect, snap::zone_rect(SnapZone::Left, WORK));
+        assert_eq!(w.snap_state(), Some(SnapZone::Left));
+        assert!(!w.maximized);
+        assert!(!m.snap_to(a, SnapZone::Left, WORK)); // already there
+        // Left -> top-left quarter keeps the ORIGINAL free rectangle.
+        assert!(m.snap_to(a, SnapZone::TopLeft, WORK));
+        assert!(m.unmaximize(a));
+        let w = m.get(a).unwrap();
+        assert_eq!((w.rect, w.snap_state()), (before, None));
+        assert!(!m.unmaximize(a));
+    }
+
+    #[test]
+    fn snapping_from_maximized_and_to_maximized_keeps_one_restore_rect() {
+        let (mut m, [a, ..]) = table();
+        let before = m.get(a).unwrap().rect;
+        assert!(m.maximize(a, WORK));
+        assert!(m.snap_to(a, SnapZone::Right, WORK));
+        let w = m.get(a).unwrap();
+        assert!(!w.maximized);
+        assert_eq!(w.snap_state(), Some(SnapZone::Right));
+        assert!(m.snap_to(a, SnapZone::Maximize, WORK));
+        assert_eq!(m.get(a).unwrap().snap, None);
+        assert!(m.toggle_maximize(a, WORK));
+        assert_eq!(m.get(a).unwrap().rect, before);
+        // toggle on a tiled window restores it too.
+        assert!(m.snap_to(a, SnapZone::BottomLeft, WORK));
+        assert!(m.toggle_maximize(a, WORK));
+        assert_eq!(m.get(a).unwrap().rect, before);
+    }
+
+    #[test]
+    fn a_tiled_window_respects_its_minimum_and_non_resizable_ones_refuse() {
+        let mut m = WindowManager::new(4);
+        let id = m
+            .open(
+                WindowSpec {
+                    min_w: 800,
+                    ..spec(10, 10)
+                },
+                0,
+            )
+            .unwrap();
+        assert!(m.snap_to(id, SnapZone::Right, WORK));
+        let r = m.get(id).unwrap().rect;
+        assert_eq!((r.w, r.right()), (800, WORK.right()));
+        let fixed = m
+            .open(
+                WindowSpec {
+                    resizable: false,
+                    ..spec(10, 10)
+                },
+                1,
+            )
+            .unwrap();
+        assert!(!m.snap_to(fixed, SnapZone::Left, WORK));
+        assert_eq!(m.get(fixed).unwrap().snap_state(), None);
+    }
+
+    #[test]
+    fn snapping_animates_through_the_zoom_and_changes_the_signature() {
+        let (mut m, [a, ..]) = table();
+        settle(&mut m);
+        let s0 = m.signature(None);
+        assert!(m.snap_to(a, SnapZone::TopRight, WORK));
+        assert!(m.get(a).unwrap().zoom.is_some());
+        m.step(2.0);
+        assert!(m.get(a).unwrap().zoom.is_none());
+        assert_ne!(m.signature(None), s0);
+        // Tiled windows still resize (from any edge) and then are free again.
+        let start = m.get(a).unwrap().rect;
+        assert!(m.resize(a, ResizeEdge::W, start, (-40, 0), (1280, 720)));
+        assert_eq!(m.get(a).unwrap().snap, None);
+    }
+
+    #[test]
+    fn dragging_a_maximised_or_tiled_title_restores_under_the_pointer() {
+        let (mut m, [a, ..]) = table();
+        let free = m.get(a).unwrap().rect; // 300 x 200
+        assert_eq!(m.restore_for_drag(a, 5, 5), None); // free: nothing to do
+        assert!(m.maximize(a, WORK));
+        settle(&mut m);
+        // Grab at the middle of the 1256 px bar: the restored window centres on the pointer.
+        let (dx, dy) = m
+            .restore_for_drag(a, WORK.x + WORK.w / 2, WORK.y + 10)
+            .unwrap();
+        let w = m.get(a).unwrap();
+        assert!(!w.maximized && w.zoom.is_none());
+        assert_eq!((w.rect.w, w.rect.h), (free.w, free.h));
+        assert_eq!(dx, free.w / 2);
+        assert_eq!(dy, 10);
+        assert_eq!(w.rect.x + dx, WORK.x + WORK.w / 2);
+        // Grabbing near the left edge keeps the grab near the left edge.
+        m.snap_to(a, SnapZone::Left, WORK);
+        settle(&mut m);
+        let (dx, _) = m.restore_for_drag(a, 2, WORK.y + 4).unwrap();
+        assert!(dx <= 2);
+        assert_eq!(m.get(a).unwrap().snap, None);
+    }
+
+    #[test]
+    fn moving_a_tiled_window_frees_it() {
+        let (mut m, [a, ..]) = table();
+        m.snap_to(a, SnapZone::Left, WORK);
+        assert!(m.move_to(a, 300, 300, 1280, 720));
+        assert_eq!(m.get(a).unwrap().snap, None);
     }
 
     #[test]

@@ -1,11 +1,13 @@
-//! Window chrome: the unified title bar with traffic lights at the left, the
-//! hairline outline, the shadow and the focus transition. The window's content is
-//! drawn by the app inside the rectangle below the title bar.
+//! Window chrome: the flat title bar (app icon and left-aligned title, menu button and the
+//! minimise / maximise / close buttons at the right), the hairline outline, the shadow and
+//! the focus transition. The window's content is drawn by the app inside the rectangle below
+//! the title bar. See `docs/design/ui-identity.md`.
 
 use super::*;
 use crate::text::{self, BODY, Weight};
 use osjeff_core::anim::{Tween, curves};
-use osjeff_core::style::R_WINDOW;
+use osjeff_core::style::{R_CONTROL, R_WINDOW};
+use osjeff_core::window::TitleBtn;
 
 /// Seconds the title bar and shadow take to change between focused and not.
 const FOCUS_SECS: f32 = 0.12;
@@ -140,17 +142,22 @@ impl Desktop {
         let (sc, sa) = theme::tint(p.separator);
         c.blend_rect(Rect::new(r.x, r.y + th - 1, r.w, 1), sc, sa);
 
-        self.draw_lights(c, win, r, mix, p);
-        // Title: centred on the window, clipped so it never reaches the lights.
-        let lights_right = r.max_rect().right() + 14;
-        let room = (r.w - 2 * (lights_right - r.x)).max(60).min(r.w - 24);
-        let title = text::ellipsize(&win.app.title, BODY, Weight::Medium, room);
-        let tw = text::measure(&title, BODY, Weight::Medium);
-        let tx = (r.x + (r.w - tw) / 2).max(lights_right.min(r.right() - tw - 8));
-        let fg =
-            theme::solid(p.title_inactive).lerp(theme::solid(p.text), (mix * 255 / 256) as u16);
-        let ty = text::center_y(r.y, th, BODY, Weight::Medium);
-        text::draw(c, tx, ty, &title, BODY, Weight::Medium, fg);
+        // Focus signature: a 2 px accent line along the top edge, following the corners.
+        if mix > 0 {
+            let line = Rect::new(r.x, r.y, r.w, 2)
+                .intersection(&c.clip_rect())
+                .unwrap_or(Rect::new(0, 0, 0, 0));
+            let saved = c.set_clip(line);
+            c.fill_rrect(
+                r,
+                radius,
+                Corner::Circle,
+                theme::accent(),
+                (mix * 230 / 256) as u16,
+            );
+            c.restore_clip(saved);
+        }
+        self.draw_title(c, win, r, mix, p);
 
         let cost_t0 = crate::io::rdtsc();
         // While zooming, the app is laid out for the final size: keep it inside the
@@ -198,9 +205,9 @@ impl Desktop {
         }
     }
 
-    /// The three lights: coloured (red, amber, green) when the window is focused or
-    /// the pointer is over them, grey otherwise; glyphs appear on hover.
-    fn draw_lights(
+    /// The title bar's contents: the app icon, the title (left-aligned, Medium, cut before
+    /// the buttons), the menu button and the three window buttons.
+    fn draw_title(
         &self,
         c: &mut Canvas,
         win: &Win,
@@ -208,42 +215,147 @@ impl Desktop {
         mix: u32,
         p: &osjeff_core::style::Palette,
     ) {
-        let over =
-            self.hover == Some(win.id) && r.lights_rect().contains(self.cursor_x, self.cursor_y);
-        let colored = mix > 128 || over;
-        let grey = theme::solid(p.light_inactive);
-        let discs = [
-            (r.close_rect(), theme::CLOSE, true),
-            (r.min_rect(), theme::MINIMIZE, true),
-            (r.max_rect(), theme::MAXIMIZE, win.resizable),
-        ];
-        for (rect, col, enabled) in discs {
-            let col = if colored && enabled { col } else { grey };
-            c.fill_rrect(rect, rect.w / 2, Corner::Circle, col, 256);
-            c.stroke_rrect(rect, rect.w / 2, Corner::Circle, Color::rgb(0, 0, 0), 38);
+        let lay = r.title_layout(win.resizable, true);
+        let a = (mix * 255 / 256) as u16;
+        icons::blit(
+            c,
+            win.app.kind().icon(),
+            lay.icon.x,
+            lay.icon.y,
+            lay.icon.w,
+            150 + mix * 106 / 256,
+        );
+        let fg = theme::solid(p.title_inactive).lerp(theme::solid(p.text), a);
+        let room = (lay.title_right - lay.title_x).max(0);
+        let title = text::ellipsize(&win.app.title, BODY, Weight::Medium, room);
+        let ty = text::center_y(r.y, TITLE_H, BODY, Weight::Medium);
+        text::draw(c, lay.title_x, ty, &title, BODY, Weight::Medium, fg);
+
+        let hover = self
+            .title_hover
+            .filter(|(id, _)| *id == win.id)
+            .map(|(_, b)| b);
+        let ink = theme::solid(p.title_inactive).lerp(theme::solid(p.text_secondary), a);
+        let cell = |c: &mut Canvas, rect: Rect, btn: TitleBtn| -> Color {
+            let over = hover == Some(btn);
+            if over {
+                let pill = Rect::new(rect.x + 2, rect.y + 3, rect.w - 4, rect.h - 6);
+                if btn == TitleBtn::Close {
+                    c.fill_rrect(pill, R_CONTROL, Corner::Circle, CLOSE_HOVER, 256);
+                } else {
+                    let (hc, ha) = theme::tint(p.hover);
+                    c.fill_rrect(pill, R_CONTROL, Corner::Circle, hc, (ha * 2).min(256));
+                }
+            }
+            match (over, btn) {
+                (true, TitleBtn::Close) => theme::WHITE,
+                (true, _) => theme::solid(p.text),
+                _ => ink,
+            }
+        };
+        if let Some(m) = lay.menu {
+            let col = cell(c, m, TitleBtn::Menu);
+            let (cx, cy) = (m.x + m.w / 2, m.y + m.h / 2);
+            for dy in [-4, 0, 4] {
+                c.blend_rect(Rect::new(cx - 6, cy + dy, 12, 1), col, 256);
+            }
         }
-        if !over {
+        let col = cell(c, lay.min, TitleBtn::Minimize);
+        let (cx, cy) = (lay.min.x + lay.min.w / 2, lay.min.y + lay.min.h / 2);
+        c.blend_rect(Rect::new(cx - 5, cy + 3, 10, 1), col, 256);
+        if let Some(m) = lay.max {
+            let col = cell(c, m, TitleBtn::Maximize);
+            let (cx, cy) = (m.x + m.w / 2, m.y + m.h / 2);
+            if win.maximized || win.snap.is_some() {
+                // Restore: a square in front of the corner of a second one.
+                let front = Rect::new(cx - 5, cy - 3, 8, 8);
+                outline(c, front, col);
+                c.blend_rect(Rect::new(cx - 3, cy - 5, 8, 1), col, 256);
+                c.blend_rect(Rect::new(cx + 4, cy - 5, 1, 8), col, 256);
+            } else {
+                outline(c, Rect::new(cx - 5, cy - 5, 10, 10), col);
+            }
+        }
+        let col = cell(c, lay.close, TitleBtn::Close);
+        let (cx, cy) = (lay.close.x + lay.close.w / 2, lay.close.y + lay.close.h / 2);
+        ui::draw_glyph(
+            c,
+            iconart::Glyph::Close,
+            cx - 8,
+            cy - 8,
+            16,
+            0xFF00_0000 | pack(col),
+        );
+    }
+
+    /// The pointer of a window drag is at `(cx, cy)`: show, move or hide the snap preview.
+    pub(crate) fn update_snap_preview(&mut self, id: WindowId, cx: i32, cy: i32) {
+        use osjeff_core::snap;
+        let zone = self
+            .wm
+            .get(id)
+            .filter(|w| w.resizable)
+            .and_then(|_| snap::zone_at(cx, cy, self.sw, self.sh));
+        let Some(zone) = zone else {
+            self.shell.snap = None;
+            return;
+        };
+        if self.shell.snap.as_ref().is_some_and(|p| p.zone == zone) {
             return;
         }
-        let ink = Color::rgb(0x3A, 0x1A, 0x16);
-        let stroke = |c: &mut Canvas, rect: Rect, g: iconart::Glyph| {
-            ui::draw_glyph(c, g, rect.x - 2, rect.y - 2, 16, 0xFF00_0000 | pack(ink));
+        let Some((rect, min_w, min_h)) = self.wm.get(id).map(|w| (w.rect, w.min_w, w.min_h)) else {
+            return;
         };
-        stroke(c, r.close_rect(), iconart::Glyph::Close);
-        stroke(c, r.min_rect(), iconart::Glyph::Minus);
-        if win.resizable {
-            stroke(
-                c,
-                r.max_rect(),
-                if win.maximized {
-                    iconart::Glyph::Minus
-                } else {
-                    iconart::Glyph::Plus
-                },
-            );
-        }
+        let to = snap::zone_rect_min(zone, self.work_area(), min_w, min_h);
+        // Start from where the previous preview was (or the window itself).
+        let from = self.snap_preview_rect().unwrap_or(rect);
+        let mut t = Tween::at(0.0);
+        t.retarget(1.0, 0.18, curves::ENTER);
+        self.shell.snap = Some(super::shell::SnapPreview { zone, from, to, t });
+    }
+
+    /// Where the snap preview is right now (it grows from the window to the zone).
+    pub(crate) fn snap_preview_rect(&self) -> Option<Rect> {
+        let p = self.shell.snap.as_ref()?;
+        let t = (p.t.value().clamp(0.0, 1.0) * 256.0) as i32;
+        Some(osjeff_core::snap::lerp_rect(p.from, p.to, t))
+    }
+
+    /// The translucent outline previewing where a dragged window will snap, travelling from the
+    /// window to the zone while it fades in.
+    pub(crate) fn draw_snap_preview(&self, c: &mut Canvas) {
+        let Some(r) = self.snap_preview_rect() else {
+            return;
+        };
+        let t = self
+            .shell
+            .snap
+            .as_ref()
+            .map_or(1.0, |p| p.t.value().clamp(0.0, 1.0));
+        let a = (t * 256.0) as u32;
+        let acc = theme::accent();
+        c.fill_rrect(r, R_WINDOW, Corner::Circle, acc, (a * 46 / 256) as u16);
+        c.stroke_rrect(r, R_WINDOW, Corner::Circle, acc, (a * 230 / 256) as u16);
+        c.stroke_rrect(
+            r.inflated(-1),
+            (R_WINDOW - 1).max(0),
+            Corner::Circle,
+            acc,
+            (a * 120 / 256) as u16,
+        );
     }
 }
+
+/// A crisp 1 px square outline.
+fn outline(c: &mut Canvas, r: Rect, col: Color) {
+    c.blend_rect(Rect::new(r.x, r.y, r.w, 1), col, 256);
+    c.blend_rect(Rect::new(r.x, r.bottom() - 1, r.w, 1), col, 256);
+    c.blend_rect(Rect::new(r.x, r.y + 1, 1, r.h - 2), col, 256);
+    c.blend_rect(Rect::new(r.right() - 1, r.y + 1, 1, r.h - 2), col, 256);
+}
+
+/// Fill of the close button under the pointer.
+const CLOSE_HOVER: Color = Color::rgb(0xE5, 0x48, 0x4D);
 
 fn pack(c: Color) -> u32 {
     ((c.r as u32) << 16) | ((c.g as u32) << 8) | c.b as u32

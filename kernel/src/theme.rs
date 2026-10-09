@@ -99,8 +99,6 @@ pub fn text_muted() -> Color {
 
 // Status / controls.
 pub const CLOSE: Color = Color::rgb(0xFF, 0x6B, 0x63);
-pub const MINIMIZE: Color = Color::rgb(0xFF, 0xC2, 0x4A);
-pub const MAXIMIZE: Color = Color::rgb(0x3F, 0xD0, 0x7C);
 pub const SHADOW: Color = Color::rgb(0, 0, 0);
 pub const WHITE: Color = Color::rgb(0xFF, 0xFF, 0xFF);
 

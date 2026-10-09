@@ -11,6 +11,7 @@ use core::cell::Cell;
 use osjeff_core::anim::{Spring, Tween, curves};
 use osjeff_core::chrome::{MenuGeom, MenuRow};
 use osjeff_core::raster::Surface;
+use osjeff_core::snap::SnapZone;
 
 /// Everything a menu entry or a button can ask the desktop to do.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -42,6 +43,8 @@ pub(crate) enum Cmd {
     BrowserZoomIn,
     BrowserZoomOut,
     BrowserZoomReset,
+    /// Tile the focused window to a half or a quarter of the work area.
+    Snap(SnapZone),
     /// Open one more window of an app (app-bar menu).
     NewOf(Kind),
     /// Close every window of an app (app-bar menu).
@@ -93,6 +96,8 @@ pub(crate) enum BarItem {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum MenuOrigin {
     Bar(BarItem),
+    /// The menu button in a window's title bar.
+    Window(WindowId),
     /// A right-click menu (desktop or an app-bar icon).
     Context,
 }
@@ -249,8 +254,19 @@ impl DockState {
     }
 }
 
+/// The outline previewing where a dragged window snaps: it travels from the window's rectangle
+/// to the zone's while it fades in.
+pub(crate) struct SnapPreview {
+    pub zone: SnapZone,
+    pub from: Rect,
+    pub to: Rect,
+    pub t: Tween,
+}
+
 /// All shell state of the desktop.
 pub(crate) struct Shell {
+    /// The snap preview while a window is dragged to an edge.
+    pub snap: Option<SnapPreview>,
     pub menu: Option<OpenMenu>,
     pub pop: Option<Popover>,
     pub dialog: Option<Dialog>,
@@ -274,6 +290,7 @@ pub(crate) struct Shell {
 impl Shell {
     pub(crate) fn new() -> Shell {
         Shell {
+            snap: None,
             menu: None,
             pop: None,
             dialog: None,
@@ -335,6 +352,9 @@ impl Desktop {
         for k in sh.knobs.iter_mut() {
             busy |= k.step(dt);
         }
+        if let Some(sp) = sh.snap.as_mut() {
+            busy |= sp.t.step(dt);
+        }
         // Closing overlays disappear when their fade-out ends.
         if sh
             .menu
@@ -384,6 +404,7 @@ impl Desktop {
             || sh.apps.as_ref().is_some_and(|a| !a.t.finished())
             || sh.search.as_ref().is_some_and(|s| !s.t.finished())
             || sh.knobs.iter().any(|k| !k.finished())
+            || sh.snap.as_ref().is_some_and(|p| !p.t.finished())
             || self.dock_animating()
     }
 
@@ -539,6 +560,11 @@ impl Desktop {
             Cmd::ShowSearch => self.open_search(),
             Cmd::Gallery => {
                 self.launch(Kind::Gallery);
+            }
+            Cmd::Snap(zone) => {
+                if let Some((id, _)) = target {
+                    self.snap_window(id, zone);
+                }
             }
             Cmd::Activate(id) => {
                 self.wm.activate(id);

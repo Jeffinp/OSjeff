@@ -202,6 +202,9 @@ impl Desktop {
         if self.overlay_open() {
             damage = damage.union(&self.overlay_bounds_full());
         }
+        if let Some(p) = self.snap_preview_rect() {
+            damage = damage.union(&p.inflated(3));
+        }
         let damage = damage.clamped_to(sw, sh);
         if damage.is_empty() {
             return damage;
@@ -249,6 +252,7 @@ impl Desktop {
             if damage.intersection(&dock_zone).is_some() {
                 self.draw_dock(&mut c);
             }
+            self.draw_snap_preview(&mut c);
             if self.overlay_open() {
                 self.draw_overlays_in(&mut c, None);
             }

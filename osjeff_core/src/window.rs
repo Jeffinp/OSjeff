@@ -4,21 +4,45 @@
 pub const TITLE_H: i32 = 32;
 /// Menu bar height: no window may cover it.
 pub const MENUBAR_H: i32 = 28;
-/// Traffic-light diameter.
-pub const CLOSE: i32 = 12;
-/// Inset of the first (close) light from the window's left edge.
-pub const LIGHT_INSET: i32 = 12;
-/// Distance between the left edges of adjacent lights.
-pub const LIGHT_PITCH: i32 = 20;
-/// Top of the lights inside the title bar (centres them: (32 - 12) / 2 - 0).
-const LIGHT_TOP: i32 = 10;
-/// How far the clickable area of a light extends past its disc.
-pub const LIGHT_SLOP: i32 = 2;
+/// Width of the minimise, maximise and close buttons at the right of the title bar. The hit area
+/// is the whole 40 x 32 cell (the close button reaches the very corner of the window).
+pub const BTN_W: i32 = 40;
+/// Width of the menu button that sits left of the three buttons.
+pub const MENU_W: i32 = 32;
+/// Side of the small app icon at the left of the title.
+pub const TITLE_ICON: i32 = 16;
+/// Padding before the app icon and between the icon and the title text.
+pub const TITLE_PAD: i32 = 10;
+/// Gap between the title text and the first button, kept free of text.
+pub const TITLE_GAP: i32 = 8;
 /// Thickness of the invisible resize band along a window's border.
 pub const RESIZE_BAND: i32 = 5;
 /// Length of the corner zone along each border (a bit larger than the band so
 /// corners are easy to hit).
 pub const RESIZE_CORNER: i32 = 14;
+
+/// A button of the title bar.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TitleBtn {
+    Menu,
+    Minimize,
+    Maximize,
+    Close,
+}
+
+/// Where the parts of a title bar sit (see [`Rect::title_layout`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TitleLayout {
+    /// The small app icon at the left.
+    pub icon: Rect,
+    /// Left edge of the title text and the right limit it must be cut at.
+    pub title_x: i32,
+    pub title_right: i32,
+    pub menu: Option<Rect>,
+    pub min: Rect,
+    pub max: Option<Rect>,
+    pub close: Rect,
+}
 
 /// A strongly typed window handle. Ids are handed out by
 /// [`crate::winman::WindowManager`], increase monotonically and are never
@@ -99,57 +123,87 @@ impl Rect {
         px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
     }
 
-    /// The close light (red), top-left of the title bar.
+    /// The close button: the right-most cell of the title bar.
     pub fn close_rect(&self) -> Rect {
-        Rect::new(self.x + LIGHT_INSET, self.y + LIGHT_TOP, CLOSE, CLOSE)
+        Rect::new(self.right() - BTN_W, self.y, BTN_W, TITLE_H)
     }
 
-    /// The minimise light (yellow), right of the close light.
-    pub fn min_rect(&self) -> Rect {
-        let c = self.close_rect();
-        Rect::new(c.x + LIGHT_PITCH, c.y, CLOSE, CLOSE)
-    }
-
-    /// The zoom light (green): maximise / restore.
+    /// The maximise / restore button, left of close.
     pub fn max_rect(&self) -> Rect {
-        let m = self.min_rect();
-        Rect::new(m.x + LIGHT_PITCH, m.y, CLOSE, CLOSE)
-    }
-
-    /// The three lights together (hovering any of them shows all their glyphs).
-    pub fn lights_rect(&self) -> Rect {
         let c = self.close_rect();
-        Rect::new(
-            c.x - LIGHT_SLOP,
-            c.y - LIGHT_SLOP,
-            2 * LIGHT_PITCH + CLOSE + 2 * LIGHT_SLOP,
-            CLOSE + 2 * LIGHT_SLOP,
-        )
+        Rect::new(c.x - BTN_W, c.y, BTN_W, TITLE_H)
     }
 
-    /// True when the point is on the close light (disc plus a little slop).
-    pub fn on_close(&self, px: i32, py: i32) -> bool {
-        self.close_rect().inflated(LIGHT_SLOP).contains(px, py)
+    /// The minimise button, left of maximise.
+    pub fn min_rect(&self) -> Rect {
+        let m = self.max_rect();
+        Rect::new(m.x - BTN_W, m.y, BTN_W, TITLE_H)
     }
 
-    pub fn on_max(&self, px: i32, py: i32) -> bool {
-        self.max_rect().inflated(LIGHT_SLOP).contains(px, py)
+    /// The title-bar layout of a window with this rectangle. A window that cannot be resized has
+    /// no maximise button (minimise slides over to take its place); `menu` asks for the menu
+    /// button left of the buttons.
+    pub fn title_layout(&self, resizable: bool, menu: bool) -> TitleLayout {
+        let close = self.close_rect();
+        let (max, min) = if resizable {
+            let m = self.max_rect();
+            (Some(m), Rect::new(m.x - BTN_W, m.y, BTN_W, TITLE_H))
+        } else {
+            (None, Rect::new(close.x - BTN_W, close.y, BTN_W, TITLE_H))
+        };
+        let menu = menu.then(|| Rect::new(min.x - MENU_W, min.y, MENU_W, TITLE_H));
+        let icon = Rect::new(
+            self.x + TITLE_PAD,
+            self.y + (TITLE_H - TITLE_ICON) / 2,
+            TITLE_ICON,
+            TITLE_ICON,
+        );
+        let title_x = icon.right() + TITLE_PAD - 2;
+        let controls_left = menu.map_or(min.x, |m| m.x);
+        TitleLayout {
+            icon,
+            title_x,
+            title_right: (controls_left - TITLE_GAP).max(title_x),
+            menu,
+            min,
+            max,
+            close,
+        }
     }
 
-    pub fn on_min(&self, px: i32, py: i32) -> bool {
-        self.min_rect().inflated(LIGHT_SLOP).contains(px, py)
+    /// The title-bar button under `(px, py)`.
+    pub fn title_button_at(
+        &self,
+        resizable: bool,
+        menu: bool,
+        px: i32,
+        py: i32,
+    ) -> Option<TitleBtn> {
+        if py < self.y || py >= self.y + TITLE_H {
+            return None;
+        }
+        let l = self.title_layout(resizable, menu);
+        if l.close.contains(px, py) {
+            Some(TitleBtn::Close)
+        } else if l.max.is_some_and(|m| m.contains(px, py)) {
+            Some(TitleBtn::Maximize)
+        } else if l.min.contains(px, py) {
+            Some(TitleBtn::Minimize)
+        } else if l.menu.is_some_and(|m| m.contains(px, py)) {
+            Some(TitleBtn::Menu)
+        } else {
+            None
+        }
     }
 
-    /// True when the point is on the draggable title area (excludes the three
-    /// lights).
+    /// True when the point is on the draggable title area: the title bar minus its buttons (every
+    /// button counts, so a right click on the bar never lands on the app under it).
     pub fn on_title(&self, px: i32, py: i32) -> bool {
         px >= self.x
             && px < self.x + self.w
             && py >= self.y
             && py < self.y + TITLE_H
-            && !self.on_close(px, py)
-            && !self.on_max(px, py)
-            && !self.on_min(px, py)
+            && self.title_button_at(true, true, px, py).is_none()
     }
 
     /// The border/corner under `(px, py)` for a resize drag: a
@@ -309,25 +363,89 @@ mod tests {
     }
 
     #[test]
-    fn close_light_top_left() {
+    fn buttons_sit_at_the_right_edge_close_outermost() {
         let r = win();
-        let c = r.close_rect();
-        assert_eq!(c, Rect::new(100 + 12, 100 + 10, 12, 12));
-        assert!(r.on_close(c.x + 1, c.y + 1));
-        // A little slop around the disc, none far away.
-        assert!(r.on_close(c.x - 2, c.y + 6));
-        assert!(!r.on_close(c.x - 4, c.y + 6));
-        assert!(!r.on_close(r.x + 2, r.y + 2));
-        // The light is vertically centred in the 32 px bar.
-        assert_eq!(c.y - r.y, TITLE_H - (c.bottom() - r.y));
+        let (c, m, n) = (r.close_rect(), r.max_rect(), r.min_rect());
+        assert_eq!(c, Rect::new(r.right() - BTN_W, r.y, BTN_W, TITLE_H));
+        assert_eq!(c.right(), r.right());
+        assert_eq!((m.right(), n.right()), (c.x, m.x));
+        // The corner pixel of the window is the close button (Fitts: infinite target).
+        assert_eq!(
+            r.title_button_at(true, true, r.right() - 1, r.y),
+            Some(TitleBtn::Close)
+        );
+        assert_eq!(
+            r.title_button_at(true, true, m.x + 3, m.y + 3),
+            Some(TitleBtn::Maximize)
+        );
+        assert_eq!(
+            r.title_button_at(true, true, n.x + 3, n.y + 30),
+            Some(TitleBtn::Minimize)
+        );
+        // Below the bar nothing is a button.
+        assert_eq!(r.title_button_at(true, true, c.x, r.y + TITLE_H), None);
     }
 
     #[test]
-    fn title_excludes_close_button() {
+    fn the_menu_button_sits_left_of_the_buttons_and_is_optional() {
+        let r = win();
+        let l = r.title_layout(true, true);
+        let menu = l.menu.unwrap();
+        assert_eq!(menu.right(), l.min.x);
+        assert_eq!(menu.w, MENU_W);
+        assert_eq!(
+            r.title_button_at(true, true, menu.x + 2, menu.y + 2),
+            Some(TitleBtn::Menu)
+        );
+        let none = r.title_layout(true, false);
+        assert!(none.menu.is_none());
+        assert_eq!(r.title_button_at(true, false, menu.x + 2, menu.y + 2), None);
+        // The title text stops before the first button.
+        assert_eq!(l.title_right, menu.x - TITLE_GAP);
+        assert_eq!(none.title_right, none.min.x - TITLE_GAP);
+    }
+
+    #[test]
+    fn a_window_that_cannot_be_resized_has_no_maximise_button() {
+        let r = win();
+        let l = r.title_layout(false, true);
+        assert!(l.max.is_none());
+        assert_eq!(l.min.right(), l.close.x);
+        let x = r.max_rect().x + 3;
+        assert_eq!(
+            r.title_button_at(false, true, x, r.y + 3),
+            Some(TitleBtn::Minimize)
+        );
+        assert_eq!(
+            r.title_button_at(true, true, x, r.y + 3),
+            Some(TitleBtn::Maximize)
+        );
+    }
+
+    #[test]
+    fn the_icon_and_title_start_at_the_left_and_never_reach_the_buttons() {
+        let r = win();
+        let l = r.title_layout(true, true);
+        assert_eq!(l.icon.x, r.x + TITLE_PAD);
+        assert_eq!(l.icon.w, TITLE_ICON);
+        // The icon is vertically centred in the bar.
+        assert_eq!(l.icon.y - r.y, TITLE_H - (l.icon.bottom() - r.y));
+        assert!(l.title_x > l.icon.right() && l.title_x < l.title_right);
+        // A tiny window keeps a non-negative text width.
+        let tiny = Rect::new(0, 0, 60, 100).title_layout(true, true);
+        assert!(tiny.title_right >= tiny.title_x);
+    }
+
+    #[test]
+    fn title_excludes_the_buttons() {
         let r = win();
         assert!(r.on_title(r.x + 100, r.y + 10));
-        let c = r.close_rect();
-        assert!(!r.on_title(c.x + 1, c.y + 1));
+        for b in [r.close_rect(), r.max_rect(), r.min_rect()] {
+            assert!(!r.on_title(b.x + 1, b.y + 1));
+        }
+        let menu = r.title_layout(true, true).menu.unwrap();
+        assert!(!r.on_title(menu.x + 1, menu.y + 1));
+        assert!(r.on_title(menu.x - 4, menu.y + 1));
     }
 
     #[test]
@@ -407,36 +525,6 @@ mod tests {
         assert_eq!(r.bottom(), 60);
         assert!(!r.is_empty());
         assert!(Rect::new(0, 0, 0, 5).is_empty());
-    }
-
-    #[test]
-    fn lights_run_left_to_right_close_minimise_zoom() {
-        let r = win();
-        let (c, n, m) = (r.close_rect(), r.min_rect(), r.max_rect());
-        assert_eq!(n.x - c.x, LIGHT_PITCH);
-        assert_eq!(m.x - n.x, LIGHT_PITCH);
-        assert!(r.on_max(m.x + 1, m.y + 1));
-        assert!(r.on_min(n.x + 1, n.y + 1));
-        assert!(!r.on_max(c.x + 1, c.y + 1));
-        assert!(!r.on_min(m.x + 1, m.y + 1));
-        // Hit areas of neighbours do not overlap (4 px gap between 16 px areas).
-        assert!(!r.on_close(n.x - 3, n.y + 6) || !r.on_min(n.x - 3, n.y + 6));
-        // The group rectangle covers all three.
-        let g = r.lights_rect();
-        for b in [c, n, m] {
-            assert!(g.contains(b.x, b.y) && g.contains(b.right() - 1, b.bottom() - 1));
-        }
-    }
-
-    #[test]
-    fn title_excludes_all_three_buttons() {
-        let r = win();
-        for b in [r.close_rect(), r.max_rect(), r.min_rect()] {
-            assert!(!r.on_title(b.x + 2, b.y + 2));
-        }
-        // The stretch right of the lights is still title.
-        assert!(r.on_title(r.max_rect().right() + 6, r.y + 10));
-        assert!(r.on_title(r.right() - 20, r.y + 10));
     }
 
     #[test]
