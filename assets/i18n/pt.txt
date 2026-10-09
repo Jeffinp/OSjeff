@@ -1,0 +1,73 @@
+# OSjeff messages (Português do Brasil).
+# One `key = value` per line; see docs/design/i18n.md. Keep this file and the other
+# language file on exactly the same keys and placeholders (cargo test -p osjeff_core i18n).
+
+
+# Language metadata and formats. Every language file defines these.
+meta.code = pt-BR
+meta.name = Português (Brasil)
+fmt.decimal = ,
+fmt.group = .
+fmt.plural = zero-one
+fmt.clock24_default = 1
+fmt.am = AM
+fmt.pm = PM
+fmt.time.24 = {hour}:{minute}
+fmt.time.24s = {hour}:{minute}:{second}
+fmt.time.12 = {hour12}:{minute} {ampm}
+fmt.time.12s = {hour12}:{minute}:{second} {ampm}
+fmt.date.short = {day2}/{month2}/{year}
+fmt.date.medium = {day} {month_short} {year}
+fmt.date.long = {Weekday_long}, {day} de {month_long} de {year}
+fmt.date.long_nowd = {day} de {month_long} de {year}
+fmt.date.month_year = {Month_long} de {year}
+fmt.date.weekday = {Weekday_long}
+fmt.datetime.full = {weekday}, {day} {month_short} {year} {time}
+fmt.datetime.panel = {weekday} {day} {month_short}  {time}
+
+# Weekday and month names. Short forms for the panel, long forms for headings.
+date.wd.0 = dom
+date.wd.1 = seg
+date.wd.2 = ter
+date.wd.3 = qua
+date.wd.4 = qui
+date.wd.5 = sex
+date.wd.6 = sáb
+date.wdl.0 = domingo
+date.wdl.1 = segunda-feira
+date.wdl.2 = terça-feira
+date.wdl.3 = quarta-feira
+date.wdl.4 = quinta-feira
+date.wdl.5 = sexta-feira
+date.wdl.6 = sábado
+date.wd1.0 = D
+date.wd1.1 = S
+date.wd1.2 = T
+date.wd1.3 = Q
+date.wd1.4 = Q
+date.wd1.5 = S
+date.wd1.6 = S
+date.mon.1 = jan
+date.mon.2 = fev
+date.mon.3 = mar
+date.mon.4 = abr
+date.mon.5 = mai
+date.mon.6 = jun
+date.mon.7 = jul
+date.mon.8 = ago
+date.mon.9 = set
+date.mon.10 = out
+date.mon.11 = nov
+date.mon.12 = dez
+date.monl.1 = janeiro
+date.monl.2 = fevereiro
+date.monl.3 = março
+date.monl.4 = abril
+date.monl.5 = maio
+date.monl.6 = junho
+date.monl.7 = julho
+date.monl.8 = agosto
+date.monl.9 = setembro
+date.monl.10 = outubro
+date.monl.11 = novembro
+date.monl.12 = dezembro

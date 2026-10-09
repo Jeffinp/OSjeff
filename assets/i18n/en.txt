@@ -1,0 +1,73 @@
+# OSjeff messages (English).
+# One `key = value` per line; see docs/design/i18n.md. Keep this file and the other
+# language file on exactly the same keys and placeholders (cargo test -p osjeff_core i18n).
+
+
+# Language metadata and formats. Every language file defines these.
+meta.code = en
+meta.name = English
+fmt.decimal = .
+fmt.group = ,
+fmt.plural = one
+fmt.clock24_default = 0
+fmt.am = AM
+fmt.pm = PM
+fmt.time.24 = {hour}:{minute}
+fmt.time.24s = {hour}:{minute}:{second}
+fmt.time.12 = {hour12}:{minute} {ampm}
+fmt.time.12s = {hour12}:{minute}:{second} {ampm}
+fmt.date.short = {month2}/{day2}/{year}
+fmt.date.medium = {month_short} {day}, {year}
+fmt.date.long = {weekday_long}, {month_long} {day}, {year}
+fmt.date.long_nowd = {month_long} {day}, {year}
+fmt.date.month_year = {month_long} {year}
+fmt.date.weekday = {weekday_long}
+fmt.datetime.full = {weekday}, {month_short} {day} {year} {time}
+fmt.datetime.panel = {weekday} {month_short} {day}  {time}
+
+# Weekday and month names. Short forms for the panel, long forms for headings.
+date.wd.0 = Sun
+date.wd.1 = Mon
+date.wd.2 = Tue
+date.wd.3 = Wed
+date.wd.4 = Thu
+date.wd.5 = Fri
+date.wd.6 = Sat
+date.wdl.0 = Sunday
+date.wdl.1 = Monday
+date.wdl.2 = Tuesday
+date.wdl.3 = Wednesday
+date.wdl.4 = Thursday
+date.wdl.5 = Friday
+date.wdl.6 = Saturday
+date.wd1.0 = S
+date.wd1.1 = M
+date.wd1.2 = T
+date.wd1.3 = W
+date.wd1.4 = T
+date.wd1.5 = F
+date.wd1.6 = S
+date.mon.1 = Jan
+date.mon.2 = Feb
+date.mon.3 = Mar
+date.mon.4 = Apr
+date.mon.5 = May
+date.mon.6 = Jun
+date.mon.7 = Jul
+date.mon.8 = Aug
+date.mon.9 = Sep
+date.mon.10 = Oct
+date.mon.11 = Nov
+date.mon.12 = Dec
+date.monl.1 = January
+date.monl.2 = February
+date.monl.3 = March
+date.monl.4 = April
+date.monl.5 = May
+date.monl.6 = June
+date.monl.7 = July
+date.monl.8 = August
+date.monl.9 = September
+date.monl.10 = October
+date.monl.11 = November
+date.monl.12 = December

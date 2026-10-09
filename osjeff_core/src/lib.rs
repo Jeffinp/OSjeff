@@ -43,6 +43,7 @@ pub mod glyph;
 pub mod gzip;
 pub mod heap;
 pub mod hw;
+pub mod i18n;
 pub mod icmp;
 pub mod iconart;
 pub mod image;
