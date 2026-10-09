@@ -1315,3 +1315,4 @@ kit.glyphs = Glifos
 notify.bookmarks_unsaved = Não foi possível salvar os favoritos
 notify.wallpaper_missing = Papel de parede não encontrado; usando o padrão
 notify.wallpaper_refused = Papel de parede recusado ({why}); usando o padrão
+notify.app_refused = Não foi possível abrir o app: {why}

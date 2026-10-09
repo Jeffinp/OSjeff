@@ -120,13 +120,10 @@ fn paint_image(c: &mut Canvas, path: &[u8]) -> bool {
     let mut img = match osjeff_core::wallpaper::load(&bytes, w, h) {
         Ok(img) => img,
         Err(e) => {
-            crate::notify::notify_key(
+            crate::notify::notify_why(
                 crate::klog::Level::Warn,
                 osjeff_core::tk!("notify.wallpaper_refused"),
-                &[(
-                    "why",
-                    osjeff_core::i18n::Arg::Str(osjeff_core::i18n::tr(e.why_key())),
-                )],
+                |l| alloc::string::String::from(osjeff_core::i18n::tr_in(l, e.why_key())),
             );
             return false;
         }

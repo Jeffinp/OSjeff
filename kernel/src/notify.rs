@@ -48,10 +48,34 @@ pub fn notify(level: Level, args: fmt::Arguments<'_>) {
 /// marked so the log watcher does not show it a second time in English. Unlike [`notify`]
 /// this allocates: call it from the desktop, not from an interrupt handler.
 pub fn notify_key(level: Level, key: &'static str, args: osjeff_core::i18n::Args<'_>) {
-    use osjeff_core::i18n::{Lang, tr_fmt, tr_fmt_in};
-    let english = tr_fmt_in(Lang::En, key, args);
-    klog::log_toasted(level, format_args!("{english}"));
-    let shown = tr_fmt(key, args);
+    notify_with(level, key, |_| alloc::string::String::new(), args);
+}
+
+/// [`notify_key`] for a text with a `{why}` that is itself words (a reason): `why(lang)` gives
+/// it in `lang`, so the toast has it in the language of the interface and the log in English.
+pub fn notify_why(
+    level: Level,
+    key: &'static str,
+    why: impl Fn(osjeff_core::i18n::Lang) -> alloc::string::String,
+) {
+    notify_with(level, key, why, &[]);
+}
+
+fn notify_with(
+    level: Level,
+    key: &'static str,
+    why: impl Fn(osjeff_core::i18n::Lang) -> alloc::string::String,
+    args: osjeff_core::i18n::Args<'_>,
+) {
+    use osjeff_core::i18n::{Arg, Lang, lang, tr_fmt_in};
+    let say = |l: Lang| {
+        let w = why(l);
+        let mut all: alloc::vec::Vec<(&str, Arg<'_>)> = alloc::vec::Vec::from(args);
+        all.push(("why", Arg::Str(&w)));
+        tr_fmt_in(l, key, &all)
+    };
+    klog::log_toasted(level, format_args!("{}", say(Lang::En)));
+    let shown = say(lang());
     // The toast keeps 64 bytes: cut at a character, never in the middle of one.
     let mut n = shown.len().min(TEXT);
     while !shown.is_char_boundary(n) {

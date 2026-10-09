@@ -1315,3 +1315,4 @@ kit.glyphs = Glyphs
 notify.bookmarks_unsaved = Could not save your bookmarks
 notify.wallpaper_missing = Wallpaper not found; using the default
 notify.wallpaper_refused = Wallpaper refused ({why}); using the default
+notify.app_refused = Could not open the app: {why}

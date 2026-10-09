@@ -148,6 +148,11 @@ impl Desktop {
             Ok(m) => m,
             Err(e) => {
                 serial_println!("apps: .wasm file refused: {}", e);
+                crate::notify::notify_why(
+                    crate::klog::Level::Warn,
+                    osjeff_core::tk!("notify.app_refused"),
+                    |l| e.message_in(l),
+                );
                 return;
             }
         };
@@ -158,6 +163,11 @@ impl Desktop {
                 Ok(m) => serial_println!("apps: installed `{}` {} from a file", m.id, m.version),
                 Err(e) => {
                     serial_println!("apps: install refused: {}", e);
+                    crate::notify::notify_why(
+                        crate::klog::Level::Warn,
+                        osjeff_core::tk!("notify.app_refused"),
+                        |l| e.message_in(l),
+                    );
                     return;
                 }
             }
