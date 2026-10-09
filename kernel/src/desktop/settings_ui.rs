@@ -1352,6 +1352,9 @@ impl Desktop {
         {
             self.bg_dirty = true;
         }
+        if new.lang != old.lang {
+            self.language_changed(old.lang);
+        }
         if new.appearance != old.appearance {
             // Re-resolve the look now (Auto follows the clock, the others are fixed).
             self.poll_appearance(crate::rtc::now().h);

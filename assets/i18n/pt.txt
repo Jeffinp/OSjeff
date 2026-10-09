@@ -71,3 +71,24 @@ date.monl.9 = setembro
 date.monl.10 = outubro
 date.monl.11 = novembro
 date.monl.12 = dezembro
+
+# Severity titles of notifications and banners
+level.info = Informação
+level.warn = Aviso
+level.error = Erro
+level.fatal = Falha grave
+toast.repeat = ×{n}
+
+# App names (title bars, menus, tooltips, Apps, Busca)
+app.terminal = Terminal
+app.editor = Editor
+app.tasks = Tarefas
+app.calculator = Calculadora
+app.browser = Navegador
+app.wasm = Aplicativos
+app.wasm_title = Aplicativo
+app.files = Arquivos
+app.settings = Ajustes
+app.log = Registro
+app.viewer = Imagens
+app.gallery = Componentes

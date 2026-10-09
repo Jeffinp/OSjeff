@@ -25,6 +25,8 @@
 
 use super::*;
 use alloc::boxed::Box;
+use osjeff_core::i18n::{Lang, tr, tr_in};
+use osjeff_core::tk;
 
 /// Which app a window runs. The order is the Apps overlay / menu order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -80,38 +82,34 @@ impl Kind {
         }
     }
 
-    /// Title-bar text of the first instance.
-    pub(crate) const fn title(self) -> &'static str {
+    /// Catalog key of the app's name.
+    pub(crate) const fn name_key(self) -> &'static str {
         match self {
-            Kind::Terminal => "Terminal",
-            Kind::Editor => "Editor",
-            Kind::TaskMgr => "Tarefas",
-            Kind::Calculator => "Calculadora",
-            Kind::Browser => "Navegador",
-            Kind::WasmApp => "Aplicativo",
-            Kind::Files => "Arquivos",
-            Kind::Settings => "Ajustes",
-            Kind::LogViewer => "Registro",
-            Kind::Viewer => "Imagens",
-            Kind::Gallery => "Componentes",
+            Kind::Terminal => tk!("app.terminal"),
+            Kind::Editor => tk!("app.editor"),
+            Kind::TaskMgr => tk!("app.tasks"),
+            Kind::Calculator => tk!("app.calculator"),
+            Kind::Browser => tk!("app.browser"),
+            Kind::WasmApp => tk!("app.wasm"),
+            Kind::Files => tk!("app.files"),
+            Kind::Settings => tk!("app.settings"),
+            Kind::LogViewer => tk!("app.log"),
+            Kind::Viewer => tk!("app.viewer"),
+            Kind::Gallery => tk!("app.gallery"),
+        }
+    }
+
+    /// Title-bar text of the first instance, in language `l`.
+    pub(crate) fn title_in(self, l: Lang) -> &'static str {
+        match self {
+            Kind::WasmApp => tr_in(l, tk!("app.wasm_title")),
+            _ => tr_in(l, self.name_key()),
         }
     }
 
     /// Name in menus, the app bar's tooltips, the Apps overlay and Busca.
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Kind::Terminal => "Terminal",
-            Kind::Editor => "Editor",
-            Kind::TaskMgr => "Tarefas",
-            Kind::Calculator => "Calculadora",
-            Kind::Browser => "Navegador",
-            Kind::WasmApp => "Aplicativos",
-            Kind::Files => "Arquivos",
-            Kind::Settings => "Ajustes",
-            Kind::LogViewer => "Registro",
-            Kind::Viewer => "Imagens",
-            Kind::Gallery => "Componentes",
-        }
+    pub(crate) fn label(self) -> &'static str {
+        tr(self.name_key())
     }
 
     pub(crate) const fn icon(self) -> Icon {
@@ -731,7 +729,12 @@ pub(crate) struct WasmWin {
 
 /// Title-bar text of instance `index` of `kind` (`OSJEFF SHELL`, `OSJEFF SHELL 2`...).
 pub(crate) fn base_title(kind: Kind, index: u8) -> String {
-    let mut title = String::from(kind.title());
+    base_title_in(osjeff_core::i18n::lang(), kind, index)
+}
+
+/// [`base_title`] in language `l`.
+pub(crate) fn base_title_in(l: Lang, kind: Kind, index: u8) -> String {
+    let mut title = String::from(kind.title_in(l));
     if index > 1 {
         // The same " N" suffix as the process name.
         let mut tmp = [0u8; 16];

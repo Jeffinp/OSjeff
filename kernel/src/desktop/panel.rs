@@ -60,13 +60,7 @@ pub(crate) struct Notif {
 }
 
 fn level_title(l: crate::klog::Level) -> &'static str {
-    use crate::klog::Level;
-    match l {
-        Level::Trace | Level::Debug | Level::Info => "Informação",
-        Level::Warn => "Aviso",
-        Level::Error => "Erro",
-        Level::Fatal => "Falha grave",
-    }
+    osjeff_core::i18n::tr(l.title_key())
 }
 
 fn level_color(l: crate::klog::Level) -> Color {

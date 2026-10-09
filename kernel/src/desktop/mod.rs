@@ -600,6 +600,7 @@ mod glass;
 mod input;
 mod instance;
 mod kit;
+mod lang;
 mod live;
 mod logview;
 mod overlays;
