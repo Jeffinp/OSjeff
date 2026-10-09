@@ -349,6 +349,20 @@ impl Desktop {
                     ));
                 }
             }
+            for (word, tab) in tarefas::SEARCH_ALIASES {
+                if let Some(r) = search::rank(&q, word)
+                    && search::rank(&q, Kind::TaskMgr.label()).is_none()
+                {
+                    hits.push((
+                        r.saturating_add(1),
+                        SearchHit {
+                            title: alloc::format!("Tarefas · {}", tarefas::TAB_NAMES[tab as usize]),
+                            sub: String::from("App"),
+                            kind: HitKind::Tab(tab),
+                        },
+                    ));
+                }
+            }
             for (i, a) in self.apps.iter().enumerate() {
                 if let Some(r) = search::rank(&q, &a.name) {
                     hits.push((
@@ -387,6 +401,7 @@ impl Desktop {
     fn activate_hit(&mut self, hit: SearchHit) {
         match hit.kind {
             HitKind::App(t) => self.launch_target(t),
+            HitKind::Tab(t) => self.open_tarefas_tab(t),
             HitKind::Calc => {
                 let ans = hit.title.trim_start_matches("= ").as_bytes().to_vec();
                 self.clipboard.set(&ans);
@@ -498,6 +513,9 @@ impl Desktop {
                 }
                 HitKind::App(Target::Wasm(_)) => {
                     c.blit_surface(icons::surface(Icon::WasmApp, 28), ic.x, ic.y, 256)
+                }
+                HitKind::Tab(_) => {
+                    c.blit_surface(icons::surface(Kind::TaskMgr.icon(), 28), ic.x, ic.y, 256)
                 }
                 HitKind::File(_) => {
                     c.blit_surface(icons::surface(Icon::Files, 28), ic.x, ic.y, 256)

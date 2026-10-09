@@ -153,12 +153,39 @@ impl Desktop {
         let (sw, sh) = (info.width as i32, info.height as i32);
         let wins = self.wm.windows();
 
-        // Damage = last frame's region + every animating window's box now.
+        // Damage = last frame's region + every animating window's box now. When the only
+        // thing animating is the inside of windows that stay where they are (Tarefas gliding
+        // between samples), last frame's region is the same part again: it need not grow.
         let mut damage = prev_damage;
+        let live_only = !prev_damage.is_empty()
+            && !self.overlay_open()
+            && !self.dock_animating()
+            && wins
+                .iter()
+                .filter(|w| w.shown() && self.is_dynamic(w))
+                .all(|w| self.live_rect(w).is_some());
+        if live_only {
+            // Such a glide does not need a frame per timer tick: one every 20 ms is smooth
+            // and costs a fifth. A skipped frame reports a one-pixel damage, which keeps the
+            // next frame from being taken for a rebuild.
+            let now = crate::interrupts::ticks();
+            if now.wrapping_sub(self.live_tick.get()) < 5 {
+                return Rect::new(prev_damage.x, prev_damage.y, 1, 1);
+            }
+            self.live_tick.set(now);
+            damage = Rect::new(0, 0, 0, 0);
+        }
         let mut lowest_anim_z = wins.len();
         for (i, w) in wins.iter().enumerate() {
             if w.shown() && self.is_dynamic(w) {
-                damage = damage.union(&shadow_box(self.window_box(w)));
+                // A window that only animates its own content (Tarefas gliding between two
+                // samples) repaints just that area; the first frame of a rebuild paints it all.
+                let part = if prev_damage.is_empty() {
+                    None
+                } else {
+                    self.live_rect(w)
+                };
+                damage = damage.union(&part.unwrap_or_else(|| shadow_box(self.window_box(w))));
                 lowest_anim_z = lowest_anim_z.min(i);
             }
         }

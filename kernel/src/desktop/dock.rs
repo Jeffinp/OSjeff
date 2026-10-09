@@ -213,7 +213,7 @@ impl Desktop {
         let p = theme::pal();
         let (panel, icons) = self.dock_geometry();
         self.shell.dock.layout.set((panel, {
-            let mut a = [Rect::new(0, 0, 0, 0); 10];
+            let mut a = [Rect::new(0, 0, 0, 0); 9];
             for (slot, r) in a.iter_mut().zip(&icons) {
                 *slot = *r;
             }

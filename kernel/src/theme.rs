@@ -190,6 +190,7 @@ pub fn ok() -> Color {
 }
 /// Selected row in a list (a tint of the accent).
 #[inline]
+#[allow(dead_code)]
 pub fn selection() -> Color {
     accent().lerp(
         if dark() {

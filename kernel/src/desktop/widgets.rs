@@ -214,16 +214,3 @@ pub(crate) fn copy_region(
         dst[off..off + row_len].copy_from_slice(&src[off..off + row_len]);
     }
 }
-
-/// Right-align `v` as decimal digits in `buf[start..start+width]`.
-pub(crate) fn write_uint(buf: &mut [u8], start: usize, width: usize, mut v: u32) {
-    let mut i = start + width;
-    loop {
-        i -= 1;
-        buf[i] = b'0' + (v % 10) as u8;
-        v /= 10;
-        if v == 0 || i == start {
-            break;
-        }
-    }
-}

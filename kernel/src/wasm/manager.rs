@@ -75,19 +75,6 @@ pub enum State {
     Crashed,
 }
 
-impl State {
-    /// Three-letter label for the Task Manager.
-    pub fn label(self) -> &'static str {
-        match self {
-            State::Starting => "INI",
-            State::Running => "RUN",
-            State::Suspended => "SUS",
-            State::Exited => "END",
-            State::Crashed => "ERR",
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 enum Ev {
     Key(i32, i32),

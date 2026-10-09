@@ -135,6 +135,8 @@ pub struct Desktop {
     /// `vfs::generation()` the file managers last loaded, and the tick of that check.
     fs_gen: u32,
     fs_gen_tick: u64,
+    /// Timer tick of the last frame of a window animating its own content (see `render_anim_frame`).
+    live_tick: core::cell::Cell<u64>,
 }
 
 impl Desktop {
@@ -182,6 +184,7 @@ impl Desktop {
             clip_gen: crate::wasm::clip_generation(),
             fs_gen: vfs::generation(),
             fs_gen_tick: 0,
+            live_tick: core::cell::Cell::new(0),
         };
         // Install the bundled apps into /apps (first boot) and build the launcher catalog.
         desk.init_apps();
@@ -408,6 +411,7 @@ impl Desktop {
         self.step_file_jobs();
         self.step_shell_jobs();
         self.sync_text_windows();
+        self.live_step(dt);
         let (active, gone) = self.wm.step(dt);
         let focus_busy = self.step_focus(dt);
         let shell_busy = self.step_shell(dt);
@@ -514,6 +518,7 @@ impl Desktop {
             || (w.shown() && w.app.kind() == Kind::WasmApp)
             || (w.shown() && matches!(&w.app.app, App::Files(f) if f.job.is_some()))
             || (w.shown() && matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
+            || self.live_dynamic(w)
             || self.focus_busy(w.id)
     }
 
@@ -524,6 +529,7 @@ impl Desktop {
         self.drag.is_some()
             || self.shell_animating()
             || self.toasts_sliding()
+            || self.live_busy()
             || self.wm.windows().iter().any(|w| {
                 w.shown()
                     && (w.anim.is_some()
@@ -851,9 +857,10 @@ mod gallery;
 mod glass;
 mod input;
 mod instance;
+mod kit;
+mod live;
 mod logview;
 mod menubar;
-mod monitor;
 mod overlays;
 mod render;
 mod settings_ui;
@@ -872,11 +879,11 @@ pub(crate) use edit::EditorState;
 pub(crate) use input::Special;
 pub(crate) use instance::*;
 pub(crate) use logview::LogState;
-pub use monitor::SysInputs;
-pub(crate) use monitor::{MonitorState, SysMon};
 pub(crate) use settings_ui::SettingsState;
 pub use shellhost::{worker as shell_worker, worker2 as shell_worker2};
 pub(crate) use sysstore::*;
+pub use tarefas::SysInputs;
+pub(crate) use tarefas::{SysMon, TarefasState};
 pub(crate) use term::TermState;
 pub(crate) use wasmwin::*;
 pub(crate) use widgets::*;

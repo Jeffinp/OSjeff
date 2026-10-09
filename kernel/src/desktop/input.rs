@@ -246,7 +246,7 @@ impl Desktop {
             Kind::Editor => {
                 self.editor_key(top, key);
             }
-            Kind::TaskMgr => self.task_key(top, key),
+            Kind::TaskMgr => self.tarefas_key(top, key),
             Kind::Calculator => match key {
                 Key::Char(b) => self.calc_input(top, b),
                 Key::Enter => self.calc_input(top, b'='),
@@ -269,7 +269,6 @@ impl Desktop {
                 }
             }
             Kind::Files => self.files_key(top, key),
-            Kind::Monitor => self.monitor_key(top, key),
             Kind::Settings => self.settings_key(top, key),
             Kind::LogViewer => self.log_key(top, key),
             Kind::Viewer => self.viewer_key(top, key),
@@ -646,11 +645,10 @@ impl Desktop {
                 App::Calculator(c) => c.display(),
                 App::Browser(b) => b.browser.url(),
                 App::Editor(_)
-                | App::TaskMgr
+                | App::Tarefas(_)
                 | App::Wasm(_)
                 | App::Files(_)
                 | App::Viewer(_)
-                | App::Monitor(_)
                 | App::Settings(_)
                 | App::Gallery(_)
                 | App::Log(_) => &[],
@@ -702,52 +700,15 @@ impl Desktop {
             Some(
                 App::Terminal(_)
                 | App::Editor(_)
-                | App::TaskMgr
+                | App::Tarefas(_)
                 | App::Wasm(_)
                 | App::Files(_)
                 | App::Viewer(_)
-                | App::Monitor(_)
                 | App::Settings(_)
                 | App::Gallery(_)
                 | App::Log(_),
             )
             | None => {}
-        }
-    }
-
-    pub(crate) fn task_key(&mut self, id: WindowId, key: Key) {
-        match key {
-            Key::Up => self.procs.select_prev(),
-            Key::Down => self.procs.select_next(),
-            Key::Enter => {
-                if let Some(pid) = self.procs.selected_pid()
-                    && let Some(w) = self.window_of_pid(pid)
-                {
-                    self.wm.activate(w);
-                }
-            }
-            // End the selected process: really close the window of that
-            // instance (its process goes with it when the animation ends).
-            Key::Delete => {
-                if let Some(pid) = self.procs.selected_pid()
-                    && let Some(p) = self.procs.get(pid)
-                    && p.kind == ProcKind::App
-                    && let Some(w) = self.window_of_pid(pid)
-                {
-                    self.request_close(w);
-                }
-            }
-            // Restart the selected WASM app: a fresh instance from the same package.
-            Key::Char(b'r') | Key::Char(b'R') => {
-                if let Some(pid) = self.procs.selected_pid()
-                    && let Some(w) = self.window_of_pid(pid)
-                    && let Some(h) = self.wasm_handle(w)
-                {
-                    crate::wasm::restart(h);
-                }
-            }
-            Key::Esc => self.request_close(id),
-            _ => {}
         }
     }
 
@@ -815,14 +776,7 @@ impl Desktop {
         let changed = match kind {
             Kind::Browser => self.browser_wheel(w, notches),
             Kind::TaskMgr => {
-                // The process list scrolls with its selection.
-                for _ in 0..notches.abs() {
-                    if notches > 0 {
-                        self.procs.select_next();
-                    } else {
-                        self.procs.select_prev();
-                    }
-                }
+                self.tarefas_wheel(w, notches);
                 true
             }
             Kind::Files => {
@@ -844,12 +798,9 @@ impl Desktop {
                 true
             }
             // Nothing to scroll (the WASM guest has no wheel ABI).
-            Kind::Calculator
-            | Kind::WasmApp
-            | Kind::Monitor
-            | Kind::Settings
-            | Kind::LogViewer
-            | Kind::Gallery => false,
+            Kind::Calculator | Kind::WasmApp | Kind::Settings | Kind::LogViewer | Kind::Gallery => {
+                false
+            }
         };
         if changed && let Some(r) = self.wm.get(w).map(|win| self.window_box(win)) {
             // The target may not be the focused window: make sure it is uploaded.
@@ -948,12 +899,12 @@ impl Desktop {
             }
             Kind::Files => self.files_click(w, rect, cx, cy, false),
             Kind::Viewer => self.viewer_click(w, rect, cx, cy),
-            Kind::Monitor => self.monitor_click(w, rect, cx, cy),
+            Kind::TaskMgr => self.tarefas_click(w, rect, cx, cy),
             Kind::Settings => self.settings_click(w, rect, cx, cy),
             Kind::Gallery => self.gallery_click(w, rect, cx, cy),
             Kind::LogViewer => self.log_click(w, rect, cx, cy),
             Kind::Editor => self.editor_click(w, rect, cx, cy),
-            Kind::Terminal | Kind::TaskMgr => {}
+            Kind::Terminal => {}
         }
     }
 
@@ -1070,6 +1021,14 @@ impl Desktop {
             } else {
                 self.drag = None;
             }
+        }
+
+        // The system apps repaint when what the pointer is over (or the button state) changes.
+        if self.drag.is_none()
+            && (cursor_moved || left != self.prev_left)
+            && self.live_hover(cx, cy, left)
+        {
+            scene = true;
         }
 
         // Hover: the window under the cursor shows its minimize / maximize

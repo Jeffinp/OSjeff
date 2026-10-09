@@ -35,7 +35,6 @@ pub(crate) enum Kind {
     Browser,
     WasmApp,
     Files,
-    Monitor,
     Settings,
     LogViewer,
     Viewer,
@@ -44,7 +43,7 @@ pub(crate) enum Kind {
 }
 
 impl Kind {
-    pub(crate) const ALL: [Kind; 11] = [
+    pub(crate) const ALL: [Kind; 10] = [
         Kind::Terminal,
         Kind::Editor,
         Kind::TaskMgr,
@@ -52,7 +51,6 @@ impl Kind {
         Kind::Browser,
         Kind::WasmApp,
         Kind::Files,
-        Kind::Monitor,
         Kind::Settings,
         Kind::LogViewer,
         Kind::Viewer,
@@ -61,10 +59,7 @@ impl Kind {
     /// Does the window's content change on its own every second (so the
     /// per-second tick must repaint it)?
     pub(crate) const fn is_live(self) -> bool {
-        matches!(
-            self,
-            Kind::TaskMgr | Kind::Monitor | Kind::Settings | Kind::LogViewer
-        )
+        matches!(self, Kind::TaskMgr | Kind::Settings | Kind::LogViewer)
     }
 
     /// Process-table name of the first instance (`shell`; later ones get `shell 2`...).
@@ -77,7 +72,6 @@ impl Kind {
             Kind::Browser => "browser",
             Kind::WasmApp => "wasmapp",
             Kind::Files => "files",
-            Kind::Monitor => "monitor",
             Kind::Settings => "settings",
             Kind::LogViewer => "syslog",
             Kind::Viewer => "viewer",
@@ -95,7 +89,6 @@ impl Kind {
             Kind::Browser => "Navegador",
             Kind::WasmApp => "Aplicativo",
             Kind::Files => "Arquivos",
-            Kind::Monitor => "Monitor do sistema",
             Kind::Settings => "Configurações",
             Kind::LogViewer => "Registro do sistema",
             Kind::Viewer => "Imagens",
@@ -113,7 +106,6 @@ impl Kind {
             Kind::Browser => "Navegador",
             Kind::WasmApp => "Aplicativos",
             Kind::Files => "Arquivos",
-            Kind::Monitor => "Monitor",
             Kind::Settings => "Configurações",
             Kind::LogViewer => "Registro",
             Kind::Viewer => "Imagens",
@@ -130,7 +122,6 @@ impl Kind {
             Kind::Browser => Icon::Browser,
             Kind::WasmApp => Icon::WasmApp,
             Kind::Files => Icon::Files,
-            Kind::Monitor => Icon::Monitor,
             Kind::Settings => Icon::Settings,
             Kind::LogViewer => Icon::Log,
             Kind::Viewer => Icon::Viewer,
@@ -159,14 +150,13 @@ impl Kind {
         match self {
             Kind::Terminal => Rect::new(70, 80, 600, 360),
             Kind::Editor => Rect::new(610, 110, 560, 350),
-            Kind::TaskMgr => Rect::new(360, 200, 392, 300),
+            Kind::TaskMgr => Rect::new(190, 52, 860, 592),
             Kind::Calculator => Rect::new(470, 150, 300, 420),
             Kind::Browser => Rect::new(150, 60, 916, 560),
             Kind::WasmApp => Rect::new(240, 130, 720, 470),
             Kind::Files => Rect::new(220, 110, 860, 520),
             Kind::Viewer => Rect::new(200, 90, 820, 540),
             Kind::Gallery => Rect::new(160, 70, 900, 600),
-            Kind::Monitor => Rect::new(210, 90, 800, 560),
             Kind::Settings => Rect::new(220, 84, 820, 560),
             Kind::LogViewer => Rect::new(180, 110, 860, 460),
         }
@@ -177,14 +167,13 @@ impl Kind {
         match self {
             Kind::Terminal => (320, 180),
             Kind::Editor => (320, 200),
-            Kind::TaskMgr => (360, 260),
+            Kind::TaskMgr => (700, 460),
             Kind::Calculator => (280, 360),
             Kind::Browser => (420, 260),
             Kind::WasmApp => (720, 470),
             Kind::Files => (580, 320),
             Kind::Viewer => (360, 260),
             Kind::Gallery => (560, 380),
-            Kind::Monitor => (660, 420),
             Kind::Settings => (700, 460),
             Kind::LogViewer => (520, 280),
         }
@@ -378,13 +367,12 @@ pub(crate) fn base_title(kind: Kind, index: u8) -> String {
 pub(crate) enum App {
     Terminal(Box<TermState>),
     Editor(Box<EditorState>),
-    TaskMgr,
+    Tarefas(Box<TarefasState>),
     Calculator(Box<Calc>),
     Browser(Box<BrowserState>),
     Wasm(Box<WasmWin>),
     Files(Box<FilesState>),
     Viewer(Box<ViewerState>),
-    Monitor(Box<MonitorState>),
     Settings(Box<SettingsState>),
     Log(Box<LogState>),
     Gallery(Box<gallery::GalleryState>),
@@ -396,7 +384,7 @@ impl App {
         match kind {
             Kind::Terminal => App::Terminal(Box::new(TermState::new())),
             Kind::Editor => App::Editor(Box::new(EditorState::new())),
-            Kind::TaskMgr => App::TaskMgr,
+            Kind::TaskMgr => App::Tarefas(Box::new(TarefasState::new(0))),
             Kind::Calculator => App::Calculator(Box::new(Calc::new())),
             Kind::Browser => App::Browser(Box::new(BrowserState {
                 browser: osjeff_core::Browser::with_store(new_bookmark_store()),
@@ -420,7 +408,6 @@ impl App {
             })),
             Kind::Files => App::Files(Box::new(FilesState::new())),
             Kind::Viewer => App::Viewer(Box::new(ViewerState::new())),
-            Kind::Monitor => App::Monitor(Box::new(MonitorState::new())),
             Kind::Settings => App::Settings(Box::new(SettingsState::new())),
             Kind::LogViewer => App::Log(Box::new(LogState::new())),
             Kind::Gallery => App::Gallery(Box::new(gallery::GalleryState::new())),
@@ -431,12 +418,11 @@ impl App {
         match self {
             App::Terminal(_) => Kind::Terminal,
             App::Editor(_) => Kind::Editor,
-            App::TaskMgr => Kind::TaskMgr,
+            App::Tarefas(_) => Kind::TaskMgr,
             App::Calculator(_) => Kind::Calculator,
             App::Browser(_) => Kind::Browser,
             App::Wasm(_) => Kind::WasmApp,
             App::Files(_) => Kind::Files,
-            App::Monitor(_) => Kind::Monitor,
             App::Settings(_) => Kind::Settings,
             App::Log(_) => Kind::LogViewer,
             App::Viewer(_) => Kind::Viewer,
@@ -454,7 +440,7 @@ pub(crate) struct Inst {
     pub index: u8,
     pub title: String,
     /// TSC cycles spent drawing this window since the last once-a-second sample
-    /// (the resource monitor's per-app figure).
+    /// (Tarefas' per-app figure).
     pub cost: core::cell::Cell<u64>,
     /// Draw cost of the last full second, in tenths of a percent of wall time.
     pub cost_pm: core::cell::Cell<u16>,

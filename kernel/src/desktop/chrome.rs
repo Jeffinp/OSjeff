@@ -164,12 +164,11 @@ impl Desktop {
         match &win.app.app {
             App::Terminal(t) => self.draw_terminal(c, r, t, focused),
             App::Editor(e) => self.draw_editor(c, r, e, focused),
-            App::TaskMgr => self.draw_taskmgr(c, r),
+            App::Tarefas(t) => self.draw_tarefas(c, r, t),
             App::Calculator(k) => self.draw_calculator(c, r, k),
             App::Browser(b) => self.draw_browser(c, r, focused, b),
             App::Wasm(w) => self.draw_wasm(c, r, w),
             App::Files(f) => self.draw_files(c, r, f),
-            App::Monitor(m) => self.draw_monitor(c, r, m),
             App::Settings(s) => self.draw_settings(c, r, s),
             App::Log(l) => self.draw_log(c, r, l),
             App::Viewer(v) => self.draw_viewer(c, r, v),

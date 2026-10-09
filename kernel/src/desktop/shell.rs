@@ -168,6 +168,8 @@ pub(crate) struct AppsView {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) enum HitKind {
     App(Target),
+    /// An alias that opens Tarefas on a tab ("monitor", "memória", ...).
+    Tab(u8),
     File(Vec<u8>),
     Calc,
 }
@@ -200,7 +202,7 @@ pub(crate) enum DockEntry {
 }
 
 /// The app bar's items, left to right (the Apps button first, a separator after it).
-pub(crate) const DOCK_ITEMS: [DockEntry; 10] = [
+pub(crate) const DOCK_ITEMS: [DockEntry; 9] = [
     DockEntry::Apps,
     DockEntry::App(Kind::Files),
     DockEntry::App(Kind::Browser),
@@ -209,7 +211,6 @@ pub(crate) const DOCK_ITEMS: [DockEntry; 10] = [
     DockEntry::App(Kind::Calculator),
     DockEntry::App(Kind::Viewer),
     DockEntry::App(Kind::TaskMgr),
-    DockEntry::App(Kind::Monitor),
     DockEntry::App(Kind::Settings),
 ];
 
@@ -225,7 +226,7 @@ pub(crate) struct DockState {
     /// Pointer x for magnification (None when outside the zone).
     pub pointer_x: Option<i32>,
     /// Last painted layout (panel, icons): what hit testing uses.
-    pub layout: Cell<(Rect, [Rect; 10])>,
+    pub layout: Cell<(Rect, [Rect; 9])>,
     /// Set when something changed that needs a repaint even without motion.
     pub dirty: bool,
 }
@@ -242,7 +243,7 @@ impl DockState {
             tip: Tween::at(0.0),
             bounce: Vec::new(),
             pointer_x: None,
-            layout: Cell::new((Rect::new(0, 0, 0, 0), [Rect::new(0, 0, 0, 0); 10])),
+            layout: Cell::new((Rect::new(0, 0, 0, 0), [Rect::new(0, 0, 0, 0); 9])),
             dirty: true,
         }
     }

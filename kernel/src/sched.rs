@@ -570,14 +570,6 @@ pub fn thread_stack_kib(i: usize) -> u32 {
 
 const _: () = assert!(MAX_THREADS == osjeff_core::sysmon::MAX_THREADS);
 
-pub fn thread_ticks(i: usize) -> u64 {
-    if i < MAX_THREADS {
-        TICKS[i].load(Ordering::Relaxed)
-    } else {
-        0
-    }
-}
-
 fn scheduler() -> &'static mut Scheduler {
     // SAFETY: only called from `spawn`, which every caller runs with IF=0 (`without_interrupts` in
     // `kernel_main`), so the timer ISR cannot touch SCHED meanwhile.

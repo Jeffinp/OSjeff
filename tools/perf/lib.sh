@@ -25,17 +25,17 @@ CX=640
 if [ "$MODE" = uefi ]; then CY=400; H=800; else CY=360; H=720; fi
 goto() { move $(( $1 - CX )) $(( $2 - CY )); CX=$1; CY=$2; sleep 0.3; }
 DOCKY=$(( H - 40 )); DY=$(( DOCKY - CY ))
-# The app bar (floating, centred): 10 icons of 48 px, 8 px gap, 12 px padding, a 12 px
+# The app bar (floating, centred): 9 icons of 48 px, 8 px gap, 12 px padding, a 12 px
 # separator after the first. Slots: apps files browser terminal editor calc viewer tasks
-# monitor settings. `dock_icon <name>` moves the pointer onto an icon's centre.
+# settings (`monitor` is the old name of `tasks`). `dock_icon <name>` moves the pointer onto an icon's centre.
 DOCK_Y_CENTER=$(( H - 40 ))
 dock_x() {
   local i
   case "$1" in
     apps) i=0 ;; files) i=1 ;; browser) i=2 ;; terminal) i=3 ;; editor) i=4 ;;
-    calc) i=5 ;; viewer) i=6 ;; tasks) i=7 ;; monitor) i=8 ;; settings) i=9 ;; *) i=0 ;;
+    calc) i=5 ;; viewer) i=6 ;; tasks|monitor) i=7 ;; settings) i=8 ;; *) i=0 ;;
   esac
-  local x0=$(( 640 - (10 * 48 + 9 * 8 + 12 + 24) / 2 + 12 ))
+  local x0=$(( 640 - (9 * 48 + 8 * 8 + 12 + 24) / 2 + 12 ))
   local extra=0; [ "$i" -ge 1 ] && extra=12
   echo $(( x0 + i * 56 + extra + 24 ))
 }
