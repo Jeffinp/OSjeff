@@ -104,6 +104,14 @@ fuzz_target!(|data: &[u8]| {
     if data.len() > MAX_INPUT {
         return;
     }
+    // The messages follow the language in effect: let the input pick it, so both catalogs are
+    // exercised (the fuzzer runs one input at a time).
+    let lang = if data.first().is_some_and(|b| b & 1 == 1) {
+        osjeff_core::i18n::Lang::En
+    } else {
+        osjeff_core::i18n::Lang::Pt
+    };
+    osjeff_core::i18n::set_lang(lang);
     let text = String::from_utf8_lossy(data).into_owned();
 
     // 1. Parser only.
