@@ -60,6 +60,43 @@ pub fn panel_layout(sw: i32, left: &[i32], center_w: i32, right: &[i32]) -> Pane
     }
 }
 
+/// The workspace indicator: one dot per workspace, the current one a longer pill.
+pub const WS_DOT: i32 = 8;
+pub const WS_CUR_W: i32 = 22;
+pub const WS_GAP: i32 = 6;
+
+/// Content width of the indicator for `n` workspaces (the same whichever is current).
+pub fn workspace_width(n: u8) -> i32 {
+    let n = n as i32;
+    if n == 0 {
+        return 0;
+    }
+    n * WS_DOT + (n - 1) * WS_GAP + (WS_CUR_W - WS_DOT)
+}
+
+/// The rectangle of dot `i` inside the panel item `r` (which includes [`PANEL_PAD`]) when `cur` is
+/// the current workspace.
+pub fn workspace_dot(r: Rect, i: u8, cur: u8) -> Rect {
+    let mut x = r.x + PANEL_PAD;
+    for k in 0..i {
+        x += if k == cur { WS_CUR_W } else { WS_DOT } + WS_GAP;
+    }
+    let w = if i == cur { WS_CUR_W } else { WS_DOT };
+    Rect::new(x, r.y + (r.h - WS_DOT) / 2, w, WS_DOT)
+}
+
+/// The workspace under `x` in the indicator `r` of `n` dots (the gaps belong to the nearer dot, the
+/// whole panel height is the target).
+pub fn workspace_at(r: Rect, n: u8, cur: u8, x: i32, y: i32) -> Option<u8> {
+    if !r.contains(x, y) {
+        return None;
+    }
+    (0..n).find(|&i| {
+        let d = workspace_dot(r, i, cur);
+        x >= d.x - WS_GAP / 2 && x < d.right() + WS_GAP / 2
+    })
+}
+
 /// Content width of the status pill with `n` icons.
 pub fn pill_width(n: usize) -> i32 {
     (n as i32 * PILL_PITCH - (PILL_PITCH - PILL_ICON)).max(0)
@@ -583,6 +620,46 @@ mod tests {
         let two = panel_layout(1280, &[], 100, &[20, 30]);
         assert_eq!(two.right[1].right(), 1280 - PANEL_EDGE);
         assert_eq!(two.right[0].right() + PANEL_GAP, two.right[1].x);
+    }
+
+    #[test]
+    fn the_workspace_dots_have_a_stable_width_and_a_longer_current_one() {
+        for n in 2..=4u8 {
+            let g = panel_layout(1280, &[60, workspace_width(n)], 110, &[pill_width(3)]);
+            let item = g.left[1];
+            assert_eq!(item.w, workspace_width(n) + 2 * PANEL_PAD);
+            for cur in 0..n {
+                let dots: Vec<Rect> = (0..n).map(|i| workspace_dot(item, i, cur)).collect();
+                assert_eq!(dots[cur as usize].w, WS_CUR_W);
+                assert!(
+                    dots.iter()
+                        .enumerate()
+                        .all(|(i, d)| i == cur as usize || d.w == WS_DOT)
+                );
+                // Side by side with the gap, inside the item, centred vertically.
+                for w in dots.windows(2) {
+                    assert_eq!(w[1].x - w[0].right(), WS_GAP);
+                }
+                assert_eq!(dots[0].x, item.x + PANEL_PAD);
+                assert_eq!(dots[n as usize - 1].right() + PANEL_PAD, item.right());
+                assert!(
+                    dots.iter()
+                        .all(|d| d.y - item.y == item.bottom() - d.bottom())
+                );
+                // Hit testing: each dot's own pixels and the half gaps, the whole bar height.
+                for (i, d) in dots.iter().enumerate() {
+                    assert_eq!(workspace_at(item, n, cur, d.x + 1, 2), Some(i as u8));
+                    assert_eq!(
+                        workspace_at(item, n, cur, d.right() - 1, PANEL_H - 1),
+                        Some(i as u8)
+                    );
+                }
+            }
+        }
+        let item = Rect::new(100, 0, workspace_width(3) + 2 * PANEL_PAD, PANEL_H);
+        assert_eq!(workspace_at(item, 3, 0, item.x + 1, 5), None); // the padding is not a dot
+        assert_eq!(workspace_at(item, 3, 0, 5, 5), None);
+        assert_eq!(workspace_width(0), 0);
     }
 
     #[test]

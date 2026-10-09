@@ -144,12 +144,14 @@ impl Desktop {
     /// Every panel item with its rectangle.
     pub(crate) fn panel_items(&self) -> Vec<(PanelItem, Rect)> {
         let apps_w = 16 + 8 + text::measure("Apps", BODY, Weight::Medium);
-        let left = [apps_w, 16];
+        let ws_w = chrome::workspace_width(self.wm.visible_workspaces());
+        let left = [apps_w, 16, ws_w];
         let right = [chrome::pill_width(3)];
         let g = panel_layout(self.sw, &left, self.clock_width(), &right);
         alloc::vec![
             (PanelItem::Apps, g.left[0]),
             (PanelItem::Search, g.left[1]),
+            (PanelItem::Workspaces, g.left[2]),
             (PanelItem::Clock, g.center),
             (PanelItem::Tray, g.right[0]),
         ]
@@ -256,6 +258,24 @@ impl Desktop {
             }
             PanelItem::Search => {
                 ui::draw_glyph(c, Glyph::Search, rect.x + PANEL_PAD, rect.y + 7, 16, argb)
+            }
+            PanelItem::Workspaces => {
+                let (n, cur) = (self.wm.visible_workspaces(), self.wm.workspace());
+                for i in 0..n {
+                    let d = chrome::workspace_dot(rect, i, cur);
+                    let (dc, da) = theme::tint(p.bar_text);
+                    if i == cur {
+                        c.fill_rrect(d, d.h / 2, Corner::Circle, theme::accent(), 256);
+                    } else {
+                        // A workspace with windows is a stronger dot than an empty one.
+                        let a = if self.wm.windows_on(i) > 0 {
+                            da.min(170)
+                        } else {
+                            da.min(80)
+                        };
+                        c.fill_rrect(d, d.h / 2, Corner::Circle, dc, a);
+                    }
+                }
             }
             PanelItem::Clock => {
                 let t = self.clock_text(time);
@@ -473,6 +493,19 @@ impl Desktop {
         win.push(left);
         win.push(right);
         section(&mut v, win, true);
+        // Move the window to another workspace.
+        let cur = self.wm.workspace();
+        let moves: Vec<Entry> = (0..self.wm.visible_workspaces())
+            .filter(|&i| i != cur)
+            .map(|i| {
+                Entry::item(
+                    &alloc::format!("Mover para a área de trabalho {}", i + 1),
+                    "",
+                    Cmd::MoveToWorkspace(i),
+                )
+            })
+            .collect();
+        section(&mut v, moves, true);
         v
     }
 

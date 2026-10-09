@@ -240,10 +240,10 @@ STEP=3 GAP=0.02 ...                              # devagar; STEP=250 GAP=0 = pac
 QEMU_EXTRA="-device usb-ehci -device usb-tablet" ...   # o guest só tem PS/2: o tablet não muda nada
 ```
 
-O cenário varre bordas de janela, a barra de título, o dock e os cantos da tela com
+O cenário varre bordas de janela, a barra de título, a barra de tarefas e os cantos da tela com
 `mouse_move` em rajadas (muitos pacotes PS/2 entre dois quadros), estaciona o cursor, tira
 `rest<N>.png` e força um repaint completo (Alt+Tab e volta) para tirar `clean<N>.png` com
-o cursor no mesmo lugar. Os dois têm de ser idênticos fora do HUD e do relógio. Antes da
+o cursor no mesmo lugar. Os dois têm de ser idênticos fora do HUD e do relógio (agora no centro do painel; as duas máscaras estão no script). Antes da
 correção: 181 pixels de diferença por rodada (setas fantasma); depois: 0.
 
 ### Páginas compactadas (W20)
@@ -350,17 +350,24 @@ Testes novos no `osjeff_core` (todos no host; o kernel só liga o framebuffer a 
 | `ttf`, `glyph`, `fontcache`, `textlayout` | 8, 9, 7, 6 | leitor TrueType total (fontes hostis não estouram nem entram em laço), contornos compostos, cobertura exata do rasterizador, cache por (peso, tamanho), medição, quebra e reticências, célula da fonte monoespaçada |
 | `raster` | 14 | pré-multiplicação e *source-over* sem deriva, máscaras de canto, retângulos e contornos AA, perfis de sombra simétricos, desfoque, reamostragem |
 | `anim` | 16 | bezier monotônico, mola sem divergir, `Tween` que reaponta sem salto, animação de janela interrompível, *reduzir movimento*, salto de lançamento |
-| `style`, `chrome`, `widgets` | 4, 12, 6 | paletas e aparência automática pela hora, geometria e acerto de barra de menus, menus, barra de apps (ampliação), Apps, Busca, popovers e banners; segmentado, switch, controle deslizante, barra de rolagem |
+| `style`, `chrome`, `widgets` | 4, 11, 6 | paletas e aparência automática pela hora, geometria e acerto do painel superior (relógio centralizado, pílula, pontos das áreas de trabalho), menus, trilho do Apps, Busca, popovers (Configurações rápidas, calendário com notificações) e banners; segmentado, switch, controle deslizante, barra de rolagem |
+| `snap`, `taskbar`, `launcher` | 8, 7, 6 | zonas de encaixe nas bordas e cantos, divisão exata da área útil, tamanho mínimo, `Alt+setas`; barra de tarefas (layout, hit test, indicador, clique, reordenar com vizinhos que abrem espaço); categorias, filtro, recentes |
 | `iconart`, `cursor` | 7, 4 | todos os ícones e glifos têm conteúdo, cantos transparentes, determinismo; sprites dentro da caixa, ponto quente sobre a forma |
 | `search` | 5 | ranqueamento, dobra de acentos, calculadora exata (overflow recusado, nunca embrulhado), nenhum texto curto derruba o *parser* |
-| `notify`, `settings`, `wallpaper`, `window`, `layout`, `winman` | 10, 15, 10, 21, 40, 44 | banners deslizando, chaves `appearance`/`reduce_motion` totais, esquemas claro e escuro, luzes à esquerda, área de trabalho sob a barra de menus |
+| `notify`, `settings`, `wallpaper`, `window`, `layout`, `winman` | 10, 15, 10, 21, 40, 44 | banners deslizando, chaves `appearance`/`reduce_motion` totais, esquemas claro e escuro, botões à direita (`title_layout`), encaixe e soltar pela barra, áreas de trabalho (`switch_workspace`, `move_to_workspace`), área útil entre o painel e a barra de tarefas |
 
 Cenários de tela (cada um fotografa e a imagem é revisada em claro e escuro):
 `w22-look`, `w22-apps` (todos os apps nas duas aparências), `w22-shell` (Busca, folha, galeria,
 HUD, menus de contexto), `w22-polish` (menus, Controles, calendário, Apps, Busca, folha),
 `w22-wm` (Alt+Tab, muitas janelas), `w22-toast` (banners; precisa de um gancho temporário de build, como o `w14-toast`), `w22-anim` (abrir, zoom, minimizar, restaurar em voo),
-`w22-bar` (ampliação da barra), `w22-splash`, `w22-readme` (capturas do README, em UEFI).
-`tools/perf/lib.sh` ganhou `dock_icon <nome>` (posição de cada ícone da barra) e `move` agora
+`w22-bar` (botão de menu da janela, Configurações rápidas), `w22-splash`, `w22-readme` (capturas do README, em UEFI).
+A identidade própria (W26) tem cenários novos: `w26-wm` (botões à direita, encaixe com pré-visualização,
+`Alt+setas`, menu da janela), `w26-panel` (painel, calendário com notificações, Configurações rápidas),
+`w26-taskbar` (indicadores, minimizar, reordenar, menu, mostrar área de trabalho), `w26-look`
+(os seis papéis de parede, ícones, ponteiro, aba *Shell* da galeria), `w26-launcher` (trilho,
+recentes) e `w26-workspaces`. Em claro: `QEMU_EXTRA="-rtc base=2026-10-08T12:00:00"`.
+`tools/perf/lib.sh` tem `dock_icon <nome>` (posição de cada ícone da barra de tarefas), `panel_item`,
+`quick_tile` e `light_mode` e `move` agora
 divide saltos grandes em passos de 100 px (um pacote PS/2 grande estoura).
 
 Custo de quadro (QEMU/TCG sem KVM, 1280x720, `perf-trace`, `tools/perf/summ.py`; média por caminho;

@@ -669,6 +669,13 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
   (a tela abaixo do painel de 30 px, até a barra de tarefas) e `winman::cascade_rect`
   (novas instâncias descem 28 px por índice, com volta a cada 8). Nenhuma janela cobre o painel
   (`clamped_pos`, `resized`).
+- **Áreas de trabalho** (`winman`): 2 a 4 (`MIN_`/`MAX_WORKSPACES`; a lista mostra uma vazia além da
+  última usada, `visible_workspaces`). Cada `Window` tem `ws` e `off_ws`; `shown()` é falso fora da área
+  atual. `switch_workspace` desliza as janelas da área que sai e as da que entra (`Anim::slide_in/out`,
+  420 px com desvanecimento, `Leaving::Workspace` esconde ao fim), `move_to_workspace` manda uma janela
+  e `activate` de uma janela de outra área traz a área dela. `Ctrl+Alt+←/→` trocam, com `Shift`
+  levam a janela focada; o painel mostra pontos (o atual alongado) clicáveis e o menu da janela
+  oferece "Mover para a área de trabalho N".
 - **Barra de tarefas e menus.** O ícone da barra **foca** (ou restaura) a janela mais recente do
   app, **minimiza** se ele já tem o foco, e só abre outra quando não há nenhuma (`taskbar::click_action`);
   uma pílula sob o ícone marca o app em foco e um ponto os abertos. **Nova instância:** `Ctrl+N` na

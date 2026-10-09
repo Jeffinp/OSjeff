@@ -109,6 +109,24 @@ impl Desktop {
                     self.execute(Cmd::Gallery);
                     return true;
                 }
+                // Ctrl+Alt+Left / Right: the previous / next workspace; with Shift they carry the
+                // focused window along.
+                Key::Left | Key::Right if alt_now => {
+                    let cur = self.wm.workspace();
+                    let to = if key == Key::Left {
+                        cur.saturating_sub(1)
+                    } else {
+                        (cur + 1).min(self.wm.visible_workspaces() - 1)
+                    };
+                    if self.keymap.shift() {
+                        if let Some(id) = self.focused() {
+                            self.move_window_to_workspace(id, to);
+                        }
+                    } else {
+                        self.go_workspace(to);
+                    }
+                    return true;
+                }
                 // Ctrl+Alt+D: show the desktop (or bring the windows back).
                 Key::Char(b'd' | b'D') if alt_now => {
                     self.execute(Cmd::ShowDesktop);
@@ -841,6 +859,26 @@ impl Desktop {
         self.force_full = true;
         self.relayout_browser(id);
         self.relayout_viewer(id);
+    }
+
+    /// Show workspace `to` (windows slide) and put overlays away.
+    pub(crate) fn go_workspace(&mut self, to: u8) {
+        self.close_transients();
+        self.shell.snap = None;
+        if self.wm.switch_workspace(to) {
+            self.drag = None;
+            self.title_hover = None;
+            self.force_full = true;
+        }
+    }
+
+    /// Move window `id` to workspace `to` and go there with it.
+    pub(crate) fn move_window_to_workspace(&mut self, id: WindowId, to: u8) {
+        if self.wm.move_to_workspace(id, to) {
+            self.force_full = true;
+            self.go_workspace(to);
+            self.wm.activate(id);
+        }
     }
 
     /// Tile window `id` to `zone` of the work area (animated).

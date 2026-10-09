@@ -1010,7 +1010,7 @@ impl Desktop {
             // A click on a panel item closes the menu and acts on the item.
             if let Some((item, _)) = self.panel_item_at(x, y) {
                 self.close_transients();
-                self.panel_click(item);
+                self.panel_click(item, x, y);
                 return true;
             }
             self.close_transients();
@@ -1030,7 +1030,7 @@ impl Desktop {
                         | (Some(PopKind::Centre), PanelItem::Clock)
                 );
                 if !same {
-                    self.panel_click(item);
+                    self.panel_click(item, x, y);
                 }
                 return true;
             }
@@ -1038,15 +1038,24 @@ impl Desktop {
         }
         // The panel.
         if let Some((item, _)) = self.panel_item_at(x, y) {
-            self.panel_click(item);
+            self.panel_click(item, x, y);
             return true;
         }
         false
     }
 
     /// A left click on panel item `item`.
-    pub(crate) fn panel_click(&mut self, item: PanelItem) {
+    pub(crate) fn panel_click(&mut self, item: PanelItem, x: i32, y: i32) {
         match item {
+            PanelItem::Workspaces => {
+                let n = self.wm.visible_workspaces();
+                let cur = self.wm.workspace();
+                if let Some((_, r)) = self.panel_items().into_iter().find(|(i, _)| *i == item)
+                    && let Some(ws) = chrome::workspace_at(r, n, cur, x, y)
+                {
+                    self.go_workspace(ws);
+                }
+            }
             PanelItem::Apps => self.open_apps(),
             PanelItem::Search => self.open_search(),
             PanelItem::Tray => self.open_popover(PopKind::Quick),

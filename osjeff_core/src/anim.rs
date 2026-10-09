@@ -304,7 +304,16 @@ pub enum Flavor {
     Pop,
     /// Toward / from its dock icon (minimise, restore).
     Dock,
+    /// Sideways with a fade (a workspace change): the sign is the direction of the change, +1
+    /// when the new workspace is to the right. Entering windows come from that side, leaving
+    /// ones go to the other.
+    Slide(i8),
 }
+
+/// How far, in pixels, a window travels sideways in a workspace change.
+pub const SLIDE_PX: f32 = 420.0;
+/// Seconds a workspace change takes.
+pub const SLIDE_SECS: f32 = 0.30;
 
 /// Scale of a window at the start of an open and the end of a close.
 pub const POP_SCALE: f32 = 0.92;
@@ -363,6 +372,26 @@ impl Anim {
         }
     }
 
+    /// A window of the new workspace slides in (`dir` = +1 when the workspace is to the right).
+    pub fn slide_in(dir: i8) -> Self {
+        Self {
+            phase: Phase::Opening,
+            flavor: Flavor::Slide(dir),
+            t: 0.0,
+            dur: SLIDE_SECS,
+        }
+    }
+
+    /// A window of the old workspace slides out.
+    pub fn slide_out(dir: i8) -> Self {
+        Self {
+            phase: Phase::Closing,
+            flavor: Flavor::Slide(dir),
+            t: 0.0,
+            dur: SLIDE_SECS,
+        }
+    }
+
     /// Restore from the dock.
     pub fn restore() -> Self {
         Self {
@@ -408,8 +437,8 @@ impl Anim {
     pub fn visibility(&self) -> f32 {
         let p = self.progress();
         match (self.phase, self.flavor) {
-            (Phase::Opening, Flavor::Pop) => curves::ENTER.ease(p),
-            (Phase::Closing, Flavor::Pop) => 1.0 - curves::EXIT.ease(p),
+            (Phase::Opening, Flavor::Pop | Flavor::Slide(_)) => curves::ENTER.ease(p),
+            (Phase::Closing, Flavor::Pop | Flavor::Slide(_)) => 1.0 - curves::EXIT.ease(p),
             (Phase::Opening, Flavor::Dock) => curves::GENIE.ease(p),
             (Phase::Closing, Flavor::Dock) => 1.0 - curves::GENIE.ease(1.0 - (1.0 - p)),
         }
@@ -440,6 +469,19 @@ impl Anim {
                 Frame {
                     rect: Rect::new(cx - w / 2, cy - h / 2, w, h),
                     alpha: (clamp01(v * 1.8) * 256.0) as u16,
+                }
+            }
+            (Flavor::Slide(dir), _) => {
+                // Entering windows come from the side of the change, leaving ones go away from it.
+                let sign = if self.phase == Phase::Opening {
+                    dir as f32
+                } else {
+                    -(dir as f32)
+                };
+                let off = (sign * (1.0 - v) * SLIDE_PX) as i32;
+                Frame {
+                    rect: Rect::new(rect.x + off, rect.y, rect.w, rect.h),
+                    alpha: (v * 256.0) as u16,
                 }
             }
             _ => {
@@ -735,6 +777,27 @@ mod tests {
         let f = c.frame(r, None);
         assert_eq!(f.alpha, 0);
         assert!(f.rect.w < r.w);
+    }
+
+    #[test]
+    fn a_workspace_slide_comes_from_the_side_of_the_change_and_leaves_the_other_way() {
+        let r = Rect::new(100, 80, 600, 400);
+        // Going right (+1): the incoming window starts to the right, the outgoing one ends left.
+        let mut inn = Anim::slide_in(1);
+        let start = inn.frame(r, None);
+        assert!(start.rect.x > r.x && start.alpha < 16);
+        inn.step(SLIDE_SECS);
+        assert_eq!(inn.frame(r, None).rect, r);
+        assert_eq!(inn.frame(r, None).alpha, 256);
+        let mut out = Anim::slide_out(1);
+        assert_eq!(out.frame(r, None).rect, r);
+        out.step(SLIDE_SECS);
+        let end = out.frame(r, None);
+        assert!(end.rect.x < r.x && end.alpha == 0);
+        // Same size all the way (a slide, not a scale), and left changes mirror right ones.
+        assert_eq!((start.rect.w, start.rect.h), (r.w, r.h));
+        let left = Anim::slide_in(-1).frame(r, None);
+        assert_eq!(left.rect.x - r.x, -(start.rect.x - r.x));
     }
 
     #[test]

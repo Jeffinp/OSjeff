@@ -119,6 +119,9 @@ impl Desktop {
         let mut h = self.wm.signature(self.drag.as_ref().map(|d| d.win));
         // The menu bar shows the focused app, so a focus change rebuilds the layer too.
         h ^= self.focused().map_or(0, |f| f.raw() as u64) << 32;
+        // The panel shows the workspace dots.
+        h ^= ((self.wm.workspace() as u64 + 1) << 52)
+            | ((self.wm.visible_workspaces() as u64) << 56);
         h
     }
 

@@ -46,6 +46,8 @@ pub(crate) enum Cmd {
     Snap(SnapZone),
     /// Open one more window of an app (taskbar menu).
     NewOf(Kind),
+    /// Move the focused window to workspace `n` (0-based) and go there.
+    MoveToWorkspace(u8),
     /// Pin an app to the taskbar / take it off.
     Pin(Kind),
     Unpin(Kind),
@@ -88,6 +90,8 @@ pub(crate) enum PanelItem {
     Apps,
     /// Busca.
     Search,
+    /// The workspace dots: click one to go there.
+    Workspaces,
     /// The date and time: the calendar and notification centre.
     Clock,
     /// The status pill: Quick Settings.
@@ -510,6 +514,11 @@ impl Desktop {
             Cmd::ShowSearch => self.open_search(),
             Cmd::Gallery => {
                 self.launch(Kind::Gallery);
+            }
+            Cmd::MoveToWorkspace(n) => {
+                if let Some((id, _)) = target {
+                    self.move_window_to_workspace(id, n);
+                }
             }
             Cmd::Pin(k) => self.set_pinned(k, true),
             Cmd::Unpin(k) => self.set_pinned(k, false),

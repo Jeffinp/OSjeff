@@ -179,7 +179,7 @@ the real font.
 * **Top panel** (30 px, the strip is baked into the cached wallpaper under a mostly opaque tint,
   a hairline and an inner highlight): at the left **Apps** (the OSjeff mark and the word; a right
   click opens the system menu: Sobre, Configurações, Componentes, Reiniciar, Desligar) and the Busca
-  magnifier; in the **centre** the day, month and time (a dot beside it when there are unread
+  magnifier and the workspace dots (click one to go there); in the **centre** the day, month and time (a dot beside it when there are unread
   notifications); at the right the **status pill** (network, appearance, power) that opens Quick
   Settings. There is no app name and no per-app menu strip: the app's menus are behind the menu
   button of its own title bar.

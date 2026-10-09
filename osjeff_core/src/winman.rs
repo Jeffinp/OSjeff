@@ -50,7 +50,14 @@ pub enum Leaving {
     Destroy,
     /// Hide it but keep it (and its app) alive.
     Minimize,
+    /// It slides away to another workspace.
+    Workspace,
 }
+
+/// Most workspaces there can be.
+pub const MAX_WORKSPACES: u8 = 4;
+/// Workspaces always shown (the switcher never offers fewer).
+pub const MIN_WORKSPACES: u8 = 2;
 
 /// One window record.
 pub struct Window<A> {
@@ -71,6 +78,10 @@ pub struct Window<A> {
     pub min_w: i32,
     pub min_h: i32,
     pub resizable: bool,
+    /// The workspace the window lives on, and whether it is hidden because that is not the
+    /// current one.
+    pub ws: u8,
+    pub off_ws: bool,
     pub app: A,
 }
 
@@ -105,9 +116,9 @@ impl<A> Window<A> {
         self.is_leaving() && self.leaving == Leaving::Destroy
     }
 
-    /// On screen: not minimized (an animating-out window still is).
+    /// On screen: not minimized and on the current workspace (an animating-out window still is).
     pub fn shown(&self) -> bool {
-        !self.minimized
+        !self.minimized && !self.off_ws
     }
 
     /// Accepts focus and clicks: shown and not animating out.
@@ -141,6 +152,8 @@ pub struct WindowManager<A> {
     mru: Vec<WindowId>,
     next_id: u32,
     limit: usize,
+    /// The workspace on screen.
+    cur_ws: u8,
 }
 
 impl<A> Default for WindowManager<A> {
@@ -156,6 +169,7 @@ impl<A> WindowManager<A> {
             wins: Vec::new(),
             mru: Vec::new(),
             next_id: 1,
+            cur_ws: 0,
             limit,
         }
     }
@@ -217,6 +231,8 @@ impl<A> WindowManager<A> {
             min_w: spec.min_w,
             min_h: spec.min_h,
             resizable: spec.resizable,
+            ws: self.cur_ws,
+            off_ws: false,
             app,
         });
         self.mru.insert(0, id);
@@ -277,6 +293,10 @@ impl<A> WindowManager<A> {
                         w.minimized = true;
                         w.leaving = Leaving::Destroy;
                     }
+                    Leaving::Workspace => {
+                        w.off_ws = true;
+                        w.leaving = Leaving::Destroy;
+                    }
                 }
             }
         }
@@ -314,6 +334,10 @@ impl<A> WindowManager<A> {
     /// Brings a window to the user: un-minimizes it (with the opening
     /// animation), cancels a pending close or minimize, then raises it.
     pub fn activate(&mut self, id: WindowId) -> bool {
+        // A window of another workspace brings its workspace with it.
+        if let Some(ws) = self.get(id).map(|w| w.ws).filter(|&ws| ws != self.cur_ws) {
+            self.switch_workspace(ws);
+        }
         let Some(w) = self.get_mut(id) else {
             return false;
         };
@@ -351,6 +375,93 @@ impl<A> WindowManager<A> {
             }
         }
         out
+    }
+
+    // ----------------------------------------------------------- workspaces
+
+    /// The workspace on screen (0-based).
+    pub fn workspace(&self) -> u8 {
+        self.cur_ws
+    }
+
+    /// How many workspaces the switcher shows: at least [`MIN_WORKSPACES`], one more than the
+    /// last one that holds a window (an empty one to move to), the current one included, at
+    /// most [`MAX_WORKSPACES`].
+    pub fn visible_workspaces(&self) -> u8 {
+        let last_used = self
+            .wins
+            .iter()
+            .filter(|w| !w.is_closing())
+            .map(|w| w.ws)
+            .max()
+            .map_or(0, |m| m + 1);
+        (last_used + 1)
+            .max(self.cur_ws + 1)
+            .clamp(MIN_WORKSPACES, MAX_WORKSPACES)
+    }
+
+    /// How many live windows are on workspace `ws`.
+    pub fn windows_on(&self, ws: u8) -> usize {
+        self.wins
+            .iter()
+            .filter(|w| w.ws == ws && !w.is_closing())
+            .count()
+    }
+
+    /// Shows workspace `to`: the windows of the one on screen slide away (toward the side `to`
+    /// is on, in the opposite direction) and those of `to` slide in. `false` when `to` is out of
+    /// range or already current.
+    pub fn switch_workspace(&mut self, to: u8) -> bool {
+        if to >= MAX_WORKSPACES || to == self.cur_ws {
+            return false;
+        }
+        let dir: i8 = if to > self.cur_ws { 1 } else { -1 };
+        for w in self.wins.iter_mut() {
+            if w.is_closing() {
+                continue;
+            }
+            if w.ws == to {
+                let was_hidden = w.off_ws || w.leaving == Leaving::Workspace;
+                w.off_ws = false;
+                if w.leaving == Leaving::Workspace {
+                    w.leaving = Leaving::Destroy;
+                }
+                if !w.minimized && was_hidden {
+                    w.anim = Some(Anim::slide_in(dir));
+                }
+            } else if w.ws == self.cur_ws && !w.minimized && !w.off_ws {
+                w.leaving = Leaving::Workspace;
+                w.anim = Some(Anim::slide_out(dir));
+            } else if w.ws != to {
+                w.off_ws = true;
+            }
+        }
+        self.cur_ws = to;
+        true
+    }
+
+    /// Moves window `id` to workspace `to`. When that is not the one on screen the window slides
+    /// away (toward the side `to` is on). `false` for an unknown window or an out-of-range `to`.
+    pub fn move_to_workspace(&mut self, id: WindowId, to: u8) -> bool {
+        if to >= MAX_WORKSPACES {
+            return false;
+        }
+        let cur = self.cur_ws;
+        let Some(w) = self.get_mut(id) else {
+            return false;
+        };
+        if w.ws == to {
+            return true;
+        }
+        w.ws = to;
+        if to != cur && !w.minimized && !w.off_ws && !w.is_closing() {
+            let dir: i8 = if to > cur { 1 } else { -1 };
+            w.leaving = Leaving::Workspace;
+            w.anim = Some(Anim::slide_out(-dir));
+        } else if to != cur {
+            w.off_ws = true;
+        }
+        true
     }
 
     // ------------------------------------------------- minimize / maximize
@@ -1008,6 +1119,110 @@ mod tests {
         m.snap_to(a, SnapZone::Left, WORK);
         assert!(m.move_to(a, 300, 300, 1280, 720));
         assert_eq!(m.get(a).unwrap().snap, None);
+    }
+
+    // ------------------------------------------------------------ workspaces
+
+    #[test]
+    fn windows_open_on_the_current_workspace_and_a_switch_slides_them() {
+        let (mut m, [a, b, c]) = table();
+        settle(&mut m);
+        assert_eq!(m.workspace(), 0);
+        assert_eq!(m.windows_on(0), 3);
+        assert!(m.switch_workspace(1));
+        assert!(!m.switch_workspace(1)); // already there
+        assert!(!m.switch_workspace(MAX_WORKSPACES)); // out of range
+        // The windows of workspace 0 slide away (still drawn during the slide, then hidden).
+        for id in [a, b, c] {
+            let w = m.get(id).unwrap();
+            assert!(w.shown() && w.is_leaving() && !w.active());
+        }
+        // Nothing is focusable meanwhile; once the slide ends they are hidden.
+        assert_eq!(m.focused(), None);
+        settle(&mut m);
+        for id in [a, b, c] {
+            let w = m.get(id).unwrap();
+            assert!(!w.shown() && w.off_ws && w.anim.is_none());
+        }
+        assert_eq!(m.topmost_at(100, 100), None);
+        // A window opened now lives on workspace 1.
+        let d = m.open(spec(20, 20), 4).unwrap();
+        assert_eq!(m.get(d).unwrap().ws, 1);
+        assert_eq!((m.windows_on(0), m.windows_on(1)), (3, 1));
+    }
+
+    #[test]
+    fn going_back_brings_the_windows_back_with_a_slide_in() {
+        let (mut m, [a, ..]) = table();
+        settle(&mut m);
+        m.switch_workspace(1);
+        settle(&mut m);
+        assert!(m.switch_workspace(0));
+        let w = m.get(a).unwrap();
+        assert!(w.shown() && !w.off_ws);
+        let an = w.anim.unwrap();
+        assert!(!an.is_closing());
+        assert_eq!(an.flavor(), crate::anim::Flavor::Slide(-1));
+        settle(&mut m);
+        assert!(m.get(a).unwrap().active());
+        assert!(m.focused().is_some());
+    }
+
+    #[test]
+    fn a_window_moves_between_workspaces_and_activating_it_follows() {
+        let (mut m, [a, b, c]) = table();
+        settle(&mut m);
+        assert!(m.move_to_workspace(c, 1));
+        assert_eq!(m.get(c).unwrap().ws, 1);
+        // It slides away toward the workspace it went to (opposite to the slide of a switch).
+        assert!(m.get(c).unwrap().is_leaving());
+        settle(&mut m);
+        assert!(m.get(c).unwrap().off_ws);
+        assert_eq!(m.focused(), Some(b));
+        assert!(!m.move_to_workspace(c, MAX_WORKSPACES));
+        assert!(!m.move_to_workspace(WindowId::from_raw(999), 0));
+        // Activating a window on another workspace switches to it.
+        assert!(m.activate(c));
+        assert_eq!(m.workspace(), 1);
+        settle(&mut m);
+        assert_eq!(m.focused(), Some(c));
+        assert!(m.get(a).unwrap().off_ws && m.get(b).unwrap().off_ws);
+        // Moving a window to the workspace on screen is a no-op that keeps it shown.
+        assert!(m.move_to_workspace(c, 1));
+        assert!(m.get(c).unwrap().shown());
+    }
+
+    #[test]
+    fn minimised_windows_are_not_animated_across_workspaces() {
+        let (mut m, [a, ..]) = table();
+        settle(&mut m);
+        m.minimize(a);
+        settle(&mut m);
+        m.switch_workspace(1);
+        let w = m.get(a).unwrap();
+        assert!(w.minimized && w.off_ws && w.anim.is_none());
+        // Back on workspace 0 it is still minimised (not shown).
+        m.switch_workspace(0);
+        let w = m.get(a).unwrap();
+        assert!(!w.off_ws && w.minimized && !w.shown());
+    }
+
+    #[test]
+    fn the_switcher_offers_one_empty_workspace_up_to_the_cap() {
+        let mut m = WindowManager::new(8);
+        assert_eq!(m.visible_workspaces(), MIN_WORKSPACES);
+        let a = m.open(spec(0, 0), 1).unwrap();
+        assert_eq!(m.visible_workspaces(), 2); // workspace 0 used, 1 empty
+        m.move_to_workspace(a, 1);
+        assert_eq!(m.visible_workspaces(), 3);
+        m.move_to_workspace(a, 3);
+        assert_eq!(m.visible_workspaces(), MAX_WORKSPACES);
+        // Standing on an empty workspace keeps it in the list.
+        m.switch_workspace(2);
+        assert!(m.visible_workspaces() >= 3);
+        // A closing window no longer counts as using its workspace.
+        m.request_close(a);
+        assert_eq!(m.visible_workspaces(), 3);
     }
 
     #[test]

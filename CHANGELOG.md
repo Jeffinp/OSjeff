@@ -68,6 +68,11 @@ tem releases versionadas; as seções são marcos na `master`.
   abertos) e a grade; `Ctrl`+setas percorrem o trilho. Categorias numa tabela embutida e filtro,
   ranking e recentes puros em `osjeff_core::launcher`.
 
+- **Áreas de trabalho.** De 2 a 4: `Ctrl+Alt+←/→` trocam (as janelas deslizam), `Ctrl+Alt+Shift+←/→`
+  levam a janela focada, o painel mostra pontos clicáveis e o menu da janela tem "Mover para a área de
+  trabalho N"; ativar uma janela de outra área (barra de tarefas, `Alt+Tab`) traz a área dela.
+  Lógica em `osjeff_core::winman` (`switch_workspace`, `move_to_workspace`, `visible_workspaces`).
+
 ## 2026-10 — Nova interface (W22)
 
 - **Visual novo, claro e escuro.** Barra de menus com menu do sistema, nome e menus do app em

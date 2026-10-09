@@ -92,6 +92,15 @@ light and in dark):
 The result of this comparison is recorded in `CHANGELOG.md` and in the section "Result" at the
 end of this file once the last step lands.
 
+## 6. Workspaces (step g: done)
+
+2 to 4 virtual desktops, `Ctrl+Alt+Left/Right`, a dot indicator in the panel (the current one is a
+pill; a dot is stronger when its workspace holds windows; click to go), a sideways slide with a fade
+(`Anim::slide_in/out`), `Ctrl+Alt+Shift+Left/Right` and the window menu move a window (the view
+follows it). Opening, activating from the taskbar or Alt+Tab a window of another workspace brings that
+workspace. The structure allowed it cleanly: `Window::{ws, off_ws}` and
+`WindowManager::{switch_workspace, move_to_workspace, visible_workspaces}`, all pure and tested.
+
 ## 5. Implementation order (small verified commits)
 
 a. this document; b. controls at the right, left titles, title-bar menu button, edge snapping
