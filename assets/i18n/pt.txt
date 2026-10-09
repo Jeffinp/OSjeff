@@ -205,3 +205,29 @@ search.placeholder = Buscar apps, arquivos e contas
 search.calc_hint = Calculadora · Enter copia
 search.kind_app = App
 search.tasks_tab = {app} · {tab}
+
+# Ajustes: sidebar sections
+settings.sec.appearance = Aparência
+settings.sec.wallpaper = Papel de parede
+settings.sec.dock = Barra de apps
+settings.sec.keyboard = Teclado
+settings.sec.time = Data e hora
+settings.sec.language = Idioma e região
+settings.sec.network = Rede
+settings.sec.disk = Disco
+settings.sec.power = Energia
+settings.sec.about = Sobre
+
+# Ajustes: Idioma e região page
+settings.lang.title = Idioma e região
+settings.lang.h_language = Idioma
+settings.lang.note = A mudança vale na hora, sem reiniciar.
+settings.lang.h_formats = Formatos
+settings.lang.clock = Formato da hora
+settings.lang.clock_auto = Pelo idioma
+settings.lang.clock_24 = 24 horas
+settings.lang.clock_12 = 12 horas
+settings.lang.example = Exemplo
+settings.lang.kbd_hint = Dica: o teclado ABNT2 tem as teclas de ç e de acentos.
+settings.lang.kbd_use = Usar ABNT2
+settings.lang.kbd_note = O teclado continua como está até você escolher.

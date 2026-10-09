@@ -585,7 +585,11 @@ impl Desktop {
                             .iter()
                             .filter(|w| w.app.kind() == k && !w.is_closing())
                             .count();
-                        let label = osjeff_core::tp!("taskbar.tip", n, name = k.label());
+                        let label = if n > 1 {
+                            osjeff_core::tp!("taskbar.tip", n, name = k.label())
+                        } else {
+                            String::from(k.label())
+                        };
                         ui::tooltip(c, r.x + r.w / 2, panel.y - 6, &label);
                     }
                 }

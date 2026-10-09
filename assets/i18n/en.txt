@@ -205,3 +205,29 @@ search.placeholder = Search apps, files and calculations
 search.calc_hint = Calculator · Enter copies
 search.kind_app = App
 search.tasks_tab = {app} · {tab}
+
+# Ajustes: sidebar sections
+settings.sec.appearance = Appearance
+settings.sec.wallpaper = Wallpaper
+settings.sec.dock = App bar
+settings.sec.keyboard = Keyboard
+settings.sec.time = Date & time
+settings.sec.language = Language & region
+settings.sec.network = Network
+settings.sec.disk = Disk
+settings.sec.power = Power
+settings.sec.about = About
+
+# Ajustes: Idioma e região page
+settings.lang.title = Language & region
+settings.lang.h_language = Language
+settings.lang.note = The change applies at once, without restarting.
+settings.lang.h_formats = Formats
+settings.lang.clock = Time format
+settings.lang.clock_auto = By language
+settings.lang.clock_24 = 24 hours
+settings.lang.clock_12 = 12 hours
+settings.lang.example = Example
+settings.lang.kbd_hint = Tip: the ABNT2 keyboard layout has the ç and accent keys.
+settings.lang.kbd_use = Use ABNT2
+settings.lang.kbd_note = The keyboard stays as it is until you choose.

@@ -195,7 +195,7 @@ pub const ACCENTS: [u32; 8] = [
 
 /// Names of the [`ACCENTS`] for the settings page.
 pub const ACCENT_NAMES: [&str; 8] = [
-    "Indigo", "Turquesa", "Violeta", "Rosa", "Coral", "Ambar", "Verde", "Grafite",
+    "Indigo", "Turquesa", "Violeta", "Rosa", "Coral", "Âmbar", "Verde", "Grafite",
 ];
 
 /// Which wallpaper is active.

@@ -17,6 +17,7 @@ use crate::text::{self, BODY, CALLOUT, CAPTION, FOOTNOTE, TITLE1, TITLE2, Weight
 use core::cell::Cell;
 use osjeff_core::activity::{self, Glide};
 use osjeff_core::hw::rtc::{DateTime, Field, local_to_utc, utc_to_local};
+use osjeff_core::i18n::{self, Civil, DateStyle, Lang};
 use osjeff_core::iconart::Glyph;
 use osjeff_core::keymap::Layout;
 use osjeff_core::settings::{
@@ -26,6 +27,7 @@ use osjeff_core::settings::{
 use osjeff_core::sysif::{DiskUsage, SettingsStore};
 use osjeff_core::wallpaper::{self, PRESETS, Style};
 use osjeff_core::widgets as wg;
+use osjeff_core::{t, tk};
 
 const SIDE_W: i32 = 208;
 const ROW: i32 = 48;
@@ -33,20 +35,22 @@ const ROW: i32 = 48;
 const COL_MAX: i32 = 600;
 
 /// The sections, in order: name, glyph and the colour of its badge.
-const SECTIONS: [(&str, Glyph, u32); 9] = [
-    ("Aparência", Glyph::Sun, 0x5B5CF6),
-    ("Papel de parede", Glyph::Image, 0xEC4899),
-    ("Barra de apps", Glyph::Dock, 0x14B8C4),
-    ("Teclado", Glyph::Keyboard, 0x8E8E93),
-    ("Data e hora", Glyph::Clock, 0xFB6F4B),
-    ("Rede", Glyph::Network, 0x0A84FF),
-    ("Disco", Glyph::Disk, 0x8E8E93),
-    ("Energia", Glyph::Power, 0xFF9F0A),
-    ("Sobre", Glyph::Info, 0x8B90A0),
+const SECTIONS: [(&str, Glyph, u32); 10] = [
+    (tk!("settings.sec.appearance"), Glyph::Sun, 0x5B5CF6),
+    (tk!("settings.sec.wallpaper"), Glyph::Image, 0xEC4899),
+    (tk!("settings.sec.dock"), Glyph::Dock, 0x14B8C4),
+    (tk!("settings.sec.keyboard"), Glyph::Keyboard, 0x8E8E93),
+    (tk!("settings.sec.time"), Glyph::Clock, 0xFB6F4B),
+    (tk!("settings.sec.language"), Glyph::Wave, 0x30B0C7),
+    (tk!("settings.sec.network"), Glyph::Network, 0x0A84FF),
+    (tk!("settings.sec.disk"), Glyph::Disk, 0x8E8E93),
+    (tk!("settings.sec.power"), Glyph::Power, 0xFF9F0A),
+    (tk!("settings.sec.about"), Glyph::Info, 0x8B90A0),
 ];
 /// Section numbers other code opens.
-pub(crate) const ABOUT: u8 = 8;
+pub(crate) const ABOUT: u8 = 9;
 const S_TIME: u8 = 4;
+const S_LANG: u8 = 5;
 
 // Control ids (what a click or the pointer can hit).
 const A_SEC: u32 = 0x100;
@@ -71,6 +75,9 @@ const A_SETTIME: u32 = 0x2A0;
 const A_READTIME: u32 = 0x2A1;
 const A_REBOOT: u32 = 0x2B0;
 const A_SHUTDOWN: u32 = 0x2B1;
+const A_LANG: u32 = 0x2C0;
+const A_CLOCKFMT: u32 = 0x2D0;
+const A_KBDUSE: u32 = 0x2E0;
 const A_TZ: u32 = 0x300;
 const DOWN: u32 = 1 << 31;
 
@@ -430,9 +437,10 @@ fn page(ui: &mut Ui<'_, '_>, d: &Desktop) {
         2 => page_dock(ui),
         3 => page_keyboard(ui),
         4 => page_time(ui),
-        5 => page_network(ui, d),
-        6 => page_disk(ui, d),
-        7 => page_power(ui),
+        S_LANG => page_language(ui),
+        6 => page_network(ui, d),
+        7 => page_disk(ui, d),
+        8 => page_power(ui),
         _ => page_about(ui, d),
     }
     ui.st
@@ -656,6 +664,75 @@ fn page_dock(ui: &mut Ui<'_, '_>) {
         let r = ui.row(card, i as i32);
         ui.label(r, name, sub, true);
     }
+}
+
+/// Ajustes > Idioma e região: the language (each option in its own language), the format of
+/// the time, an example, and a hint (never a forced change) about the ABNT2 keyboard.
+fn page_language(ui: &mut Ui<'_, '_>) {
+    let s = ui.s;
+    ui.title(t!("settings.lang.title"));
+    ui.header(t!("settings.lang.h_language"));
+    let card = ui.card(Lang::ALL.len() as i32 * ROW);
+    for (i, l) in Lang::ALL.into_iter().enumerate() {
+        let r = ui.row(card, i as i32);
+        ui.label(r, l.native_name(), l.code(), true);
+        if let Some(c) = ui.c.as_deref_mut()
+            && ui.view.intersection(&r).is_some()
+        {
+            ui::radio(c, r.right() - 16 - 16, r.y + (ROW - 16) / 2, s.lang == l);
+        }
+        ui.hit(r, A_LANG + i as u32);
+    }
+    ui.header(t!("settings.lang.note"));
+    if s.lang == Lang::Pt && s.layout == Layout::Us {
+        let card = ui.card(ROW);
+        let r = ui.row(card, 0);
+        ui.label(
+            r,
+            t!("settings.lang.kbd_hint"),
+            t!("settings.lang.kbd_note"),
+            true,
+        );
+        let b = Rect::new(r.right() - 16 - 112, r.y + 8, 112, 32);
+        ui.button(
+            b,
+            t!("settings.lang.kbd_use"),
+            ButtonKind::Secondary,
+            A_KBDUSE,
+            true,
+        );
+    }
+    ui.header(t!("settings.lang.h_formats"));
+    let card = ui.card(2 * ROW);
+    let r = ui.row(card, 0);
+    ui.label(r, t!("settings.lang.clock"), "", true);
+    let sel = if s.clock_auto {
+        0
+    } else if s.clock24 {
+        1
+    } else {
+        2
+    };
+    let seg = Rect::new(r.right() - 16 - 270, r.y + 10, 270, 28);
+    ui.segmented(
+        seg,
+        &[
+            t!("settings.lang.clock_auto"),
+            t!("settings.lang.clock_24"),
+            t!("settings.lang.clock_12"),
+        ],
+        sel,
+        A_CLOCKFMT,
+    );
+    let r = ui.row(card, 1);
+    let civil = Civil::from_rtc(&read_local());
+    let example = alloc::format!(
+        "{} \u{b7} {} \u{b7} {}",
+        i18n::format_date(civil, DateStyle::Full, s.clock24),
+        i18n::format_num(1_234_567),
+        i18n::format_size(1536)
+    );
+    ui.label(r, t!("settings.lang.example"), &example, true);
 }
 
 fn page_keyboard(ui: &mut Ui<'_, '_>) {
@@ -1664,7 +1741,16 @@ impl Desktop {
                 st.focus = Focus::Kbd;
                 return;
             }
-            A_CLOCK24 => s.clock24 = !s.clock24,
+            A_CLOCK24 => s.set_clock24(!s.clock24),
+            h if (A_LANG..A_LANG + Lang::ALL.len() as u32).contains(&h) => {
+                s.set_language(Lang::ALL[(h - A_LANG) as usize]);
+            }
+            h if (A_CLOCKFMT..A_CLOCKFMT + 3).contains(&h) => match h - A_CLOCKFMT {
+                0 => s.follow_language_clock(),
+                1 => s.set_clock24(true),
+                _ => s.set_clock24(false),
+            },
+            A_KBDUSE => s.layout = Layout::Abnt2,
             A_TZSEARCH => {
                 st.focus = Focus::TzSearch;
                 return;
@@ -1884,7 +1970,7 @@ impl Desktop {
             text::draw_left(
                 c,
                 Rect::new(badge.right() + 10, rr.y, rr.w - 50, rr.h),
-                name,
+                i18n::tr(name),
                 BODY,
                 if selected {
                     Weight::Medium
