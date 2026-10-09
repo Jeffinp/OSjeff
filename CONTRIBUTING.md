@@ -4,6 +4,16 @@ Este projeto é de um desenvolvedor só, mas trabalha como se não fosse: toda m
 precisa de prova. Estas regras são as que foram usadas na auditoria de desempenho
 e segurança (`docs/audit/`).
 
+## Licença e termos de contribuição
+
+O código é **disponível para leitura** sob a [PolyForm Strict 1.0.0](LICENSE) e pertence ao
+Titular (Jeferson Reis Almeida). Você pode estudá-lo e usá-lo para fins não comerciais, mas **não**
+pode redistribuí-lo, criar sistemas derivados nem vendê-lo. Quem quer contribuir recebe uma
+permissão limitada para modificar o código com esse fim e cede os direitos da contribuição ao
+Titular: leia [`LICENSE-CONTRIBUTORS.md`](LICENSE-CONTRIBUTORS.md) antes do primeiro pull request.
+**Todo commit precisa de `Signed-off-by`** (`git commit -s`), que registra o aceite desses termos.
+Uso comercial exige licença escrita do Titular.
+
 ## Antes de começar
 
 ```bash

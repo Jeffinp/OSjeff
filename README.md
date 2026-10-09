@@ -11,7 +11,7 @@
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
 ![Tests](https://img.shields.io/badge/tests-2888%20passing-success?style=for-the-badge)
 ![Fuzz](https://img.shields.io/badge/fuzz-17%20targets-success?style=for-the-badge)
-![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
+![License](https://img.shields.io/badge/license-PolyForm%20Strict-orange?style=for-the-badge)
 
 **🇧🇷 Português** · [🇺🇸 English](README.en.md)
 
@@ -197,4 +197,4 @@ OSjeff/
 
 ## 👤 Autor e licença
 
-**Jeferson Reis Almeida**: [MIT](LICENSE) © 2026.
+**Jeferson Reis Almeida**: [PolyForm Strict 1.0.0](LICENSE) © 2026 (código-fonte disponível; uso não comercial, sem redistribuição nem obras derivadas; contribuições conforme [LICENSE-CONTRIBUTORS.md](LICENSE-CONTRIBUTORS.md); avisos de terceiros em [NOTICE.md](NOTICE.md)).

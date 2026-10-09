@@ -23,6 +23,11 @@ allow = [
 ]
 confidence-threshold = 0.9
 
+# OSjeff itself is source-available (PolyForm Strict), not published to crates.io:
+# the license policy above applies to its dependencies only.
+[licenses.private]
+ignore = true
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
