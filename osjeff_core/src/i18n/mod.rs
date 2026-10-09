@@ -29,6 +29,8 @@ pub mod template;
 
 #[cfg(test)]
 mod audit;
+#[cfg(test)]
+pub(crate) mod testlang;
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -134,6 +136,10 @@ static MISSING: AtomicU32 = AtomicU32::new(0);
 
 /// The language in effect.
 pub fn lang() -> Lang {
+    #[cfg(test)]
+    if let Some(l) = testlang::current() {
+        return l;
+    }
     Lang::from_index(CURRENT.load(Ordering::Relaxed))
 }
 
