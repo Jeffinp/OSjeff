@@ -587,6 +587,50 @@ pub fn bounce(t: f32, height: f32) -> (f32, bool) {
     (4.0 * peak * u * (1.0 - u), true)
 }
 
+// ---------------------------------------------------------------------------
+// Caret blink
+// ---------------------------------------------------------------------------
+
+/// Length of one caret blink, in milliseconds.
+pub const BLINK_MS: u64 = 1060;
+/// A caret keeps blinking this long after the last key or click, then rests solid (an idle
+/// desktop must not repaint forever).
+pub const BLINK_ACTIVE_MS: u64 = 12_000;
+/// The caret stays solid this long after input.
+pub const BLINK_HOLD_MS: u64 = 500;
+
+fn smoothstep256(x: u32) -> u32 {
+    let x = x.min(256);
+    (x * x * (768 - 2 * x)) >> 16
+}
+
+/// The caret opacity (0..=256) `ms` milliseconds into the blink, eased: solid, a quick fade
+/// out, dark, a quick fade in.
+pub fn caret_curve(ms: u64) -> u32 {
+    let t = ms % BLINK_MS;
+    match t {
+        0..=419 => 256,
+        420..=579 => 256 - smoothstep256(((t - 420) * 256 / 160) as u32),
+        580..=899 => 0,
+        _ => smoothstep256(((t - 900) * 256 / 160) as u32),
+    }
+}
+
+/// The opacity of a caret whose owner saw input `since_ms` ago (`None`: never, so a fresh
+/// window keeps a solid caret): solid for [`BLINK_HOLD_MS`], blinking until [`BLINK_ACTIVE_MS`],
+/// solid afterwards.
+pub fn caret_alpha(since_ms: Option<u64>) -> u32 {
+    match since_ms {
+        Some(s) if (BLINK_HOLD_MS..BLINK_ACTIVE_MS).contains(&s) => caret_curve(s - BLINK_HOLD_MS),
+        _ => 256,
+    }
+}
+
+/// Whether such a caret still changes (the window needs frames).
+pub fn caret_animating(since_ms: Option<u64>) -> bool {
+    since_ms.is_some_and(|s| s < BLINK_ACTIVE_MS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -904,5 +948,34 @@ mod tests {
         assert_eq!(bounce(0.1, 10.0), (0.0, false));
         set_reduce_motion(false);
         assert!(!reduce_motion());
+    }
+
+    #[test]
+    fn the_blink_is_eased_and_rests() {
+        // Solid, fades out, dark, fades in, solid again, each blink the same.
+        assert_eq!(caret_curve(0), 256);
+        assert_eq!(caret_curve(419), 256);
+        assert!(caret_curve(500) < 256 && caret_curve(500) > 0);
+        assert_eq!(caret_curve(700), 0);
+        assert!(caret_curve(1000) > 0 && caret_curve(1000) < 256);
+        assert_eq!(caret_curve(BLINK_MS), caret_curve(0));
+        // Monotonic on the way down and back up.
+        let down: Vec<u32> = (420..580).map(caret_curve).collect();
+        assert!(down.windows(2).all(|w| w[0] >= w[1]));
+        let up: Vec<u32> = (900..1060).map(caret_curve).collect();
+        assert!(up.windows(2).all(|w| w[0] <= w[1]));
+        assert!(down.iter().chain(&up).all(|&a| a <= 256));
+    }
+
+    #[test]
+    fn a_caret_holds_after_input_and_rests_after_a_while() {
+        assert_eq!(caret_alpha(None), 256);
+        assert!(!caret_animating(None));
+        assert_eq!(caret_alpha(Some(0)), 256);
+        assert_eq!(caret_alpha(Some(BLINK_HOLD_MS - 1)), 256);
+        assert_eq!(caret_alpha(Some(BLINK_HOLD_MS + 700)), 0);
+        assert_eq!(caret_alpha(Some(BLINK_ACTIVE_MS)), 256);
+        assert!(caret_animating(Some(BLINK_ACTIVE_MS - 1)));
+        assert!(!caret_animating(Some(BLINK_ACTIVE_MS)));
     }
 }

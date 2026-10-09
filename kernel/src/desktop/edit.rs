@@ -96,7 +96,7 @@ impl EditorState {
             force_close: false,
             last_click: (0, 0, 0),
             press_at: (-1, -1),
-            last_input: appui::ticks(),
+            last_input: 0,
             caret_x: Spring::pixels(0.0, 1100.0, 66.0),
             caret_seen: (0, 0, 0),
             sel_t: Tween::at(1.0),

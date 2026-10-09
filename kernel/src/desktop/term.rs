@@ -58,7 +58,7 @@ impl TermState {
             term,
             ctx: Some(ctx),
             sel: None,
-            last_input: appui::ticks(),
+            last_input: 0,
             scroll_fade: ScrollbarFade::new(),
             grid: (80, 24),
             last_click: (0, (0, 0), 0),

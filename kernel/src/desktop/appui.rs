@@ -11,7 +11,7 @@
 use super::ui::{self, ButtonKind, Control};
 use super::*;
 use crate::text::{self, BODY, CALLOUT, FOOTNOTE, Weight};
-use osjeff_core::anim::Tween;
+use osjeff_core::anim::{self, Tween};
 use osjeff_core::appart::{FileKind, Tool};
 use osjeff_core::style::R_CONTROL;
 
@@ -32,44 +32,20 @@ pub(crate) fn now_ms() -> u32 {
 
 // ---------------------------------------------------------------------------- caret
 
-/// Length of one caret blink, in milliseconds.
-const BLINK_MS: u64 = 1060;
-/// The caret keeps blinking this long after the last key or click, then rests solid (an idle
-/// desktop must not repaint forever).
-pub(crate) const BLINK_ACTIVE_MS: u64 = 12_000;
-
-fn smooth(x: u32) -> u32 {
-    // smoothstep on 0..=256
-    let x = x.min(256);
-    (x * x * (768 - 2 * x)) >> 24
+/// Milliseconds since the last input at tick `last_input` (`None`: 0 means never).
+fn since_input(last_input: u64) -> Option<u64> {
+    (last_input != 0).then(|| ticks().saturating_sub(last_input) * 4)
 }
 
-/// The caret opacity (0..=256) `ms` milliseconds into the blink, eased: solid, a quick fade
-/// out, dark, a quick fade in.
-pub(crate) fn caret_curve(ms: u64) -> u32 {
-    let t = ms % BLINK_MS;
-    match t {
-        0..=419 => 256,
-        420..=579 => 256 - smooth(((t - 420) * 256 / 160) as u32),
-        580..=899 => 0,
-        _ => smooth(((t - 900) * 256 / 160) as u32),
-    }
-}
-
-/// Opacity of a caret whose owner last saw input at tick `last_input`: solid for half a second
-/// after input, blinking until [`BLINK_ACTIVE_MS`], solid afterwards.
+/// Opacity (0..=256) of a caret whose owner last saw input at tick `last_input` (0 = never): the
+/// eased blink of `osjeff_core::anim::caret_alpha`.
 pub(crate) fn caret_alpha(last_input: u64) -> u32 {
-    let since = ticks().saturating_sub(last_input) * 4;
-    if !(500..BLINK_ACTIVE_MS).contains(&since) {
-        256
-    } else {
-        caret_curve(since - 500)
-    }
+    anim::caret_alpha(since_input(last_input))
 }
 
 /// Whether the caret of an owner with input at `last_input` still animates (needs frames).
 pub(crate) fn caret_animating(last_input: u64) -> bool {
-    ticks().saturating_sub(last_input) * 4 < BLINK_ACTIVE_MS
+    anim::caret_animating(since_input(last_input))
 }
 
 // -------------------------------------------------------------------------- buttons
