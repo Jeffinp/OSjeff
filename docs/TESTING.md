@@ -62,6 +62,7 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 
 | `http_body` | `[modo, corte(2 B), ...bytes]`: os bytes como resposta HTTP inteira, como corpo sob cabeçalhos hostis (`gzip, gzip, deflate`, `br`, `Content-Length` enorme...), em leitura parcial do `Inflater`, e (modo `0x10`) comprimidos por nosso codificador (gzip, zlib, deflate cru, gzip em cadeia, `chunked`), **cortados** em qualquer ponto | `browser::body_partial`/`page_body_partial`/`body_bytes`, `appnet::app_response`, `Inflater::read_partial`. Invariantes: nunca pânico, corpo <= `MAX_DECODED_BYTES`, um fluxo válido cortado decodifica para **prefixo do original** e inteiro decodifica exato e sem aviso (regressões: `fuzz/regressions/http_body/`) |
 | `app_manifest` | bytes como `.wasm` inteiro, como payload de `osjeff.manifest` ou de `osjeff.icon` (embrulhado numa seção válida), ou como manifesto/ícone soltos | `wasmsec` (cabeçalho, seções, LEB128), `appmanifest` (chaves, quotas, `net_hosts`, ícone PNG até 64x64) e as invariantes do manifesto aceito (inclui: `net_hosts` limitado, só com permissão de rede, nunca admite o que o filtro de destinos recusa) |
+| `compositor_ops` | sequência de operações de área de trabalho (abrir, fechar, mover, redimensionar, focar, minimizar, encaixar, áreas de trabalho, overlays, ticks de animação, janelas vivas, relógio, quadros ociosos), 1 a 4 por quadro | `osjeff_core::compositor`: depois de cada quadro o resultado incremental é idêntico ao redesenho completo, o pintor nunca escreve fora do footprint, um quadro ocioso não planeja nada. 5 minutos: 25 351 execuções (84/s, até 400 quadros cada), 0 falhas |
 | `entropy_api` | sequência de operações (`add` com id e crédito declarado quaisquer, timestamps, `fill` de qualquer tamanho, reseed, relógio) | `osjeff_core::entropy`: nunca pânico; crédito por fonte <= 8 bits por byte e nunca decrescente; nota nunca decrescente e timing sozinho nunca Strong; crédito na chave <= 256 por classe; nenhuma saída de 32 bytes se repete |
 | `app_sandbox` | sequência de operações com caminhos em bytes crus sobre dois apps que dividem um `MemFs` **ou** um `VolumeFs` sobre um OJFS v3 de 1 MiB em RAM (o primeiro bool escolhe; mais URLs) | `appfs` (normalização, `Sandbox`, `VolumeFs`, cota, descritores) e `appnet`: nada existe fora de `/data/<id>`, os arquivos do sistema e do usuário ficam intactos, a cota vale, `fsck` limpo, URL aceita nunca é local |
 
@@ -83,6 +84,7 @@ cargo fuzz run http_body -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run app_manifest -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run app_sandbox -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run entropy_api -- -max_total_time=600 -print_final_stats=1
+cargo fuzz run compositor_ops -- -max_total_time=300 -print_final_stats=1
 cargo fuzz run html_img_form -- -max_total_time=600 -print_final_stats=1
 ```
 
@@ -429,6 +431,50 @@ mais caro: o tempo dos retângulos arredondados no rastro por primitiva dobra me
 número de chamadas (a janela arrastada é o Terminal, que não mudou), e a soma da composição só sobe
 uns 5 %; não achei a causa e não é efeito do repintar parcial (desligado numa imagem de teste, o
 resultado é o mesmo). Fica como lacuna conhecida.
+
+### Compositor (W27): teste diferencial, oráculo no QEMU e custo de quadro
+
+Projeto em [`design/compositor.md`](design/compositor.md). O desktop piscava com várias janelas (sombras
+sumindo, o Snake piscando, uma janela pintada acima de outra que está acima dela); o compositor
+tinha vários caminhos e uma assinatura de cache que precisava ser estendida a cada recurso novo.
+Agora há um caminho só, e a corretude é **testada contra um redesenho completo**:
+
+| Camada | Comando | O que prova |
+|---|---|---|
+| Host, `osjeff_core::compositor` (52 testes, ~40 s) | `cargo test -p osjeff_core compositor` | `Region` (disjunta, só cresce, subtração exata), o motor em cenas feitas à mão, e o **teste diferencial**: um simulador de área de trabalho (janelas, áreas de trabalho, z-order, animações com opacidade, janelas "vivas" e "jogo", painel, barra, popover, toast, pré-visualização de encaixe) com um pintor de modelo (cor única por janela, faixa de título, cantos recortados, anel de sombra translúcido em aritmética inteira, escritas fora do footprint são acusadas). 1500 históricos x 60 quadros e 40 x 400, de 1 a 3 eventos por quadro: depois de **cada** quadro o resultado incremental (só com o dano do motor) é idêntico, byte a byte, ao redesenho completo. A mensagem de falha traz o seed e as operações |
+| Host, casos dirigidos | idem | sombra sob a vizinha, janela acima de uma animada, sombra cortada pela borda do dano, janela saindo da tela pelos quatro lados, maximizada, translúcida, dano de 1 pixel, áreas de trabalho, overlays, e os dois bugs reportados (Tarefas + Snake; Editor sobre Tarefas, com a sombra afirmada presente) |
+| Host, **testes de mutação** | idem (`tests/mutants.rs`) | quebra-se de propósito cada regra e exige-se que o teste diferencial falhe: esquecer o footprint antigo, as trocas de z-order, a camada removida, o `look`, o `dirty`; omitir a sombra do footprint; declarar os cantos arredondados como opacos; esquecer o `dirty`, o `look`, a invalidação do relógio. 11 mutantes, todos pegos |
+| Fuzz | `cd fuzz && cargo fuzz run compositor_ops -- -max_total_time=300 -print_final_stats=1` | o mesmo simulador dirigido pela entrada: incremental == completo, nenhuma escrita fora do footprint, quadro ocioso não planeja nada |
+| QEMU, oráculo | `tools/perf/scen/w27-oracle.sh` + `tools/perf/w27-oracle-check.sh <out>` | muitas janelas (Terminal, Editor, Calculadora, Arquivos, Ajustes, Snake, Tarefas): mover, redimensionar, focar, minimizar, restaurar, encaixar, maximizar, áreas de trabalho, popovers, menus, Alt+Tab. Depois de cada passo, `rest<N>.png` (o que o compositor incremental deixou) contra `clean<N>.png` (o mesmo estado em modo referência, Ctrl+Alt+R: todo quadro recomposto do zero). Conjunto A (janelas estáticas): 0 pixels. Conjunto B (`W27_SET=b`: Snake, um terminal executando `sleep`, Tarefas): duas fotos de verdade a mais dizem quais pixels mudam sozinhos e o verificador os ignora, e tolera 6000 pixels dos números das Tarefas (`W27_TOL`) |
+| QEMU, piscadas | `tools/perf/w27-burst-check.sh <out> b2_ 0` | rajada de 12 fotos a cada 0,2 s: sem Tarefas, quadros consecutivos idênticos (0 pixels); com Tarefas visíveis, só os números dela mudam (até ~3800 px por passo) |
+| QEMU, modo verify | `W27_VERIFY=1 ...` / Ctrl+Alt+V | cada quadro é comparado com o redesenho completo (que não confia em footprint nenhum); divergências saem na serial como `compositor-verify: MISMATCH` (o conteúdo de apps WASM, de terminais executando e das Tarefas é ignorado: lê o relógio) |
+
+Resultado (BIOS e UEFI, mesmas máquina e cenas; o "antes" é o commit `57b9121`):
+
+| | antes | depois |
+|---|---|---|
+| Conjunto A, pares diferentes | 1 de 34 (e janelas fantasmas no Alt+Tab) | 0 de 34, 0 pixels |
+| Conjunto B, pares fora do ruído das Tarefas | 3 de 23 (acima de 6000 px: 6066, 9974, 15 270), 9 com mais de 900 px; o Editor pintado acima das Tarefas; sombras faltando | 0 de 23 (maior diferença 1077 px, BIOS; 1294 px, UEFI, todas nos números das Tarefas) |
+| Rajada sem Tarefas | 0 | 0 |
+| `w20-cursor` + `w20-cursor-check` | 0 | 0 |
+| `w27-flicker-check` | estável | estável |
+
+Custo de quadro (QEMU/TCG sem KVM, 1280x720, `perf-trace`, `tools/perf/summ.py`; mesma imagem de teste
+por cenário; o hospedeiro é compartilhado, então repetições variam uns 5-8 %):
+
+| Cenário | antes | depois |
+|---|---|---|
+| ocioso | tique do relógio 0,40 ms (0 além disso) | 0,37 a 0,53 ms (0 além disso) |
+| arrastar a janela, quadro de dano (a regressão de ~10 % da Tarefas: 6,3 para 6,9 ms) | 6,8 e 7,3 ms; CPU do compositor 44-45 % | 4,5, 4,7 e 4,9 ms; CPU 34-36 % |
+| abrir e fechar a Calculadora, quadro de animação | 3,5 ms + 25 reconstruções de 28 ms + 12 "settle" de 12 ms; CPU 19,7 % | 5,0 a 5,5 ms, sem reconstrução; quadros de entrada de 9 a 13 ms; CPU 22,9 % |
+| Tarefas visíveis (CPU), quadro do gráfico | ~2,8 ms por quadro real; CPU 20,6 % | ~3,5 ms; CPU 19,6 % |
+| Snake + Tarefas visíveis, quadro estável | 13 ms (55 quadros/s); CPU 58 % | 5,2 ms (140 quadros/s); CPU 41 % |
+
+O arrasto ficou mais barato porque o dano é um retângulo só do tamanho das duas posições e as camadas
+opacas escondem o que está embaixo; a regressão de 10 % que o commit das Tarefas trouxe (6,3 para 6,9 ms, sem causa achada)
+desapareceu junto com o caminho antigo (a recomposição da cena estática). **Lacuna conhecida:** abrir e fechar uma janela sobre outra
+ficou cerca de 1,5 ms mais caro por quadro (a janela de baixo é repintada, antes vinha de uma cópia em
+cache), e um quadro com uma janela "viva" por cima de outras repinta as de baixo só onde o dano as toca.
 
 ## 5. Lint e supply chain
 

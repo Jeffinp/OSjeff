@@ -3,6 +3,26 @@
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
 tem releases versionadas; as seções são marcos na `master`.
 
+## 2026-10 — Um compositor correto por construção (W27)
+
+- O desktop piscava com várias janelas abertas: sombras sumiam (a do Editor), o Snake piscava e uma
+  janela era pintada acima de outra que está acima dela. Causa: vários caminhos de desenho que
+  duplicavam uns aos outros e uma assinatura de cache que cada recurso novo precisava estender.
+- **Um caminho só.** O desktop é descrito como uma cena de camadas (janelas com a sombra no footprint,
+  barra, painel, overlays); o motor de dano (`osjeff_core::compositor`: `Region` de retângulos disjuntos,
+  `Scene`, `Engine`) compara com o quadro anterior e planeja o que repintar; cada camada é pintada de
+  baixo para cima sobre o dano, menos o que uma camada opaca esconde; só o dano sobe à VRAM. Arrastar,
+  o relógio e o gráfico que desliza são casos da mesma regra. Cursor, toasts e HUD continuam só no
+  framebuffer (cursor apagado primeiro e pintado por último).
+- **Provado.** Teste diferencial no host (milhares de históricos aleatórios: o resultado incremental é
+  idêntico ao redesenho completo depois de cada quadro) com 11 testes de mutação permanentes e o alvo de
+  fuzz `compositor_ops`; no QEMU, o oráculo `w27-oracle.sh` (tela em repouso contra o modo referência,
+  Ctrl+Alt+R) e o modo verify (Ctrl+Alt+V). Antes: janelas fora de ordem e sombras faltando; depois: 0
+  pixels de diferença (BIOS e UEFI).
+- Removidos o cache `STATIC`, `render`, `render_anim_frame`, `anim_signature`, `WindowManager::signature`,
+  `wm::scene_signature`. O painel é uma camada opaca acima das janelas. Arrastar ficou 35 % mais barato;
+  Snake + Tarefas, de 13 para 5 ms por quadro. Projeto: `docs/design/compositor.md`.
+
 ## 2026-10 — Os apps do sistema (W25)
 
 - **Tarefas** reúne o Gerenciador de tarefas e o Monitor de recursos num monitor de atividade com

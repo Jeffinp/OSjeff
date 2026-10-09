@@ -129,3 +129,10 @@ path = "fuzz_targets/entropy_api.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "compositor_ops"
+path = "fuzz_targets/compositor_ops.rs"
+test = false
+doc = false
+bench = false
