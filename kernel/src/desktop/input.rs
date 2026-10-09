@@ -798,9 +798,11 @@ impl Desktop {
                 true
             }
             // Nothing to scroll (the WASM guest has no wheel ABI).
-            Kind::Calculator | Kind::WasmApp | Kind::Settings | Kind::LogViewer | Kind::Gallery => {
-                false
+            Kind::LogViewer => {
+                self.log_wheel(w, notches);
+                true
             }
+            Kind::Calculator | Kind::WasmApp | Kind::Settings | Kind::Gallery => false,
         };
         if changed && let Some(r) = self.wm.get(w).map(|win| self.window_box(win)) {
             // The target may not be the focused window: make sure it is uploaded.

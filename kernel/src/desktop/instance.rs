@@ -90,7 +90,7 @@ impl Kind {
             Kind::WasmApp => "Aplicativo",
             Kind::Files => "Arquivos",
             Kind::Settings => "Configurações",
-            Kind::LogViewer => "Registro do sistema",
+            Kind::LogViewer => "Registro",
             Kind::Viewer => "Imagens",
             Kind::Gallery => "Componentes",
         }
@@ -158,7 +158,7 @@ impl Kind {
             Kind::Viewer => Rect::new(200, 90, 820, 540),
             Kind::Gallery => Rect::new(160, 70, 900, 600),
             Kind::Settings => Rect::new(220, 84, 820, 560),
-            Kind::LogViewer => Rect::new(180, 110, 860, 460),
+            Kind::LogViewer => Rect::new(200, 80, 880, 540),
         }
     }
 
@@ -175,7 +175,7 @@ impl Kind {
             Kind::Viewer => (360, 260),
             Kind::Gallery => (560, 380),
             Kind::Settings => (700, 460),
-            Kind::LogViewer => (520, 280),
+            Kind::LogViewer => (720, 360),
         }
     }
 
