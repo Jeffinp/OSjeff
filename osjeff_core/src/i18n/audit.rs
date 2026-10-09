@@ -793,6 +793,8 @@ const ACCENT_STRICT: &[&str] = &[
     "osjeff_core/src/shell/parse.rs",
     "osjeff_core/src/shell/regex.rs",
     "osjeff_core/src/shell/sys.rs",
+    "kernel/src/desktop/tarefas.rs",
+    "osjeff_core/src/activity.rs",
 ];
 
 fn unaccented_literals(file: &str, src: &str, a: &Accents) -> Vec<String> {

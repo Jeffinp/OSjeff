@@ -1,13 +1,15 @@
 //! Pure helpers of the **Tarefas** app (the activity monitor): friendly process names,
-//! Portuguese number formatting, the history ring's interpolation for smooth graphs,
+//! number formatting in the language in effect, the history ring's interpolation for smooth graphs,
 //! an exponential smoother, rates from wrapping counters, load averages, the memory
 //! pressure level and the sortable process table.
 //!
 //! Everything is integer arithmetic (the kernel has no FPU in its hot paths) and
 //! allocation-light; the kernel owns the sampling and the drawing.
 
+use crate::i18n::{self, Arg, locale};
 use crate::klog::FixedBuf;
 use crate::sysmon::Series;
+use crate::tk;
 use alloc::string::String;
 use core::fmt::Write;
 
@@ -18,30 +20,31 @@ use core::fmt::Write;
 /// are, so nothing disappears from the list.
 pub fn friendly_name(raw: &[u8]) -> String {
     let (base, num) = split_number(raw);
+    // Catalog keys; the text is looked up in the language in effect.
     let fixed: Option<&str> = match base {
-        b"compositor" => Some("Interface"),
-        b"fetcher" => Some("Rede (busca)"),
-        b"appd" => Some("Aplicativos"),
-        b"shelld" | b"shelld2" => Some("Terminal (execução)"),
-        b"logd" => Some("Registro"),
-        b"kernel" => Some("Sistema"),
-        b"(ocioso)" => Some("Ocioso"),
-        b"shell" => Some("Terminal"),
-        b"editor" => Some("Editor"),
-        b"taskmgr" | b"monitor" => Some("Tarefas"),
-        b"calc" => Some("Calculadora"),
-        b"browser" => Some("Navegador"),
-        b"wasmapp" => Some("Aplicativo"),
-        b"files" => Some("Arquivos"),
-        b"settings" => Some("Ajustes"),
-        b"syslog" => Some("Registro"),
-        b"viewer" => Some("Imagens"),
-        b"gallery" => Some("Componentes"),
+        b"compositor" => Some(tk!("tasks.name.interface")),
+        b"fetcher" => Some(tk!("tasks.name.net_fetch")),
+        b"appd" => Some(tk!("tasks.name.apps")),
+        b"shelld" | b"shelld2" => Some(tk!("tasks.name.shell_exec")),
+        b"logd" => Some(tk!("app.log")),
+        b"kernel" => Some(tk!("tasks.name.system")),
+        b"(idle)" => Some(tk!("tasks.name.idle")),
+        b"shell" => Some(tk!("app.terminal")),
+        b"editor" => Some(tk!("app.editor")),
+        b"taskmgr" | b"monitor" => Some(tk!("app.tasks")),
+        b"calc" => Some(tk!("app.calculator")),
+        b"browser" => Some(tk!("app.browser")),
+        b"wasmapp" => Some(tk!("app.wasm_title")),
+        b"files" => Some(tk!("app.files")),
+        b"settings" => Some(tk!("app.settings")),
+        b"syslog" => Some(tk!("app.log")),
+        b"viewer" => Some(tk!("app.viewer")),
+        b"gallery" => Some(tk!("app.gallery")),
         _ => None,
     };
     let mut out = String::new();
     match fixed {
-        Some(s) => out.push_str(s),
+        Some(key) => out.push_str(i18n::tr(key)),
         None => {
             // Raw names are ASCII in practice; anything else is shown 1:1 as Latin-1.
             out.extend(base.iter().map(|&b| b as char));
@@ -77,10 +80,16 @@ pub fn is_system_name(raw: &[u8]) -> bool {
 
 // ------------------------------------------------------------------ formatting
 
-/// `12,3%` from tenths of a percent.
+/// `12,3%` (`12.3%` in English) from tenths of a percent.
 pub fn fmt_pct(pm: u32) -> FixedBuf<12> {
     let mut b = FixedBuf::new();
-    let _ = write!(b, "{},{}%", pm / 10, pm % 10);
+    let _ = write!(
+        b,
+        "{}{}{}%",
+        pm / 10,
+        locale::decimal_sep(i18n::lang()),
+        pm % 10
+    );
     b
 }
 
@@ -91,23 +100,10 @@ pub fn fmt_pct_int(pm: u32) -> FixedBuf<8> {
     b
 }
 
-/// `512 B`, `1,5 KiB`, `12,0 MiB`, `3,2 GiB`.
+/// `512 B`, `1,5 KiB`, `12,0 MiB`, `3,2 GiB` (`1.5 KiB` in English).
 pub fn fmt_size(v: u64) -> FixedBuf<20> {
     let mut b = FixedBuf::new();
-    const K: u64 = 1024;
-    if v < K {
-        let _ = write!(b, "{v} B");
-        return b;
-    }
-    let (div, unit) = if v < K * K {
-        (K, "KiB")
-    } else if v < K * K * K {
-        (K * K, "MiB")
-    } else {
-        (K * K * K, "GiB")
-    };
-    let tenths = v.saturating_mul(10) / div;
-    let _ = write!(b, "{},{} {unit}", tenths / 10, tenths % 10);
+    let _ = locale::write_size(&mut b, i18n::lang(), v);
     b
 }
 
@@ -118,58 +114,77 @@ pub fn fmt_speed(bytes_per_s: u64) -> FixedBuf<24> {
     b
 }
 
-/// A whole number with a thin grouping: `12.345` (Portuguese uses the dot).
+/// A whole number with the language's thousands separator: `12.345` / `12,345`.
 pub fn fmt_count(v: u64) -> FixedBuf<28> {
-    let mut digits = FixedBuf::<24>::new();
-    let _ = write!(digits, "{v}");
-    let d = digits.as_bytes();
     let mut b = FixedBuf::new();
-    for (i, &c) in d.iter().enumerate() {
-        if i > 0 && (d.len() - i).is_multiple_of(3) {
-            let _ = b.write_char('.');
-        }
-        let _ = b.write_char(c as char);
-    }
+    let _ = locale::write_int(
+        &mut b,
+        i18n::lang(),
+        i64::try_from(v).unwrap_or(i64::MAX),
+        true,
+    );
+    b
+}
+
+/// A catalog text filled with `args`, in a fixed buffer.
+fn fill<const N: usize>(key: &str, args: &[(&str, Arg<'_>)]) -> FixedBuf<N> {
+    let mut b = FixedBuf::new();
+    let _ = b.write_str(&i18n::tr_fmt(key, args));
     b
 }
 
 /// Uptime for people: `42 s`, `3 min 05 s`, `1 h 02 min`, `2 d 03 h`.
 pub fn fmt_elapsed(secs: u64) -> FixedBuf<20> {
-    let mut b = FixedBuf::new();
-    let (d, h, m, s) = (secs / 86_400, secs / 3600 % 24, secs / 60 % 60, secs % 60);
-    if d > 0 {
-        let _ = write!(b, "{d} d {h:02} h");
-    } else if h > 0 {
-        let _ = write!(b, "{h} h {m:02} min");
-    } else if m > 0 {
-        let _ = write!(b, "{m} min {s:02} s");
+    let int = |n: u64| Arg::Int(i64::try_from(n).unwrap_or(i64::MAX));
+    let (h24, m60, s60) = (secs / 3600 % 24, secs / 60 % 60, secs % 60);
+    if secs >= 86_400 {
+        fill(
+            tk!("tasks.fmt.dh"),
+            &[("d", int(secs / 86_400)), ("h", Arg::Pad(h24, 2))],
+        )
+    } else if secs >= 3600 {
+        fill(
+            tk!("tasks.fmt.hm"),
+            &[("h", int(secs / 3600)), ("m", Arg::Pad(m60, 2))],
+        )
+    } else if secs >= 60 {
+        fill(
+            tk!("tasks.fmt.ms"),
+            &[("m", int(secs / 60)), ("s", Arg::Pad(s60, 2))],
+        )
     } else {
-        let _ = write!(b, "{s} s");
+        fill(tk!("tasks.fmt.s"), &[("s", int(secs))])
     }
-    b
 }
 
 /// `01:02:03` clock-style uptime, with `d` days in front past one day.
 pub fn fmt_clock(secs: u64) -> FixedBuf<20> {
-    let mut b = FixedBuf::new();
     let (d, h, m, s) = (secs / 86_400, secs / 3600 % 24, secs / 60 % 60, secs % 60);
     if d > 0 {
-        let _ = write!(b, "{d} d {h:02}:{m:02}:{s:02}");
+        let d = Arg::Int(i64::try_from(d).unwrap_or(i64::MAX));
+        fill(
+            tk!("tasks.fmt.clock_days"),
+            &[
+                ("d", d),
+                ("h", Arg::Pad(h, 2)),
+                ("m", Arg::Pad(m, 2)),
+                ("s", Arg::Pad(s, 2)),
+            ],
+        )
     } else {
+        let mut b = FixedBuf::new();
         let _ = write!(b, "{h:02}:{m:02}:{s:02}");
+        b
     }
-    b
 }
 
-/// `há 12 s` for a graph's hover label (`0` is "agora").
-pub fn fmt_ago(secs: u32) -> FixedBuf<12> {
-    let mut b = FixedBuf::new();
+/// `há 12 s` / `12 s ago` for a graph's hover label (`0` is "agora" / "now").
+pub fn fmt_ago(secs: u32) -> FixedBuf<16> {
     if secs == 0 {
-        let _ = write!(b, "agora");
+        fill(tk!("tasks.fmt.now"), &[])
     } else {
-        let _ = write!(b, "há {secs} s");
+        fill(tk!("tasks.fmt.ago"), &[("n", Arg::Int(i64::from(secs)))])
     }
-    b
 }
 
 /// A log timestamp (milliseconds since boot) as `12,345` seconds, or `3:25,100` once past
@@ -177,33 +192,45 @@ pub fn fmt_ago(secs: u32) -> FixedBuf<12> {
 pub fn fmt_log_time(ms: u32) -> FixedBuf<16> {
     let mut b = FixedBuf::new();
     let (h, m, s, ms) = (ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000);
+    let dec = locale::decimal_sep(i18n::lang());
     if h > 0 {
-        let _ = write!(b, "{h}:{m:02}:{s:02},{ms:03}");
+        let _ = write!(b, "{h}:{m:02}:{s:02}{dec}{ms:03}");
     } else if m > 0 {
-        let _ = write!(b, "{m}:{s:02},{ms:03}");
+        let _ = write!(b, "{m}:{s:02}{dec}{ms:03}");
     } else {
-        let _ = write!(b, "{s},{ms:03}");
+        let _ = write!(b, "{s}{dec}{ms:03}");
     }
     b
 }
 
-/// The chip text of a log level.
-pub const fn level_name(l: crate::klog::Level) -> &'static str {
+/// The catalog key of the chip text of a log level.
+pub const fn level_key(l: crate::klog::Level) -> &'static str {
     use crate::klog::Level;
     match l {
-        Level::Trace => "TRACE",
-        Level::Debug => "DEBUG",
-        Level::Info => "INFO",
-        Level::Warn => "AVISO",
-        Level::Error => "ERRO",
-        Level::Fatal => "FATAL",
+        Level::Trace => tk!("log.chip.trace"),
+        Level::Debug => tk!("log.chip.debug"),
+        Level::Info => tk!("log.chip.info"),
+        Level::Warn => tk!("log.chip.warn"),
+        Level::Error => tk!("log.chip.error"),
+        Level::Fatal => tk!("log.chip.fatal"),
     }
+}
+
+/// The chip text of a log level, in the language in effect.
+pub fn level_name(l: crate::klog::Level) -> &'static str {
+    i18n::tr(level_key(l))
 }
 
 /// `0,42` from thousandths (the load average).
 pub fn fmt_milli(v: u32) -> FixedBuf<12> {
     let mut b = FixedBuf::new();
-    let _ = write!(b, "{},{:02}", v / 1000, v % 1000 / 10);
+    let _ = write!(
+        b,
+        "{}{}{:02}",
+        v / 1000,
+        locale::decimal_sep(i18n::lang()),
+        v % 1000 / 10
+    );
     b
 }
 
@@ -457,12 +484,18 @@ impl Pressure {
         }
     }
 
-    pub fn label(self) -> &'static str {
+    /// The catalog key of the label.
+    pub const fn key(self) -> &'static str {
         match self {
-            Pressure::Normal => "Normal",
-            Pressure::Attention => "Atenção",
-            Pressure::Critical => "Crítica",
+            Pressure::Normal => tk!("tasks.pressure.normal"),
+            Pressure::Attention => tk!("tasks.pressure.attention"),
+            Pressure::Critical => tk!("tasks.pressure.critical"),
         }
+    }
+
+    /// The label in the language in effect.
+    pub fn label(self) -> &'static str {
+        i18n::tr(self.key())
     }
 }
 
@@ -498,14 +531,20 @@ pub enum TaskState {
 }
 
 impl TaskState {
-    pub const fn label(self) -> &'static str {
+    /// The catalog key of the label.
+    pub const fn key(self) -> &'static str {
         match self {
-            TaskState::Running => "Ativo",
-            TaskState::Waiting => "Em espera",
-            TaskState::Suspended => "Suspenso",
-            TaskState::Ended => "Encerrado",
-            TaskState::Stopped => "Parado",
+            TaskState::Running => tk!("tasks.state.running"),
+            TaskState::Waiting => tk!("tasks.state.waiting"),
+            TaskState::Suspended => tk!("tasks.state.suspended"),
+            TaskState::Ended => tk!("tasks.state.ended"),
+            TaskState::Stopped => tk!("tasks.state.stopped"),
         }
+    }
+
+    /// The label in the language in effect.
+    pub fn label(self) -> &'static str {
+        i18n::tr(self.key())
     }
 }
 
@@ -530,15 +569,21 @@ impl Column {
         Column::Up,
     ];
 
-    pub const fn title(self) -> &'static str {
+    /// The catalog key of the header.
+    pub const fn key(self) -> &'static str {
         match self {
-            Column::Pid => "PID",
-            Column::Name => "Nome",
-            Column::State => "Estado",
-            Column::Cpu => "CPU",
-            Column::Mem => "Memória",
-            Column::Up => "Tempo ativo",
+            Column::Pid => tk!("tasks.col.pid"),
+            Column::Name => tk!("tasks.col.name"),
+            Column::State => tk!("tasks.col.state"),
+            Column::Cpu => tk!("tasks.col.cpu"),
+            Column::Mem => tk!("tasks.col.mem"),
+            Column::Up => tk!("tasks.col.up"),
         }
+    }
+
+    /// The header text in the language in effect.
+    pub fn title(self) -> &'static str {
+        i18n::tr(self.key())
     }
 
     /// Sorting a column the first time: text ascending, numbers descending.
@@ -660,6 +705,8 @@ pub fn totals(rows: &[TaskRow]) -> Totals {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::Lang;
+    use crate::i18n::testlang::LangGuard;
 
     fn s(b: FixedBuf<20>) -> String {
         String::from_utf8_lossy(b.as_bytes()).into_owned()
@@ -667,6 +714,7 @@ mod tests {
 
     #[test]
     fn names_are_translated() {
+        let _lang = LangGuard::new(Lang::Pt);
         assert_eq!(friendly_name(b"compositor"), "Interface");
         assert_eq!(friendly_name(b"fetcher"), "Rede (busca)");
         assert_eq!(friendly_name(b"appd"), "Aplicativos");
@@ -685,6 +733,32 @@ mod tests {
     }
 
     #[test]
+    fn english_names_numbers_and_labels() {
+        let _lang = LangGuard::new(Lang::En);
+        assert_eq!(friendly_name(b"fetcher"), "Network (fetch)");
+        assert_eq!(friendly_name(b"shell 2"), "Terminal 2");
+        assert_eq!(friendly_name(b"taskmgr"), "Tasks");
+        assert_eq!(friendly_name(b"(idle)"), "Idle");
+        assert_eq!(fmt_pct(123).as_bytes(), b"12.3%");
+        assert_eq!(s(fmt_size(1536)), "1.5 KiB");
+        assert_eq!(fmt_speed(2048).as_bytes(), b"2.0 KiB/s");
+        assert_eq!(fmt_count(1234567).as_bytes(), b"1,234,567");
+        assert_eq!(s(fmt_elapsed(185)), "3 min 05 s");
+        assert_eq!(fmt_ago(0).as_bytes(), b"now");
+        assert_eq!(fmt_ago(12).as_bytes(), b"12 s ago");
+        assert_eq!(fmt_milli(420).as_bytes(), b"0.42");
+        assert_eq!(fmt_log_time(205_100).as_bytes(), b"3:25.100");
+        assert_eq!(level_name(crate::klog::Level::Warn), "WARN");
+        assert_eq!(level_name(crate::klog::Level::Error), "ERROR");
+        assert_eq!(Pressure::Attention.label(), "Elevated");
+        assert_eq!(TaskState::Waiting.label(), "Waiting");
+        assert_eq!(Column::Up.title(), "Uptime");
+        let _pt = LangGuard::new(Lang::Pt);
+        assert_eq!(level_name(crate::klog::Level::Warn), "AVISO");
+        assert_eq!(Column::Name.title(), "Nome");
+    }
+
+    #[test]
     fn system_names() {
         assert!(is_system_name(b"appd"));
         assert!(is_system_name(b"kernel"));
@@ -694,6 +768,7 @@ mod tests {
 
     #[test]
     fn pt_formatting() {
+        let _lang = LangGuard::new(Lang::Pt);
         assert_eq!(fmt_pct(0).as_bytes(), b"0,0%");
         assert_eq!(fmt_pct(123).as_bytes(), b"12,3%");
         assert_eq!(fmt_pct(1000).as_bytes(), b"100,0%");
@@ -898,6 +973,7 @@ mod tests {
 
     #[test]
     fn pressure_levels() {
+        let _lang = LangGuard::new(Lang::Pt);
         assert_eq!(Pressure::of(0, 0), Pressure::Normal);
         assert_eq!(Pressure::of(59, 100), Pressure::Normal);
         assert_eq!(Pressure::of(60, 100), Pressure::Attention);
@@ -925,6 +1001,7 @@ mod tests {
 
     #[test]
     fn table_sorts_every_column_both_ways() {
+        let _lang = LangGuard::new(Lang::Pt);
         let mut rows = [
             task(1, "shell", 3, Some(100), None, 5),
             task(2, "editor", 2, Some(300), Some(128), 50),
@@ -947,6 +1024,7 @@ mod tests {
 
     #[test]
     fn table_sort_is_stable_and_accent_blind() {
+        let _lang = LangGuard::new(Lang::Pt);
         let mut rows = [
             task(1, "a", 1, Some(10), None, 0),
             task(2, "b", 2, Some(10), None, 0),
@@ -965,11 +1043,12 @@ mod tests {
         sort_tasks(&mut rows, Column::Name, false);
         assert_eq!(ids(&rows), [2, 3, 1]);
         assert_eq!(fold("Execução"), "execucao");
-        assert_eq!(fold("Atenção Ônibus"), "atencao onibus");
+        assert_eq!(fold("Atenção Ônibus"), ["aten", "cao onibus"].concat());
     }
 
     #[test]
     fn table_search_and_totals() {
+        let _lang = LangGuard::new(Lang::Pt);
         let r = TaskRow::new(1, b"shelld", TaskKind::Thread, 0, TaskState::Waiting);
         assert!(r.matches(""));
         assert!(r.matches("execucao"));

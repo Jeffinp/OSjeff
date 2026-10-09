@@ -32,11 +32,10 @@ impl Desktop {
             }
         }
         self.files_language_changed_all();
-        self.files_language_changed_all();
-        self.viewer_language_changed_all();
-        self.files_language_changed_all();
         self.viewer_language_changed_all();
         self.editor_language_changed_all();
+        // Tarefas keeps its rows (friendly names) and a footer message.
+        self.tarefas_language_changed();
         // Transient layers hold strings: drop them (they are cheap to open again).
         let sh = &mut self.shell;
         sh.menu = None;

@@ -481,8 +481,15 @@ impl Desktop {
                     ));
                 }
             }
-            for (word, tab) in tarefas::SEARCH_ALIASES {
-                if let Some(r) = search::rank(&q, word)
+            for (word_key, tab) in tarefas::SEARCH_ALIASES {
+                // The alias is known in both languages, like the app names above.
+                if let Some(r) = search::rank(&q, osjeff_core::i18n::tr(word_key))
+                    .into_iter()
+                    .chain(search::rank(
+                        &q,
+                        osjeff_core::i18n::tr_in(osjeff_core::i18n::Lang::En, word_key),
+                    ))
+                    .min()
                     && search::rank(&q, Kind::TaskMgr.label()).is_none()
                 {
                     hits.push((
@@ -491,7 +498,7 @@ impl Desktop {
                             title: osjeff_core::t!(
                                 "search.tasks_tab",
                                 app = Kind::TaskMgr.label(),
-                                tab = tarefas::TAB_NAMES[tab as usize]
+                                tab = tarefas::tab_name(tab)
                             ),
                             sub: String::from(osjeff_core::t!("search.kind_app")),
                             kind: HitKind::Tab(tab),

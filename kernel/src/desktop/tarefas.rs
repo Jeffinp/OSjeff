@@ -24,9 +24,11 @@ use osjeff_core::activity::{
     self, Column, Glide, LoadAvg, Pressure, Rate, TaskKind, TaskRow, TaskState, fold, sample_under,
     smooth121, snapshot, sort_tasks,
 };
+use osjeff_core::i18n;
 use osjeff_core::klog::FixedBuf;
 use osjeff_core::sysif::{DiskUsage, NetStats};
 use osjeff_core::sysmon::{CpuSample, CpuSampler, HIST, MAX_THREADS, Series, nice_ceiling};
+use osjeff_core::{t, tk, tp};
 
 /// Milliseconds the glide between two samples takes.
 pub(crate) const ANIM_MS: u32 = 450;
@@ -200,17 +202,35 @@ impl SysMon {
 
 // ------------------------------------------------------------------ state
 
-pub(crate) const TAB_NAMES: [&str; 5] = ["CPU", "Memória", "Disco", "Rede", "Processos"];
+/// The tab names (catalog keys; see [`tab_names`]).
+pub(crate) const TAB_KEYS: [&str; 5] = [
+    tk!("tasks.tab.cpu"),
+    tk!("tasks.tab.memory"),
+    tk!("tasks.tab.disk"),
+    tk!("tasks.tab.network"),
+    tk!("tasks.tab.processes"),
+];
 pub(crate) const TAB_PROCESSES: u8 = 4;
 
-/// Words Busca also knows Tarefas by, and the tab each opens (the old Monitor lives on as these).
+/// The tab names in the language in effect.
+pub(crate) fn tab_names() -> [&'static str; 5] {
+    TAB_KEYS.map(i18n::tr)
+}
+
+/// The name of tab `tab` in the language in effect.
+pub(crate) fn tab_name(tab: u8) -> &'static str {
+    i18n::tr(TAB_KEYS[usize::from(tab).min(TAB_KEYS.len() - 1)])
+}
+
+/// Words Busca also knows Tarefas by (catalog keys, matched in both languages), and the tab each
+/// opens (the old Monitor lives on as these).
 pub(crate) const SEARCH_ALIASES: [(&str, u8); 6] = [
-    ("Monitor", 0),
-    ("Desempenho", 0),
-    ("Processador", 0),
-    ("Memória", 1),
-    ("Disco", 2),
-    ("Rede", 3),
+    (tk!("tasks.alias.monitor"), 0),
+    (tk!("tasks.alias.performance"), 0),
+    (tk!("tasks.alias.processor"), 0),
+    (tk!("tasks.tab.memory"), 1),
+    (tk!("tasks.tab.disk"), 2),
+    (tk!("tasks.tab.network"), 3),
 ];
 
 const ROW_H: i32 = 28;
@@ -489,6 +509,24 @@ impl Desktop {
         self.tarefas_rebuild(id);
     }
 
+    /// The language changed: the rows hold friendly names and the footer message holds text, so
+    /// build the rows again and drop the message.
+    pub(crate) fn tarefas_language_changed(&mut self) {
+        let ids: Vec<WindowId> = self
+            .wm
+            .windows()
+            .iter()
+            .filter(|w| matches!(w.app.app, App::Tarefas(_)))
+            .map(|w| w.id)
+            .collect();
+        for id in ids {
+            if let Some(t) = self.tarefas_mut(id) {
+                t.msg = None;
+            }
+            self.tarefas_rebuild(id);
+        }
+    }
+
     fn tarefas_rebuild(&mut self, id: WindowId) {
         let Some((tab, sort, desc, query)) = self.tarefas_mut(id).map(|t| {
             let (s, d) = match t.tab {
@@ -598,13 +636,7 @@ impl Desktop {
             r.mem_kib = Some(sched::thread_stack_kib(t));
             rows.push((r, None));
         }
-        let mut idle = TaskRow::new(
-            0x2_0000,
-            b"(ocioso)",
-            TaskKind::System,
-            0,
-            TaskState::Waiting,
-        );
+        let mut idle = TaskRow::new(0x2_0000, b"(idle)", TaskKind::System, 0, TaskState::Waiting);
         idle.cpu_pm = Some(mon.last.idle_pm);
         rows.push((idle, None));
         rows.retain(|(r, _)| r.matches(query));
@@ -669,7 +701,7 @@ impl Desktop {
                 if let Some(w) = self.window_of_pid(row.pid) {
                     self.request_close(w);
                 }
-                alloc::format!("{} encerrado.", row.name)
+                t!("tasks.msg.closed", name = row.name.as_str())
             }
             _ => match row.raw.as_str() {
                 "appd" => {
@@ -684,7 +716,7 @@ impl Desktop {
                     for w in wasm {
                         self.request_close(w);
                     }
-                    alloc::format!("{n} aplicativo(s) encerrado(s).")
+                    tp!("tasks.msg.apps_closed", n)
                 }
                 _ => {
                     // The command line workers: interrupt whatever the terminals run.
@@ -697,7 +729,7 @@ impl Desktop {
                             n += 1;
                         }
                     }
-                    alloc::format!("{n} comando(s) interrompido(s).")
+                    tp!("tasks.msg.cmds_stopped", n)
                 }
             },
         };
@@ -729,7 +761,7 @@ impl Desktop {
             self.open_new(kind);
         }
         if let Some(t) = self.tarefas_mut(id) {
-            t.msg = Some((alloc::format!("{} reiniciado.", row.name), false));
+            t.msg = Some((t!("tasks.msg.restarted", name = row.name.as_str()), false));
         }
     }
 
@@ -1053,7 +1085,7 @@ impl Desktop {
         let l = lay(r);
         let hv = st.hover.get();
         // The tab bar.
-        ui::segmented(c, l.tabs, &TAB_NAMES, st.tab as usize);
+        ui::segmented(c, l.tabs, &tab_names(), st.tab as usize);
         match st.tab {
             0 => self.tf_cpu(c, &l, st),
             1 => self.tf_memory(c, &l, st),
@@ -1121,7 +1153,7 @@ impl Desktop {
         let t = mon.t_q8();
         let now_pm = kit::lerp(mon.prev.busy_pm as i64, mon.last.busy_pm as i64, t) as u32;
         let big = activity::fmt_pct(now_pm);
-        self.section(c, sp.title, "Uso do processador", kit::fb_str(&big));
+        self.section(c, sp.title, t!("tasks.cpu.usage"), kit::fb_str(&big));
 
         let mut raw = [0u32; HIST];
         let n = snapshot(&mon.cpu_total, &mut raw);
@@ -1165,7 +1197,7 @@ impl Desktop {
         self.stat_card(
             c,
             Rect::new(sp.side.x, y, sp.side.w, ch),
-            "Tempo ligado",
+            t!("tasks.cpu.uptime"),
             kit::fb_str(&up),
             "",
         );
@@ -1182,21 +1214,20 @@ impl Desktop {
         self.stat_card(
             c,
             Rect::new(sp.side.x, y, sp.side.w, ch),
-            "Carga média",
+            t!("tasks.cpu.load"),
             kit::fb_str(&ld),
-            "1 min   5 min   15 min",
+            t!("tasks.cpu.load_sub"),
         );
         y += ch + gap;
         let mut th = FixedBuf::<24>::new();
         let _ = write!(th, "{}", sched::thread_count());
-        let mut sub = FixedBuf::<40>::new();
-        let _ = write!(sub, "{} processos", self.procs.len().saturating_sub(1));
+        let sub = tp!("tasks.cpu.processes", self.procs.len().saturating_sub(1));
         self.stat_card(
             c,
             Rect::new(sp.side.x, y, sp.side.w, ch),
-            "Threads",
+            t!("tasks.cpu.threads"),
             kit::fb_str(&th),
-            kit::fb_str(&sub),
+            &sub,
         );
         y += ch + gap;
         if y + 72 <= sp.side.bottom() {
@@ -1213,7 +1244,7 @@ impl Desktop {
                 .unwrap_or_default();
             let r = Rect::new(sp.side.x, y, sp.side.w, 72.min(sp.side.bottom() - y));
             kit::card(c, r);
-            kit::label(c, r.x + 16, r.y + 10, r.w - 32, "Processador");
+            kit::label(c, r.x + 16, r.y + 10, r.w - 32, t!("tasks.cpu.processor"));
             text::draw_ellipsis(
                 c,
                 r.x + 16,
@@ -1229,12 +1260,11 @@ impl Desktop {
                     .unwrap_or("")
                     .split_whitespace()
                     .count();
-                let vm = if si.hypervisor.as_bytes().is_empty() {
-                    ""
+                let sub = if si.hypervisor.as_bytes().is_empty() {
+                    tp!("tasks.cpu.features", feats)
                 } else {
-                    "Virtualizado · "
+                    tp!("tasks.cpu.features_vm", feats)
                 };
-                let sub = alloc::format!("{vm}{feats} recursos");
                 text::draw_ellipsis(
                     c,
                     r.x + 16,
@@ -1260,7 +1290,7 @@ impl Desktop {
         text::draw_left(
             c,
             Rect::new(area.x, area.y, area.w, 24),
-            "Por processo",
+            t!("tasks.cpu.by_process"),
             CALLOUT,
             Weight::Semibold,
             kit::ink(),
@@ -1269,7 +1299,7 @@ impl Desktop {
         let mut y = area.y + 28;
         let fit = ((area.bottom() - y) / 28).max(0) as usize;
         let mut shown = 0;
-        for r in st.rows.iter().filter(|r| r.raw != "(ocioso)") {
+        for r in st.rows.iter().filter(|r| r.raw != "(idle)") {
             if shown >= fit {
                 break;
             }
@@ -1319,7 +1349,7 @@ impl Desktop {
         let t = mon.t_q8();
         let used = mon.heap_now();
         let big = activity::fmt_size(used);
-        self.section(c, sp.title, "Memória em uso", kit::fb_str(&big));
+        self.section(c, sp.title, t!("tasks.mem.in_use_title"), kit::fb_str(&big));
 
         let mut raw = [0u32; HIST];
         let n = snapshot(&mon.heap, &mut raw);
@@ -1374,7 +1404,7 @@ impl Desktop {
             card.x + 16,
             card.y + 12,
             card.w - 32,
-            "Pressão da memória",
+            t!("tasks.mem.pressure"),
         );
         text::draw_ellipsis(
             c,
@@ -1403,7 +1433,7 @@ impl Desktop {
         text::draw_left(
             c,
             Rect::new(card.x + 16, card.bottom() - 26, card.w - 32, 18),
-            "do espaço do sistema",
+            t!("tasks.mem.of_system"),
             FOOTNOTE,
             Weight::Regular,
             kit::ink3(),
@@ -1414,12 +1444,15 @@ impl Desktop {
         kit::card(c, nums);
         let free = total.saturating_sub(used);
         let rows: [(&str, FixedBuf<24>); 5] = [
-            ("Em uso", activity::fmt_size(used).into_fb()),
-            ("Livre", activity::fmt_size(free).into_fb()),
-            ("Total", activity::fmt_size(total).into_fb()),
-            ("Pico (60 s)", activity::fmt_size(mon.heap_peak()).into_fb()),
+            (t!("tasks.mem.in_use"), activity::fmt_size(used).into_fb()),
+            (t!("tasks.mem.free"), activity::fmt_size(free).into_fb()),
+            (t!("tasks.mem.total"), activity::fmt_size(total).into_fb()),
             (
-                "Memória física",
+                t!("tasks.mem.peak"),
+                activity::fmt_size(mon.heap_peak()).into_fb(),
+            ),
+            (
+                t!("tasks.mem.physical"),
                 crate::sysinfo::get().map_or(FixedBuf::<24>::new(), |si| {
                     activity::fmt_size(si.total_ram()).into_fb()
                 }),
@@ -1445,7 +1478,7 @@ impl Desktop {
         text::draw_left(
             c,
             Rect::new(area.x, area.y, area.w, 24),
-            "Por aplicativo",
+            t!("tasks.mem.by_app"),
             CALLOUT,
             Weight::Semibold,
             kit::ink(),
@@ -1453,7 +1486,7 @@ impl Desktop {
         text::draw_right(
             c,
             Rect::new(area.x, area.y, area.w, 24),
-            "valores aproximados",
+            t!("tasks.mem.approx"),
             FOOTNOTE,
             Weight::Regular,
             kit::ink3(),
@@ -1475,7 +1508,7 @@ impl Desktop {
             text::draw_left(
                 c,
                 Rect::new(area.x, y, area.w, 24),
-                "Nenhum aplicativo aberto.",
+                t!("tasks.mem.no_apps"),
                 BODY,
                 Weight::Regular,
                 kit::ink2(),
@@ -1527,8 +1560,11 @@ impl Desktop {
         let usage = VfsUsage;
         let u = vfs::statfs();
         let (title, sub) = match vfs::volume() {
-            vfs::Volume::Disk => ("Disco principal", usage.label().trim_end_matches(" (IDE)")),
-            vfs::Volume::Memory => ("Memória (sem disco)", "Os arquivos somem ao desligar"),
+            vfs::Volume::Disk => (
+                t!("tasks.disk.main"),
+                usage.label().trim_end_matches(" (IDE)"),
+            ),
+            vfs::Volume::Memory => (t!("tasks.disk.ram"), t!("tasks.disk.ram_sub")),
         };
         text::draw_left(
             c,
@@ -1573,11 +1609,17 @@ impl Desktop {
             },
         );
         let cols = [
-            ("Usado", activity::fmt_size(u.used()).into_fb()),
-            ("Livre", activity::fmt_size(u.free).into_fb()),
-            ("Total", activity::fmt_size(u.total).into_fb()),
             (
-                "Arquivos e pastas",
+                t!("tasks.disk.used"),
+                activity::fmt_size(u.used()).into_fb(),
+            ),
+            (t!("tasks.disk.free"), activity::fmt_size(u.free).into_fb()),
+            (
+                t!("tasks.disk.total"),
+                activity::fmt_size(u.total).into_fb(),
+            ),
+            (
+                t!("tasks.disk.items"),
                 if u.inodes_total > 0 {
                     activity::fmt_count(u.inodes_used() as u64).into_fb()
                 } else {
@@ -1600,9 +1642,14 @@ impl Desktop {
         }
 
         // Throughput chart.
-        self.section(c, sp.title, "Leitura e gravação", "");
-        let mut lx = sp.title.x + 170;
-        for (name, col) in [("Leitura", theme::accent()), ("Gravação", kit::amber())] {
+        let io_title = t!("tasks.disk.io");
+        self.section(c, sp.title, io_title, "");
+        // The legend starts after the section title, whatever its width.
+        let mut lx = sp.title.x + text::measure(io_title, CALLOUT, Weight::Semibold) + 24;
+        for (name, col) in [
+            (t!("tasks.disk.read"), theme::accent()),
+            (t!("tasks.disk.write"), kit::amber()),
+        ] {
             c.fill_rrect(
                 Rect::new(lx, sp.title.y + 8, 8, 8),
                 4,
@@ -1634,13 +1681,12 @@ impl Desktop {
         let hover = Self::hovered_sample(st).filter(|&i| i < n);
         let mut tip = FixedBuf::<64>::new();
         if let Some(i) = hover {
-            let _ = write!(
-                tip,
-                "Leitura {} · Gravação {} · {}",
-                activity::fmt_speed(rraw[i] as u64),
-                activity::fmt_speed(wraw[i] as u64),
-                activity::fmt_ago((n - 1 - i) as u32)
-            );
+            let _ = tip.write_str(&t!(
+                "tasks.disk.tip",
+                r = kit::fb_str(&activity::fmt_speed(rraw[i] as u64)),
+                w = kit::fb_str(&activity::fmt_speed(wraw[i] as u64)),
+                ago = kit::fb_str(&activity::fmt_ago((n - 1 - i) as u32))
+            ));
         }
         kit::chart(
             c,
@@ -1669,20 +1715,26 @@ impl Desktop {
         let rate_rd = kit::lerp(mon.disk_rd_prev as i64, mon.disk_rd_rate as i64, t) as u64;
         let rate_wr = kit::lerp(mon.disk_wr_prev as i64, mon.disk_wr_rate as i64, t) as u64;
         let a = activity::fmt_speed(rate_rd);
-        let sub_a = alloc::format!("{} desde a inicialização", activity::fmt_size(rd_total));
+        let sub_a = t!(
+            "tasks.disk.since_boot",
+            size = kit::fb_str(&activity::fmt_size(rd_total))
+        );
         self.stat_card(
             c,
             Rect::new(sp.side.x, sp.side.y, sp.side.w, ch),
-            "Leitura",
+            t!("tasks.disk.read"),
             kit::fb_str(&a),
             &sub_a,
         );
         let b = activity::fmt_speed(rate_wr);
-        let sub_b = alloc::format!("{} desde a inicialização", activity::fmt_size(wr_total));
+        let sub_b = t!(
+            "tasks.disk.since_boot",
+            size = kit::fb_str(&activity::fmt_size(wr_total))
+        );
         self.stat_card(
             c,
             Rect::new(sp.side.x, sp.side.y + ch + 12, sp.side.w, ch),
-            "Gravação",
+            t!("tasks.disk.write"),
             kit::fb_str(&b),
             &sub_b,
         );
@@ -1699,13 +1751,13 @@ impl Desktop {
         kit::card(c, card);
         // Status line.
         let (word, col) = if !has_nic {
-            ("Sem placa de rede", kit::ink3())
+            (t!("tasks.net.no_nic"), kit::ink3())
         } else if !snap.link_up {
-            ("Sem sinal", kit::red())
+            (t!("tasks.net.no_link"), kit::red())
         } else if snap.config.is_none() {
-            ("Procurando endereço", kit::amber())
+            (t!("tasks.net.searching"), kit::amber())
         } else {
-            ("Conectado", kit::green())
+            (t!("tasks.net.connected"), kit::green())
         };
         let w = kit::chip(c, card.x + 20, card.y + 16, 22, word, col);
         if has_nic {
@@ -1768,11 +1820,14 @@ impl Desktop {
                     let _ = write!(dns, "{d}");
                 }
                 if cfg == osjeff_core::net::NetConfig::STATIC_FALLBACK {
-                    let _ = write!(lease, "Estático");
+                    let _ = lease.write_str(t!("tasks.net.static"));
                 } else if let Some(ms) = snap.lease_remaining_ms {
-                    let _ = write!(lease, "{} restantes", activity::fmt_elapsed(ms / 1000));
+                    let _ = lease.write_str(&t!(
+                        "tasks.net.lease_left",
+                        time = kit::fb_str(&activity::fmt_elapsed(ms / 1000))
+                    ));
                 } else {
-                    let _ = write!(lease, "Sem expiração");
+                    let _ = lease.write_str(t!("tasks.net.lease_none"));
                 }
             }
             None => {
@@ -1784,7 +1839,7 @@ impl Desktop {
             }
         }
         let colw = (card.w - 40 - 24) / 2;
-        let left = [("Endereço IP", &ip), ("Máscara", &mask)];
+        let left = [(t!("tasks.net.ip"), &ip), (t!("tasks.net.mask"), &mask)];
         for (i, (k, v)) in left.iter().enumerate() {
             kit::kv(
                 c,
@@ -1796,19 +1851,19 @@ impl Desktop {
         kit::kv(
             c,
             Rect::new(card.x + 20, card.y + 52 + 2 * 26, colw, 26),
-            "Roteador",
+            t!("tasks.net.router"),
             kit::fb_str(&gw),
         );
         kit::kv(
             c,
             Rect::new(card.x + 20 + colw + 24, card.y + 52, colw, 26),
-            "DNS",
+            t!("tasks.net.dns"),
             kit::fb_str(&dns),
         );
         kit::kv(
             c,
             Rect::new(card.x + 20 + colw + 24, card.y + 52 + 26, colw, 26),
-            "Concessão",
+            t!("tasks.net.lease"),
             kit::fb_str(&lease),
         );
         let _ = st;
@@ -1816,9 +1871,13 @@ impl Desktop {
         // Throughput chart.
         let rx_now = kit::lerp(mon.rx_prev as i64, mon.rx_rate as i64, t) as u64;
         let tx_now = kit::lerp(mon.tx_prev as i64, mon.tx_rate as i64, t) as u64;
-        self.section(c, sp.title, "Tráfego", "");
-        let mut lx = sp.title.x + 80;
-        for (name, col) in [("Recebido", theme::accent()), ("Enviado", kit::amber())] {
+        let traffic = t!("tasks.net.traffic");
+        self.section(c, sp.title, traffic, "");
+        let mut lx = sp.title.x + text::measure(traffic, CALLOUT, Weight::Semibold) + 24;
+        for (name, col) in [
+            (t!("tasks.net.received"), theme::accent()),
+            (t!("tasks.net.sent"), kit::amber()),
+        ] {
             c.fill_rrect(
                 Rect::new(lx, sp.title.y + 8, 8, 8),
                 4,
@@ -1850,13 +1909,12 @@ impl Desktop {
         let hover = Self::hovered_sample(st).filter(|&i| i < n);
         let mut tip = FixedBuf::<64>::new();
         if let Some(i) = hover {
-            let _ = write!(
-                tip,
-                "Recebido {} · Enviado {} · {}",
-                activity::fmt_speed(rraw[i] as u64),
-                activity::fmt_speed(traw[i] as u64),
-                activity::fmt_ago((n - 1 - i) as u32)
-            );
+            let _ = tip.write_str(&t!(
+                "tasks.net.tip",
+                rx = kit::fb_str(&activity::fmt_speed(rraw[i] as u64)),
+                tx = kit::fb_str(&activity::fmt_speed(traw[i] as u64)),
+                ago = kit::fb_str(&activity::fmt_ago((n - 1 - i) as u32))
+            ));
         }
         kit::chart(
             c,
@@ -1882,28 +1940,28 @@ impl Desktop {
         // Side cards.
         let ch = 96;
         let a = activity::fmt_speed(rx_now);
-        let sub_a = alloc::format!(
-            "{} · {} pacotes",
-            activity::fmt_size(snap.rx_bytes),
-            activity::fmt_count(snap.rx_packets)
+        let sub_a = tp!(
+            "tasks.net.packets",
+            snap.rx_packets,
+            size = kit::fb_str(&activity::fmt_size(snap.rx_bytes))
         );
         self.stat_card(
             c,
             Rect::new(sp.side.x, sp.side.y, sp.side.w, ch),
-            "Recebido",
+            t!("tasks.net.received"),
             kit::fb_str(&a),
             &sub_a,
         );
         let b = activity::fmt_speed(tx_now);
-        let sub_b = alloc::format!(
-            "{} · {} pacotes",
-            activity::fmt_size(snap.tx_bytes),
-            activity::fmt_count(snap.tx_packets)
+        let sub_b = tp!(
+            "tasks.net.packets",
+            snap.tx_packets,
+            size = kit::fb_str(&activity::fmt_size(snap.tx_bytes))
         );
         self.stat_card(
             c,
             Rect::new(sp.side.x, sp.side.y + ch + 12, sp.side.w, ch),
-            "Enviado",
+            t!("tasks.net.sent"),
             kit::fb_str(&b),
             &sub_b,
         );
@@ -1913,7 +1971,7 @@ impl Desktop {
             self.stat_card(
                 c,
                 Rect::new(sp.side.x, sp.side.y + 2 * (ch + 12), sp.side.w, 72),
-                "Erros e descartes",
+                t!("tasks.net.errors"),
                 &e,
                 "",
             );
@@ -1930,7 +1988,7 @@ impl Desktop {
                 c,
                 l.search,
                 &st.query,
-                "Buscar",
+                t!("tasks.proc.search"),
                 st.search_focus,
                 st.search_focus,
             );
@@ -2139,9 +2197,9 @@ impl Desktop {
         }
         if st.rows.is_empty() {
             let msg = if st.query.is_empty() {
-                "Nada para mostrar."
+                t!("tasks.proc.empty")
             } else {
-                "Nenhum processo corresponde à busca."
+                t!("tasks.proc.no_match")
             };
             text::draw_left(
                 c,
@@ -2172,13 +2230,13 @@ impl Desktop {
             mon.heap_total as u64,
         ));
         let disk_pct = activity::fmt_pct_int(vfs::statfs().used_permille());
-        let summary = alloc::format!(
-            "{} processos · {} threads · CPU {} · Memória {} · Disco {}",
-            totals.processes,
-            totals.threads,
-            kit::fb_str(&cpu),
-            kit::fb_str(&mem_pct),
-            kit::fb_str(&disk_pct)
+        let summary = t!(
+            "tasks.proc.summary",
+            processes = &tp!("tasks.proc.processes", totals.processes),
+            threads = &tp!("tasks.proc.threads", totals.threads),
+            cpu = kit::fb_str(&cpu),
+            mem = kit::fb_str(&mem_pct),
+            disk = kit::fb_str(&disk_pct)
         );
         let btn_x = l.btn_restart.x;
         text::draw_left(
@@ -2192,13 +2250,17 @@ impl Desktop {
         let sel_row = st.sel_index().and_then(|i| st.rows.get(i));
         let detail = match (&st.msg, sel_row) {
             (Some((m, _)), _) => m.clone(),
-            (None, Some(r)) => alloc::format!(
-                "Nome interno: {} · {}",
-                if r.raw.is_empty() { "—" } else { &r.raw },
-                match r.kind {
-                    TaskKind::App => "aplicativo",
-                    TaskKind::Thread => "serviço do sistema",
-                    TaskKind::System => "sistema",
+            (None, Some(r)) => t!(
+                "tasks.proc.detail",
+                raw = if r.raw.is_empty() {
+                    "—"
+                } else {
+                    r.raw.as_str()
+                },
+                kind = match r.kind {
+                    TaskKind::App => t!("tasks.kind.app"),
+                    TaskKind::Thread => t!("tasks.kind.service"),
+                    TaskKind::System => t!("tasks.kind.system"),
                 }
             ),
             _ => String::new(),
@@ -2216,14 +2278,14 @@ impl Desktop {
         ui::push_button(
             c,
             l.btn_restart,
-            "Reiniciar",
+            t!("tasks.restart"),
             ButtonKind::Secondary,
             kit::control_state(hv_key == H_RESTART, down, can_restart),
         );
         ui::push_button(
             c,
             l.btn_end,
-            "Encerrar",
+            t!("tasks.end"),
             if can_end && sel_row.is_some_and(Self::needs_confirm) {
                 ButtonKind::Destructive
             } else {
@@ -2261,7 +2323,7 @@ impl Desktop {
             .confirm
             .and_then(|id| st.rows.iter().find(|r| r.id == id));
         let name = row.map_or("", |r| r.name.as_str());
-        let title = alloc::format!("Encerrar “{name}”?");
+        let title = t!("tasks.confirm.title", name = name);
         text::draw_left(
             c,
             Rect::new(s.x + 20, s.y + 18, s.w - 40, 24),
@@ -2271,11 +2333,11 @@ impl Desktop {
             kit::ink(),
         );
         let msg = match row.map(|r| r.raw.as_str()) {
-            Some("appd") => "Todos os aplicativos instalados serão fechados.",
-            Some(_) => "Os comandos em execução nos terminais serão interrompidos.",
+            Some("appd") => t!("tasks.confirm.appd"),
+            Some(_) => t!("tasks.confirm.shell"),
             None => "",
         };
-        let body_txt = alloc::format!("É um serviço do sistema. {msg}");
+        let body_txt = t!("tasks.confirm.body", msg = msg);
         let lines = text::wrap(&body_txt, BODY, Weight::Regular, s.w - 40, 3);
         for (k, (a, b)) in lines.into_iter().enumerate() {
             text::draw(
@@ -2293,14 +2355,14 @@ impl Desktop {
         ui::push_button(
             c,
             l.sheet_cancel,
-            "Cancelar",
+            t!("common.cancel"),
             ButtonKind::Secondary,
             kit::control_state(hv_key == H_CANCEL, down, true),
         );
         ui::push_button(
             c,
             l.sheet_ok,
-            "Encerrar",
+            t!("tasks.end"),
             ButtonKind::Destructive,
             kit::control_state(hv_key == H_OK, down, true),
         );
