@@ -4,7 +4,7 @@
 //! one flat colour and a single highlight facet, a 1 px bevel) with a bold glyph, from
 //! anti-aliased paths: no bitmap assets. The kernel caches the 128 px sources and the scaled
 //! copies it needs (taskbar, Apps, menus). Small monochrome UI glyphs (search, network,
-//! chevrons, ...) are drawn at the size asked, in the colour asked.
+//! the brand head, chevrons, ...) are drawn at the size asked, in the colour asked.
 //!
 //! Pure and host tested; `cargo test -p kitsune_core -- --ignored dump_icons` with
 //! `ICON_SHEET=/tmp/icons.ppm` writes a contact sheet to look at.
@@ -21,7 +21,6 @@ pub const TILE_R: usize = 28;
 /// The built-in icons.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IconId {
-    Launchpad,
     Terminal,
     Notes,
     Files,
@@ -33,12 +32,14 @@ pub enum IconId {
     Photos,
     Tasks,
     Apps,
+    /// The Kitsune fox on its tile ([`crate::brand`]).
     Brand,
+    /// The fox in front of its crown of tails, no tile (boot splash, About).
+    Halo,
 }
 
 /// Every icon, in a stable order.
 pub const ALL: [IconId; 13] = [
-    IconId::Launchpad,
     IconId::Terminal,
     IconId::Notes,
     IconId::Files,
@@ -51,6 +52,7 @@ pub const ALL: [IconId; 13] = [
     IconId::Tasks,
     IconId::Apps,
     IconId::Brand,
+    IconId::Halo,
 ];
 
 /// `sin` of `deg` degrees in Q14 (16384 = 1.0).
@@ -246,11 +248,35 @@ fn finish(s: &mut Surface, m: &CornerMasks) {
     );
 }
 
+impl IconId {
+    /// Whether the icon is drawn from the brand polygons ([`crate::brand`]): those are
+    /// rendered at the exact size asked, with per-size hints, instead of being scaled from
+    /// the 128 px source.
+    pub fn is_brand_art(self) -> bool {
+        matches!(self, IconId::Apps | IconId::Brand | IconId::Halo)
+    }
+}
+
+/// A brand-art icon (see [`IconId::is_brand_art`]) rendered at `px` x `px`: the fox tile
+/// (`Brand`), the fox with its tails (`Halo`) or the neutral tile with the white fox that
+/// stands for an app without an icon of its own (`Apps`).
+pub fn render_brand(id: IconId, px: usize) -> Surface {
+    use crate::brand::{self, Scheme};
+    let mark = match id {
+        IconId::Halo => brand::halo(&Scheme::KITSUNE),
+        IconId::Apps => brand::fallback(&Scheme::KITSUNE),
+        _ => brand::tile(&Scheme::KITSUNE),
+    };
+    brand::render(&mark, px)
+}
+
 /// Render icon `id` at 128 x 128.
 pub fn render(id: IconId, m: &CornerMasks) -> Surface {
+    if id.is_brand_art() {
+        return render_brand(id, SRC);
+    }
     let mut s = Surface::new(SRC, SRC);
     match id {
-        IconId::Launchpad => launcher(&mut s, m),
         IconId::Terminal => terminal(&mut s, m),
         IconId::Notes => editor(&mut s, m),
         IconId::Files => files(&mut s, m),
@@ -261,8 +287,7 @@ pub fn render(id: IconId, m: &CornerMasks) -> Surface {
         IconId::Console => console(&mut s, m),
         IconId::Photos => viewer(&mut s, m),
         IconId::Tasks => tasks(&mut s, m),
-        IconId::Apps => generic(&mut s, m),
-        IconId::Brand => brand(&mut s, m),
+        IconId::Apps | IconId::Brand | IconId::Halo => unreachable!("brand art returns early"),
     }
     finish(&mut s, m);
     s
@@ -277,22 +302,6 @@ fn ring(s: &mut Surface, cx: i32, cy: i32, r: i32, t: i32, c: u32) {
     p.ellipse(q(cx), q(cy), q(r), q(r));
     p.ellipse_hole(q(cx), q(cy), q(r - t), q(r - t));
     fill(s, &p, c);
-}
-
-fn launcher(s: &mut Surface, m: &CornerMasks) {
-    tile(s, 0x7C83FF, 0x4B3FE0, m);
-    for r in 0..3 {
-        for c in 0..3 {
-            let accent = r == 1 && c == 1;
-            circle(
-                s,
-                36 + c * 28,
-                36 + r * 28,
-                if accent { 11 } else { 9 },
-                Paint::Solid(if accent { rgb(0x5EEAD4) } else { WHITE }),
-            );
-        }
-    }
 }
 
 fn terminal(s: &mut Surface, m: &CornerMasks) {
@@ -445,29 +454,6 @@ fn tasks(s: &mut Surface, m: &CornerMasks) {
         b.rrect(q(x), q(108 - h), q(16), q(*h), q(6));
         fill(s, &b, if *accent { rgb(0x5EEAD4) } else { WHITE });
     }
-}
-
-fn generic(s: &mut Surface, m: &CornerMasks) {
-    tile(s, 0x8EA0C8, 0x44527A, m);
-    for (x, y) in [(24, 24), (24, 68), (68, 68)] {
-        let mut k = Path::new();
-        k.rrect(q(x), q(y), q(36), q(36), q(10));
-        fill(s, &k, WHITE);
-    }
-    let mut d = Path::new();
-    d.polygon(&[
-        (q(86), q(20)),
-        (q(108), q(42)),
-        (q(86), q(64)),
-        (q(64), q(42)),
-    ]);
-    fill(s, &d, rgb(0x5EEAD4));
-}
-
-fn brand(s: &mut Surface, m: &CornerMasks) {
-    tile(s, 0x6366F8, 0x4F46E5, m);
-    let chev = [(q(46), q(34)), (q(80), q(64)), (q(46), q(94))];
-    fill(s, &stroke_path(&chev, q(15), true), rgb(0xFFFFFF));
 }
 
 /// An installed app's own icon (`w x h` RGBA bytes, straight alpha) centred on a
@@ -668,8 +654,10 @@ pub fn glyph(g: Glyph, px: usize, c: u32) -> Surface {
         }
         Glyph::Minus => stroke(&mut s, &[(3, 8), (13, 8)], 2),
         Glyph::Brand => {
-            let pts = [pt(5, 2), pt(11, 8), pt(5, 14)];
-            s.fill_path(&stroke_path(&pts, w(2) + 96, true), Paint::Solid(c));
+            // The mono fox head, tuned for this size ([`crate::brand`]), in the colour asked
+            // (its alpha included).
+            s = crate::brand::render(&crate::brand::mono(c & 0x00FF_FFFF), px);
+            s.fade(((c >> 24) * 256 + 127) / 255);
         }
         Glyph::Sun => {
             let mut d = Path::new();
@@ -870,7 +858,8 @@ mod tests {
     #[test]
     fn every_icon_is_a_squircle_with_content() {
         let m = masks();
-        for id in ALL {
+        // The halo is the one mark without a tile: transparent background, no squircle.
+        for id in ALL.into_iter().filter(|&i| i != IconId::Halo) {
             let s = render(id, &m);
             assert_eq!((s.w, s.h), (SRC, SRC));
             // Transparent outside the rounded corner, opaque in the middle area.

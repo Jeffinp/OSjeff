@@ -1,5 +1,6 @@
 //! Animated boot splash drawn before the desktop starts: the deep night wallpaper,
-//! the brand mark, the name and a slim progress bar.
+//! the brand mark (the fox with its tails), the name and a slim progress bar. The mark and
+//! the name fade in over the first 0.7 s and out over the last 0.4 s.
 
 use crate::fb::{Canvas, Color, Corner};
 use crate::text::{self, BODY, Weight};
@@ -9,6 +10,33 @@ use kitsune_core::wallpaper::{PRESETS, lerp_rgb};
 
 fn rgb24(v: u32) -> Color {
     Color::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+}
+
+/// Side of the brand mark on the splash.
+const MARK: i32 = 232;
+
+/// Renders the brand mark once, so the first splash frame does not pay for it (the kernel
+/// logs how long this took).
+pub fn prewarm() {
+    let _ = crate::icons::surface(crate::icons::Icon::Halo, MARK);
+}
+
+/// Opacity (`0..=256`) of the mark and the name at `progress` of the splash: a quick fade
+/// in, steady, a short fade out.
+fn fade(progress: f32) -> u32 {
+    const IN: f32 = 0.14; // 0.7 s of 5
+    const OUT: f32 = 0.08; // 0.4 s of 5
+    let p = progress.clamp(0.0, 1.0);
+    let a = if p < IN {
+        p / IN
+    } else if p > 1.0 - OUT {
+        (1.0 - p) / OUT
+    } else {
+        1.0
+    };
+    // Smoothstep, so both ends ease.
+    let a = a * a * (3.0 - 2.0 * a);
+    (a * 256.0) as u32
 }
 
 /// Renders one frame of the splash. `progress` in `0.0..=1.0` fills the bar.
@@ -30,34 +58,43 @@ pub fn draw_splash(c: &mut Canvas, progress: f32) {
         c.glow(cx, cy, rad, rgb24(b.color), b.alpha as u32, &lut);
     }
 
-    // Brand mark with a soft halo, the name below it.
+    // Brand mark with a soft glow, the name below it.
+    let a = fade(progress);
     let cx = w as i32 / 2;
-    let mark = 112;
-    let gy = h as i32 * 30 / 100;
-    c.glow(cx, gy + mark / 2, mark * 2, theme::accent(), 70, &lut);
-    c.blit_surface(
-        crate::icons::surface(crate::icons::Icon::Brand, mark),
-        cx - mark / 2,
-        gy,
-        256,
+    let gy = h as i32 * 19 / 100;
+    c.glow(
+        cx,
+        gy + MARK / 2,
+        MARK * 2,
+        theme::accent(),
+        70 * a / 256,
+        &lut,
     );
-    let name = Rect::new(0, gy + mark + 22, w as i32, 48);
-    text::draw_centered(
+    c.blit_surface(
+        crate::icons::surface(crate::icons::Icon::Halo, MARK),
+        cx - MARK / 2,
+        gy,
+        a,
+    );
+    let name = Rect::new(0, gy + MARK + 8, w as i32, 48);
+    text::draw_centered_a(
         c,
         name,
         "Kitsune",
         40,
         Weight::Semibold,
         Color::rgb(255, 255, 255),
+        a as u16,
     );
     let sub = Rect::new(0, name.bottom() + 2, w as i32, 24);
-    text::draw_centered(
+    text::draw_centered_a(
         c,
         sub,
         "Sistema operacional",
         BODY,
         Weight::Regular,
         Color::rgb(0xC4, 0xC6, 0xE8),
+        a as u16,
     );
 
     // Slim progress bar: translucent track, accent fill.

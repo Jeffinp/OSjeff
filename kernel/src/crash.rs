@@ -229,9 +229,9 @@ fn paint(
     canvas.fill_rect(0, 0, w, h, BG);
     canvas.fill_rect(0, 0, w, banner_h, BANNER);
     let title = match kind {
-        Kind::Panic => "KERNEL PANIC",
-        Kind::Exception => "CPU EXCEPTION",
-        Kind::Unsupported => "UNSUPPORTED SCREEN",
+        Kind::Panic => "KITSUNE - KERNEL PANIC",
+        Kind::Exception => "KITSUNE - CPU EXCEPTION",
+        Kind::Unsupported => "KITSUNE - UNSUPPORTED SCREEN",
     };
     font::draw_text(&mut canvas, margin, 2 * tscale, title, WHITE, tscale);
 

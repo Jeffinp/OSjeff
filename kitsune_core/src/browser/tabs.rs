@@ -200,10 +200,18 @@ pub fn tab_title_in(lang: Lang, title: &str, url: &str) -> String {
     }
 }
 
+/// The badge of the browser's own pages (`kitsune://...`): not a letter but the mark of the
+/// system. A private-use code point, so it can travel in the same `char` as the letters; the
+/// kernel draws the fox head for it.
+pub const BRAND_BADGE: char = '\u{E000}';
+
 /// The letter on a tab's badge (there is no favicon): the first letter of the host, or of the
 /// title when the host has none (an IP address), else its first digit; upper case; `•` when
-/// there is nothing.
+/// there is nothing. The browser's own pages get [`BRAND_BADGE`].
 pub fn tab_badge(title: &str, url: &str) -> char {
+    if super::is_internal_url(url.trim()) {
+        return BRAND_BADGE;
+    }
     let host = host_of(url.trim());
     let from = |s: &str, f: fn(&char) -> bool| {
         s.chars()
@@ -373,6 +381,13 @@ mod tests {
         assert_eq!(&u[host_range(u).0..host_range(u).1], "kitsune://favoritos");
         let u = "osjeff://favoritos?rm=1";
         assert_eq!(&u[host_range(u).0..host_range(u).1], "osjeff://favoritos");
+    }
+
+    #[test]
+    fn own_pages_wear_the_brand_badge() {
+        assert_eq!(tab_badge("", "kitsune://sobre"), BRAND_BADGE);
+        assert_eq!(tab_badge("x", " osjeff://favoritos "), BRAND_BADGE);
+        assert_eq!(tab_badge("", "https://example.com"), 'E');
     }
 
     #[test]

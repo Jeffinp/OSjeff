@@ -47,6 +47,11 @@ pub(crate) fn badge_color(seed: &str) -> Color {
 
 /// A rounded badge with a letter: the favicon-less site mark.
 fn letter_badge(c: &mut Canvas, r: Rect, letter: char, seed: &str, squircle: bool) {
+    if letter == tabs_model::BRAND_BADGE {
+        // The browser's own pages: the fox, like a favicon (its tile has the corners).
+        c.blit_surface(icons::surface(Icon::Brand, r.w.min(r.h)), r.x, r.y, 256);
+        return;
+    }
     let style = if squircle {
         Corner::Squircle
     } else {

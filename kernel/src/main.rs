@@ -391,7 +391,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         sched::spawn("logd", logd::worker);
     });
 
-    // Boot splash: progress tracks real elapsed time (>= 5 seconds).
+    // Boot splash: progress tracks real elapsed time (>= 5 seconds). The brand mark is drawn
+    // once up front; its cost is logged below, the TSC is already calibrated.
+    let brand_t0 = io::rdtsc();
+    boot::prewarm();
+    let brand_cyc = io::rdtsc().wrapping_sub(brand_t0);
+    klog!(
+        Info,
+        "boot: brand mark rendered in {} us ({} Mcycles)",
+        brand_cyc.saturating_mul(1000) / tsc_khz.max(1),
+        brand_cyc / 1_000_000
+    );
     run_splash(&mut *framebuffer, &mut *back, info, n);
     trace::mark("splash end (artificial >= 5 s)");
 

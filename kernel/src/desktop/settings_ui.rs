@@ -1268,10 +1268,11 @@ fn page_about(ui: &mut Ui<'_, '_>, d: &Desktop) {
     if let Some(c) = ui.c.as_deref_mut()
         && ui.view.intersection(&head).is_some()
     {
-        icons::blit(c, Icon::Brand, head.x, head.y, 72, 256);
+        // The fox with its tails: a wide mark, so it gets a wider box than the old square icon.
+        icons::blit(c, Icon::Halo, head.x - 6, head.y - 4, 96, 256);
         text::draw_left(
             c,
-            Rect::new(head.x + 92, head.y + 6, head.w - 92, 32),
+            Rect::new(head.x + 100, head.y + 6, head.w - 100, 32),
             "Kitsune",
             TITLE1,
             Weight::Semibold,
@@ -1288,7 +1289,7 @@ fn page_about(ui: &mut Ui<'_, '_>, d: &Desktop) {
         );
         text::draw_left(
             c,
-            Rect::new(head.x + 92, head.y + 42, head.w - 92, 22),
+            Rect::new(head.x + 100, head.y + 42, head.w - 100, 22),
             &v,
             BODY,
             Weight::Regular,

@@ -270,6 +270,14 @@ pub fn mono(color: u32) -> Mark {
     Mark { tile: None, polys }
 }
 
+/// The neutral tile of an app that brings no icon of its own: a slate tile with the white
+/// mono fox, so the fallback is recognisably "a Kitsune app".
+pub fn fallback(_s: &Scheme) -> Mark {
+    let mut m = mono(0xF2F3FA);
+    m.tile = Some(0x4A5173);
+    m
+}
+
 // ----------------------------------------------------------------------- the halo
 
 /// The spine of a tail pointing up from the pivot at the origin, in coordinate units:
@@ -307,7 +315,7 @@ fn tail_shapes() -> (Pts, Pts) {
 /// Where the tails fan out from (behind the head).
 const HALO_PIVOT: (i32, i32) = (256, 372);
 /// Scale of the head in front of the crown, in 1/256.
-const HALO_HEAD_K: i32 = 134;
+const HALO_HEAD_K: i32 = 150;
 /// Where the chin of the small head sits.
 const HALO_CHIN_Y: i32 = 478;
 
@@ -409,7 +417,13 @@ pub fn hint(px: usize) -> Hint {
         eye_pct,
         nose_pct,
         ear_inner,
-        supersample: if px <= 32 { 8 } else { 4 },
+        supersample: match px {
+            0..=32 => 8,
+            33..=96 => 4,
+            // Large renders: the path coverage is exact already, 2x only evens out the
+            // seams, and it keeps the cost of the splash mark low.
+            _ => 2,
+        },
     }
 }
 

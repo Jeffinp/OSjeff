@@ -555,7 +555,7 @@ fn gallery_colors(c: &mut Canvas, body: Rect, pad: i32, p: &Palette) {
 fn gallery_icons(c: &mut Canvas, body: Rect, pad: i32, p: &Palette) {
     let all = [
         Icon::Brand,
-        Icon::Launchpad,
+        Icon::Halo,
         Icon::Files,
         Icon::Browser,
         Icon::Terminal,

@@ -1,5 +1,8 @@
 //! App icons: procedural squircle tiles (`kitsune_core::iconart`), drawn at 128 px
-//! once and cached per size so every blit is a plain surface copy.
+//! once and cached per size so every blit is a plain surface copy. The icons made from the
+//! brand polygons (`kitsune_core::brand`: the fox tile, the fox with its tails, the fallback
+//! of an app without an icon) are drawn at the exact size asked, with the per-size hints, not
+//! scaled from the 128 px source.
 //!
 //! The cache is bounded (it is cleared when it outgrows [`MAX_SCALED`] entries)
 //! and used only from the compositor thread. Icons do not depend on the
@@ -15,6 +18,8 @@ use kitsune_core::raster::Surface;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Icon {
     Brand,
+    /// The fox with its crown of tails (boot splash, About).
+    Halo,
     Launchpad,
     Terminal,
     Editor,
@@ -32,8 +37,8 @@ pub enum Icon {
 impl Icon {
     fn id(self) -> IconId {
         match self {
-            Icon::Brand => IconId::Brand,
-            Icon::Launchpad => IconId::Launchpad,
+            Icon::Brand | Icon::Launchpad => IconId::Brand,
+            Icon::Halo => IconId::Halo,
             Icon::Terminal => IconId::Terminal,
             Icon::Editor => IconId::Notes,
             Icon::TaskMgr => IconId::Tasks,
@@ -85,6 +90,11 @@ pub fn surface(icon: Icon, size: i32) -> &'static Surface {
     if c.scaled.len() >= MAX_SCALED {
         c.scaled.clear();
     }
+    if id.is_brand_art() {
+        c.scaled
+            .push((id, size as u16, iconart::render_brand(id, size)));
+        return &c.scaled.last().expect("just pushed").2;
+    }
     let si = match c.sources.iter().position(|(i, _)| *i == id) {
         Some(i) => i,
         None => {
@@ -123,9 +133,9 @@ pub fn bytes() -> usize {
 /// An installed app's own 24x24 (or any size) RGBA icon on a squircle tile, `size`
 /// pixels square. Not cached here: the caller keeps the result.
 pub fn app_tile(rgba: Option<&[u8]>, size: i32) -> Surface {
-    let s = match rgba {
-        Some(px) => iconart::wrap_app_icon(px, 24, 24, crate::fb::masks()),
-        None => iconart::render(IconId::Apps, crate::fb::masks()),
-    };
-    s.resized(size.clamp(8, 256) as usize, size.clamp(8, 256) as usize)
+    let side = size.clamp(8, 256) as usize;
+    match rgba {
+        Some(px) => iconart::wrap_app_icon(px, 24, 24, crate::fb::masks()).resized(side, side),
+        None => iconart::render_brand(IconId::Apps, side),
+    }
 }

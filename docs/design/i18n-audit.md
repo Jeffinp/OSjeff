@@ -27,8 +27,8 @@ de falha ficam em inglês de propósito e não entram na conta.
 | Apps de terceiros (WASM) | 8 | 46 | 0 | 40 | 1 | 83 |
 | Kit de componentes | 0 | 0 | 0 | 0 | 0 | 75 |
 | Sistema (logs e tela de falha: ficam em inglês) | 7 | 33 | 0 | 25 | 1 | 46 |
-| Outros | 4 | 12 | 0 | 5 | 1 | 63 |
-| **Total** | 54 | 249 | 0 | 173 | 16 | 1412 |
+| Outros | 5 | 18 | 0 | 9 | 1 | 63 |
+| **Total** | 55 | 255 | 0 | 177 | 16 | 1412 |
 
 Cada app só mexe nos arquivos da sua linha; os arquivos de `Kit de componentes` e do `Shell` já
 foram tratados (Shell) ou só mudam se um app precisar de uma chave nova (use o prefixo do próprio app).
@@ -162,6 +162,7 @@ núcleo sem dono claro.
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
 | `kitsune_core/src/base64.rs` | 4 | 0 | 3 | 1 |
+| `kitsune_core/src/brand.rs` | 6 | 0 | 4 | 0 |
 | `kitsune_core/src/compositor/sim/paint.rs` | 1 | 0 | 1 | 0 |
 | `kitsune_core/src/i18n/audit.rs` | 1 | 0 | 1 | 0 |
 | `kitsune_core/src/i18n/template.rs` | 6 | 0 | 0 | 0 |
@@ -176,10 +177,10 @@ núcleo sem dono claro.
 
 | Arquivo:linha | Texto | Tipo |
 |---|---|---|
-| `kernel/src/crash.rs:234` | `UNSUPPORTED SCREEN` | en |
+| `kernel/src/crash.rs:234` | `KITSUNE - UNSUPPORTED SCREEN` | en |
 | `kernel/src/crash.rs:271` | `ERROR  : {code:#018x}` | en |
 | `kernel/src/crash.rs:280` | `The system is halted. Reset or power-cycle the machine to restart.\nThe same report was written to the seri...` | misto |
-| `kernel/src/desktop/browser_ui.rs:134` | `load to first paint` | en |
+| `kernel/src/desktop/browser_ui.rs:139` | `load to first paint` | en |
 | `kernel/src/interrupts.rs:314` | `stack overflow in thread '{owner}': guard page hit at {cr2:#x} ({code:?})` | en |
 | `kernel/src/interrupts.rs:321` | `page fault accessing {cr2:#x}: {code:?}` | en |
 | `kernel/src/io.rs:12` | `in al, dx` | en |
@@ -197,9 +198,9 @@ núcleo sem dono claro.
 | `kernel/src/main.rs:326` | `dhcp done` | en |
 | `kernel/src/main.rs:364` | `storage init done` | en |
 | `kernel/src/main.rs:387` | `ui text engine ready` | en |
-| `kernel/src/main.rs:402` | `Desktop::new (fs load from ATA) done` | en |
-| `kernel/src/main.rs:410` | `wallpaper painted` | en |
-| `kernel/src/main.rs:722` | `the kernel panicked` | en |
+| `kernel/src/main.rs:412` | `Desktop::new (fs load from ATA) done` | en |
+| `kernel/src/main.rs:420` | `wallpaper painted` | en |
+| `kernel/src/main.rs:732` | `the kernel panicked` | en |
 | `kernel/src/netstack.rs:708` | `tcp stream error` | en |
 | `kernel/src/trace.rs:658` | `The quick brown fox jumps over the lazy dog 0123` | en |
 | `kernel/src/trace.rs:736` | `The quick brown fox jumps over the lazy dog 0123` | en |
@@ -249,6 +250,10 @@ núcleo sem dono claro.
 | `kitsune_core/src/bmp.rs:76` | `invalid bmp dimensions` | en |
 | `kitsune_core/src/bmp.rs:79` | `invalid bmp colour masks` | en |
 | `kitsune_core/src/bmp.rs:80` | `bmp image: {e}` | en |
+| `kitsune_core/src/brand.rs:593` | `light face` | en |
+| `kitsune_core/src/brand.rs:603` | `tail (dark)` | en |
+| `kitsune_core/src/brand.rs:617` | `  <title>{title}</title>` | en |
+| `kitsune_core/src/brand.rs:637` | `  <path fill="{}" fill-rule="evenodd" d="{d}"/> <!-- silhouette; eyes and nose are holes -->` | en |
 | `kitsune_core/src/compositor/sim/paint.rs:77` | `layer {:?} wrote ({x},{y}) outside its footprint {:?}` | en |
 | `kitsune_core/src/editor2/mod.rs:353` | `line index out of sync with the text` | en |
 | `kitsune_core/src/editor2/mod.rs:356` | `cursor past the end` | en |
@@ -402,7 +407,7 @@ decida caso a caso se vão para o catálogo.
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 814 | `UTC {:02}:{:02}:{:02}` | neutro | `settings.utc_02_02_02` |
-| 1275 | `Kitsune` | neutro | `settings.kitsune` |
+| 1276 | `Kitsune` | neutro | `settings.kitsune` |
 
 **`kitsune_core/src/settings.rs`** (1)
 
@@ -815,14 +820,14 @@ decida caso a caso se vão para o catálogo.
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 48 | `Kitsune` | neutro | `sys.kitsune` |
-| 57 | `Sistema operacional` | pt | `sys.sistema_operacional` |
+| 83 | `Kitsune` | neutro | `sys.kitsune` |
+| 93 | `Sistema operacional` | pt | `sys.sistema_operacional` |
 
 **`kernel/src/crash.rs`** (8)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 234 | `UNSUPPORTED SCREEN` | en | `sys.unsupported_screen` |
+| 234 | `KITSUNE - UNSUPPORTED SCREEN` | en | `sys.kitsune_unsupported_screen` |
 | 257 | `thread : {}` | neutro | `sys.thread` |
 | 265 | `RIP    : {:#018x}` | neutro | `sys.rip_018x` |
 | 267 | `RSP    : {rsp:#018x}` | neutro | `sys.rsp_rsp_018x` |
@@ -835,7 +840,7 @@ decida caso a caso se vão para o catálogo.
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 134 | `load to first paint` | en | `sys.load_first_paint` |
+| 139 | `load to first paint` | en | `sys.load_first_paint` |
 
 **`kernel/src/interrupts.rs`** (2)
 
@@ -868,9 +873,9 @@ decida caso a caso se vão para o catálogo.
 | 326 | `dhcp done` | en | `sys.dhcp_done` |
 | 364 | `storage init done` | en | `sys.storage_init_done` |
 | 387 | `ui text engine ready` | en | `sys.ui_text_engine_ready` |
-| 402 | `Desktop::new (fs load from ATA) done` | en | `sys.desktop_new_fs_load` |
-| 410 | `wallpaper painted` | en | `sys.wallpaper_painted` |
-| 722 | `the kernel panicked` | en | `sys.kernel_panicked` |
+| 412 | `Desktop::new (fs load from ATA) done` | en | `sys.desktop_new_fs_load` |
+| 420 | `wallpaper painted` | en | `sys.wallpaper_painted` |
+| 732 | `the kernel panicked` | en | `sys.kernel_panicked` |
 
 **`kernel/src/trace.rs`** (2)
 
@@ -889,6 +894,17 @@ decida caso a caso se vão para o catálogo.
 | 30 | `invalid base64 length` | en | `misc.invalid_base64_length` |
 | 31 | `base64 padding before the end` | en | `misc.base64_padding_before_end` |
 | 32 | `base64 data too large` | misto | `misc.base64_data_too_large` |
+
+**`kitsune_core/src/brand.rs`** (6)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 593 | `light face` | en | `misc.light_face` |
+| 603 | `tail (dark)` | en | `misc.tail_dark` |
+| 617 | `  <title>{title}</title>` | en | `misc.title_title_title` |
+| 621 | `  <rect width="{GRID}" height="{GRID}" rx="{}" fill="{}"/> <!-- tile -->` | neutro | `misc.rect_width_grid_height` |
+| 637 | `  <path fill="{}" fill-rule="evenodd" d="{d}"/> <!-- silhouette; eyes and nose are holes -->` | en | `misc.path_fill_fill_rule` |
+| 644 | `  <polygon fill="{}" points="{}"/> <!-- {} -->` | neutro | `misc.polygon_fill_points` |
 
 **`kitsune_core/src/compositor/sim/paint.rs`** (1)
 
