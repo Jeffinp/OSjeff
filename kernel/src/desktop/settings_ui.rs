@@ -17,12 +17,12 @@ use crate::text::{self, BODY, CALLOUT, CAPTION, FOOTNOTE, TITLE1, TITLE2, Weight
 use core::cell::Cell;
 use osjeff_core::activity::{self, Glide};
 use osjeff_core::hw::rtc::{DateTime, Field, local_to_utc, utc_to_local};
-use osjeff_core::i18n::{self, Civil, DateStyle, Lang};
+use osjeff_core::i18n::{self, Arg, Civil, DateStyle, Lang};
 use osjeff_core::iconart::Glyph;
 use osjeff_core::keymap::Layout;
 use osjeff_core::settings::{
-    ACCENT_NAMES, ACCENTS, DOCK_ZOOM_MAX, PATH_CAP, Settings, TIMEZONES, TOAST_SECS_MAX,
-    TOAST_SECS_MIN, WallpaperChoice, search_timezones, utc_label,
+    ACCENTS, DOCK_ZOOM_MAX, PATH_CAP, Settings, TIMEZONES, TOAST_SECS_MAX, TOAST_SECS_MIN,
+    WallpaperChoice, accent_name, city_name, search_timezones, utc_label,
 };
 use osjeff_core::sysif::{DiskUsage, SettingsStore};
 use osjeff_core::wallpaper::{self, PRESETS, Style};
@@ -100,7 +100,9 @@ pub(crate) struct SettingsState {
     path: [u8; PATH_CAP],
     path_len: usize,
     focus: Focus,
-    msg: Option<(String, bool)>,
+    /// A message under a control: the catalog key, its `{why}` argument if any, and whether
+    /// it is an error. Kept as a key so it follows the language.
+    msg: Option<(&'static str, String, bool)>,
     /// The date and time being edited (local time) on "Data e hora".
     edit: DateTime,
     kbd_test: Vec<u8>,
@@ -159,8 +161,15 @@ impl SettingsState {
         st
     }
 
-    fn say(&mut self, m: &str, error: bool) {
-        self.msg = Some((String::from(m), error));
+    fn say(&mut self, key: &'static str, error: bool) {
+        self.msg = Some((key, String::new(), error));
+    }
+
+    /// The message in the language in effect.
+    fn message(&self) -> Option<(String, bool)> {
+        self.msg
+            .as_ref()
+            .map(|(key, why, err)| (i18n::tr_fmt(key, &[("why", Arg::Str(why.as_str()))]), *err))
     }
 
     pub(crate) fn heap_bytes(&self) -> usize {
@@ -451,29 +460,37 @@ fn page(ui: &mut Ui<'_, '_>, d: &Desktop) {
 fn page_appearance(ui: &mut Ui<'_, '_>) {
     use osjeff_core::style::AppearanceSetting as A;
     let s = ui.s;
-    ui.title("Aparência");
-    ui.header("Tema");
+    ui.title(t!("settings.sec.appearance"));
+    ui.header(t!("settings.theme"));
     let card = ui.card(ROW);
     let r = ui.row(card, 0);
-    ui.label(r, "Tema", "", true);
+    ui.label(r, t!("settings.theme"), "", true);
     let sel = match s.appearance {
         A::Auto => 0,
         A::Light => 1,
         A::Dark => 2,
     };
     let seg = Rect::new(r.right() - 16 - 300, r.y + 10, 300, 28);
-    ui.segmented(seg, &["Automático", "Claro", "Escuro"], sel, A_THEME);
+    ui.segmented(
+        seg,
+        &[
+            t!("quick.appearance.auto"),
+            t!("quick.appearance.light"),
+            t!("quick.appearance.dark"),
+        ],
+        sel,
+        A_THEME,
+    );
 
-    ui.header("Cor de destaque");
+    ui.header(t!("quick.accent"));
     let card = ui.card(96);
     let pitch = ((card.w - 32 - 28) / 7).max(30);
-    for i in 0..8usize {
+    for (i, &rgb) in ACCENTS.iter().enumerate() {
         let sw = Rect::new(card.x + 16 + i as i32 * pitch, card.y + 18, 28, 28);
         let hov = ui.hovered(A_SWATCH + i as u32);
         if let Some(c) = ui.c.as_deref_mut()
             && ui.view.intersection(&card).is_some()
         {
-            let rgb = ACCENTS[i];
             let col = Color::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
             if s.accent as usize == i {
                 c.stroke_rrect(sw.inflated(3), 17, Corner::Circle, col, 256);
@@ -483,7 +500,7 @@ fn page_appearance(ui: &mut Ui<'_, '_>) {
             }
             c.fill_rrect(sw, 14, Corner::Circle, col, 256);
             c.stroke_rrect(sw, 14, Corner::Circle, Color::rgb(0, 0, 0), 36);
-            let name = ACCENT_NAMES[i];
+            let name = accent_name(i);
             let mid = sw.x + sw.w / 2;
             let nw = text::measure(name, CAPTION, Weight::Regular) + 8;
             text::draw_centered(
@@ -506,27 +523,27 @@ fn page_appearance(ui: &mut Ui<'_, '_>) {
         ui.hit(sw.inflated(6), A_SWATCH + i as u32);
     }
 
-    ui.header("Movimento");
+    ui.header(t!("quick.motion"));
     let card = ui.card(ROW);
     let k = ui.st.knobs[0].value();
     ui.row_switch(
         card,
         0,
-        "Reduzir movimento",
-        "As transições terminam na hora",
+        t!("settings.motion.reduce"),
+        t!("settings.motion.reduce_sub"),
         k,
         A_MOTION,
     );
 
-    ui.header("Notificações");
+    ui.header(t!("centre.notifications"));
     let card = ui.card(2 * ROW);
     let k = ui.st.knobs[1].value();
-    ui.row_switch(card, 0, "Mostrar notificações", "", k, A_TOASTS);
-    let secs = alloc::format!("{} s", s.toast_secs);
+    ui.row_switch(card, 0, t!("settings.notif.show"), "", k, A_TOASTS);
+    let secs = t!("settings.unit_secs", n = s.toast_secs as i64);
     ui.row_slider(
         card,
         1,
-        "Duração",
+        t!("settings.notif.duration"),
         s.toast_secs as i32,
         (TOAST_SECS_MIN as i32, TOAST_SECS_MAX as i32),
         &secs,
@@ -537,7 +554,7 @@ fn page_appearance(ui: &mut Ui<'_, '_>) {
 
 fn page_wallpaper(ui: &mut Ui<'_, '_>) {
     let s = ui.s;
-    ui.title("Papel de parede");
+    ui.title(t!("settings.sec.wallpaper"));
     // The grid: five presets and the user's image, three to a row.
     let gap = 16;
     let tw = (ui.w - 2 * gap) / 3;
@@ -563,7 +580,7 @@ fn page_wallpaper(ui: &mut Ui<'_, '_>) {
             }
             let name = if let Some(p) = PRESETS.get(i) {
                 preview(c, t, p);
-                p.name
+                p.name()
             } else {
                 // The user's picture: a framed landscape on a dark tile.
                 c.fill_rrect(t, 10, Corner::Circle, Color::rgb(0x2B, 0x2F, 0x45), 256);
@@ -581,7 +598,7 @@ fn page_wallpaper(ui: &mut Ui<'_, '_>) {
                     Color::rgb(0x3F, 0xB9, 0x8A),
                     256,
                 );
-                "Sua imagem"
+                t!("settings.wp.yours")
             };
             text::draw_centered(
                 c,
@@ -601,27 +618,27 @@ fn page_wallpaper(ui: &mut Ui<'_, '_>) {
     let rows = tiles.div_ceil(3) as i32;
     ui.y = top + rows * (th + 36) + 4;
 
-    ui.header("Imagem do usuário");
+    ui.header(t!("settings.wp.custom"));
     let card = ui.card(110);
     let field = Rect::new(card.x + 16, card.y + 16, card.w - 32 - 88 - 8, 28);
     let focus = ui.st.focus == Focus::Path;
     let path = String::from_utf8_lossy(&ui.st.path[..ui.st.path_len]).into_owned();
-    ui.field(field, &path, "ex.: /Imagens/praia.png", focus, A_PATH);
+    ui.field(field, &path, t!("settings.wp.path_hint"), focus, A_PATH);
     ui.button(
         Rect::new(field.right() + 8, field.y, 88, 28),
-        "Aplicar",
+        t!("settings.wp.apply"),
         ButtonKind::Primary,
         A_APPLY,
         ui.st.path_len > 0,
     );
     ui.button(
         Rect::new(card.x + 16, card.y + 62, 148, 28),
-        "Escolher imagem…",
+        t!("settings.wp.choose"),
         ButtonKind::Secondary,
         A_PICK,
         true,
     );
-    if let Some((m, err)) = &ui.st.msg
+    if let Some((m, err)) = ui.st.message()
         && let Some(c) = ui.c.as_deref_mut()
         && ui.view.intersection(&card).is_some()
     {
@@ -631,7 +648,7 @@ fn page_wallpaper(ui: &mut Ui<'_, '_>) {
             card.w - 16 - 148 - 12 - 16,
             44,
         );
-        let lines = text::wrap(m, FOOTNOTE, Weight::Regular, r.w, 2);
+        let lines = text::wrap(&m, FOOTNOTE, Weight::Regular, r.w, 2);
         for (k, (a, b)) in lines.into_iter().enumerate() {
             text::draw(
                 c,
@@ -640,23 +657,23 @@ fn page_wallpaper(ui: &mut Ui<'_, '_>) {
                 &m[a..b],
                 FOOTNOTE,
                 Weight::Regular,
-                if *err { kit::red() } else { kit::ink2() },
+                if err { kit::red() } else { kit::ink2() },
             );
         }
     }
 }
 
 fn page_dock(ui: &mut Ui<'_, '_>) {
-    ui.title("Barra de apps");
-    ui.header("Uso");
+    ui.title(t!("settings.sec.dock"));
+    ui.header(t!("settings.dock.usage"));
     let card = ui.card(3 * ROW);
     for (i, (name, sub)) in [
-        ("Reordenar", "Arraste um ícone fixado para outra posição"),
+        (t!("settings.dock.reorder"), t!("settings.dock.reorder_sub")),
+        (t!("settings.dock.pin"), t!("settings.dock.pin_sub")),
         (
-            "Fixar e desafixar",
-            "Botão direito no ícone, em Fixar ou Desafixar",
+            t!("settings.dock.new_window"),
+            t!("settings.dock.new_window_sub"),
         ),
-        ("Nova janela", "Shift + clique no ícone do app"),
     ]
     .into_iter()
     .enumerate()
@@ -737,12 +754,12 @@ fn page_language(ui: &mut Ui<'_, '_>) {
 
 fn page_keyboard(ui: &mut Ui<'_, '_>) {
     let s = ui.s;
-    ui.title("Teclado");
-    ui.header("Disposição");
+    ui.title(t!("settings.sec.keyboard"));
+    ui.header(t!("settings.kbd.layout"));
     let card = ui.card(2 * ROW);
     for (i, (name, sub, l)) in [
-        ("US", "Padrão internacional", Layout::Us),
-        ("ABNT2", "Português do Brasil: ç e acentos", Layout::Abnt2),
+        ("US", t!("settings.kbd.us_sub"), Layout::Us),
+        ("ABNT2", t!("settings.kbd.abnt2_sub"), Layout::Abnt2),
     ]
     .into_iter()
     .enumerate()
@@ -756,40 +773,26 @@ fn page_keyboard(ui: &mut Ui<'_, '_>) {
         }
         ui.hit(r, A_LAYOUT + i as u32);
     }
-    ui.header("Teste");
+    ui.header(t!("settings.kbd.test"));
     let card = ui.card(ROW + 16);
     let field = Rect::new(card.x + 16, card.y + 14, card.w - 32, 28);
     let txt = text::from_bytes(&ui.st.kbd_test).into_owned();
     let focus = ui.st.focus == Focus::Kbd;
-    ui.field(field, &txt, "Digite aqui para experimentar", focus, A_KBD);
+    ui.field(field, &txt, t!("settings.kbd.test_hint"), focus, A_KBD);
 }
 
 fn page_time(ui: &mut Ui<'_, '_>) {
     let s = ui.s;
-    ui.title("Data e hora");
+    ui.title(t!("settings.sec.time"));
     // Now.
     let now = read_local();
-    ui.header("Agora");
+    ui.header(t!("settings.time.now"));
     let card = ui.card(96);
     if let Some(c) = ui.c.as_deref_mut()
         && ui.view.intersection(&card).is_some()
     {
-        let t = if s.clock24 {
-            alloc::format!("{:02}:{:02}:{:02}", now.time.h, now.time.m, now.time.s)
-        } else {
-            let h12 = if now.time.h.is_multiple_of(12) {
-                12
-            } else {
-                now.time.h % 12
-            };
-            alloc::format!(
-                "{:02}:{:02}:{:02} {}",
-                h12,
-                now.time.m,
-                now.time.s,
-                if now.time.h < 12 { "AM" } else { "PM" }
-            )
-        };
+        let civil = Civil::from_rtc(&now);
+        let t = i18n::format_time(civil, s.clock24, true);
         text::draw_left(
             c,
             Rect::new(card.x + 20, card.y + 14, card.w / 2, 40),
@@ -798,36 +801,7 @@ fn page_time(ui: &mut Ui<'_, '_>) {
             Weight::Semibold,
             kit::ink(),
         );
-        const WD: [&str; 7] = [
-            "domingo",
-            "segunda-feira",
-            "terça-feira",
-            "quarta-feira",
-            "quinta-feira",
-            "sexta-feira",
-            "sábado",
-        ];
-        const MON: [&str; 12] = [
-            "janeiro",
-            "fevereiro",
-            "março",
-            "abril",
-            "maio",
-            "junho",
-            "julho",
-            "agosto",
-            "setembro",
-            "outubro",
-            "novembro",
-            "dezembro",
-        ];
-        let d = alloc::format!(
-            "{}, {} de {} de {}",
-            WD[now.weekday() as usize % 7],
-            now.date.d,
-            MON[(now.date.m as usize).clamp(1, 12) - 1],
-            now.date.y
-        );
+        let d = i18n::format_date(civil, DateStyle::Long, s.clock24);
         text::draw_left(
             c,
             Rect::new(card.x + 20, card.y + 56, card.w - 40, 22),
@@ -847,20 +821,27 @@ fn page_time(ui: &mut Ui<'_, '_>) {
             kit::ink3(),
         );
     }
-    ui.header("Formato");
+    ui.header(t!("settings.time.format"));
     let card = ui.card(ROW);
     let k = ui.st.knobs[2].value();
-    ui.row_switch(card, 0, "Relógio de 24 horas", "", k, A_CLOCK24);
+    ui.row_switch(card, 0, t!("settings.time.clock24"), "", k, A_CLOCK24);
 
     // The zone picker.
-    ui.header("Fuso horário");
+    ui.header(t!("settings.time.zone"));
     let card = ui.card(48 + TZ_ROWS * TZ_ROW_H + 8);
     let sf = Rect::new(card.x + 12, card.y + 10, card.w - 24, 28);
     let focus = ui.st.focus == Focus::TzSearch;
     if let Some(c) = ui.c.as_deref_mut()
         && ui.view.intersection(&sf).is_some()
     {
-        kit::search_field(c, sf, &ui.st.tz_query, "Buscar cidade", focus, focus);
+        kit::search_field(
+            c,
+            sf,
+            &ui.st.tz_query,
+            t!("settings.time.search"),
+            focus,
+            focus,
+        );
     }
     ui.hit(sf, A_TZSEARCH);
     let list = Rect::new(card.x + 8, card.y + 46, card.w - 16, TZ_ROWS * TZ_ROW_H);
@@ -875,7 +856,8 @@ fn page_time(ui: &mut Ui<'_, '_>) {
         }
         let selected = s.tz_city == ci;
         let id = A_TZ + ci as u32;
-        let (name, mins) = TIMEZONES[ci as usize];
+        let (_, mins) = TIMEZONES[ci as usize];
+        let name = city_name(ci);
         if let Some(c) = ui.c.as_deref_mut() {
             let fg = if selected {
                 c.fill_rrect(r.inflated(-2), 7, Corner::Circle, theme::accent(), 256);
@@ -916,7 +898,7 @@ fn page_time(ui: &mut Ui<'_, '_>) {
         text::draw_left(
             c,
             Rect::new(list.x + 12, list.y, list.w - 24, TZ_ROW_H),
-            "Nenhuma cidade encontrada.",
+            t!("settings.time.no_city"),
             BODY,
             Weight::Regular,
             kit::ink2(),
@@ -928,15 +910,15 @@ fn page_time(ui: &mut Ui<'_, '_>) {
     ui.hit(list, A_TZLIST);
 
     // The clock editor.
-    ui.header("Ajustar data e hora");
+    ui.header(t!("settings.time.adjust"));
     let card = ui.card(150);
     let fields: [(Field, &str, i32); 6] = [
-        (Field::Day, "Dia", 56),
-        (Field::Month, "Mês", 56),
-        (Field::Year, "Ano", 80),
-        (Field::Hour, "Hora", 56),
-        (Field::Minute, "Min", 56),
-        (Field::Second, "Seg", 56),
+        (Field::Day, t!("settings.time.day"), 56),
+        (Field::Month, t!("settings.time.month"), 56),
+        (Field::Year, t!("settings.time.year"), 80),
+        (Field::Hour, t!("settings.time.hour"), 56),
+        (Field::Minute, t!("settings.time.min"), 56),
+        (Field::Second, t!("settings.time.sec"), 56),
     ];
     let e = ui.st.edit;
     let vals = [
@@ -997,29 +979,29 @@ fn page_time(ui: &mut Ui<'_, '_>) {
     }
     ui.button(
         Rect::new(card.x + 20, card.y + 104, 140, 28),
-        "Ler do relógio",
+        t!("settings.time.read"),
         ButtonKind::Secondary,
         A_READTIME,
         true,
     );
     ui.button(
         Rect::new(card.x + 20 + 148, card.y + 104, 100, 28),
-        "Ajustar",
+        t!("settings.time.set"),
         ButtonKind::Primary,
         A_SETTIME,
         true,
     );
-    if let Some((m, err)) = &ui.st.msg
+    if let Some((m, err)) = ui.st.message()
         && let Some(c) = ui.c.as_deref_mut()
         && ui.view.intersection(&card).is_some()
     {
         text::draw_left(
             c,
             Rect::new(card.x + 20 + 256, card.y + 104, card.w - 296, 28),
-            m,
+            &m,
             FOOTNOTE,
             Weight::Regular,
-            if *err { kit::red() } else { kit::ink2() },
+            if err { kit::red() } else { kit::ink2() },
         );
     }
 }
@@ -1036,19 +1018,19 @@ fn kv_row(ui: &mut Ui<'_, '_>, card: Rect, i: i32, name: &str, value: &str) {
 
 fn page_network(ui: &mut Ui<'_, '_>, d: &Desktop) {
     use osjeff_core::netstats::NicKind;
-    ui.title("Rede");
+    ui.title(t!("settings.sec.network"));
     let snap = crate::netd::stats();
     let has_nic = snap.nic != NicKind::None;
     let (word, col) = if !has_nic {
-        ("Sem placa de rede", kit::ink3())
+        (t!("settings.net.no_nic"), kit::ink3())
     } else if !snap.link_up {
-        ("Sem sinal", kit::red())
+        (t!("settings.net.no_link"), kit::red())
     } else if snap.config.is_none() {
-        ("Procurando endereço", kit::amber())
+        (t!("settings.net.waiting"), kit::amber())
     } else {
-        ("Conectado", kit::green())
+        (t!("settings.net.connected"), kit::green())
     };
-    ui.header("Conexão");
+    ui.header(t!("settings.net.connection"));
     let card = ui.card(ROW);
     let r = ui.row(card, 0);
     if let Some(c) = ui.c.as_deref_mut()
@@ -1066,7 +1048,7 @@ fn page_network(ui: &mut Ui<'_, '_>, d: &Desktop) {
             );
         }
     }
-    ui.header("Endereços");
+    ui.header(t!("settings.net.addresses"));
     let card = ui.card(5 * ROW);
     let m = crate::nic::mac();
     let mac = alloc::format!(
@@ -1113,63 +1095,60 @@ fn page_network(ui: &mut Ui<'_, '_>, d: &Desktop) {
             }
         }
         lease = if cfg == osjeff_core::net::NetConfig::STATIC_FALLBACK {
-            String::from("Estático")
+            String::from(t!("settings.net.static"))
         } else if let Some(ms) = snap.lease_remaining_ms {
-            alloc::format!("{} restantes", activity::fmt_elapsed(ms / 1000))
+            t!(
+                "settings.net.left",
+                t = kit::fb_str(&activity::fmt_elapsed(ms / 1000))
+            )
         } else {
-            String::from("Sem expiração")
+            String::from(t!("settings.net.no_expiry"))
         };
     }
-    kv_row(ui, card, 0, "Endereço IP", &ip);
-    kv_row(ui, card, 1, "Máscara", &mask);
-    kv_row(ui, card, 2, "Roteador", &gw);
+    kv_row(ui, card, 0, t!("settings.net.ip"), &ip);
+    kv_row(ui, card, 1, t!("settings.net.mask"), &mask);
+    kv_row(ui, card, 2, t!("settings.net.router"), &gw);
     kv_row(ui, card, 3, "DNS", &dns);
-    kv_row(ui, card, 4, "Concessão", &lease);
-    ui.header("Dispositivo e tráfego");
+    kv_row(ui, card, 4, t!("settings.net.lease"), &lease);
+    ui.header(t!("settings.net.device"));
     let card = ui.card(4 * ROW);
     kv_row(
         ui,
         card,
         0,
-        "Endereço físico",
+        t!("settings.net.mac"),
         if has_nic { &mac } else { "—" },
     );
     let rx = alloc::format!(
-        "{} · {}",
-        activity::fmt_size(snap.rx_bytes),
-        activity::fmt_speed(d.sysmon.rx_rate)
+        "{} · {}/s",
+        i18n::format_size(snap.rx_bytes),
+        i18n::format_size(d.sysmon.rx_rate)
     );
     let tx = alloc::format!(
-        "{} · {}",
-        activity::fmt_size(snap.tx_bytes),
-        activity::fmt_speed(d.sysmon.tx_rate)
+        "{} · {}/s",
+        i18n::format_size(snap.tx_bytes),
+        i18n::format_size(d.sysmon.tx_rate)
     );
-    kv_row(ui, card, 1, "Recebido", &rx);
-    kv_row(ui, card, 2, "Enviado", &tx);
-    let pk = alloc::format!(
-        "{} recebidos · {} enviados",
-        activity::fmt_count(snap.rx_packets),
-        activity::fmt_count(snap.tx_packets)
+    kv_row(ui, card, 1, t!("settings.net.received"), &rx);
+    kv_row(ui, card, 2, t!("settings.net.sent"), &tx);
+    let pk = t!(
+        "settings.net.packets_value",
+        rx = Arg::Num(snap.rx_packets as i64),
+        tx = Arg::Num(snap.tx_packets as i64)
     );
-    kv_row(ui, card, 3, "Pacotes", &pk);
+    kv_row(ui, card, 3, t!("settings.net.packets"), &pk);
 }
 
 fn page_disk(ui: &mut Ui<'_, '_>, d: &Desktop) {
-    ui.title("Disco");
+    ui.title(t!("settings.sec.disk"));
     let usage = VfsUsage;
     let u = vfs::statfs();
     let (title, sub) = match vfs::volume() {
-        vfs::Volume::Disk => (
-            "Disco principal",
-            String::from("Sistema de arquivos OJFS v3"),
-        ),
-        vfs::Volume::Memory => (
-            "Memória (sem disco)",
-            String::from("Os arquivos somem ao desligar"),
-        ),
+        vfs::Volume::Disk => (t!("settings.disk.main"), t!("settings.disk.main_sub")),
+        vfs::Volume::Memory => (t!("settings.disk.memory"), t!("settings.disk.memory_sub")),
     };
     let _ = usage.label();
-    ui.header("Volume");
+    ui.header(t!("settings.disk.volume"));
     let card = ui.card(104);
     if let Some(c) = ui.c.as_deref_mut()
         && ui.view.intersection(&card).is_some()
@@ -1185,17 +1164,17 @@ fn page_disk(ui: &mut Ui<'_, '_>, d: &Desktop) {
         text::draw_left(
             c,
             Rect::new(card.x + 20, card.y + 38, card.w - 140, 18),
-            &sub,
+            sub,
             FOOTNOTE,
             Weight::Regular,
             kit::ink2(),
         );
         let pm = u.used_permille();
-        let pct = activity::fmt_pct(pm);
+        let pct = t!("settings.pct", p = i18n::dec(pm as i64, 1));
         text::draw_right(
             c,
             Rect::new(card.x, card.y + 14, card.w - 20, 28),
-            kit::fb_str(&pct),
+            &pct,
             TITLE2,
             Weight::Semibold,
             theme::accent(),
@@ -1216,32 +1195,32 @@ fn page_disk(ui: &mut Ui<'_, '_>, d: &Desktop) {
         ui,
         card,
         0,
-        "Usado",
-        kit::fb_str(&activity::fmt_size(u.used())),
+        t!("settings.disk.used"),
+        &i18n::format_size(u.used()),
     );
     kv_row(
         ui,
         card,
         1,
-        "Livre",
-        kit::fb_str(&activity::fmt_size(u.free)),
+        t!("settings.disk.free"),
+        &i18n::format_size(u.free),
     );
     kv_row(
         ui,
         card,
         2,
-        "Total",
-        kit::fb_str(&activity::fmt_size(u.total)),
+        t!("settings.disk.total"),
+        &i18n::format_size(u.total),
     );
     let files = if u.inodes_total > 0 {
-        alloc::format!("{}", activity::fmt_count(u.inodes_used() as u64))
+        i18n::format_num(u.inodes_used() as i64)
     } else {
         String::from("—")
     };
-    kv_row(ui, card, 3, "Arquivos e pastas", &files);
-    ui.header("Dispositivos");
+    kv_row(ui, card, 3, t!("settings.disk.items"), &files);
+    ui.header(t!("settings.disk.devices"));
     let card = ui.card(2 * ROW);
-    for (i, label) in ["Disco de inicialização", "Disco de arquivos"]
+    for (i, label) in [t!("settings.disk.boot_disk"), t!("settings.disk.data_disk")]
         .iter()
         .enumerate()
     {
@@ -1249,20 +1228,20 @@ fn page_disk(ui: &mut Ui<'_, '_>, d: &Desktop) {
             Some(dk) => alloc::format!(
                 "{} · {}",
                 dk.model_name(),
-                activity::fmt_size(dk.mib() << 20)
+                i18n::format_size(dk.mib() << 20)
             ),
-            None => String::from("ausente"),
+            None => String::from(t!("settings.disk.absent")),
         };
         kv_row(ui, card, i as i32, label, &v);
     }
 }
 
 fn page_power(ui: &mut Ui<'_, '_>) {
-    ui.title("Energia");
+    ui.title(t!("settings.sec.power"));
     let card = ui.card(2 * ROW);
     for (i, (name, label, id)) in [
-        ("Reiniciar", "Reiniciar…", A_REBOOT),
-        ("Desligar", "Desligar…", A_SHUTDOWN),
+        (t!("power.restart"), t!("menu.system.restart"), A_REBOOT),
+        (t!("power.shutdown"), t!("menu.system.shutdown"), A_SHUTDOWN),
     ]
     .into_iter()
     .enumerate()
@@ -1284,7 +1263,7 @@ fn page_power(ui: &mut Ui<'_, '_>) {
 }
 
 fn page_about(ui: &mut Ui<'_, '_>, d: &Desktop) {
-    ui.title("Sobre");
+    ui.title(t!("settings.sec.about"));
     let head = Rect::new(ui.x, ui.y, ui.w, 88);
     if let Some(c) = ui.c.as_deref_mut()
         && ui.view.intersection(&head).is_some()
@@ -1298,13 +1277,13 @@ fn page_about(ui: &mut Ui<'_, '_>, d: &Desktop) {
             Weight::Semibold,
             kit::ink(),
         );
-        let v = alloc::format!(
-            "Versão {} · compilação {}",
-            env!("CARGO_PKG_VERSION"),
-            if cfg!(debug_assertions) {
-                "de depuração"
+        let v = t!(
+            "settings.about.version",
+            v = env!("CARGO_PKG_VERSION"),
+            build = if cfg!(debug_assertions) {
+                t!("settings.about.build_debug")
             } else {
-                "otimizada"
+                t!("settings.about.build_release")
             }
         );
         text::draw_left(
@@ -1331,32 +1310,33 @@ fn page_about(ui: &mut Ui<'_, '_>, d: &Desktop) {
             }
         })
         .unwrap_or_else(|| String::from("—"));
-    kv_row(ui, card, 0, "Processador", &cpu);
-    let ram = si.map_or(String::from("—"), |s| {
-        String::from(kit::fb_str(&activity::fmt_size(s.total_ram())))
-    });
-    kv_row(ui, card, 1, "Memória", &ram);
+    kv_row(ui, card, 0, t!("settings.about.cpu"), &cpu);
+    let ram = si.map_or(String::from("—"), |s| i18n::format_size(s.total_ram()));
+    kv_row(ui, card, 1, t!("settings.about.memory"), &ram);
     let up = alloc::format!("{}", activity::fmt_clock(d.sysmon.uptime_s));
-    kv_row(ui, card, 2, "Tempo ligado", &up);
+    kv_row(ui, card, 2, t!("settings.about.uptime"), &up);
     let res = si.map_or(String::from("—"), |s| {
-        alloc::format!("{} × {} pixels", s.width, s.height)
+        t!(
+            "settings.about.resolution",
+            w = Arg::Int(s.width as i64),
+            h = Arg::Int(s.height as i64)
+        )
     });
-    kv_row(ui, card, 3, "Tela", &res);
+    kv_row(ui, card, 3, t!("settings.about.display"), &res);
     let boot = si.map_or(String::from("—"), |s| {
-        let vm = if s.hypervisor.as_bytes().is_empty() {
-            ""
+        if s.hypervisor.as_bytes().is_empty() {
+            String::from(s.boot_mode)
         } else {
-            " · máquina virtual"
-        };
-        alloc::format!("{}{vm}", s.boot_mode)
+            t!("settings.about.vm", mode = s.boot_mode)
+        }
     });
-    kv_row(ui, card, 4, "Inicialização", &boot);
+    kv_row(ui, card, 4, t!("settings.about.boot"), &boot);
     let sec = match crate::rng::quality() {
-        osjeff_core::entropy::Quality::Strong => "Fonte forte de números aleatórios",
-        osjeff_core::entropy::Quality::Mixed => "Números aleatórios de fonte mista",
-        osjeff_core::entropy::Quality::Weak => "Números aleatórios de fonte fraca",
+        osjeff_core::entropy::Quality::Strong => t!("settings.about.rng_strong"),
+        osjeff_core::entropy::Quality::Mixed => t!("settings.about.rng_mixed"),
+        osjeff_core::entropy::Quality::Weak => t!("settings.about.rng_weak"),
     };
-    kv_row(ui, card, 5, "Segurança", sec);
+    kv_row(ui, card, 5, t!("settings.about.security"), sec);
 }
 
 /// A wallpaper thumbnail: the gradient / solid colour and glows the preset paints.
@@ -1469,25 +1449,32 @@ impl Desktop {
     /// Use the image at `path` as the wallpaper (file manager, viewer). `Some(message)`
     /// is the reason it was refused.
     pub(crate) fn set_wallpaper_path(&mut self, path: &[u8]) -> Option<String> {
+        self.try_wallpaper_path(path)
+            .map(|(key, why)| i18n::tr_fmt(key, &[("why", Arg::Str(why.as_str()))]))
+    }
+
+    /// [`Self::set_wallpaper_path`] with the refusal as a catalog key and its `{why}`.
+    fn try_wallpaper_path(&mut self, path: &[u8]) -> Option<(&'static str, String)> {
         let (w, h) = (self.sw as usize, self.sh as usize);
         let mut s = crate::settings::get();
         if !s.set_image_path(path) {
-            return Some(String::from(
-                "Caminho inválido para papel de parede (use letras, números . _ - /).",
-            ));
+            return Some((tk!("settings.wp.err_path"), String::new()));
         }
         match read_path(path) {
-            None => return Some(String::from("Arquivo não encontrado.")),
+            None => return Some((tk!("settings.wp.err_missing"), String::new())),
             Some(bytes) => {
                 if let Err(e) = wallpaper::load(&bytes, w, h) {
-                    return Some(alloc::format!("Imagem recusada: {e}"));
+                    return Some((
+                        tk!("settings.wp.err_refused"),
+                        String::from(i18n::tr(e.why_key())),
+                    ));
                 }
             }
         }
         s.wallpaper = WallpaperChoice::Image;
         match self.settings_apply(s) {
             Ok(()) => None,
-            Err(_) => Some(String::from("Papel de parede aplicado, mas não foi salvo.")),
+            Err(_) => Some((tk!("settings.wp.err_unsaved"), String::new())),
         }
     }
 
@@ -1506,15 +1493,15 @@ impl Desktop {
         if path.is_empty() {
             return;
         }
-        match self.set_wallpaper_path(&path) {
-            Some(m) => {
+        match self.try_wallpaper_path(&path) {
+            Some((key, why)) => {
                 if let Some(st) = self.settings_mut(id) {
-                    st.say(&m, true);
+                    st.msg = Some((key, why, true));
                 }
             }
             None => {
                 if let Some(st) = self.settings_mut(id) {
-                    st.say("Papel de parede aplicado.", false);
+                    st.say(tk!("settings.wp.applied"), false);
                 }
             }
         }
@@ -1704,10 +1691,7 @@ impl Desktop {
                 if i < PRESETS.len() {
                     s.wallpaper = WallpaperChoice::Preset(i as u8);
                 } else if st.path_len == 0 {
-                    st.say(
-                        "Escolha uma imagem: digite o caminho abaixo ou use o Arquivos.",
-                        false,
-                    );
+                    st.say(tk!("settings.wp.pick_hint"), false);
                     return;
                 } else {
                     self.settings_use_path(id);
@@ -1723,10 +1707,7 @@ impl Desktop {
                 return;
             }
             A_PICK => {
-                st.say(
-                    "No Arquivos, clique com o botão direito na imagem e escolha “Definir como papel de parede”.",
-                    false,
-                );
+                st.say(tk!("settings.wp.pick_files"), false);
                 self.launch(Kind::Files);
                 return;
             }
@@ -1783,17 +1764,17 @@ impl Desktop {
             }
             A_READTIME => {
                 st.edit = read_local();
-                st.say("Lido do relógio.", false);
+                st.say(tk!("settings.time.read_ok"), false);
                 return;
             }
             A_SETTIME => {
                 let tzm = crate::rtc::tz_minutes();
                 if st.edit.is_valid() {
                     crate::rtc::set_utc(&local_to_utc(st.edit, tzm));
-                    st.say("Relógio ajustado.", false);
+                    st.say(tk!("settings.time.set_ok"), false);
                     crate::klog!(Info, "rtc: clock set by the user");
                 } else {
-                    st.say("Data inválida.", true);
+                    st.say(tk!("settings.time.invalid"), true);
                 }
                 return;
             }

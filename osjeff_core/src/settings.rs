@@ -39,6 +39,7 @@ use crate::i18n::Lang;
 use crate::keymap::Layout;
 use crate::klog::FixedBuf;
 use crate::style::AppearanceSetting;
+use crate::tk;
 use crate::wallpaper::PRESETS;
 use alloc::vec::Vec;
 use core::fmt::Write as _;
@@ -56,59 +57,76 @@ pub const CITY_NONE: u8 = 255;
 /// ordered by offset. The settings store the offset (and the index, to show the city the
 /// user chose); there is no daylight saving.
 pub const TIMEZONES: [(&str, i16); 52] = [
-    ("Ilha Baker", -720),
-    ("Pago Pago", -660),
-    ("Honolulu", -600),
-    ("Anchorage", -540),
-    ("Los Angeles", -480),
-    ("Denver", -420),
-    ("Cidade do México", -360),
-    ("Chicago", -360),
-    ("Nova York", -300),
-    ("Bogotá", -300),
-    ("Rio Branco", -300),
-    ("Manaus", -240),
-    ("Santiago", -240),
-    ("Caracas", -240),
-    ("St. John's", -210),
-    ("Buenos Aires", -180),
-    ("São Paulo", -180),
-    ("Brasília", -180),
-    ("Fernando de Noronha", -120),
-    ("Açores", -60),
-    ("Lisboa", 0),
-    ("Londres", 0),
-    ("Reykjavik", 0),
-    ("Madri", 60),
-    ("Paris", 60),
-    ("Berlim", 60),
-    ("Roma", 60),
-    ("Atenas", 120),
-    ("Cairo", 120),
-    ("Joanesburgo", 120),
-    ("Moscou", 180),
-    ("Istambul", 180),
-    ("Nairóbi", 180),
-    ("Teerã", 210),
-    ("Dubai", 240),
-    ("Cabul", 270),
-    ("Carachi", 300),
-    ("Nova Délhi", 330),
-    ("Katmandu", 345),
-    ("Daca", 360),
-    ("Bangcoc", 420),
-    ("Pequim", 480),
-    ("Singapura", 480),
-    ("Tóquio", 540),
-    ("Seul", 540),
-    ("Adelaide", 570),
-    ("Sydney", 600),
-    ("Ilhas Salomão", 660),
-    ("Auckland", 720),
-    ("Chatham", 765),
-    ("Nuku'alofa", 780),
-    ("Kiritimati", 840),
+    (tk!("settings.tz.baker_island"), -720),
+    (tk!("settings.tz.pago_pago"), -660),
+    (tk!("settings.tz.honolulu"), -600),
+    (tk!("settings.tz.anchorage"), -540),
+    (tk!("settings.tz.los_angeles"), -480),
+    (tk!("settings.tz.denver"), -420),
+    (tk!("settings.tz.mexico_city"), -360),
+    (tk!("settings.tz.chicago"), -360),
+    (tk!("settings.tz.new_york"), -300),
+    (tk!("settings.tz.bogota"), -300),
+    (tk!("settings.tz.rio_branco"), -300),
+    (tk!("settings.tz.manaus"), -240),
+    (tk!("settings.tz.santiago"), -240),
+    (tk!("settings.tz.caracas"), -240),
+    (tk!("settings.tz.st_johns"), -210),
+    (tk!("settings.tz.buenos_aires"), -180),
+    (tk!("settings.tz.sao_paulo"), -180),
+    (tk!("settings.tz.brasilia"), -180),
+    (tk!("settings.tz.noronha"), -120),
+    (tk!("settings.tz.azores"), -60),
+    (tk!("settings.tz.lisbon"), 0),
+    (tk!("settings.tz.london"), 0),
+    (tk!("settings.tz.reykjavik"), 0),
+    (tk!("settings.tz.madrid"), 60),
+    (tk!("settings.tz.paris"), 60),
+    (tk!("settings.tz.berlin"), 60),
+    (tk!("settings.tz.rome"), 60),
+    (tk!("settings.tz.athens"), 120),
+    (tk!("settings.tz.cairo"), 120),
+    (tk!("settings.tz.johannesburg"), 120),
+    (tk!("settings.tz.moscow"), 180),
+    (tk!("settings.tz.istanbul"), 180),
+    (tk!("settings.tz.nairobi"), 180),
+    (tk!("settings.tz.tehran"), 210),
+    (tk!("settings.tz.dubai"), 240),
+    (tk!("settings.tz.kabul"), 270),
+    (tk!("settings.tz.karachi"), 300),
+    (tk!("settings.tz.new_delhi"), 330),
+    (tk!("settings.tz.kathmandu"), 345),
+    (tk!("settings.tz.dhaka"), 360),
+    (tk!("settings.tz.bangkok"), 420),
+    (tk!("settings.tz.beijing"), 480),
+    (tk!("settings.tz.singapore"), 480),
+    (tk!("settings.tz.tokyo"), 540),
+    (tk!("settings.tz.seoul"), 540),
+    (tk!("settings.tz.adelaide"), 570),
+    (tk!("settings.tz.sydney"), 600),
+    (tk!("settings.tz.solomon"), 660),
+    (tk!("settings.tz.auckland"), 720),
+    (tk!("settings.tz.chatham"), 765),
+    (tk!("settings.tz.nukualofa"), 780),
+    (tk!("settings.tz.kiritimati"), 840),
 ];
+
+/// The name of city `i` of [`TIMEZONES`] in `lang` (empty for an index out of range).
+pub fn city_name_in(lang: Lang, i: u8) -> &'static str {
+    TIMEZONES
+        .get(i as usize)
+        .map_or("", |&(key, _)| crate::i18n::tr_in(lang, key))
+}
+
+/// The name of city `i` in the language in effect.
+pub fn city_name(i: u8) -> &'static str {
+    city_name_in(crate::i18n::lang(), i)
+}
+
+/// The name of accent `i` in the language in effect (empty out of range).
+pub fn accent_name(i: usize) -> &'static str {
+    ACCENT_NAMES.get(i).map_or("", |&key| crate::i18n::tr(key))
+}
 
 /// The index of Brasília, the default city.
 pub const DEFAULT_CITY: u8 = 17;
@@ -137,16 +155,19 @@ pub fn city_for_offset(minutes: i32) -> u8 {
         .map_or(CITY_NONE, |i| i as u8)
 }
 
-/// Indexes into [`TIMEZONES`] whose city or `UTC+hh:mm` label contains `query`
-/// (accents and case ignored), in list order. An empty query lists every city.
+/// Indexes into [`TIMEZONES`] whose city (in any language: `Lisboa` and `Lisbon` find the
+/// same row) or `UTC+hh:mm` label contains `query` (accents and case ignored), in list
+/// order. An empty query lists every city.
 pub fn search_timezones(query: &str) -> Vec<u8> {
     let q = crate::search::fold(query.trim());
     TIMEZONES
         .iter()
         .enumerate()
-        .filter(|(_, (name, m))| {
+        .filter(|(_, (key, m))| {
             q.is_empty()
-                || crate::search::fold(name).contains(q.as_str())
+                || Lang::ALL
+                    .iter()
+                    .any(|&l| crate::search::fold(crate::i18n::tr_in(l, key)).contains(q.as_str()))
                 || crate::search::fold(
                     core::str::from_utf8(utc_label(*m as i32).as_bytes()).unwrap_or(""),
                 )
@@ -193,9 +214,16 @@ pub const ACCENTS: [u32; 8] = [
     0x8B90A0, // graphite
 ];
 
-/// Names of the [`ACCENTS`] for the settings page.
+/// Catalog keys of the names of the [`ACCENTS`] (look them up with [`accent_name`]).
 pub const ACCENT_NAMES: [&str; 8] = [
-    "Indigo", "Turquesa", "Violeta", "Rosa", "Coral", "Âmbar", "Verde", "Grafite",
+    tk!("settings.accent.indigo"),
+    tk!("settings.accent.turquoise"),
+    tk!("settings.accent.violet"),
+    tk!("settings.accent.rose"),
+    tk!("settings.accent.coral"),
+    tk!("settings.accent.amber"),
+    tk!("settings.accent.green"),
+    tk!("settings.accent.graphite"),
 ];
 
 /// Which wallpaper is active.
@@ -775,6 +803,13 @@ mod tests {
     fn accent_palette_head_is_the_theme_indigo() {
         assert_eq!(ACCENTS[0], 0x5B5CF6);
         assert_eq!(ACCENTS.len(), ACCENT_NAMES.len());
+        for l in Lang::ALL {
+            for k in ACCENT_NAMES {
+                assert!(!crate::i18n::tr_in(l, k).is_empty() && crate::i18n::tr_in(l, k) != k);
+            }
+        }
+        assert_eq!(crate::i18n::tr_in(Lang::Pt, ACCENT_NAMES[5]), "Âmbar");
+        assert_eq!(crate::i18n::tr_in(Lang::En, ACCENT_NAMES[5]), "Amber");
         let s = Settings {
             accent: 200,
             ..Settings::default()
@@ -936,7 +971,7 @@ mod tests {
         // A stored city that does not match the offset is dropped for the offset's own.
         let s = Settings::parse(b"tz=-180\ntz_city=43\n");
         assert_eq!(s.tz_minutes, -180);
-        assert_eq!(TIMEZONES[s.tz_city as usize].0, "Brasília");
+        assert_eq!(city_name_in(Lang::Pt, s.tz_city), "Brasília");
         // An offset that no city has leaves the picker without a selection.
         let s = Settings::parse(b"tz=-30\n");
         assert_eq!(s.tz_city, CITY_NONE);
@@ -945,7 +980,7 @@ mod tests {
         assert_eq!(TIMEZONES[s.tz_city as usize].1, 60);
         // The chosen city sticks while the offset agrees.
         let s = Settings::parse(b"tz=0\ntz_city=22\n");
-        assert_eq!(TIMEZONES[s.tz_city as usize].0, "Reykjavik");
+        assert_eq!(city_name_in(Lang::En, s.tz_city), "Reykjavik");
         // set_city refuses an index outside the list.
         let mut s = Settings::default();
         s.set_city(250);
@@ -957,12 +992,14 @@ mod tests {
         assert!(
             TIMEZONES
                 .windows(2)
-                .all(|w| w[0].1 <= w[1].1 || w[1].0 == "Chatham")
+                .all(|w| w[0].1 <= w[1].1 || w[1].0 == tk!("settings.tz.chatham"))
         );
-        assert_eq!(TIMEZONES[DEFAULT_CITY as usize].0, "Brasília");
-        for &(name, m) in TIMEZONES.iter() {
-            assert!(!name.is_empty());
-            assert!((TZ_MIN..=TZ_MAX).contains(&(m as i32)), "{name}");
+        assert_eq!(city_name_in(Lang::Pt, DEFAULT_CITY), "Brasília");
+        for (i, &(_, m)) in TIMEZONES.iter().enumerate() {
+            for l in Lang::ALL {
+                assert!(!city_name_in(l, i as u8).is_empty(), "{i}");
+            }
+            assert!((TZ_MIN..=TZ_MAX).contains(&(m as i32)), "{i}");
         }
         assert_eq!(utc_label(-180).as_bytes(), b"UTC-03:00");
         assert_eq!(utc_label(330).as_bytes(), b"UTC+05:30");
@@ -970,9 +1007,12 @@ mod tests {
         assert_eq!(search_timezones("").len(), TIMEZONES.len());
         let r = search_timezones("sao");
         assert_eq!(r.len(), 1);
-        assert_eq!(TIMEZONES[r[0] as usize].0, "São Paulo");
-        assert!(search_timezones("TOKYO").is_empty());
+        assert_eq!(city_name_in(Lang::Pt, r[0]), "São Paulo");
+        // Both names of a city find it, whatever the language in effect.
+        assert_eq!(search_timezones("TOKYO"), search_timezones("toquio"));
         assert_eq!(search_timezones("toquio").len(), 1);
+        assert_eq!(search_timezones("lisbon"), search_timezones("Lisboa"));
+        assert_eq!(search_timezones("lisbon").len(), 1);
         // The offset text finds cities too.
         assert!(search_timezones("-03:00").len() >= 3);
         assert!(search_timezones("zzzz").is_empty());

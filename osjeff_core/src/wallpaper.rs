@@ -6,6 +6,7 @@
 //! Memory is bounded before anything is allocated ([`check_source`]).
 
 use crate::image::{self, Filter, Format, Image, ImageError};
+use crate::tk;
 
 /// Largest accepted image file.
 pub const MAX_FILE: usize = 4 * 1024 * 1024;
@@ -103,7 +104,8 @@ pub struct Scheme {
 /// light (or only) scheme; `dark`, when present, is what the dark appearance shows.
 #[derive(Clone, Copy, Debug)]
 pub struct Preset {
-    pub name: &'static str,
+    /// Catalog key of the name (see [`Preset::name`]).
+    pub name_key: &'static str,
     pub style: Style,
     pub top: u32,
     pub bottom: u32,
@@ -114,6 +116,16 @@ pub struct Preset {
 }
 
 impl Preset {
+    /// The name in the language in effect.
+    pub fn name(&self) -> &'static str {
+        crate::i18n::tr(self.name_key)
+    }
+
+    /// The name in `lang`.
+    pub fn name_in(&self, lang: crate::i18n::Lang) -> &'static str {
+        crate::i18n::tr_in(lang, self.name_key)
+    }
+
     /// The scheme to paint for the given appearance.
     pub fn scheme(&self, dark: bool) -> Scheme {
         match (dark, self.dark) {
@@ -244,7 +256,7 @@ const NO_SHAPES: [Shape; 0] = [];
 /// facets, pale by day and deep indigo at night); the others keep one look.
 pub const PRESETS: [Preset; 6] = [
     Preset {
-        name: "Crepúsculo",
+        name_key: tk!("settings.wp.name.dusk"),
         style: Style::Shapes,
         top: 0xE3E6FF,
         bottom: 0xFCE4D8,
@@ -265,7 +277,7 @@ pub const PRESETS: [Preset; 6] = [
         shapes: &DUSK_SHAPES,
     },
     Preset {
-        name: "Aurora",
+        name_key: tk!("settings.wp.name.aurora"),
         style: Style::Glow,
         top: 0x04161F,
         bottom: 0x0B3A44,
@@ -278,7 +290,7 @@ pub const PRESETS: [Preset; 6] = [
         shapes: &NO_SHAPES,
     },
     Preset {
-        name: "Mono",
+        name_key: tk!("settings.wp.name.mono"),
         style: Style::Shapes,
         top: 0x1E1F24,
         bottom: 0x0C0D10,
@@ -287,7 +299,7 @@ pub const PRESETS: [Preset; 6] = [
         shapes: &MONO_SHAPES,
     },
     Preset {
-        name: "Papel",
+        name_key: tk!("settings.wp.name.paper"),
         style: Style::Shapes,
         top: 0xF6F2EA,
         bottom: 0xE8E1D3,
@@ -296,7 +308,7 @@ pub const PRESETS: [Preset; 6] = [
         shapes: &PAPER_SHAPES,
     },
     Preset {
-        name: "Turquesa",
+        name_key: tk!("settings.wp.name.turquoise"),
         style: Style::Shapes,
         top: 0x0C5F66,
         bottom: 0x083742,
@@ -305,7 +317,7 @@ pub const PRESETS: [Preset; 6] = [
         shapes: &FIELD_SHAPES,
     },
     Preset {
-        name: "Pôr do sol",
+        name_key: tk!("settings.wp.name.sunset"),
         style: Style::Shapes,
         top: 0x24184F,
         bottom: 0xFF8A5C,
@@ -351,6 +363,19 @@ pub enum WallpaperError {
     TooBigImage,
     Decode(image::DecodeError),
     Image(ImageError),
+}
+
+impl WallpaperError {
+    /// Catalog key of the reason, for the person (the [`Display`](core::fmt::Display) text is
+    /// for logs).
+    pub fn why_key(&self) -> &'static str {
+        match self {
+            WallpaperError::TooBigFile => tk!("settings.wp.why_big_file"),
+            WallpaperError::UnknownFormat => tk!("settings.wp.why_format"),
+            WallpaperError::TooBigImage => tk!("settings.wp.why_big_image"),
+            WallpaperError::Decode(_) | WallpaperError::Image(_) => tk!("settings.wp.why_bad"),
+        }
+    }
 }
 
 impl core::fmt::Display for WallpaperError {
@@ -507,7 +532,7 @@ mod tests {
         assert!(PRESETS.iter().any(|p| luma(p.top) + luma(p.bottom) > 900));
         assert!(PRESETS.iter().any(|p| luma(p.top) + luma(p.bottom) < 200));
         for p in PRESETS {
-            assert!(!p.name.is_empty() && p.top <= 0xFFFFFF && p.bottom <= 0xFFFFFF);
+            assert!(!p.name_key.is_empty() && p.top <= 0xFFFFFF && p.bottom <= 0xFFFFFF);
             for b in p.scheme(false).blobs.iter().chain(&p.scheme(true).blobs) {
                 assert!((0..=1000).contains(&b.x) && (0..=1000).contains(&b.y) && b.r <= 1000);
                 assert!(b.color <= 0xFFFFFF);
@@ -518,24 +543,29 @@ mod tests {
     #[test]
     fn shapes_stay_on_the_screen_and_only_shape_presets_have_them() {
         for p in PRESETS {
-            assert_eq!(p.style == Style::Shapes, !p.shapes.is_empty(), "{}", p.name);
+            assert_eq!(
+                p.style == Style::Shapes,
+                !p.shapes.is_empty(),
+                "{}",
+                p.name()
+            );
             for sh in p.shapes {
                 for (x, y) in sh.pts {
                     assert!(
                         (0..=1000).contains(&x) && (0..=1000).contains(&y),
                         "{}",
-                        p.name
+                        p.name()
                     );
                 }
                 for dark in [false, true] {
                     let (c, a) = sh.look(dark);
-                    assert!(c <= 0xFFFFFF && a > 0, "{}", p.name);
+                    assert!(c <= 0xFFFFFF && a > 0, "{}", p.name());
                 }
                 // A polygon, not a line: the corners are not all collinear.
                 let [a, b, c, _] = sh.pts;
                 let cross = (b.0 - a.0) as i32 * (c.1 - a.1) as i32
                     - (b.1 - a.1) as i32 * (c.0 - a.0) as i32;
-                assert_ne!(cross, 0, "{}", p.name);
+                assert_ne!(cross, 0, "{}", p.name());
             }
         }
         // The default and the sunset change nothing between appearances only where meant.
@@ -548,7 +578,12 @@ mod tests {
             PRESETS[5].shapes[0].look(false)
         );
         // Names are short enough for the Settings thumbnails.
-        assert!(PRESETS.iter().all(|p| p.name.chars().count() <= 11));
+        for l in crate::i18n::Lang::ALL {
+            assert!(PRESETS.iter().all(|p| {
+                let n = p.name_in(l);
+                !n.is_empty() && n != p.name_key && n.chars().count() <= 11
+            }));
+        }
     }
 
     #[test]
@@ -598,5 +633,28 @@ mod tests {
         let crc = crate::inflate::crc32(&png[12..29]);
         png.extend_from_slice(&crc.to_be_bytes());
         assert_eq!(check_source(&png), Err(WallpaperError::TooBigImage));
+    }
+
+    #[test]
+    fn every_refusal_has_a_reason_in_both_languages() {
+        use crate::i18n::{Lang, tr_in};
+        let errs = [
+            WallpaperError::TooBigFile,
+            WallpaperError::UnknownFormat,
+            WallpaperError::TooBigImage,
+            WallpaperError::Decode(image::DecodeError::UnknownFormat),
+            WallpaperError::Image(ImageError::ZeroSize),
+        ];
+        for e in errs {
+            for l in Lang::ALL {
+                let t = tr_in(l, e.why_key());
+                assert!(t != e.why_key() && !t.is_empty(), "{e:?}");
+            }
+        }
+        assert_eq!(
+            tr_in(Lang::En, WallpaperError::UnknownFormat.why_key()),
+            "use PNG, BMP or PPM"
+        );
+        assert!(tr_in(Lang::Pt, WallpaperError::TooBigImage.why_key()).contains("é"));
     }
 }
