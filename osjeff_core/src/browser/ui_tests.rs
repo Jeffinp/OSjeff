@@ -538,3 +538,63 @@ fn page_title_cut_inside_a_multibyte_character_does_not_panic() {
         assert!(b.page_title().chars().all(|c| c == '\u{20ac}'));
     }
 }
+
+// ---- tabs share the window's stores ----
+
+#[test]
+fn a_sibling_shares_favourites_and_allowed_hosts_but_not_history() {
+    let mut a = browser_with_history(&["http://a.test/x"]);
+    a.toggle_bookmark();
+    let mut b = a.sibling();
+    assert!(b.is_home(), "a new tab starts on the start page");
+    assert_eq!(b.bookmarks().len(), 1, "favourites are the window's");
+    assert_eq!(b.history_len(), 0, "history is the tab's");
+    // A favourite added in one tab shows in the other.
+    b.open(b"http://b.test/y");
+    b.take_request();
+    b.loaded_with(Conn::Plain, false);
+    b.toggle_bookmark();
+    assert_eq!(a.bookmarks().len(), 2);
+    // So does the one-site-one-session certificate override.
+    a.open(b"https://expired.example.com/");
+    a.take_request();
+    a.fail_with(FailReason::Cert(crate::tlsverify::CertError::Expired));
+    a.continue_insecure();
+    b.open(b"https://expired.example.com/");
+    assert_eq!(
+        b.insecure_host().as_deref(),
+        Some(&b"expired.example.com"[..])
+    );
+}
+
+#[test]
+fn stop_drops_a_pending_load_and_keeps_the_page() {
+    let mut b = browser_with_history(&["http://a.test/x"]);
+    b.open(b"http://b.test/y");
+    assert!(b.is_loading());
+    b.stop();
+    assert!(!b.is_loading());
+    assert!(b.take_request().is_none(), "nothing left to fetch");
+    assert_eq!(b.history_len(), 1);
+    b.stop(); // nothing to stop: harmless
+}
+
+#[test]
+fn recent_lists_each_address_once_newest_first_without_internal_pages() {
+    let mut b = browser_with_history(&["http://a.test/", "http://b.test/", "http://a.test/"]);
+    b.open(b"osjeff://sobre");
+    let r = b.recent(10);
+    assert_eq!(r, ["http://a.test/", "http://b.test/"]);
+    assert_eq!(b.recent(1), ["http://a.test/"]);
+    assert!(Browser::new().recent(5).is_empty());
+}
+
+#[test]
+fn reload_refetches_the_navigated_address_not_the_typed_text() {
+    let mut b = Browser::new();
+    b.open(b"https://example.com/a");
+    assert!(b.take_request().is_some());
+    type_str(&mut b, "typed junk");
+    b.reload();
+    assert_eq!(b.take_request(), Some(&b"https://example.com/a"[..]));
+}

@@ -526,6 +526,14 @@ pub enum Glyph {
     Dock,
     Bell,
     Wave,
+    ChevronLeft,
+    Reload,
+    Lock,
+    Warning,
+    Star,
+    StarFill,
+    Globe,
+    Home,
 }
 
 /// Draw `g` at `px` x `px` in straight ARGB colour `c`.
@@ -705,6 +713,86 @@ pub fn glyph(g: Glyph, px: usize, c: u32) -> Surface {
             dot.ellipse(u(8), u(5), u(1) - 32, u(1) - 32);
             s.fill_path(&dot, Paint::Solid(c));
         }
+        Glyph::ChevronLeft => stroke(&mut s, &[(10, 3), (5, 8), (10, 13)], 2),
+        Glyph::Reload => {
+            // An open ring (from 40 to 330 degrees, clockwise from the top) with an arrow
+            // head at its end.
+            let centre = (u(8), u(8));
+            let radius = u(5) + 32;
+            let at = |deg: i32| rot(centre.0, centre.1, 0, -radius, deg);
+            let pts: Vec<(i32, i32)> = (0..=15).map(|k| at(40 + k * 20)).collect();
+            s.fill_path(&stroke_path(&pts, w(2) - 16, true), Paint::Solid(c));
+            // The tip leads along the direction of travel at the end of the arc.
+            let end = at(330);
+            let t = rot(0, 0, 0, -256, 330 + 90);
+            let n = rot(0, 0, 0, -256, 330);
+            let k = u(3) + 64;
+            let tip = (end.0 + t.0 * k / 256 * 3 / 2, end.1 + t.1 * k / 256 * 3 / 2);
+            let a = (end.0 + n.0 * k / 256, end.1 + n.1 * k / 256);
+            let b = (end.0 - n.0 * k / 256, end.1 - n.1 * k / 256);
+            let mut head = Path::new();
+            head.polygon(&[tip, a, b]);
+            s.fill_path(&head, Paint::Solid(c));
+        }
+        Glyph::Lock => {
+            let mut body = Path::new();
+            body.rrect(u(3), u(7), u(10), u(7) + 128, u(2));
+            s.fill_path(&body, Paint::Solid(c));
+            let sh = [
+                pt(5, 7),
+                pt(5, 5),
+                (u(6) - 40, u(3) + 80),
+                pt(8, 2),
+                (u(10) + 40, u(3) + 80),
+                pt(11, 5),
+                pt(11, 7),
+            ];
+            s.fill_path(&stroke_path(&sh, w(2) - 32, true), Paint::Solid(c));
+        }
+        Glyph::Warning => {
+            let tri = [pt(8, 2), pt(14, 13), pt(2, 13), pt(8, 2)];
+            s.fill_path(&stroke_path(&tri, w(2) - 24, true), Paint::Solid(c));
+            stroke(&mut s, &[(8, 6), (8, 9)], 2);
+            let mut dot = Path::new();
+            dot.ellipse(u(8), u(11) + 40, u(1) - 24, u(1) - 24);
+            s.fill_path(&dot, Paint::Solid(c));
+        }
+        Glyph::Star | Glyph::StarFill => {
+            let centre = (u(8), u(8) + 40);
+            let outer = u(6) + 128;
+            let inner = u(3);
+            let pts: Vec<(i32, i32)> = (0..10)
+                .map(|k| {
+                    let r = if k % 2 == 0 { outer } else { inner };
+                    rot(centre.0, centre.1, 0, -r, k * 36)
+                })
+                .collect();
+            if g == Glyph::StarFill {
+                let mut p = Path::new();
+                p.polygon(&pts);
+                s.fill_path(&p, Paint::Solid(c));
+            } else {
+                let mut closed = pts.clone();
+                closed.push(pts[0]);
+                s.fill_path(&stroke_path(&closed, w(1) + 96, true), Paint::Solid(c));
+            }
+        }
+        Glyph::Globe => {
+            let mut ring = Path::new();
+            ring.ellipse(u(8), u(8), u(7), u(7));
+            ring.ellipse_hole(u(8), u(8), u(7) - 72, u(7) - 72);
+            s.fill_path(&ring, Paint::Solid(c));
+            let mut mer = Path::new();
+            mer.ellipse(u(8), u(8), u(3) + 40, u(7) - 20);
+            mer.ellipse_hole(u(8), u(8), u(3) - 32, u(7) - 90);
+            s.fill_path(&mer, Paint::Solid(c));
+            stroke(&mut s, &[(1, 8), (15, 8)], 1);
+        }
+        Glyph::Home => {
+            stroke(&mut s, &[(2, 8), (8, 2), (14, 8)], 2);
+            let body = [pt(4, 7), pt(4, 14), pt(12, 14), pt(12, 7)];
+            s.fill_path(&stroke_path(&body, w(2) - 32, true), Paint::Solid(c));
+        }
     }
     s
 }
@@ -871,6 +959,14 @@ mod tests {
             Glyph::Power,
             Glyph::Image,
             Glyph::Dock,
+            Glyph::ChevronLeft,
+            Glyph::Reload,
+            Glyph::Lock,
+            Glyph::Warning,
+            Glyph::Star,
+            Glyph::StarFill,
+            Glyph::Globe,
+            Glyph::Home,
         ] {
             for px in [12usize, 16, 20] {
                 let s = glyph(g, px, rgb(0xFF0000));
@@ -879,7 +975,11 @@ mod tests {
                 // Only red ink (premultiplied: g and b stay zero).
                 assert!(s.px.iter().all(|&p| p & 0xFFFF == 0), "{g:?}");
                 // It stays inside its box with a margin to spare on all sides.
-                assert!(s.px[..px].iter().all(|&p| p >> 24 < 200) || g == Glyph::Info);
+                assert!(
+                    s.px[..px].iter().all(|&p| p >> 24 < 200)
+                        || matches!(g, Glyph::Info | Glyph::Globe),
+                    "{g:?} touches the top edge"
+                );
             }
         }
     }
@@ -950,6 +1050,14 @@ mod tests {
             Glyph::Power,
             Glyph::Image,
             Glyph::Dock,
+            Glyph::ChevronLeft,
+            Glyph::Reload,
+            Glyph::Lock,
+            Glyph::Warning,
+            Glyph::Star,
+            Glyph::StarFill,
+            Glyph::Globe,
+            Glyph::Home,
         ];
         for (i, g) in gl.iter().enumerate() {
             put(

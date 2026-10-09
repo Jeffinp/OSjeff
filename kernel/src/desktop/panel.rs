@@ -358,9 +358,16 @@ impl Desktop {
         let wasm = kind == Some(Kind::WasmApp);
         match name {
             "Arquivo" => {
+                let browser = kind == Some(Kind::Browser);
                 let mut v = alloc::vec![Entry::item(
-                    "Nova janela",
-                    if wasm { "" } else { "Ctrl+N" },
+                    if browser { "Nova aba" } else { "Nova janela" },
+                    if wasm {
+                        ""
+                    } else if browser {
+                        "Ctrl+T"
+                    } else {
+                        "Ctrl+N"
+                    },
                     Cmd::NewWindow
                 )];
                 match kind {
@@ -373,8 +380,16 @@ impl Desktop {
                 }
                 v.push(Entry::sep());
                 v.push(
-                    Entry::item("Fechar janela", "Ctrl+W", Cmd::CloseWindow)
-                        .disabled_if(kind.is_none()),
+                    Entry::item(
+                        if browser {
+                            "Fechar aba"
+                        } else {
+                            "Fechar janela"
+                        },
+                        "Ctrl+W",
+                        Cmd::CloseWindow,
+                    )
+                    .disabled_if(kind.is_none()),
                 );
                 v
             }

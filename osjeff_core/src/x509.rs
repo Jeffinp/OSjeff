@@ -187,6 +187,7 @@ pub fn parse_time(tag: u8, s: &[u8]) -> Result<u64, Error> {
 /// OID content bytes used below (the TLV's value, no tag or length).
 mod oid {
     pub const COMMON_NAME: &[u8] = &[0x55, 0x04, 0x03];
+    pub const ORGANIZATION: &[u8] = &[0x55, 0x04, 0x0A];
     pub const SUBJECT_ALT_NAME: &[u8] = &[0x55, 0x1D, 0x11];
     pub const BASIC_CONSTRAINTS: &[u8] = &[0x55, 0x1D, 0x13];
     pub const KEY_USAGE: &[u8] = &[0x55, 0x1D, 0x0F];
@@ -374,6 +375,29 @@ fn parse_key_usage(value: &[u8]) -> Result<u16, Error> {
     Ok((hi << 8) | lo)
 }
 
+/// The first attribute `want` (an OID) of a `Name` (its content bytes), if any.
+fn name_attr<'a>(name: &'a [u8], want: &[u8]) -> Option<&'a [u8]> {
+    // Name ::= SEQUENCE OF RDN (SET OF AttributeTypeAndValue)
+    let mut names = Reader::new(name);
+    while !names.is_empty() {
+        let (tag, rdn) = names.read().ok()?;
+        if tag != TAG_SET {
+            return None;
+        }
+        let mut set = Reader::new(rdn);
+        while !set.is_empty() {
+            let atv = set.expect(TAG_SEQ).ok()?;
+            let mut a = Reader::new(atv);
+            let id = a.expect(TAG_OID).ok()?;
+            let (_, value) = a.read().ok()?;
+            if id == want {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
 impl<'a> Cert<'a> {
     /// `issuer == subject` byte for byte (a self-issued certificate; a
     /// self-signed leaf shows up here).
@@ -383,25 +407,17 @@ impl<'a> Cert<'a> {
 
     /// The first `commonName` of the subject, if any (UTF8/Printable bytes).
     pub fn subject_cn(&self) -> Option<&'a [u8]> {
-        // Name ::= SEQUENCE OF RDN (SET OF AttributeTypeAndValue)
-        let mut names = Reader::new(self.subject);
-        while !names.is_empty() {
-            let (tag, rdn) = names.read().ok()?;
-            if tag != TAG_SET {
-                return None;
-            }
-            let mut set = Reader::new(rdn);
-            while !set.is_empty() {
-                let atv = set.expect(TAG_SEQ).ok()?;
-                let mut a = Reader::new(atv);
-                let id = a.expect(TAG_OID).ok()?;
-                let (_, value) = a.read().ok()?;
-                if id == oid::COMMON_NAME {
-                    return Some(value);
-                }
-            }
-        }
-        None
+        name_attr(self.subject, oid::COMMON_NAME)
+    }
+
+    /// The first `commonName` of the issuer, if any.
+    pub fn issuer_cn(&self) -> Option<&'a [u8]> {
+        name_attr(self.issuer, oid::COMMON_NAME)
+    }
+
+    /// The first `organizationName` of the issuer, if any.
+    pub fn issuer_org(&self) -> Option<&'a [u8]> {
+        name_attr(self.issuer, oid::ORGANIZATION)
     }
 
     /// The `dNSName` entries of `subjectAltName` (at most [`MAX_SAN`] are

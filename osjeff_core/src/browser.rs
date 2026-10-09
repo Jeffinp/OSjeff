@@ -6,10 +6,19 @@
 //! pending request out with [`Browser::take_request`], fetches the bytes, and
 //! fetches the bytes; the kernel renders them with the `web` engine.
 
+pub mod cert;
+pub mod errors;
+pub mod motion;
+pub mod tabs;
+
+pub use cert::CertInfo;
+
 use crate::Key;
 use alloc::boxed::Box;
+use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 
 /// Max bytes of a URL (address bar + resolved navigation target).
 pub const URL_CAP: usize = 480;
@@ -442,13 +451,13 @@ pub enum PageNote {
 }
 
 impl PageNote {
-    /// Banner text. ASCII only (the bitmap font has no accents).
+    /// Banner text.
     pub fn label(self) -> &'static str {
         match self {
-            PageNote::Truncated => "Pagina cortada no limite de tamanho",
-            PageNote::Incomplete => "Pagina incompleta (conexao interrompida)",
-            PageNote::Damaged => "Pagina com dados compactados corrompidos (parcial)",
-            PageNote::BadChecksum => "Pagina com falha de verificacao (checksum)",
+            PageNote::Truncated => "Página cortada no limite de tamanho",
+            PageNote::Incomplete => "Página incompleta: a conexão foi interrompida",
+            PageNote::Damaged => "Página parcial: os dados recebidos estão corrompidos",
+            PageNote::BadChecksum => "A verificação da página falhou",
         }
     }
 }
@@ -953,9 +962,9 @@ pub struct Browser {
     security: Security,
     note: Option<PageNote>,
     fail_reason: FailReason,
-    insecure: InsecureHosts,
+    insecure: Rc<RefCell<InsecureHosts>>,
     history: History,
-    bookmarks: Box<dyn BookmarkStore>,
+    bookmarks: Rc<RefCell<Box<dyn BookmarkStore>>>,
     /// Keyboard focus is in the address bar (else on the page).
     bar_focus: bool,
     /// Highlighted suggestion (Up/Down in the address bar).
@@ -1082,9 +1091,9 @@ impl Browser {
             security: Security::None,
             note: None,
             fail_reason: FailReason::Network,
-            insecure: InsecureHosts::new(),
+            insecure: Rc::new(RefCell::new(InsecureHosts::new())),
             history: History::default(),
-            bookmarks: Box::new(MemoryBookmarks::default()),
+            bookmarks: Rc::new(RefCell::new(Box::new(MemoryBookmarks::default()))),
             bar_focus: true,
             sugg_sel: None,
             sugg_dismissed: false,
@@ -1100,7 +1109,16 @@ impl Browser {
     /// A browser whose favourites live in `store` (the one place the kernel plugs persistence in).
     pub fn with_store(store: Box<dyn BookmarkStore>) -> Self {
         let mut b = Self::new();
-        b.bookmarks = store;
+        b.bookmarks = Rc::new(RefCell::new(store));
+        b
+    }
+
+    /// A fresh browser (a new tab) that shares this one's favourites and the hosts the user
+    /// allowed past a certificate error: both belong to the window, not to a tab.
+    pub fn sibling(&self) -> Self {
+        let mut b = Self::new();
+        b.bookmarks = Rc::clone(&self.bookmarks);
+        b.insecure = Rc::clone(&self.insecure);
         b
     }
 
@@ -1118,11 +1136,20 @@ impl Browser {
         self.set_url(b"");
     }
 
-    /// Re-fetch the current address (no-op on the start page).
+    /// Re-fetch the page that is shown (no-op on the start page). It is the address that was
+    /// navigated to, not whatever has been typed in the bar since; an unsent edit is dropped.
     pub fn reload(&mut self) {
-        if !self.home {
-            self.submit();
+        if self.home || self.nav_len == 0 {
+            return;
         }
+        let nav = self.nav[..self.nav_len].to_vec();
+        self.set_url(&nav);
+        self.submit();
+    }
+
+    /// "Tentar novamente" on an error page: the same navigation again.
+    pub fn retry(&mut self) {
+        self.reload();
     }
 
     /// Navigate straight to `url` (used by the start-page shortcuts).
@@ -1439,13 +1466,14 @@ impl Browser {
     /// The host of the current navigation when the user allowed it to proceed
     /// despite a certificate error (the fetcher then skips validation for that
     /// host only, on every hop of this navigation).
-    pub fn insecure_host(&self) -> Option<&[u8]> {
+    pub fn insecure_host(&self) -> Option<Vec<u8>> {
         let u = parse_url(self.nav_url())?;
         if !u.https {
             return None;
         }
-        let i = self.insecure.find(u.host())?;
-        Some(&self.insecure.hosts[i][..usize::from(self.insecure.lens[i])])
+        let ins = self.insecure.borrow();
+        let i = ins.find(u.host())?;
+        Some(ins.hosts[i][..usize::from(ins.lens[i])].to_vec())
     }
 
     /// True when the failed navigation can be retried anyway: the failure is a
@@ -1461,7 +1489,7 @@ impl Browser {
             return;
         }
         if let Some(u) = parse_url(self.nav_url()) {
-            self.insecure.add(u.host());
+            self.insecure.borrow_mut().add(u.host());
         }
         self.pending = true;
         self.status = Status::Loading;
@@ -1488,14 +1516,16 @@ impl Browser {
         }
         // `osjeff://favoritos?rm=N` removes the N-th favourite, then shows the list.
         let mut shown = alloc::format!("osjeff://{name}");
-        if name == "favoritos"
-            && let Some(n) = query
-                .strip_prefix("rm=")
-                .and_then(|v| v.parse::<usize>().ok())
-            && let Some(b) = self.bookmarks.all().get(n)
-        {
-            let u = b.url.clone();
-            self.bookmarks.remove(&u);
+        let doomed = (name == "favoritos")
+            .then(|| {
+                query
+                    .strip_prefix("rm=")
+                    .and_then(|v| v.parse::<usize>().ok())
+            })
+            .flatten()
+            .and_then(|n| self.bookmarks.borrow().all().get(n).cloned());
+        if let Some(b) = doomed {
+            self.bookmarks.borrow_mut().remove(&b.url);
             shown = String::from("osjeff://favoritos");
         }
         self.set_url(shown.as_bytes());
@@ -1528,7 +1558,7 @@ impl Browser {
     fn page_bookmarks(&self) -> Vec<u8> {
         let mut h =
             String::from("<html><head><title>Favoritos</title></head><body><h1>Favoritos</h1>");
-        let all = self.bookmarks.all();
+        let all = self.bookmarks.borrow().all();
         if all.is_empty() {
             h.push_str("<p>Nenhum favorito ainda. Abra uma pagina e aperte Ctrl+D.</p>");
         }
@@ -1597,6 +1627,7 @@ impl Browser {
             && !self.nav_url().is_empty()
             && self
                 .bookmarks
+                .borrow()
                 .contains(&String::from_utf8_lossy(self.nav_url()))
     }
 
@@ -1607,8 +1638,8 @@ impl Browser {
             return None;
         }
         let url = String::from_utf8_lossy(self.nav_url()).into_owned();
-        if self.bookmarks.contains(&url) {
-            self.bookmarks.remove(&url);
+        if self.bookmarks.borrow().contains(&url) {
+            self.bookmarks.borrow_mut().remove(&url);
             return Some(false);
         }
         let title = if self.page_title.is_empty() {
@@ -1616,12 +1647,15 @@ impl Browser {
         } else {
             self.page_title.clone()
         };
-        self.bookmarks.add(Bookmark { url, title }).then_some(true)
+        self.bookmarks
+            .borrow_mut()
+            .add(Bookmark { url, title })
+            .then_some(true)
     }
 
     /// The favourites.
     pub fn bookmarks(&self) -> Vec<Bookmark> {
-        self.bookmarks.all()
+        self.bookmarks.borrow().all()
     }
 
     /// Select the whole address (Ctrl+L): typing replaces it.
@@ -1669,7 +1703,7 @@ impl Browser {
             .map(|u| String::from_utf8_lossy(u).into_owned())
             .filter(|u| !u.starts_with("osjeff://"))
             .collect();
-        suggest(&q, &self.bookmarks.all(), &hist)
+        suggest(&q, &self.bookmarks.borrow().all(), &hist)
     }
 
     /// The highlighted suggestion index.
@@ -1687,6 +1721,38 @@ impl Browser {
             }
             None => false,
         }
+    }
+
+    /// Stop loading: a request that was not taken yet is dropped, one in flight is ignored by
+    /// the caller. The page on screen (or the start page) stays.
+    pub fn stop(&mut self) {
+        if self.status == Status::Loading {
+            self.pending = false;
+            self.history.replay = false;
+            self.status = Status::Idle;
+        }
+    }
+
+    /// Is a navigation in progress?
+    pub fn is_loading(&self) -> bool {
+        self.status == Status::Loading
+    }
+
+    /// Up to `n` most recently visited addresses, newest first, each once, without the
+    /// browser's own pages.
+    pub fn recent(&self, n: usize) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for u in self.history.urls.iter().rev() {
+            let u = String::from_utf8_lossy(u);
+            if u.starts_with("osjeff://") || out.iter().any(|o| *o == u) {
+                continue;
+            }
+            out.push(u.into_owned());
+            if out.len() >= n {
+                break;
+            }
+        }
+        out
     }
 
     /// Mark the current fetch as failed (the kernel shows the error state).
@@ -2089,7 +2155,10 @@ mod tests {
             b.take_request(),
             Some(&b"https://expired.example.com/page"[..])
         );
-        assert_eq!(b.insecure_host(), Some(&b"expired.example.com"[..]));
+        assert_eq!(
+            b.insecure_host().as_deref(),
+            Some(&b"expired.example.com"[..])
+        );
         b.loaded_with(Conn::Insecure, false);
         assert_eq!(b.security(), Security::HttpsInvalid);
         // Another origin is not covered.
@@ -2097,7 +2166,10 @@ mod tests {
         assert_eq!(b.insecure_host(), None);
         // Same origin, other path: covered (it is per origin, case-insensitive).
         b.open(b"https://EXPIRED.example.com/x");
-        assert_eq!(b.insecure_host(), Some(&b"expired.example.com"[..]));
+        assert_eq!(
+            b.insecure_host().as_deref(),
+            Some(&b"expired.example.com"[..])
+        );
         // http never uses the override.
         b.open(b"http://expired.example.com/");
         assert_eq!(b.insecure_host(), None);

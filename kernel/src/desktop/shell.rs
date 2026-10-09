@@ -484,11 +484,20 @@ impl Desktop {
             Cmd::Shutdown => self.ask_power(true),
             Cmd::NewWindow => {
                 let kind = target.map_or(Kind::Terminal, |(_, k)| k);
-                self.new_window(kind);
+                if let Some((id, Kind::Browser)) = target {
+                    // One browser window: "new" opens a tab.
+                    self.menu_ctrl_key_browser(id, 't');
+                } else {
+                    self.new_window(kind);
+                }
             }
             Cmd::CloseWindow => {
-                if let Some((id, _)) = target {
-                    self.request_close(id);
+                if let Some((id, kind)) = target {
+                    if kind == Kind::Browser {
+                        self.browser_close_active(id);
+                    } else {
+                        self.request_close(id);
+                    }
                 }
             }
             Cmd::Minimize => {
@@ -565,6 +574,11 @@ impl Desktop {
             }
         }
         self.force_full = true;
+    }
+
+    /// A Ctrl chord for browser window `id` from a menu entry.
+    fn menu_ctrl_key_browser(&mut self, id: WindowId, c: char) {
+        self.browser_ctrl_chord(id, c);
     }
 
     /// Send a Ctrl chord to the focused app as if typed (menu entries reuse the keys).

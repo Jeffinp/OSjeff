@@ -20,6 +20,99 @@ use osjeff_core::web::{
     textops::Span,
 };
 
+/// The page area as last painted, in the framebuffer's own pixel format (rows copied with
+/// `copy_from_slice`, no per-pixel conversion).
+#[derive(Default)]
+pub(crate) struct PaintCache {
+    pub valid: bool,
+    pub key: u64,
+    pub scroll: i32,
+    pub w: usize,
+    pub h: usize,
+    pub bpp: usize,
+    rows: Vec<u8>,
+}
+
+impl PaintCache {
+    /// Start over for a page area of `w` x `h` pixels.
+    fn begin(&mut self, key: u64, w: usize, h: usize, bpp: usize, scroll: i32) {
+        self.valid = true;
+        self.key = key;
+        self.scroll = scroll;
+        self.w = w;
+        self.h = h;
+        self.bpp = bpp;
+        self.rows.clear();
+        self.rows.resize(w * h * bpp, 0);
+    }
+
+    pub(crate) fn invalidate(&mut self) {
+        self.valid = false;
+        self.rows = Vec::new();
+    }
+
+    fn row_len(&self) -> usize {
+        self.w * self.bpp
+    }
+
+    /// Copy the whole cache back to `area` of the framebuffer.
+    fn restore(&self, fb: &mut [u8], stride: usize, area: Rect) {
+        self.restore_rows(fb, stride, area, 0, 0, self.h as i32);
+    }
+
+    /// Copy `n` cached rows starting at `from` to the framebuffer rows starting at `to` of `area`.
+    fn restore_rows(&self, fb: &mut [u8], stride: usize, area: Rect, to: i32, from: i32, n: i32) {
+        let rl = self.row_len();
+        for r in 0..n.max(0) as usize {
+            let src = &self.rows[(from as usize + r) * rl..][..rl];
+            let o = ((area.y as usize + to as usize + r) * stride + area.x as usize) * self.bpp;
+            if let Some(dst) = fb.get_mut(o..o + rl) {
+                dst.copy_from_slice(src);
+            }
+        }
+    }
+
+    /// Copy framebuffer rows `y0..y1` of `area` into the cache.
+    fn store_rows(&mut self, fb: &[u8], stride: usize, area: Rect, y0: i32, y1: i32) {
+        let rl = self.row_len();
+        for y in y0.max(0) as usize..(y1.max(0) as usize).min(self.h) {
+            let o = ((area.y as usize + y) * stride + area.x as usize) * self.bpp;
+            if let Some(src) = fb.get(o..o + rl) {
+                self.rows[y * rl..(y + 1) * rl].copy_from_slice(src);
+            }
+        }
+    }
+
+    /// Move the cached rows by `dy` (the page moved up by `dy` when positive); the rows that
+    /// came into view are left stale for the caller to paint.
+    fn shift(&mut self, dy: i32) {
+        let rl = self.row_len();
+        let n = (self.h as i32 - dy.abs()).max(0) as usize;
+        if dy > 0 {
+            self.rows
+                .copy_within(dy as usize * rl..(dy as usize + n) * rl, 0);
+        } else {
+            self.rows.copy_within(0..n * rl, (-dy) as usize * rl);
+        }
+    }
+}
+
+/// Everything that changes how the page area looks except the scroll position.
+fn page_key(bs: &BrowserState, content: Rect) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |v: u64| {
+        h ^= v;
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    };
+    mix(bs.rev);
+    mix(u64::from(bs.tabs.active().id));
+    mix(content.w as u64);
+    mix(content.h as u64);
+    mix(bs.hover_link.map_or(u64::MAX, |l| l as u64));
+    mix(u64::from(theme::dark()));
+    h
+}
+
 /// Text metrics backed by the kernel's glyph engine.
 pub(crate) struct KernelMetrics;
 
@@ -226,35 +319,10 @@ fn paint_border(c: &mut Canvas, r: Rect, widths: [i32; 4], radius: i32, color: C
 }
 
 impl Desktop {
-    /// The pointer moved: which link of the browser page is under it? Returns whether that
-    /// changed (the page repaints the underline).
-    pub(crate) fn browser_hover_update(&mut self, cx: i32, cy: i32) -> bool {
-        let Some(id) = self.browser_id() else {
-            return false;
-        };
-        let over =
-            self.drag.is_none() && !self.overlay_open() && self.topmost_at(cx, cy) == Some(id);
-        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
-            return false;
-        };
-        let content = BrowserChrome::of(rect).content;
-        let Some(b) = self.browser_state_mut(id) else {
-            return false;
-        };
-        let new = if over && content.contains(cx, cy) && !b.browser.is_home() {
-            b.page
-                .as_ref()
-                .and_then(|p| p.link_index_at(cx - content.x, cy - content.y + b.scroll))
-        } else {
-            None
-        };
-        let changed = new != b.hover_link;
-        b.hover_link = new;
-        changed
-    }
-
     /// Rasterize a `web` engine display list into the content box, offset by the
-    /// current scroll and clipped to the visible area.
+    /// current scroll and clipped to the visible area. The finished area is kept: the next
+    /// paint of the same page at the same size copies it back, and a scroll moves it and
+    /// paints only the rows that came into view.
     pub(crate) fn paint_web_page(
         &self,
         c: &mut Canvas,
@@ -263,19 +331,79 @@ impl Desktop {
         scroll: i32,
         bs: &BrowserState,
     ) {
-        let Some(clip) = content.intersection(&c.clip_rect()) else {
+        let key = page_key(bs, content);
+        let info = c.fb_info();
+        let whole = content.x >= 0
+            && content.y >= 0
+            && content.right() <= info.width as i32
+            && content.bottom() <= info.height as i32
+            && c.clip_rect().intersection(&content) == Some(content);
+        let bpp = info.bytes_per_pixel;
+        let (w, h) = (content.w.max(0) as usize, content.h.max(0) as usize);
+        if !whole || w == 0 || h == 0 || bpp == 0 {
+            self.paint_page_range(c, page, content, scroll, bs, 0, content.h);
+            return;
+        }
+        let mut cache = bs.cache.borrow_mut();
+        let usable =
+            cache.valid && cache.key == key && cache.w == w && cache.h == h && cache.bpp == bpp;
+        let stride = info.stride;
+        if usable && cache.scroll == scroll {
+            cache.restore(c.buffer_mut(), stride, content);
+            return;
+        }
+        if usable && (scroll - cache.scroll).unsigned_abs() as usize * 2 < h {
+            // Scrolled a little: keep the rows that are still in view, paint the new ones.
+            let dy = scroll - cache.scroll; // > 0: the page moved up
+            let keep = h as i32 - dy.abs();
+            let (strip_y, keep_y, keep_from) = if dy > 0 { (keep, 0, dy) } else { (0, -dy, 0) };
+            cache.restore_rows(c.buffer_mut(), stride, content, keep_y, keep_from, keep);
+            cache.shift(dy);
+            drop(cache);
+            let (y0, y1) = if dy > 0 {
+                (strip_y, h as i32)
+            } else {
+                (0, -dy)
+            };
+            self.paint_page_range(c, page, content, scroll, bs, y0, y1);
+            let mut cache = bs.cache.borrow_mut();
+            cache.store_rows(c.buffer_mut(), stride, content, y0, y1);
+            cache.scroll = scroll;
+            return;
+        }
+        drop(cache);
+        self.paint_page_range(c, page, content, scroll, bs, 0, content.h);
+        let mut cache = bs.cache.borrow_mut();
+        cache.begin(key, w, h, bpp, scroll);
+        cache.store_rows(c.buffer_mut(), stride, content, 0, content.h);
+    }
+
+    /// Paint rows `y0..y1` (page-area coordinates) of the page.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_page_range(
+        &self,
+        c: &mut Canvas,
+        page: &Page,
+        content: Rect,
+        scroll: i32,
+        bs: &BrowserState,
+        y0: i32,
+        y1: i32,
+    ) {
+        let band = Rect::new(content.x, content.y + y0, content.w, (y1 - y0).max(0));
+        let Some(clip) = band.intersection(&c.clip_rect()) else {
             return;
         };
         let saved = c.set_clip(clip);
         let m = KernelMetrics;
-        let (top, bottom) = (scroll, scroll + content.h);
+        let (top, bottom) = (scroll + y0, scroll + y1);
         let (ox, oy) = (content.x, content.y - scroll);
         // The page's own background, whatever the system appearance.
         c.fill_rect(
-            content.x.max(0) as usize,
-            content.y.max(0) as usize,
-            content.w.max(0) as usize,
-            content.h.max(0) as usize,
+            band.x.max(0) as usize,
+            band.y.max(0) as usize,
+            band.w.max(0) as usize,
+            band.h.max(0) as usize,
             rgb(page.background),
         );
         let visible = |y: i32, h: i32| y + h >= top - 2 && y <= bottom + 2;

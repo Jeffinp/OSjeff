@@ -339,7 +339,7 @@ fn browser_keeps_the_note_for_the_banner() {
     assert_eq!(b.note(), Some(PageNote::Truncated));
     assert_eq!(
         PageNote::Truncated.label(),
-        "Pagina cortada no limite de tamanho"
+        "Página cortada no limite de tamanho"
     );
     b.open(b"example.org");
     assert!(b.take_request().is_some());

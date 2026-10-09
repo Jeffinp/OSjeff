@@ -75,10 +75,10 @@ pub const ACCENT_TEXT: Color = Color::rgb(0xFF, 0xFF, 0xFF);
 
 // ---- legacy app-interior colours (light surfaces) ----
 
+#[allow(dead_code)]
 pub const ACCENT_2: Color = Color::rgb(0x7C, 0x6C, 0xFF); // violet
 
 // Surfaces.
-pub const DOCK_EDGE: Color = Color::rgb(0x2A, 0x33, 0x52);
 /// App interiors are drawn on this: the unified window colour of the current appearance.
 #[inline]
 pub fn window_body() -> Color {
@@ -100,7 +100,6 @@ pub fn text_muted() -> Color {
 
 // Status / controls.
 pub const CLOSE: Color = Color::rgb(0xFF, 0x6B, 0x63);
-pub const SHADOW: Color = Color::rgb(0, 0, 0);
 pub const WHITE: Color = Color::rgb(0xFF, 0xFF, 0xFF);
 
 // ---- semantic colours of the app interiors (they follow the appearance) ----
@@ -157,11 +156,6 @@ pub fn tool_bg() -> Color {
     } else {
         Color::rgb(0xEA, 0xEA, 0xEF)
     }
-}
-/// Icon ink on toolbars.
-#[inline]
-pub fn ink() -> Color {
-    text()
 }
 /// Disabled icon ink.
 #[inline]
