@@ -55,6 +55,8 @@ pub(crate) enum Cmd {
     ShowDesktop,
     /// Close every window of an app (app-bar menu).
     QuitOf(Kind),
+    /// A command of the file manager (its context and sort menus, the View menu).
+    Files(osjeff_core::fileman::Cmd),
 }
 
 /// One row of a menu.
@@ -499,6 +501,17 @@ impl Desktop {
                     self.toggle_maximize(id);
                 }
             }
+            Cmd::Copy | Cmd::Paste | Cmd::Cut | Cmd::SelectAll
+                if target.is_some_and(|(_, k)| k == Kind::Files) =>
+            {
+                use osjeff_core::fileman::Cmd as F;
+                self.files_run_focused(match cmd {
+                    Cmd::Copy => F::Copy,
+                    Cmd::Paste => F::Paste,
+                    Cmd::Cut => F::Cut,
+                    _ => F::SelectAll,
+                });
+            }
             Cmd::Copy => self.copy_from_focused(),
             Cmd::Paste => self.paste_into_focused(),
             Cmd::Cut => self.menu_ctrl(ctrl('x')),
@@ -537,6 +550,7 @@ impl Desktop {
             Cmd::NewOf(k) => {
                 self.new_window(k);
             }
+            Cmd::Files(c) => self.files_run_focused(c),
             Cmd::QuitOf(k) => {
                 let ids: Vec<WindowId> = self
                     .wm

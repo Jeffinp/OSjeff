@@ -84,6 +84,7 @@ pub const DOCK_EDGE: Color = Color::rgb(0x2A, 0x33, 0x52);
 pub fn window_body() -> Color {
     solid(pal().window_bg)
 }
+#[allow(dead_code)]
 pub const HEADER: Color = Color::rgb(0x18, 0x21, 0x39);
 pub const HEADER_TEXT: Color = Color::rgb(0xE8, 0xED, 0xF7);
 
@@ -124,6 +125,7 @@ pub fn surface() -> Color {
 }
 /// Alternate list rows.
 #[inline]
+#[allow(dead_code)]
 pub fn zebra() -> Color {
     if dark() {
         Color::rgb(0x25, 0x25, 0x28)

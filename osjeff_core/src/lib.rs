@@ -16,6 +16,7 @@ extern crate alloc;
 pub mod activity;
 pub mod anim;
 pub mod appabi;
+pub mod appart;
 pub mod appfs;
 pub mod appinstall;
 pub mod appmanifest;

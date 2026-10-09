@@ -75,6 +75,9 @@ pub(crate) enum DragMode {
     PageSelect,
     /// A control of a system app being dragged (a slider of Ajustes).
     Ui,
+    /// A press in a file manager: a click, a drag of items or a rubber band (the gesture
+    /// lives in the window's state).
+    Files,
 }
 
 pub(crate) struct Drag {
@@ -408,13 +411,14 @@ impl Desktop {
     /// is still animating (the caller keeps rendering).
     pub fn animate(&mut self, dt: f32) -> bool {
         self.step_file_jobs();
+        let files_busy = self.step_files(dt);
         self.step_shell_jobs();
         self.sync_text_windows();
         self.live_step(dt);
         let (active, gone) = self.wm.step(dt);
         let focus_busy = self.step_focus(dt);
         let shell_busy = self.step_shell(dt);
-        let active = active || focus_busy || shell_busy;
+        let active = active || focus_busy || shell_busy || files_busy;
         if !active {
             // Nothing animates any more: the next animation re-captures its window.
             self.tex_key.set(None);
@@ -519,7 +523,7 @@ impl Desktop {
             // on its own clock), so it is kept out of the cached static layer and
             // repainted through the per-frame damage path like an animation.
             || (w.shown() && w.app.kind() == Kind::WasmApp)
-            || (w.shown() && matches!(&w.app.app, App::Files(f) if f.job.is_some()))
+            || (w.shown() && matches!(&w.app.app, App::Files(f) if f.animating()))
             || (w.shown() && matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
             || self.live_dynamic(w)
             || self.focus_busy(w.id)
@@ -539,7 +543,7 @@ impl Desktop {
                         || w.zoom.is_some()
                         || self.focus_busy(w.id)
                         || w.app.kind() == Kind::WasmApp
-                        || matches!(&w.app.app, App::Files(f) if f.job.is_some())
+                        || matches!(&w.app.app, App::Files(f) if f.animating())
                         || matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
             })
     }
@@ -848,7 +852,9 @@ fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
     }
 }
 
+mod appart;
 mod apps;
+mod appui;
 pub(crate) mod calc_ui;
 mod chrome;
 mod cursor;

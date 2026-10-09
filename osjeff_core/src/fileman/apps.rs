@@ -46,7 +46,7 @@ pub fn status_label(installed: bool) -> &'static str {
     if installed {
         "instalado"
     } else {
-        "nao instalado"
+        "não instalado"
     }
 }
 
@@ -80,40 +80,39 @@ pub fn app_action(row: &Row, key: AppKey) -> Result<AppAction, &'static str> {
         (AppKey::Enter, true) => Ok(AppAction::Launch(id)),
         (AppKey::Enter, false) => Ok(AppAction::InstallAndLaunch(id)),
         (AppKey::Install, false) => Ok(AppAction::Install(id)),
-        (AppKey::Install, true) => Err("ja instalado"),
+        (AppKey::Install, true) => Err("Já instalado"),
         (AppKey::Remove, true) => Ok(AppAction::Remove(id)),
-        (AppKey::Remove, false) => Err("nao instalado"),
+        (AppKey::Remove, false) => Err("Não instalado"),
     }
 }
 
-/// The permissions and limits of `m` as lines for the Properties panel (ASCII,
-/// Portuguese, each at most 46 characters for a 520-pixel panel).
+/// The permissions and limits of `m` as lines for the Properties panel (Portuguese).
 pub fn manifest_lines(m: &Manifest) -> Vec<String> {
     let abi = match m.abi {
-        Abi::V1 => "1 (desenho continuo)",
+        Abi::V1 => "1 (desenho contínuo)",
         Abi::V2 => "2 (por eventos)",
     };
     let fs = match m.fs {
         FsPerm::None => String::from("nenhum"),
-        FsPerm::Own => format!("so /data/{}", m.id),
-        FsPerm::Home => String::from("pasta do usuario (/home)"),
+        FsPerm::Own => format!("só /data/{}", m.id),
+        FsPerm::Home => String::from("pasta do usuário (/home)"),
     };
     let net = match m.net {
         NetPerm::None => "nenhuma",
-        NetPerm::Http => "HTTP e HTTPS (enderecos publicos)",
+        NetPerm::Http => "HTTP e HTTPS (endereços públicos)",
         NetPerm::Tcp => "HTTP e HTTPS (TCP reservado)",
     };
     let clip = match m.clipboard {
-        ClipPerm::None => "nao",
+        ClipPerm::None => "não",
         ClipPerm::Rw => "ler e escrever",
     };
     alloc::vec![
         format!("App: {} ({})", m.name, m.id),
-        format!("Versao: {}   ABI {}", m.version, abi),
+        format!("Versão: {}   ABI {}", m.version, abi),
         format!("Arquivos: {fs}"),
         format!("Rede: {net}"),
-        format!("Area de transferencia: {clip}"),
-        format!("Memoria: {} MiB   Disco: {} KiB", m.mem_mib, m.disk_kib),
+        format!("Área de transferência: {clip}"),
+        format!("Memória: {} MiB   Disco: {} KiB", m.mem_mib, m.disk_kib),
         format!(
             "Arquivos abertos: {}   Janela {}x{}{}",
             m.max_fds,

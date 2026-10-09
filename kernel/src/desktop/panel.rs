@@ -380,11 +380,12 @@ impl Desktop {
             }
             "Editar" => {
                 let editor = kind == Some(Kind::Editor);
+                let files = kind == Some(Kind::Files);
                 alloc::vec![
                     Entry::item("Desfazer", "Ctrl+Z", Cmd::Undo).disabled_if(!editor),
                     Entry::item("Refazer", "Ctrl+Y", Cmd::Redo).disabled_if(!editor),
                     Entry::sep(),
-                    Entry::item("Recortar", "Ctrl+X", Cmd::Cut).disabled_if(!editor),
+                    Entry::item("Recortar", "Ctrl+X", Cmd::Cut).disabled_if(!editor && !files),
                     Entry::item(
                         "Copiar",
                         if kind == Some(Kind::Terminal) {
@@ -397,7 +398,8 @@ impl Desktop {
                     .disabled_if(kind.is_none() || wasm),
                     Entry::item("Colar", "Ctrl+V", Cmd::Paste).disabled_if(kind.is_none() || wasm),
                     Entry::sep(),
-                    Entry::item("Selecionar tudo", "Ctrl+A", Cmd::SelectAll).disabled_if(!editor),
+                    Entry::item("Selecionar tudo", "Ctrl+A", Cmd::SelectAll)
+                        .disabled_if(!editor && !files),
                 ]
             }
             "Visualizar" => {
@@ -407,6 +409,33 @@ impl Desktop {
                     v.push(Entry::item("Ampliar", "Ctrl++", Cmd::BrowserZoomIn));
                     v.push(Entry::item("Reduzir", "Ctrl+-", Cmd::BrowserZoomOut));
                     v.push(Entry::item("Tamanho real", "Ctrl+0", Cmd::BrowserZoomReset));
+                    v.push(Entry::sep());
+                }
+                if let Some(fid) = self.focused().filter(|_| kind == Some(Kind::Files))
+                    && let Some(App::Files(f)) = self.wm.get(fid).map(|w| &w.app.app)
+                {
+                    use osjeff_core::fileman::{Cmd as FCmd, ui::ViewMode};
+                    let mut list = Entry::item(
+                        "Como lista",
+                        "Ctrl+1",
+                        Cmd::Files(FCmd::SetView(ViewMode::List)),
+                    );
+                    list.checked = f.mode == ViewMode::List;
+                    let mut icons = Entry::item(
+                        "Como ícones",
+                        "Ctrl+2",
+                        Cmd::Files(FCmd::SetView(ViewMode::Icons)),
+                    );
+                    icons.checked = f.mode == ViewMode::Icons;
+                    v.push(list);
+                    v.push(icons);
+                    let mut pv = Entry::item(
+                        "Pré-visualização",
+                        "Espaço",
+                        Cmd::Files(FCmd::TogglePreview),
+                    );
+                    pv.checked = f.preview_open;
+                    v.push(pv);
                     v.push(Entry::sep());
                 }
                 v.push(Entry::item("Zoom da janela", "", Cmd::Zoom));

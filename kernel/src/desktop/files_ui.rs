@@ -1,600 +1,1303 @@
-//! `Desktop::draw_files`: the file manager window. Pure drawing: the state is
-//! `FilesState` (rows already loaded: no disk access happens while painting) and
-//! the geometry is `osjeff_core::fileman::Layout`, shared with the mouse handler.
+//! `Desktop::draw_files`: the Arquivos window. Pure drawing: the state is `FilesState` (rows
+//! already loaded: no disk access happens while painting) and the geometry is
+//! `osjeff_core::fileman::ui`, shared with the mouse handler.
 //!
-//! Light theme with dark text everywhere on the light surfaces (the old dark-on-
-//! light mix had unreadable rows); selected rows are white on blue.
+//! Layout: a translucent-looking sidebar (Favoritos, Locais, the disk with its usage bar), a
+//! toolbar (back and forward, the breadcrumb path bar, the view switch, sort, search and the
+//! preview toggle), the list or the icon grid on the content colour with overlay scrollbar,
+//! an optional preview pane, a status bar and sheets attached to the window. Text is
+//! measured, never counted in columns.
 
-use super::files::{MENU_ROW_H, MENU_W_FILES, menu_height};
+use super::appui::{self, EmptyIcon};
+use super::files::{SheetKind, crumbs_of, files_sheet_kind, modified_label};
+use super::ui::ButtonKind;
 use super::*;
-use osjeff_core::fileman::{self, CELL, Layout, Place, ROW_H, SortKey};
+use crate::text::{self, BODY, CALLOUT, CAPTION, FOOTNOTE, Weight};
+use osjeff_core::appart::{FileKind, Tool};
+use osjeff_core::fileman::ui::{self as fui, Columns, Layout, SideLayout, ViewMode};
+use osjeff_core::fileman::{self, Place, SortKey};
 
-fn text(c: &mut Canvas, x: i32, y: i32, s: &[u8], col: Color) {
-    if x >= 0 && y >= 0 {
-        crate::text::legacy::draw_bytes(c, x as usize, y as usize, s, col, 2);
-    }
+fn argb(c: Color) -> u32 {
+    appui::rgb_of(c)
 }
 
-fn rect(c: &mut Canvas, x: i32, y: i32, w: i32, h: i32, col: Color) {
-    if w > 0 && h > 0 {
-        c.fill_rect(
-            x.max(0) as usize,
-            y.max(0) as usize,
-            w as usize,
-            h as usize,
-            col,
-        );
-    }
+/// `color` at `a` (0..=256) as a blend of text colour: used for dim text.
+fn alpha_of(a: u32, base: u32) -> u32 {
+    (a * base / 256).min(256)
 }
 
-fn round(c: &mut Canvas, x: i32, y: i32, w: i32, h: i32, rad: i32, col: Color) {
-    if w > 0 && h > 0 {
-        c.fill_round_rect(
-            x.max(0) as usize,
-            y.max(0) as usize,
-            w as usize,
-            h as usize,
-            rad.max(0) as usize,
-            col,
-        );
-    }
-}
-
-/// Small glyph by id: 0 folder, 1 trash, 2 disk, 3 document, 4 apps (a 2x2 grid).
-fn glyph(c: &mut Canvas, id: u8, x: i32, y: i32, s: i32, col: Color, bg: Color) {
-    match id {
-        0 => {
-            round(c, x, y + 1, s / 2, s / 4 + 1, 2, col);
-            round(c, x, y + s / 5, s, s - s / 5, 2, col);
-        }
-        1 => {
-            rect(c, x, y + s / 6, s, s / 12 + 1, col);
-            round(c, x + s / 8, y + s / 4, s - s / 4, s - s / 3, 2, col);
-        }
-        2 => {
-            round(c, x, y, s, s, s / 4, col);
-            round(
-                c,
-                x + s / 2 - s / 8,
-                y + s / 2 - s / 8,
-                s / 4,
-                s / 4,
-                s / 8,
-                bg,
-            );
-        }
-        4 => {
-            let q = s / 2 - 1;
-            for (dx, dy) in [(0, 0), (s - q, 0), (0, s - q), (s - q, s - q)] {
-                round(c, x + dx, y + dy, q, q, 2, col);
-            }
-        }
-        _ => {
-            round(c, x + s / 6, y, s - s / 3, s, 2, col);
-            rect(c, x + s / 4, y + s / 3, s / 2, 1, bg);
-            rect(c, x + s / 4, y + s / 2, s / 2, 1, bg);
-        }
-    }
-}
-
-/// Fit `name` (UTF-8) in `cols` columns for the ASCII font.
-fn shown(name: &[u8], cols: usize) -> Vec<u8> {
-    fileman::ellipsize(&fileman::display_ascii(name), cols)
+fn tertiary() -> Color {
+    theme::solid(theme::pal().text_tertiary)
 }
 
 impl Desktop {
-    pub(crate) fn draw_files(&self, c: &mut Canvas, r: Rect, st: &FilesState) {
-        let lay = Layout::of(r);
-        let v = &st.view;
-        let vis = lay.visible_rows();
+    pub(crate) fn draw_files(&self, c: &mut Canvas, r: Rect, st: &FilesState, focused: bool) {
+        let lay = Layout::of(r, st.mode, st.preview_open, st.search_is_open());
+        let now_ms = appui::now_ms();
+        self.draw_files_sidebar(c, &lay, st, focused);
+        self.draw_files_toolbar(c, &lay, st, focused);
+        let list_clip = lay
+            .list
+            .intersection(&c.clip_rect())
+            .unwrap_or(Rect::new(0, 0, 0, 0));
+        // The content colour under the header and the list.
+        ui::fill(
+            c,
+            Rect::new(
+                lay.main.x,
+                lay.toolbar.bottom(),
+                lay.main.w - lay.preview.map_or(0, |p| p.w),
+                (lay.status.y - lay.toolbar.bottom()).max(0),
+            ),
+            theme::surface(),
+        );
+        appui::hairline(c, lay.main.x, lay.toolbar.bottom() - 1, lay.main.w);
+        if lay.header.h > 0 {
+            self.draw_files_header(c, &lay, st);
+        }
+        let saved = c.set_clip(list_clip);
+        self.draw_files_items(c, &lay, st, focused);
+        c.restore_clip(saved);
+        // Overlay scrollbar.
+        let n = st.view.rows.len();
+        let content = fui::content_height(st.mode, lay.list.w, n);
+        if content > lay.list.h {
+            let alpha = if matches!(st.gesture, Gesture::Thumb { .. }) {
+                256
+            } else {
+                st.scroll_fade.alpha(now_ms)
+            };
+            let track = Rect::new(lay.list.right() - 12, lay.list.y, 12, lay.list.h);
+            ui::overlay_scrollbar(
+                c,
+                track,
+                st.scroller.pos().max(0) as usize,
+                content as usize,
+                lay.list.h as usize,
+                alpha,
+            );
+        }
+        if let Some(pane) = lay.preview {
+            self.draw_files_preview(c, pane, st);
+        }
+        self.draw_files_status(c, &lay, st);
+        // The ghost of dragged items follows the pointer inside the window.
+        if let Gesture::Drag(d) = &st.gesture {
+            let saved = c.set_clip(
+                r.intersection(&c.clip_rect())
+                    .unwrap_or(Rect::new(0, 0, 0, 0)),
+            );
+            draw_drag_ghost(c, d, self.keymap.ctrl());
+            c.restore_clip(saved);
+        }
+        if st.sheet_open() {
+            self.draw_files_sheet(c, r, st);
+        }
+    }
 
-        // ---- toolbar ----
-        rect(
-            c,
-            r.x + 1,
-            r.y + TITLE_H,
-            r.w - 2,
-            fileman::TOOLBAR_H,
-            theme::toolbar(),
-        );
-        let nav = [
-            (lay.back, b"<", v.history.can_back()),
-            (lay.forward, b">", v.history.can_forward()),
-            (lay.up, b"^", !vfs::is_root(&v.cwd)),
-        ];
-        for (b, label, on) in nav {
-            round(c, b.x, b.y, b.w, b.h, 6, theme::button_bg());
-            let col = if on { theme::text() } else { theme::line() };
-            text(c, b.x + (b.w - CELL) / 2, b.y + (b.h - 14) / 2, label, col);
+    // ------------------------------------------------------------------ sidebar
+
+    fn draw_files_sidebar(&self, c: &mut Canvas, lay: &Layout, st: &FilesState, focused: bool) {
+        let p = theme::pal();
+        let sb = lay.sidebar;
+        // A veil of the accent that fades into the sidebar colour: the stand-in for a live
+        // blur (a window is composited opaque, so there is no backdrop to show through).
+        let base = theme::sidebar();
+        let top = base.lerp(theme::accent(), if theme::dark() { 26 } else { 30 });
+        c.fill_rrect_vgrad(sb, 0, Corner::Circle, top, base, 256);
+        ui::fill_token(c, Rect::new(sb.right() - 1, sb.y, 1, sb.h), 0, p.separator);
+        let side = SideLayout::of(sb);
+        for (title, r) in [
+            ("Favoritos", side.favorites_title),
+            ("Locais", side.places_title),
+        ] {
+            text::draw_left(c, r, title, FOOTNOTE, Weight::Semibold, tertiary());
         }
-        let ab = lay.address;
-        round(c, ab.x, ab.y, ab.w, ab.h, 8, theme::line());
-        round(
-            c,
-            ab.x + 1,
-            ab.y + 1,
-            ab.w - 2,
-            ab.h - 2,
-            7,
-            theme::button_bg(),
-        );
-        let crumbs = fileman::breadcrumbs(&v.cwd);
-        let labels: Vec<usize> = crumbs
-            .iter()
-            .map(|k| fileman::display_ascii(&k.label).len())
-            .collect();
-        let (spans, folded) = lay.crumb_spans(&labels);
-        let ty = ab.y + (ab.h - 14) / 2;
-        if folded {
-            text(c, ab.x + 10, ty, b"...", theme::text_muted());
-        }
-        let last = crumbs.len() - 1;
-        for (n, &(i, x, _)) in spans.iter().enumerate() {
-            let col = if i == last {
+        let current = Place::of_path(&st.view.cwd);
+        let hover_place = match st.hover {
+            Some(fui::Hit::Place(pl)) => Some(pl),
+            _ => None,
+        };
+        let drop_place = match &st.gesture {
+            Gesture::Drag(d) => match d.over {
+                DropHover::Place(pl) => Some(pl),
+                _ => None,
+            },
+            _ => None,
+        };
+        for (place, rect) in side.items {
+            let is_disk = place == Place::Disk;
+            let row = if is_disk {
+                Rect::new(rect.x, rect.y, rect.w, 28)
+            } else {
+                rect
+            };
+            let active = place == current;
+            let acc = theme::accent();
+            if active {
+                let (col, a) = if focused {
+                    (acc, 44u16)
+                } else {
+                    (theme::text_muted(), 36)
+                };
+                c.fill_rrect(row, 6, Corner::Circle, col, a);
+            } else if hover_place == Some(place) {
+                let (col, a) = theme::tint(p.hover);
+                let a = (a as u32 * appui::level(&st.hover_t) / 256) as u16;
+                c.fill_rrect(row, 6, Corner::Circle, col, a);
+            }
+            if drop_place == Some(place) {
+                c.fill_rrect(row, 6, Corner::Circle, acc, 70);
+                c.stroke_rrect(row, 6, Corner::Circle, acc, 256);
+            }
+            let tool = match place {
+                Place::Home => Tool::Home,
+                Place::Documents => Tool::Folder,
+                Place::Images => Tool::Photo,
+                Place::Apps => Tool::Apps,
+                Place::Trash => Tool::Trash,
+                Place::Disk => Tool::Disk,
+            };
+            let icon_col = argb(acc);
+            appui::blit_tool_dim(
+                c,
+                tool,
+                row.x + 10,
+                row.y + (row.h - 16) / 2,
+                16,
+                icon_col,
+                if active { 256 } else { 210 },
+            );
+            let label = match place {
+                Place::Home => "Início",
+                Place::Documents => "Documentos",
+                Place::Images => "Imagens",
+                Place::Apps => "Apps",
+                Place::Trash => "Lixeira",
+                Place::Disk => {
+                    if vfs::volume() == vfs::Volume::Memory {
+                        "Memória"
+                    } else {
+                        "Disco"
+                    }
+                }
+            };
+            let tcol = if active {
                 theme::text()
             } else {
-                theme::accent()
+                theme::solid(p.text)
             };
-            text(c, x, ty, &fileman::display_ascii(&crumbs[i].label), col);
-            if n + 1 < spans.len() {
-                let w = labels[i] as i32 * CELL;
-                text(c, x + w + CELL, ty, b">", theme::text_muted());
-            }
-        }
-
-        // ---- sidebar ----
-        rect(
-            c,
-            lay.sidebar.x,
-            lay.sidebar.y,
-            lay.sidebar.w,
-            lay.sidebar.h,
-            theme::sidebar(),
-        );
-        text(
-            c,
-            lay.sidebar.x + 12,
-            lay.sidebar.y + 6,
-            b"Locais",
-            theme::text_muted(),
-        );
-        let docs = v.cwd.starts_with(b"/Documentos");
-        for (p, pr) in lay.places() {
-            let (label, gid, active): (&[u8], u8, bool) = match p {
-                Place::Root => (b"Raiz", 2, v.cwd == b"/"),
-                Place::Documents => (b"Documentos", 0, docs),
-                Place::Apps => (b"Apps", 4, v.in_apps()),
-                Place::Trash => (b"Lixeira", 1, v.in_trash()),
-                Place::Disk => (b"", 2, false),
-            };
-            if p == Place::Disk {
-                self.draw_sidebar_disk(c, lay.sidebar.x, pr, st);
-                continue;
-            }
-            if active {
-                round(c, pr.x, pr.y, pr.w, pr.h, 7, theme::accent());
-            }
-            let (tc, gc) = if active {
-                (theme::WHITE, theme::WHITE)
-            } else {
-                (theme::text(), theme::accent())
-            };
-            glyph(
+            text::draw_left(
                 c,
-                gid,
-                pr.x + 8,
-                pr.y + (pr.h - 16) / 2,
-                16,
-                gc,
+                Rect::new(row.x + 34, row.y, row.w - 40, row.h),
+                label,
+                BODY,
                 if active {
-                    theme::accent()
+                    Weight::Medium
                 } else {
-                    theme::sidebar()
+                    Weight::Regular
                 },
+                tcol,
             );
-            text(c, pr.x + 32, pr.y + (pr.h - 14) / 2, label, tc);
-        }
-
-        // ---- column header ----
-        let h = lay.header;
-        rect(c, h.x, h.y, h.w, h.h, theme::toolbar());
-        rect(c, h.x, h.bottom() - 1, h.w, 1, theme::line());
-        let date_title: &[u8] = if v.in_trash() {
-            b"Apagado em"
-        } else if v.in_apps() {
-            b"Estado"
-        } else {
-            b"Modificado"
-        };
-        let cols: [(&[u8], i32, SortKey); 3] = [
-            (b"Nome", lay.name_x, SortKey::Name),
-            (b"Tamanho", lay.size_x + 8, SortKey::Size),
-            (date_title, lay.date_x + 8, SortKey::Modified),
-        ];
-        for (title, x, key) in cols {
-            text(c, x, h.y + (h.h - 14) / 2, title, theme::text());
-            if v.sort.key == key {
-                let ax = x + title.len() as i32 * CELL + 4;
-                text(
+            if is_disk {
+                let used = st.usage.used_permille();
+                let bar = Rect::new(rect.x + 12, rect.y + 34, rect.w - 24, 5);
+                let col = if used > 900 {
+                    theme::danger()
+                } else {
+                    theme::accent()
+                };
+                ui::fill_token(
                     c,
-                    ax,
-                    h.y + (h.h - 14) / 2,
-                    if v.sort.asc { b"^" } else { b"v" },
-                    theme::accent(),
+                    bar,
+                    3,
+                    if theme::dark() {
+                        0x33FF_FFFF
+                    } else {
+                        0x1F00_0000
+                    },
+                );
+                let w = (bar.w as i64 * used as i64 / 1000) as i32;
+                if w > 0 {
+                    c.fill_rrect(
+                        Rect::new(bar.x, bar.y, w.max(5), bar.h),
+                        3,
+                        Corner::Circle,
+                        col,
+                        256,
+                    );
+                }
+                let free = alloc::format!("{} livres", fileman::format_size(st.usage.free));
+                text::draw_ellipsis(
+                    c,
+                    rect.x + 12,
+                    rect.y + 41,
+                    rect.w - 24,
+                    &free,
+                    FOOTNOTE,
+                    Weight::Regular,
+                    theme::text_muted(),
                 );
             }
         }
+    }
 
-        // ---- rows ----
-        let l = lay.list;
-        rect(c, l.x, l.y, l.w, l.h, theme::window_body());
-        if v.rows.is_empty() {
-            let msg: &[u8] = if v.in_trash() {
-                b"(lixeira vazia)"
-            } else if v.in_apps() {
-                b"(nenhum app)"
-            } else {
-                b"(pasta vazia)"
+    // ------------------------------------------------------------------ toolbar
+
+    fn draw_files_toolbar(&self, c: &mut Canvas, lay: &Layout, st: &FilesState, _focused: bool) {
+        let hover_lvl = appui::level(&st.hover_t);
+        let hv = |h: fui::Hit| -> u32 { if st.hover == Some(h) { hover_lvl } else { 0 } };
+        appui::tool_button(
+            c,
+            lay.back,
+            Tool::ChevronLeft,
+            st.view.history.can_back(),
+            hv(fui::Hit::Back),
+            false,
+            false,
+        );
+        appui::tool_button(
+            c,
+            lay.forward,
+            Tool::ChevronRight,
+            st.view.history.can_forward(),
+            hv(fui::Hit::Forward),
+            false,
+            false,
+        );
+        // The path bar.
+        if lay.path.w > 0 {
+            appui::pill(c, lay.path);
+            let (crumbs, labels, widths) = crumbs_of(&st.view.cwd);
+            let cl = fui::crumb_layout(lay.path, &widths);
+            let n = crumbs.len();
+            let saved = c.set_clip(
+                lay.path
+                    .intersection(&c.clip_rect())
+                    .unwrap_or(Rect::new(0, 0, 0, 0)),
+            );
+            let drop_crumb = match &st.gesture {
+                Gesture::Drag(d) => match d.over {
+                    DropHover::Crumb(i) => Some(i),
+                    _ => None,
+                },
+                _ => None,
             };
-            text(c, lay.name_x, l.y + 10, msg, theme::text_muted());
-        }
-        let name_cols = ((lay.size_x - lay.name_x - 8) / CELL).max(4) as usize;
-        for i in v.scroll..v.rows.len().min(v.scroll + vis + 1) {
-            let y = lay.row_y(i, v.scroll);
-            if y + ROW_H > l.bottom() {
-                break;
+            if let Some(f) = cl.fold {
+                text::draw_centered(c, f, "…", BODY, Weight::Regular, theme::text_muted());
             }
-            let row = &v.rows[i];
-            let sel = v.sel.is_selected(i);
-            let cut = !v.in_trash()
-                && !v.in_apps()
-                && self.pathclip.is_cut_path(&vfs::join(&v.cwd, &row.name));
-            if sel {
-                round(c, l.x + 4, y, l.w - 8, ROW_H - 2, 6, theme::accent());
-            } else if i % 2 == 1 {
-                rect(c, l.x, y, l.w, ROW_H - 2, theme::zebra());
-            }
-            if !sel && i == v.sel.cursor() && st.input.is_none() && !v.rows.is_empty() {
-                rect(c, l.x + 4, y, l.w - 8, 1, theme::accent());
-                rect(c, l.x + 4, y + ROW_H - 3, l.w - 8, 1, theme::accent());
-            }
-            let (tc, mc) = if sel {
-                (theme::WHITE, theme::WHITE)
-            } else if cut {
-                (theme::line(), theme::line())
-            } else {
-                (theme::text(), theme::text_muted())
-            };
-            let gcol = if sel {
-                theme::WHITE
-            } else if row.is_dir() {
-                theme::accent()
-            } else {
-                theme::text_muted()
-            };
-            let bg = if sel {
-                theme::accent()
-            } else {
-                theme::window_body()
-            };
-            // Installed apps show their launcher icon, the rest the document glyph.
-            let icon = if v.in_apps() && row.installed {
-                self.apps
-                    .iter()
-                    .find(|a| a.id.as_bytes() == &row.id[..])
-                    .and_then(|a| a.icon.as_deref())
-            } else {
-                None
-            };
-            match icon {
-                Some(rgba) => c.draw_rgba(
-                    rgba,
-                    24,
-                    24,
-                    (lay.name_x - 30).max(0) as usize,
-                    y.max(0) as usize,
-                ),
-                None => glyph(
+            for (k, (i, rect)) in cl.spans.iter().enumerate() {
+                let last = *i + 1 == n;
+                let hovered = st.hover == Some(fui::Hit::Crumb(*i));
+                if drop_crumb == Some(*i) {
+                    c.fill_rrect(*rect, 5, Corner::Circle, theme::accent(), 80);
+                } else if hovered && !last {
+                    let (col, a) = theme::tint(theme::pal().hover);
+                    c.fill_rrect(*rect, 5, Corner::Circle, col, a);
+                }
+                let mut x = rect.x + fui::CRUMB_PAD;
+                if *i == 0 {
+                    appui::blit_tool_dim(
+                        c,
+                        Tool::Disk,
+                        x,
+                        rect.y + (rect.h - 14) / 2,
+                        14,
+                        argb(theme::accent()),
+                        256,
+                    );
+                    x += 20;
+                }
+                let (wt, col) = if last {
+                    (Weight::Medium, theme::text())
+                } else if hovered {
+                    (Weight::Regular, theme::text())
+                } else {
+                    (Weight::Regular, theme::text_muted())
+                };
+                let room = (rect.right() - fui::CRUMB_PAD - x).max(0);
+                text::draw_ellipsis(
                     c,
-                    if v.in_apps() {
-                        4
-                    } else if row.is_dir() {
-                        0
-                    } else {
-                        3
-                    },
-                    lay.name_x - 26,
-                    y + (ROW_H - 18) / 2,
-                    16,
-                    gcol,
-                    bg,
-                ),
+                    x,
+                    text::center_y(rect.y, rect.h, BODY, wt),
+                    room,
+                    &labels[*i],
+                    BODY,
+                    wt,
+                    col,
+                );
+                if k + 1 < cl.spans.len() {
+                    appui::blit_tool_dim(
+                        c,
+                        Tool::ChevronRight,
+                        rect.right() + (fui::CRUMB_GAP - 8) / 2,
+                        rect.y + (rect.h - 8) / 2,
+                        8,
+                        argb(tertiary()),
+                        256,
+                    );
+                }
             }
-            let ty = y + (ROW_H - 2 - 14) / 2;
-            text(c, lay.name_x, ty, &shown(&row.name, name_cols), tc);
-            let size: String = if row.is_dir() {
-                String::from("--")
-            } else {
-                fileman::format_size(row.size)
-            };
-            let sx = lay.date_x - 8 - size.len() as i32 * CELL;
-            text(c, sx, ty, size.as_bytes(), mc);
-            if v.in_apps() {
-                let status = fileman::apps::status_label(row.installed);
-                let sc = if sel {
-                    theme::WHITE
-                } else if row.installed {
-                    theme::ok()
+            c.restore_clip(saved);
+        }
+        if lay.view_switch.w > 0 {
+            appui::tool_segmented(
+                c,
+                lay.view_switch,
+                &[Tool::ViewList, Tool::ViewGrid],
+                st.mode.index(),
+            );
+        }
+        if lay.sort.w > 0 {
+            appui::tool_button(
+                c,
+                lay.sort,
+                Tool::Sort,
+                true,
+                hv(fui::Hit::SortButton),
+                false,
+                false,
+            );
+        }
+        if lay.search_is_field() {
+            let text = st.search.input.to_string_lossy();
+            appui::field(
+                c,
+                lay.search,
+                &appui::FieldText {
+                    text: &text,
+                    caret: st.search.input.caret(),
+                    selection: st.search.input.selection(),
+                },
+                "Buscar",
+                st.search.focused,
+                if st.search.focused {
+                    appui::caret_alpha(st.search.last_input)
+                } else {
+                    0
+                },
+                Some(Tool::Search),
+                !text.is_empty(),
+            );
+        } else {
+            appui::tool_button(
+                c,
+                lay.search,
+                Tool::Search,
+                true,
+                hv(fui::Hit::Search),
+                false,
+                false,
+            );
+        }
+        appui::tool_button(
+            c,
+            lay.preview_btn,
+            Tool::Eye,
+            true,
+            hv(fui::Hit::PreviewButton),
+            false,
+            st.preview_open,
+        );
+    }
+
+    // ------------------------------------------------------------------- header
+
+    fn draw_files_header(&self, c: &mut Canvas, lay: &Layout, st: &FilesState) {
+        let h = lay.header;
+        let cols = lay.columns();
+        let date_title = if st.view.in_trash() {
+            "Data da exclusão"
+        } else if st.view.in_apps() {
+            "Estado"
+        } else {
+            "Última modificação"
+        };
+        appui::hairline(c, h.x, h.bottom() - 1, h.w);
+        let sort = st.view.sort;
+        let draw_title =
+            |c: &mut Canvas, x: i32, w: i32, title: &str, key: SortKey, right: bool| {
+                let active = sort.key == key;
+                let wt = if active {
+                    Weight::Medium
+                } else {
+                    Weight::Regular
+                };
+                let col = if active {
+                    theme::text()
                 } else {
                     theme::text_muted()
                 };
-                text(c, lay.date_x + 8, ty, status.as_bytes(), sc);
-            } else {
-                text(c, lay.date_x + 8, ty, files_local(row.mtime).as_bytes(), mc);
-            }
-        }
-
-        // ---- scrollbar ----
-        let sb = lay.scrollbar;
-        rect(c, sb.x, sb.y, sb.w, sb.h, theme::toolbar());
-        if v.rows.len() > vis {
-            let (ty, th) = lay.thumb(v.scroll, v.rows.len());
-            round(c, sb.x + 2, ty, sb.w - 4, th, 4, theme::ink_dim());
-        }
-
-        // ---- status bar ----
-        self.draw_files_status(c, &lay, st);
-
-        // ---- overlays ----
-        if let Some(edit) = &st.input {
-            self.draw_name_box(c, r, edit);
-        }
-        if let Some(q) = &st.confirm {
-            self.draw_confirm(c, r, q);
-        }
-        if let Some(lines) = &st.props {
-            self.draw_props(c, r, lines);
-        }
-        if let Some(m) = &st.menu {
-            self.draw_files_menu(c, m);
-        }
-    }
-
-    fn draw_sidebar_disk(&self, c: &mut Canvas, sx: i32, pr: Rect, st: &FilesState) {
-        let usage = st.usage;
-        let label: &[u8] = if vfs::volume() == vfs::Volume::Memory {
-            b"Memoria"
-        } else {
-            b"Disco"
-        };
-        text(c, sx + 12, pr.y - 22, b"Discos", theme::text_muted());
-        glyph(
-            c,
-            2,
-            pr.x + 8,
-            pr.y + 2,
-            16,
-            theme::accent(),
-            theme::sidebar(),
-        );
-        text(c, pr.x + 32, pr.y + 2, label, theme::text());
-        let bar_x = pr.x + 8;
-        let bar_w = pr.w - 16;
-        round(c, bar_x, pr.y + 22, bar_w, 8, 4, theme::line());
-        let fill = bar_w * usage.used_permille() as i32 / 1000;
-        if fill > 0 {
-            let col = if usage.used_permille() > 900 {
-                theme::danger()
-            } else {
-                theme::accent()
+                let tw = text::measure(title, FOOTNOTE, wt);
+                let arrow = if active { 14 } else { 0 };
+                let tx = if right { x + w - tw - arrow } else { x };
+                text::draw(
+                    c,
+                    tx,
+                    text::center_y(h.y, h.h - 1, FOOTNOTE, wt),
+                    title,
+                    FOOTNOTE,
+                    wt,
+                    col,
+                );
+                if active {
+                    appui::blit_tool_dim(
+                        c,
+                        if sort.asc {
+                            Tool::ChevronUp
+                        } else {
+                            Tool::ChevronDown
+                        },
+                        tx + tw + 4,
+                        h.y + (h.h - 1 - 8) / 2,
+                        8,
+                        argb(theme::accent()),
+                        256,
+                    );
+                }
             };
-            round(c, bar_x, pr.y + 22, fill.max(8), 8, 4, col);
-        }
-        let s = alloc::format!("{} livres", fileman::format_size(usage.free));
-        crate::text::legacy::draw_bytes(
+        draw_title(
             c,
-            bar_x.max(0) as usize,
-            (pr.y + 36).max(0) as usize,
-            s.as_bytes(),
-            theme::text_muted(),
-            1,
+            cols.name_x + 28,
+            cols.size_x - cols.name_x - 28,
+            "Nome",
+            SortKey::Name,
+            false,
         );
+        draw_title(
+            c,
+            cols.size_x,
+            ui_size_w(&cols),
+            "Tamanho",
+            SortKey::Size,
+            true,
+        );
+        if cols.has_date() {
+            draw_title(
+                c,
+                cols.date_x,
+                cols.right - cols.date_x - 12,
+                date_title,
+                SortKey::Modified,
+                false,
+            );
+        }
     }
 
-    fn draw_files_status(&self, c: &mut Canvas, lay: &Layout, st: &FilesState) {
-        let s = lay.status;
-        rect(c, s.x + 1, s.y, s.w - 2, s.h - 1, theme::toolbar());
-        rect(c, s.x + 1, s.y, s.w - 2, 1, theme::line());
-        let ty = s.y + (s.h - 14) / 2;
-        let cols = ((s.w - 24) / CELL).max(8) as usize;
-        if let Some(job) = &st.job {
-            // Progress: label, bar, percent. Esc cancels.
-            let pm = job.copy.permille();
-            let name = shown(job.copy.current_name(), 22);
-            let left = alloc::format!("{} {}", job.label, String::from_utf8_lossy(&name));
-            text(c, s.x + 12, ty, left.as_bytes(), theme::text());
-            let bw = (s.w / 3).max(80);
-            let bx = s.right() - 12 - bw - 5 * CELL;
-            round(c, bx, ty + 2, bw, 10, 5, theme::line());
-            round(
-                c,
-                bx,
-                ty + 2,
-                (bw * pm as i32 / 1000).max(10),
-                10,
-                5,
-                theme::accent(),
-            );
-            let pct = alloc::format!("{:>3}%", pm / 10);
-            text(c, bx + bw + 8, ty, pct.as_bytes(), theme::text());
+    // -------------------------------------------------------------------- items
+
+    fn draw_files_items(&self, c: &mut Canvas, lay: &Layout, st: &FilesState, focused: bool) {
+        let rows = &st.view.rows;
+        let n = rows.len();
+        if n == 0 {
+            self.draw_files_empty(c, lay, st);
             return;
         }
-        let summary = st.view.summary();
-        text(c, s.x + 12, ty, summary.as_bytes(), theme::text_muted());
-        if let Some((m, err)) = &st.msg {
-            let x = s.x + 12 + (summary.len() as i32 + 3) * CELL;
-            let room = ((s.right() - 12 - x) / CELL).max(0) as usize;
-            let col = if *err { theme::danger() } else { theme::ok() };
-            let mb = m.as_bytes();
-            text(c, x, ty, &fileman::ellipsize(mb, room.min(cols)), col);
+        let scroll = st.scroller.pos();
+        let (first, end) = fui::visible_range(st.mode, lay.list.w, lay.list.h, scroll, n);
+        let enter = appui::level(&st.enter_t);
+        let slide = ((256 - enter) as i32 * 8) / 256;
+        let cols = lay.columns();
+        let hover_lvl = appui::level(&st.hover_t);
+        let hovered = match st.hover {
+            Some(fui::Hit::Item(i)) => Some(i),
+            _ => None,
+        };
+        let drop_item = match &st.gesture {
+            Gesture::Drag(d) => match d.over {
+                DropHover::Item(i) => Some(i),
+                _ => None,
+            },
+            _ => None,
+        };
+        let renaming = st.input.as_ref().and_then(|e| {
+            let EditPurpose::Rename(p) = &e.purpose;
+            let name = vfs::base_name(p);
+            rows.iter().position(|r| r.name == name)
+        });
+        for (i, row) in rows.iter().enumerate().take(end).skip(first) {
+            let base = fui::item_rect(st.mode, lay.list.w, i);
+            let rect = Rect::new(
+                lay.list.x + base.x,
+                lay.list.y + base.y - scroll + slide,
+                base.w,
+                base.h,
+            );
+            let sel = st.view.sel.is_selected(i);
+            let hov = hovered == Some(i) && !sel;
+            let cut = !st.view.in_trash()
+                && !st.view.in_apps()
+                && self
+                    .pathclip
+                    .is_cut_path(&vfs::join(&st.view.cwd, &row.name));
+            let dropping = drop_item == Some(i);
+            let ctx = ItemCtx {
+                sel,
+                hover: if hov { hover_lvl } else { 0 },
+                cut,
+                dropping,
+                focused,
+                alpha: enter,
+                editing: renaming == Some(i),
+            };
+            match st.mode {
+                ViewMode::List => self.draw_list_row(c, rect, &cols, row, &ctx, st),
+                ViewMode::Icons => self.draw_icon_cell(c, rect, row, &ctx, st),
+            }
+        }
+        // The rubber band.
+        if let Gesture::Band { anchor, cur, .. } = &st.gesture {
+            let a = (lay.list.x + anchor.0, lay.list.y + anchor.1 - scroll);
+            let b = (cur.0, cur.1);
+            let r = fui::band_rect(a, b);
+            let acc = theme::accent();
+            c.fill_rrect(r, 3, Corner::Circle, acc, 34);
+            c.stroke_rrect(r, 3, Corner::Circle, acc, 200);
+        }
+    }
+
+    fn draw_files_empty(&self, c: &mut Canvas, lay: &Layout, st: &FilesState) {
+        let q = st.view.filter();
+        let (icon, title, sub): (EmptyIcon, &str, String) = if !q.is_empty() {
+            (
+                EmptyIcon::Tool(Tool::Search),
+                "Nenhum resultado",
+                alloc::format!("Nada encontrado para “{}”", String::from_utf8_lossy(q)),
+            )
+        } else if st.view.in_trash() {
+            (EmptyIcon::Tool(Tool::Trash), "Lixeira vazia", String::new())
         } else if st.view.in_apps() {
-            let x = s.x + 12 + (summary.len() as i32 + 3) * CELL;
-            let room = ((s.right() - 12 - x) / CELL).max(0) as usize;
-            let hint: &[u8] = b"Enter abre   I instala   Del remove";
-            text(
-                c,
-                x,
-                ty,
-                &fileman::ellipsize(hint, room),
-                theme::text_muted(),
-            );
-        }
-    }
-
-    /// The name field (new file / new folder / rename), centered in the window.
-    fn draw_name_box(&self, c: &mut Canvas, r: Rect, edit: &NameEdit) {
-        let title: &[u8] = match edit.purpose {
-            EditPurpose::NewFile => b"Novo arquivo",
-            EditPurpose::NewFolder => b"Nova pasta",
-            EditPurpose::Rename(_) => b"Renomear",
-        };
-        let w = (r.w - 80).clamp(260, 460);
-        let h = 96;
-        let x = r.x + (r.w - w) / 2;
-        let y = r.y + (r.h - h) / 2;
-        round(c, x - 3, y - 3, w + 6, h + 6, 12, theme::line());
-        round(c, x, y, w, h, 10, theme::window_body());
-        text(c, x + 14, y + 10, title, theme::text());
-        let (bx, by, bw) = (x + 14, y + 34, w - 28);
-        round(c, bx, by, bw, 26, 6, theme::accent());
-        round(c, bx + 2, by + 2, bw - 4, 22, 5, theme::button_bg());
-        let cols = ((bw - 16) / CELL).max(4) as usize;
-        let disp = fileman::display_ascii(edit.input.text());
-        let caret = edit.input.caret_column();
-        // Scroll the text so the caret stays inside the box.
-        let start = (caret + 1).saturating_sub(cols);
-        let end = disp.len().min(start + cols);
-        text(
-            c,
-            bx + 8,
-            by + 6,
-            &disp[start.min(disp.len())..end],
-            theme::text(),
-        );
-        rect(
-            c,
-            bx + 8 + ((caret - start) as i32) * CELL,
-            by + 5,
-            2,
-            16,
-            theme::accent(),
-        );
-        text(
-            c,
-            x + 14,
-            y + 70,
-            b"Enter confirma   Esc cancela",
-            theme::text_muted(),
-        );
-    }
-
-    fn draw_confirm(&self, c: &mut Canvas, r: Rect, q: &Confirm) {
-        let (l1, n): (&str, usize) = match q {
-            Confirm::Purge(p) => ("Excluir permanentemente?", p.len()),
-            Confirm::PurgeTrash(p) => ("Excluir da lixeira para sempre?", p.len()),
-            Confirm::EmptyTrash => ("Esvaziar a lixeira?", 0),
-        };
-        let w = (r.w - 80).clamp(280, 440);
-        let h = 104;
-        let x = r.x + (r.w - w) / 2;
-        let y = r.y + (r.h - h) / 2;
-        round(c, x - 3, y - 3, w + 6, h + 6, 12, theme::danger());
-        round(c, x, y, w, h, 10, theme::window_body());
-        text(c, x + 14, y + 12, l1.as_bytes(), theme::text());
-        let l2 = if n > 0 {
-            alloc::format!("{n} item(ns). Nao ha como desfazer.")
+            (EmptyIcon::File(FileKind::App), "Nenhum app", String::new())
         } else {
-            String::from("Tudo sera apagado. Nao ha como desfazer.")
+            (
+                EmptyIcon::File(FileKind::Folder),
+                "Pasta vazia",
+                String::from("Arraste itens para cá"),
+            )
         };
-        text(
-            c,
-            x + 14,
-            y + 38,
-            &fileman::ellipsize(l2.as_bytes(), ((w - 28) / CELL) as usize),
-            theme::text_muted(),
-        );
-        text(
-            c,
-            x + 14,
-            y + 74,
-            b"Enter confirma   Esc cancela",
-            theme::text(),
-        );
+        appui::empty_state(c, lay.list, icon, title, &sub);
     }
 
-    fn draw_props(&self, c: &mut Canvas, r: Rect, lines: &[String]) {
-        let w = (r.w - 60).clamp(280, 520);
-        let h = 44 + lines.len() as i32 * 20;
-        let x = r.x + (r.w - w) / 2;
-        let y = r.y + (r.h - h).max(0) / 2;
-        round(c, x - 3, y - 3, w + 6, h + 6, 12, theme::line());
-        round(c, x, y, w, h, 10, theme::window_body());
-        text(c, x + 14, y + 10, b"Propriedades", theme::accent());
-        let cols = ((w - 28) / CELL) as usize;
-        for (i, l) in lines.iter().enumerate() {
-            text(
-                c,
-                x + 14,
-                y + 34 + i as i32 * 20,
-                &fileman::ellipsize(l.as_bytes(), cols),
-                theme::text(),
+    fn draw_list_row(
+        &self,
+        c: &mut Canvas,
+        rect: Rect,
+        cols: &Columns,
+        row: &fileman::Row,
+        ctx: &ItemCtx,
+        st: &FilesState,
+    ) {
+        let p = theme::pal();
+        let pill = Rect::new(rect.x, rect.y + 1, rect.w, rect.h - 2);
+        if ctx.sel {
+            c.fill_rrect(
+                pill,
+                6,
+                Corner::Circle,
+                appui::selection_fill(ctx.focused),
+                256,
+            );
+        } else if ctx.hover > 0 {
+            let (col, a) = theme::tint(p.hover);
+            c.fill_rrect(
+                pill,
+                6,
+                Corner::Circle,
+                col,
+                (a as u32 * ctx.hover / 256) as u16,
             );
         }
-    }
-
-    fn draw_files_menu(&self, c: &mut Canvas, m: &CtxMenu) {
-        let h = menu_height(m.items.len());
-        round(c, m.x + 3, m.y + 5, MENU_W_FILES, h, 10, theme::ink_dim());
-        round(c, m.x, m.y, MENU_W_FILES, h, 9, theme::window_body());
-        round(c, m.x, m.y, MENU_W_FILES, 1, 0, theme::line());
-        for (i, (cmd, label)) in m.items.iter().enumerate() {
-            let y = m.y + 4 + i as i32 * MENU_ROW_H;
-            let hover = self.cursor_x >= m.x
-                && self.cursor_x < m.x + MENU_W_FILES
-                && self.cursor_y >= y
-                && self.cursor_y < y + MENU_ROW_H;
-            if hover {
-                round(
+        if ctx.dropping {
+            c.fill_rrect(pill, 6, Corner::Circle, theme::accent(), 60);
+            c.stroke_rrect(pill, 6, Corner::Circle, theme::accent(), 256);
+        }
+        let dim = if ctx.cut { 110 } else { 256 };
+        let a = alpha_of(ctx.alpha, dim);
+        let (fg, fg2) = if ctx.sel {
+            let t = appui::selection_text(ctx.focused);
+            (t, t)
+        } else {
+            (theme::text(), theme::text_muted())
+        };
+        // Icon: an installed app shows its own, the rest the kind's icon.
+        let ix = cols.name_x;
+        let iy = rect.y + (rect.h - 20) / 2;
+        if st.view.in_apps() && row.installed {
+            let rgba = self
+                .apps
+                .iter()
+                .find(|app| app.id.as_bytes() == &row.id[..])
+                .and_then(|app| app.icon.as_deref());
+            if let Some(px) = rgba {
+                let tile = icons::app_tile(Some(px), 20);
+                c.blit_surface(&tile, ix, iy, a);
+            } else {
+                appart::blit_file(c, FileKind::App, ix, iy, 20, a);
+            }
+        } else if st.view.in_apps() {
+            appart::blit_file(c, FileKind::App, ix, iy, 20, a / 2);
+        } else {
+            appart::blit_file(c, fui::icon_kind(&row.name, row.is_dir()), ix, iy, 20, a);
+        }
+        // Name.
+        let name_x = ix + 28;
+        let name_w = (cols.size_x - name_x - 12).max(20);
+        if ctx.editing {
+            if let Some(e) = &st.input {
+                draw_rename_field(
                     c,
-                    m.x + 4,
-                    y + 1,
-                    MENU_W_FILES - 8,
-                    MENU_ROW_H - 2,
-                    6,
-                    theme::accent(),
+                    Rect::new(name_x - 4, rect.y + 2, name_w + 4, rect.h - 4),
+                    e,
                 );
             }
-            let col = if hover {
-                theme::WHITE
-            } else if matches!(
-                cmd,
-                fileman::Cmd::DeletePermanent | fileman::Cmd::EmptyTrash | fileman::Cmd::RemoveApp
-            ) {
-                theme::danger()
+        } else {
+            let name = String::from_utf8_lossy(&row.name);
+            let shown = text::ellipsize_middle(&name, BODY, Weight::Regular, name_w);
+            text::draw_a(
+                c,
+                name_x,
+                text::center_y(rect.y, rect.h, BODY, Weight::Regular),
+                &shown,
+                BODY,
+                Weight::Regular,
+                fg,
+                a as u16,
+            );
+        }
+        // Size and date.
+        let size: String = if row.is_dir() {
+            String::from("—")
+        } else {
+            fileman::format_size(row.size)
+        };
+        let size_w = ui_size_w(cols);
+        let sw = text::measure(&size, BODY, Weight::Regular);
+        text::draw_a(
+            c,
+            cols.size_x + size_w - sw,
+            text::center_y(rect.y, rect.h, BODY, Weight::Regular),
+            &size,
+            BODY,
+            Weight::Regular,
+            fg2,
+            a as u16,
+        );
+        if cols.has_date() {
+            let (label, col) = if st.view.in_apps() {
+                let l = fileman::apps::status_label(row.installed);
+                (
+                    String::from(l),
+                    if row.installed && !ctx.sel {
+                        theme::ok()
+                    } else {
+                        fg2
+                    },
+                )
+            } else {
+                (modified_label(row.mtime), fg2)
+            };
+            appui::draw_ellipsis_a(
+                c,
+                cols.date_x,
+                text::center_y(rect.y, rect.h, BODY, Weight::Regular),
+                cols.right - cols.date_x - 12,
+                &label,
+                BODY,
+                Weight::Regular,
+                col,
+                a as u16,
+            );
+        }
+    }
+
+    fn draw_icon_cell(
+        &self,
+        c: &mut Canvas,
+        rect: Rect,
+        row: &fileman::Row,
+        ctx: &ItemCtx,
+        st: &FilesState,
+    ) {
+        let p = theme::pal();
+        let cx = rect.x + rect.w / 2;
+        let tile = Rect::new(cx - 30, rect.y + 2, 60, 60);
+        let acc = theme::accent();
+        if ctx.sel {
+            let col = if ctx.focused {
+                acc
+            } else {
+                theme::text_muted()
+            };
+            c.fill_rrect(tile, 10, Corner::Circle, col, 52);
+        } else if ctx.hover > 0 {
+            let (col, a) = theme::tint(p.hover);
+            c.fill_rrect(
+                tile,
+                10,
+                Corner::Circle,
+                col,
+                (a as u32 * ctx.hover / 256) as u16,
+            );
+        }
+        if ctx.dropping {
+            c.fill_rrect(tile, 10, Corner::Circle, acc, 70);
+            c.stroke_rrect(tile, 10, Corner::Circle, acc, 256);
+        }
+        let dim = if ctx.cut { 110 } else { 256 };
+        let a = alpha_of(ctx.alpha, dim);
+        let kind = fui::icon_kind(&row.name, row.is_dir());
+        if st.view.in_apps() && row.installed {
+            let rgba = self
+                .apps
+                .iter()
+                .find(|app| app.id.as_bytes() == &row.id[..])
+                .and_then(|app| app.icon.as_deref());
+            if let Some(px) = rgba {
+                let t = icons::app_tile(Some(px), 48);
+                c.blit_surface(&t, cx - 24, rect.y + 8, a);
+            } else {
+                appart::blit_file(c, FileKind::App, cx - 24, rect.y + 8, 48, a);
+            }
+        } else {
+            let kind = if st.view.in_apps() {
+                FileKind::App
+            } else {
+                kind
+            };
+            appart::blit_file(c, kind, cx - 24, rect.y + 8, 48, a);
+        }
+        // Label: up to two lines, centred; a selection pill behind it.
+        let name = String::from_utf8_lossy(&row.name).into_owned();
+        let max_w = rect.w - 4;
+        if ctx.editing {
+            if let Some(e) = &st.input {
+                draw_rename_field(c, Rect::new(rect.x - 4, rect.y + 62, rect.w + 8, 24), e);
+            }
+            return;
+        }
+        // A name that fits is one line; one with spaces wraps to two (the second cut with an
+        // ellipsis); a long name without spaces is cut in the middle so the extension stays.
+        let mut pieces: Vec<String> = Vec::new();
+        if text::measure(&name, FOOTNOTE, Weight::Regular) <= max_w {
+            pieces.push(name.clone());
+        } else if name.contains(' ') {
+            let lines = text::wrap(&name, FOOTNOTE, Weight::Regular, max_w, 2);
+            let n = lines.len();
+            for (k, (s, e)) in lines.iter().enumerate() {
+                if k + 1 == n && *e < name.len() {
+                    pieces.push(text::ellipsize(
+                        &name[*s..],
+                        FOOTNOTE,
+                        Weight::Regular,
+                        max_w,
+                    ));
+                } else {
+                    pieces.push(String::from(name[*s..*e].trim_end()));
+                }
+            }
+        } else {
+            pieces.push(text::ellipsize_middle(
+                &name,
+                FOOTNOTE,
+                Weight::Regular,
+                max_w,
+            ));
+        }
+        let mut ly = rect.y + 64;
+        let lh = text::line_height(FOOTNOTE);
+        for piece in &pieces {
+            let tw = text::measure(piece, FOOTNOTE, Weight::Regular);
+            if ctx.sel {
+                let pr = Rect::new(cx - tw / 2 - 4, ly - 1, tw + 8, lh + 2);
+                c.fill_rrect(
+                    pr,
+                    4,
+                    Corner::Circle,
+                    appui::selection_fill(ctx.focused),
+                    256,
+                );
+            }
+            let col = if ctx.sel {
+                appui::selection_text(ctx.focused)
             } else {
                 theme::text()
             };
-            text(
+            text::draw_a(
                 c,
-                m.x + 14,
-                y + (MENU_ROW_H - 14) / 2,
-                label.as_bytes(),
+                cx - tw / 2,
+                ly,
+                piece,
+                FOOTNOTE,
+                Weight::Regular,
                 col,
+                a as u16,
+            );
+            ly += lh + 1;
+        }
+    }
+
+    // ------------------------------------------------------------------ preview
+
+    fn draw_files_preview(&self, c: &mut Canvas, pane: Rect, st: &FilesState) {
+        let p = theme::pal();
+        ui::fill(c, pane, theme::sidebar());
+        ui::fill_token(c, Rect::new(pane.x, pane.y, 1, pane.h), 0, p.separator);
+        let saved = c.set_clip(
+            pane.intersection(&c.clip_rect())
+                .unwrap_or(Rect::new(0, 0, 0, 0)),
+        );
+        let inner = Rect::new(pane.x + 16, pane.y + 16, pane.w - 32, pane.h - 32);
+        let Some(d) = st.preview.as_ref() else {
+            c.restore_clip(saved);
+            return;
+        };
+        if d.name.is_empty() {
+            text::draw_centered(
+                c,
+                Rect::new(pane.x, pane.y, pane.w, pane.h),
+                "Selecione um item",
+                BODY,
+                Weight::Regular,
+                tertiary(),
+            );
+            c.restore_clip(saved);
+            return;
+        }
+        let mut y = inner.y;
+        // Picture area.
+        let box_h = 156;
+        let card = Rect::new(inner.x, y, inner.w, box_h);
+        if let Some(img) = &d.image {
+            ui::fill_token(c, card, 8, p.content_bg);
+            let ix = card.x + (card.w - img.w as i32) / 2;
+            let iy = card.y + (card.h - img.h as i32) / 2;
+            let clip = Rect::new(ix, iy, img.w as i32, img.h as i32);
+            let saved2 = c.set_clip(
+                clip.intersection(&c.clip_rect())
+                    .unwrap_or(Rect::new(0, 0, 0, 0)),
+            );
+            c.blit_surface(img, ix, iy, 256);
+            c.restore_clip(saved2);
+            ui::stroke_token(c, card, 8, p.separator);
+        } else if !d.lines.is_empty() {
+            ui::fill_token(c, card, 8, p.content_bg);
+            ui::stroke_token(c, card, 8, p.separator);
+            let saved2 = c.set_clip(
+                Rect::new(card.x + 1, card.y + 1, card.w - 2, card.h - 2)
+                    .intersection(&c.clip_rect())
+                    .unwrap_or(Rect::new(0, 0, 0, 0)),
+            );
+            let lh = 11;
+            for (k, l) in d.lines.iter().take(12).enumerate() {
+                text::draw_mono(
+                    c,
+                    card.x + 8,
+                    card.y + 8 + k as i32 * lh,
+                    l,
+                    9,
+                    theme::text_muted(),
+                );
+            }
+            c.restore_clip(saved2);
+        } else {
+            appart::blit_file(
+                c,
+                d.kind,
+                card.x + (card.w - 64) / 2,
+                card.y + (card.h - 64) / 2,
+                64,
+                256,
+            );
+        }
+        y = card.bottom() + 14;
+        // Title and kind.
+        let lines = text::wrap(&d.name, CALLOUT, Weight::Semibold, inner.w, 2);
+        for (s, e) in &lines {
+            let piece = d.name[*s..*e].trim_end();
+            let tw = text::measure(piece, CALLOUT, Weight::Semibold);
+            text::draw(
+                c,
+                inner.x + (inner.w - tw.min(inner.w)) / 2,
+                y,
+                &text::ellipsize(piece, CALLOUT, Weight::Semibold, inner.w),
+                CALLOUT,
+                Weight::Semibold,
+                theme::text(),
+            );
+            y += text::line_height(CALLOUT) + 1;
+        }
+        let kw = text::measure(&d.kind_label, FOOTNOTE, Weight::Regular);
+        text::draw(
+            c,
+            inner.x + (inner.w - kw.min(inner.w)) / 2,
+            y + 2,
+            &text::ellipsize(&d.kind_label, FOOTNOTE, Weight::Regular, inner.w),
+            FOOTNOTE,
+            Weight::Regular,
+            theme::text_muted(),
+        );
+        y += 26;
+        if let Some(note) = &d.note {
+            text::draw_ellipsis(
+                c,
+                inner.x,
+                y,
+                inner.w,
+                note,
+                FOOTNOTE,
+                Weight::Regular,
+                tertiary(),
+            );
+            y += 22;
+        }
+        appui::hairline(c, inner.x, y, inner.w);
+        y += 8;
+        for (label, value) in &d.info {
+            let lw = text::measure(label, FOOTNOTE, Weight::Regular) + 8;
+            text::draw(c, inner.x, y, label, FOOTNOTE, Weight::Regular, tertiary());
+            let room = (inner.w - lw).max(10);
+            let v = text::ellipsize(value, FOOTNOTE, Weight::Regular, room);
+            let vw = text::measure(&v, FOOTNOTE, Weight::Regular);
+            text::draw(
+                c,
+                inner.right() - vw,
+                y,
+                &v,
+                FOOTNOTE,
+                Weight::Regular,
+                theme::text(),
+            );
+            y += 22;
+        }
+        c.restore_clip(saved);
+    }
+
+    // ------------------------------------------------------------------- status
+
+    fn draw_files_status(&self, c: &mut Canvas, lay: &Layout, st: &FilesState) {
+        let s = lay.status;
+        appui::hairline(c, s.x, s.y, s.w);
+        let ty = text::center_y(s.y, s.h, FOOTNOTE, Weight::Regular);
+        let mut summary = st.view.summary();
+        if !st.view.filter().is_empty() {
+            summary = alloc::format!("{} de {} itens", st.view.rows.len(), st.view.total_rows());
+        }
+        let w = text::draw(
+            c,
+            s.x + 16,
+            ty,
+            &summary,
+            FOOTNOTE,
+            Weight::Regular,
+            theme::text_muted(),
+        );
+        if let Some((m, err)) = &st.msg {
+            let x = s.x + 16 + w + 14;
+            let col = if *err { theme::danger() } else { theme::ok() };
+            text::draw_ellipsis(
+                c,
+                x,
+                ty,
+                (s.right() - 16 - x).max(0),
+                m,
+                FOOTNOTE,
+                Weight::Medium,
+                col,
+            );
+        } else if st.view.in_apps() {
+            let hint = "Enter abre  ·  I instala  ·  Del remove";
+            let x = s.x + 16 + w + 14;
+            text::draw_ellipsis(
+                c,
+                x,
+                ty,
+                (s.right() - 16 - x).max(0),
+                hint,
+                FOOTNOTE,
+                Weight::Regular,
+                tertiary(),
             );
         }
     }
+
+    // -------------------------------------------------------------------- sheets
+
+    fn draw_files_sheet(&self, c: &mut Canvas, r: Rect, st: &FilesState) {
+        let (kind, size) = files_sheet_kind(st);
+        let t = appui::level(&st.sheet_t);
+        let panel = appui::sheet(c, r, size, t);
+        let labels = kind.buttons();
+        let btns = appui::button_row(
+            panel.right() - appui::SHEET_PAD,
+            panel.bottom() - appui::SHEET_PAD - appui::BUTTON_H,
+            &labels,
+        );
+        let hover = |b: &Rect| b.contains(self.cursor_x, self.cursor_y);
+        let saved = c.set_clip(
+            panel
+                .intersection(&c.clip_rect())
+                .unwrap_or(Rect::new(0, 0, 0, 0)),
+        );
+        match kind {
+            SheetKind::Confirm => {
+                let what = |n: usize, trash: bool| {
+                    let _ = trash;
+                    if n == 1 {
+                        String::from("O item será apagado de vez. Isso não pode ser desfeito.")
+                    } else {
+                        alloc::format!(
+                            "Os {n} itens serão apagados de vez. Isso não pode ser desfeito."
+                        )
+                    }
+                };
+                let (title, msg) = match &st.confirm {
+                    Some(Confirm::Purge(p)) => ("Excluir permanentemente?", what(p.len(), false)),
+                    Some(Confirm::PurgeTrash(p)) => ("Excluir da lixeira?", what(p.len(), true)),
+                    _ => (
+                        "Esvaziar a lixeira?",
+                        String::from("Tudo o que está na lixeira será apagado de vez."),
+                    ),
+                };
+                appui::sheet_text(c, panel, title, &msg, false);
+                appui::sheet_button(
+                    c,
+                    btns[0],
+                    labels[0],
+                    ButtonKind::Secondary,
+                    hover(&btns[0]),
+                    false,
+                );
+                appui::sheet_button(
+                    c,
+                    btns[1],
+                    labels[1],
+                    ButtonKind::Destructive,
+                    hover(&btns[1]),
+                    false,
+                );
+            }
+            SheetKind::Info => {
+                let lines = st.props.as_deref().unwrap_or(&[]);
+                let p = theme::pal();
+                let tw = text::TITLE3;
+                text::draw(
+                    c,
+                    panel.x + appui::SHEET_PAD,
+                    panel.y + appui::SHEET_PAD,
+                    "Informações",
+                    tw,
+                    Weight::Semibold,
+                    theme::text(),
+                );
+                let mut y = panel.y + appui::SHEET_PAD + text::line_height(tw) + 10;
+                let label_w = 104;
+                for l in lines {
+                    let (k, v) = match l.split_once(": ") {
+                        Some((k, v)) => (k, v),
+                        None => ("", l.as_str()),
+                    };
+                    let row = Rect::new(
+                        panel.x + appui::SHEET_PAD,
+                        y,
+                        panel.w - 2 * appui::SHEET_PAD,
+                        24,
+                    );
+                    text::draw_right(
+                        c,
+                        Rect::new(row.x, row.y, label_w, row.h),
+                        k,
+                        BODY,
+                        Weight::Regular,
+                        theme::solid(p.text_secondary),
+                    );
+                    let vx = row.x + label_w + 12;
+                    let shown = text::ellipsize_middle(v, BODY, Weight::Regular, row.right() - vx);
+                    text::draw(
+                        c,
+                        vx,
+                        text::center_y(row.y, row.h, BODY, Weight::Regular),
+                        &shown,
+                        BODY,
+                        Weight::Regular,
+                        theme::text(),
+                    );
+                    y += 24;
+                }
+                appui::sheet_button(
+                    c,
+                    btns[1],
+                    labels[1],
+                    ButtonKind::Primary,
+                    hover(&btns[1]),
+                    false,
+                );
+            }
+            SheetKind::Copy => {
+                let (title, name, pm) = match &st.job {
+                    Some(j) => {
+                        let (n, _) = j.copy.files();
+                        let label = if n > 1 {
+                            alloc::format!("{} {} arquivos", j.label, n)
+                        } else {
+                            String::from(j.label)
+                        };
+                        (
+                            label,
+                            String::from_utf8_lossy(j.copy.current_name()).into_owned(),
+                            j.copy.permille(),
+                        )
+                    }
+                    None => (String::new(), String::new(), 0),
+                };
+                text::draw(
+                    c,
+                    panel.x + appui::SHEET_PAD,
+                    panel.y + appui::SHEET_PAD,
+                    &title,
+                    text::TITLE3,
+                    Weight::Semibold,
+                    theme::text(),
+                );
+                let y = panel.y + appui::SHEET_PAD + text::line_height(text::TITLE3) + 8;
+                text::draw_ellipsis(
+                    c,
+                    panel.x + appui::SHEET_PAD,
+                    y,
+                    panel.w - 2 * appui::SHEET_PAD,
+                    &name,
+                    BODY,
+                    Weight::Regular,
+                    theme::text_muted(),
+                );
+                let bar = Rect::new(
+                    panel.x + appui::SHEET_PAD,
+                    y + 28,
+                    panel.w - 2 * appui::SHEET_PAD - 44,
+                    6,
+                );
+                ui::progress(c, bar, pm);
+                let pct = alloc::format!("{}%", pm / 10);
+                text::draw_right(
+                    c,
+                    Rect::new(bar.right() + 8, bar.y - 6, 36, 18),
+                    &pct,
+                    FOOTNOTE,
+                    Weight::Medium,
+                    theme::text_muted(),
+                );
+                appui::sheet_button(
+                    c,
+                    btns[1],
+                    labels[1],
+                    ButtonKind::Secondary,
+                    hover(&btns[1]),
+                    false,
+                );
+            }
+        }
+        c.restore_clip(saved);
+    }
 }
 
-fn files_local(t: u64) -> String {
-    super::files::local_time(t)
+/// Width of the size column's text area.
+fn ui_size_w(cols: &Columns) -> i32 {
+    ((if cols.has_date() {
+        cols.date_x
+    } else {
+        cols.right
+    }) - cols.size_x
+        - 12)
+        .max(40)
+}
+
+/// How one item is to be drawn.
+struct ItemCtx {
+    sel: bool,
+    hover: u32,
+    cut: bool,
+    dropping: bool,
+    focused: bool,
+    alpha: u32,
+    editing: bool,
+}
+
+/// The inline rename field (a white field with an accent ring, the stem selected).
+fn draw_rename_field(c: &mut Canvas, r: Rect, e: &NameEdit) {
+    // Opaque underneath: the field sits on a selected (accent) row in the list.
+    c.fill_rrect(r, 6, Corner::Circle, theme::surface(), 256);
+    let text = e.input.to_string_lossy();
+    appui::field(
+        c,
+        r,
+        &appui::FieldText {
+            text: &text,
+            caret: e.input.caret(),
+            selection: e.input.selection(),
+        },
+        "",
+        true,
+        appui::caret_alpha(e.last_input),
+        None,
+        false,
+    );
+}
+
+/// The card that follows the pointer while items are dragged.
+fn draw_drag_ghost(c: &mut Canvas, d: &DragState, ctrl: bool) {
+    let p = theme::pal();
+    let name_w = text::measure(&d.label, BODY, Weight::Regular).min(160);
+    let w = 12 + 22 + 8 + name_w + 12 + if d.count > 1 { 26 } else { 0 };
+    let r = Rect::new(d.pos.0 + 14, d.pos.1 + 10, w, 32);
+    c.draw_shadow(
+        r,
+        Shadow {
+            blur: 10,
+            dy: 4,
+            alpha: 90,
+        },
+        Rect::new(r.x, r.y + 6, r.w, r.h - 12),
+    );
+    let valid = d.op.is_some();
+    c.fill_rrect(r, 8, Corner::Circle, theme::solid(p.window_bg), 240);
+    ui::stroke_token(c, r, 8, p.control_border);
+    appart::blit_file(
+        c,
+        d.kind,
+        r.x + 8,
+        r.y + 5,
+        22,
+        if valid { 256 } else { 150 },
+    );
+    text::draw_ellipsis(
+        c,
+        r.x + 38,
+        text::center_y(r.y, r.h, BODY, Weight::Regular),
+        name_w,
+        &d.label,
+        BODY,
+        Weight::Regular,
+        if valid {
+            theme::text()
+        } else {
+            theme::text_muted()
+        },
+    );
+    if d.count > 1 {
+        let b = Rect::new(r.right() - 26, r.y + 7, 18, 18);
+        c.fill_rrect(b, 9, Corner::Circle, theme::accent(), 256);
+        text::draw_centered(
+            c,
+            b,
+            &alloc::format!("{}", d.count.min(99)),
+            CAPTION,
+            Weight::Semibold,
+            theme::ACCENT_TEXT,
+        );
+    }
+    // A copy gets a plus badge on the corner of the card.
+    if ctrl && valid && d.op == Some(fui::DropOp::Copy) {
+        let b = Rect::new(r.x - 6, r.y - 6, 16, 16);
+        c.fill_rrect(b, 8, Corner::Circle, theme::ok(), 256);
+        appui::blit_tool_dim(c, Tool::Plus, b.x + 3, b.y + 3, 10, 0xFFFFFF, 256);
+    }
 }

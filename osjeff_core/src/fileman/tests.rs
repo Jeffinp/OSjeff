@@ -267,13 +267,13 @@ fn selection_count_matches_the_mask_under_random_clicks() {
 fn breadcrumbs_of_paths() {
     let c = breadcrumbs(b"/");
     assert_eq!(c.len(), 1);
-    assert_eq!(c[0].label, b"Raiz");
+    assert_eq!(c[0].label, b"Disco");
     let c = breadcrumbs(b"/a/b c/d");
     let labels: Vec<_> = c.iter().map(|x| x.label.clone()).collect();
     assert_eq!(
         labels,
         vec![
-            b"Raiz".to_vec(),
+            b"Disco".to_vec(),
             b"a".to_vec(),
             b"b c".to_vec(),
             b"d".to_vec()
@@ -297,18 +297,6 @@ fn breadcrumbs_of_the_trash() {
     assert_eq!(c.len(), 2);
     assert_eq!(c[1].label, b"Lixeira");
     assert_eq!(c[1].path, TRASH_PATH);
-}
-
-#[test]
-fn long_paths_fold_leading_crumbs() {
-    assert_eq!(first_visible_crumb(&[4, 3, 5], 100), 0);
-    // "Raiz > a > bbbbb" = 4+3+3+3+5 = 18 columns.
-    assert_eq!(first_visible_crumb(&[4, 3, 5], 18), 0);
-    // One less: fold "Raiz" ("... a > bbbbb" = 4 + 3 + 3 + 5 = 15).
-    assert_eq!(first_visible_crumb(&[4, 3, 5], 17), 1);
-    // The last crumb always stays.
-    assert_eq!(first_visible_crumb(&[4, 3, 50], 5), 2);
-    assert_eq!(first_visible_crumb(&[], 5), 0);
 }
 
 #[test]
@@ -525,131 +513,13 @@ fn context_menu_adapts_to_the_selection() {
         context_menu(ctx(false, 1, true, false)),
         context_menu(ctx(true, 1, false, false)),
     ] {
-        assert!(m.iter().all(|(_, l)| l.is_ascii()));
+        assert!(m.iter().all(|(_, l)| !l.is_empty()));
+        // Entries come grouped: the group number never goes back.
+        let groups: Vec<u8> = m.iter().map(|(c, _)| c.group()).collect();
+        let mut sorted = groups.clone();
+        sorted.sort();
+        assert_eq!(groups, sorted, "{m:?}");
     }
-}
-
-// ---- layout ----
-
-fn layout() -> Layout {
-    Layout::of(Rect::new(100, 100, 780, 520))
-}
-
-#[test]
-fn layout_regions_do_not_overlap_and_fit() {
-    let l = layout();
-    let w = l.window;
-    for r in [
-        l.back,
-        l.forward,
-        l.up,
-        l.address,
-        l.sidebar,
-        l.header,
-        l.list,
-        l.status,
-        l.scrollbar,
-    ] {
-        assert!(r.x >= w.x && r.right() <= w.right(), "{r:?}");
-        assert!(r.y >= w.y + TITLE_H && r.bottom() <= w.bottom(), "{r:?}");
-    }
-    assert!(l.list.bottom() <= l.status.y);
-    assert!(l.header.bottom() <= l.list.y);
-    assert!(l.sidebar.right() <= l.header.x);
-    assert!(l.list.right() <= l.scrollbar.x);
-    assert!(
-        l.back.right() < l.forward.x && l.forward.right() < l.up.x && l.up.right() < l.address.x
-    );
-    assert!(l.name_x < l.size_x && l.size_x < l.date_x);
-    assert!(l.visible_rows() > 8);
-}
-
-#[test]
-fn layout_survives_tiny_windows() {
-    let l = Layout::of(Rect::new(0, 0, 100, 60));
-    assert!(l.list.h >= 0 && l.sidebar.h >= 0 && l.address.w >= 0);
-    assert_eq!(l.visible_rows(), 0);
-    assert_eq!(l.scroll_for(500, 100), 100 * 500 / 1000);
-}
-
-#[test]
-fn hit_testing_finds_each_region() {
-    let l = layout();
-    let c = |r: Rect| (r.x + r.w / 2, r.y + r.h / 2);
-    let h = |p: (i32, i32)| l.hit(p.0, p.1, 0, &[4, 3]);
-    assert_eq!(h(c(l.back)), Some(Hit::Back));
-    assert_eq!(h(c(l.forward)), Some(Hit::Forward));
-    assert_eq!(h(c(l.up)), Some(Hit::Up));
-    for (p, r) in l.places() {
-        assert_eq!(h(c(r)), Some(Hit::Place(p)));
-    }
-    assert_eq!(
-        h((l.size_x + 10, l.header.y + 5)),
-        Some(Hit::Header(SortKey::Size))
-    );
-    assert_eq!(
-        h((l.date_x + 10, l.header.y + 5)),
-        Some(Hit::Header(SortKey::Modified))
-    );
-    assert_eq!(
-        h((l.name_x, l.header.y + 5)),
-        Some(Hit::Header(SortKey::Name))
-    );
-    assert_eq!(h((l.list.x + 5, l.list.y + 1)), Some(Hit::Row(0)));
-    assert_eq!(
-        h((l.list.x + 5, l.list.y + ROW_H * 3 + 1)),
-        Some(Hit::Row(3))
-    );
-    assert_eq!(
-        l.hit(l.list.x + 5, l.list.y + ROW_H * 3 + 1, 10, &[]),
-        Some(Hit::Row(13))
-    );
-    assert!(matches!(h(c(l.scrollbar)), Some(Hit::Scroll(_))));
-    assert_eq!(l.hit(0, 0, 0, &[]), None);
-}
-
-#[test]
-fn clicking_a_crumb_and_the_blank_address() {
-    let l = layout();
-    let labels = [4usize, 3, 5];
-    let (spans, folded) = l.crumb_spans(&labels);
-    assert!(!folded);
-    assert_eq!(spans.len(), 3);
-    for (i, x, w) in &spans {
-        assert_eq!(
-            l.hit(x + w / 2, l.address.y + 5, 0, &labels),
-            Some(Hit::Crumb(*i))
-        );
-    }
-    assert_eq!(
-        l.hit(l.address.right() - 5, l.address.y + 5, 0, &labels),
-        Some(Hit::Address)
-    );
-}
-
-#[test]
-fn crumbs_fold_in_a_narrow_bar() {
-    let l = Layout::of(Rect::new(0, 0, 440, 260));
-    let labels = [4usize, 20, 20, 20];
-    let (spans, folded) = l.crumb_spans(&labels);
-    assert!(folded);
-    assert_eq!(spans.last().unwrap().0, 3);
-    assert!(spans.first().unwrap().0 > 0);
-}
-
-#[test]
-fn scroll_mapping_round_trips() {
-    let l = layout();
-    let rows = 5000;
-    assert_eq!(l.scroll_for(0, rows), 0);
-    assert_eq!(l.scroll_for(1000, rows), rows - l.visible_rows());
-    let mid = l.scroll_for(500, rows);
-    let (y, h) = l.thumb(mid, rows);
-    assert!(y > l.scrollbar.y && y + h < l.scrollbar.bottom());
-    assert_eq!(l.thumb(0, 3), (l.scrollbar.y, l.scrollbar.h));
-    let (y_end, h_end) = l.thumb(rows - l.visible_rows(), rows);
-    assert_eq!(y_end + h_end, l.scrollbar.bottom());
-    assert!(h >= 24);
 }
 
 // ---- the view over a real volume ----
@@ -795,7 +665,7 @@ fn summary_counts_items_and_selection() {
 }
 
 #[test]
-fn select_name_scrolls_it_into_view() {
+fn select_name_puts_the_cursor_on_it() {
     let mut fs = fresh();
     for i in 0..100 {
         let p = alloc::format!("/f{i:03}");
@@ -803,54 +673,13 @@ fn select_name_scrolls_it_into_view() {
     }
     let mut v = FileView::new();
     v.refresh(&mut fs).unwrap();
-    v.select_name(b"f090", 10);
+    v.select_name(b"f090");
     assert_eq!(v.sel.cursor(), 90);
-    assert!(v.scroll <= 90 && v.scroll + 10 > 90);
-    v.select_name(b"f001", 10);
-    assert_eq!(v.scroll, 1);
-    v.scroll_by(1000, 10);
-    assert_eq!(v.scroll, 90);
-    v.scroll_by(-1000, 10);
-    assert_eq!(v.scroll, 0);
-}
-
-#[test]
-fn five_thousand_entries_load_sorted() {
-    let mut fs = Fs3::format(RamDisk::new(32 * 2048), &{
-        let mut o = FormatOptions::new(*b"0123456789abcdef", NOW);
-        o.inode_count = Some(8192);
-        o
-    })
-    .unwrap();
-    fs.mkdir("/many", NOW).unwrap();
-    for i in 0..5000u32 {
-        let p = alloc::format!("/many/file{i}.txt");
-        fs.write_file(p.as_str(), b"x", NOW + i as u64).unwrap();
-    }
-    let mut v = FileView::new();
-    v.navigate(&mut fs, b"/many").unwrap();
-    assert_eq!(v.rows.len(), 5000);
-    assert_eq!(v.rows[0].name, b"file0.txt");
-    assert_eq!(v.rows[4999].name, b"file4999.txt");
-    v.click_header(SortKey::Modified);
-    v.click_header(SortKey::Modified);
-    assert_eq!(v.rows[0].name, b"file4999.txt");
-    v.sel.select_all();
-    assert_eq!(v.selected_paths().len(), 5000);
-    assert_eq!(v.summary(), "5000 selecionados (4,8 KiB)");
-}
-
-#[test]
-fn file_names_of_255_bytes_list_and_fold() {
-    let mut fs = fresh();
-    let name = "é".repeat(127);
-    fs.write_file(alloc::format!("/{name}").as_str(), b"", NOW)
-        .unwrap();
-    let mut v = FileView::new();
-    v.refresh(&mut fs).unwrap();
-    assert_eq!(v.rows[0].name.len(), 254);
-    assert_eq!(display_ascii(&v.rows[0].name).len(), 127);
-    assert_eq!(ellipsize(&display_ascii(&v.rows[0].name), 20).len(), 20);
+    assert_eq!(v.sel.count(), 1);
+    v.select_name(b"f001");
+    assert_eq!(v.sel.selected(), vec![1]);
+    v.select_name(b"nope");
+    assert_eq!(v.sel.selected(), vec![1]);
 }
 
 #[test]
@@ -862,10 +691,10 @@ fn select_names_selects_the_new_items() {
     }
     let mut v = FileView::new();
     v.refresh(&mut fs).unwrap();
-    v.select_names(&[b"d".to_vec(), b"b".to_vec()], 10);
+    v.select_names(&[b"d".to_vec(), b"b".to_vec()]);
     assert_eq!(v.sel.selected(), vec![1, 3]);
     assert_eq!(v.sel.cursor(), 1);
-    v.select_names(&[b"zzz".to_vec()], 10);
+    v.select_names(&[b"zzz".to_vec()]);
     assert_eq!(v.sel.selected(), vec![1, 3]);
 }
 
@@ -906,7 +735,7 @@ fn apps_rows_carry_id_state_and_size() {
     assert!(!r.installed && r.mtime == 0 && r.size == 9000 && !r.is_dir());
     assert!(rows[0].installed && rows[0].mtime == 1);
     assert_eq!(apps::status_label(true), "instalado");
-    assert_eq!(apps::status_label(false), "nao instalado");
+    assert_eq!(apps::status_label(false), "não instalado");
 }
 
 #[test]
@@ -1005,12 +834,12 @@ fn app_keys_install_remove_and_run() {
         app_action(missing, AppKey::Install),
         Ok(AppAction::Install("paint".into()))
     );
-    assert_eq!(app_action(installed, AppKey::Install), Err("ja instalado"));
+    assert_eq!(app_action(installed, AppKey::Install), Err("Já instalado"));
     assert_eq!(
         app_action(installed, AppKey::Remove),
         Ok(AppAction::Remove("notes".into()))
     );
-    assert_eq!(app_action(missing, AppKey::Remove), Err("nao instalado"));
+    assert_eq!(app_action(missing, AppKey::Remove), Err("Não instalado"));
 }
 
 #[test]
@@ -1058,24 +887,8 @@ fn apps_context_menu_offers_what_applies() {
     assert!(
         context_menu(ctx(1, false))
             .iter()
-            .all(|(_, l)| l.is_ascii())
+            .all(|(_, l)| !l.is_empty())
     );
-}
-
-#[test]
-fn sidebar_has_an_apps_entry_that_hits_and_fits() {
-    let l = layout();
-    let places = l.places();
-    let apps_rect = places.iter().find(|(p, _)| *p == Place::Apps).unwrap().1;
-    let c = (apps_rect.x + 5, apps_rect.y + 5);
-    assert_eq!(l.hit(c.0, c.1, 0, &[4]), Some(Hit::Place(Place::Apps)));
-    // No two sidebar entries overlap, and all of them fit in the sidebar.
-    for (i, (_, a)) in places.iter().enumerate() {
-        assert!(a.bottom() <= l.sidebar.bottom(), "{a:?}");
-        for (_, b) in &places[i + 1..] {
-            assert!(a.bottom() <= b.y || b.bottom() <= a.y, "{a:?} {b:?}");
-        }
-    }
 }
 
 #[test]
@@ -1091,7 +904,7 @@ fn manifest_lines_show_every_permission() {
     assert!(all.contains("/data/demo"), "{all}");
     assert!(all.contains("HTTP"), "{all}");
     assert!(all.contains("ler e escrever"), "{all}");
-    assert!(all.contains("Memoria:") && all.contains("Janela "), "{all}");
+    assert!(all.contains("Memória:") && all.contains("Janela "), "{all}");
     m.fs = FsPerm::None;
     m.net = NetPerm::None;
     m.clipboard = ClipPerm::None;
@@ -1100,10 +913,231 @@ fn manifest_lines_show_every_permission() {
         none.contains("Arquivos: nenhum") && none.contains("Rede: nenhuma"),
         "{none}"
     );
+    // Each line is a short "label: value" the information sheet can split at the colon.
     assert!(
-        lines.iter().all(|l| l.is_ascii() && l.len() <= 46),
+        lines
+            .iter()
+            .all(|l| l.contains(": ") && l.chars().count() <= 60),
         "{lines:?}"
     );
     m.fs = FsPerm::Home;
     assert!(apps::manifest_lines(&m).join("\n").contains("/home"));
+}
+
+// ---- search filter ----
+
+fn searchable() -> FileView {
+    let mut fs = fresh();
+    for n in [
+        "Ação.txt",
+        "relatorio.pdf",
+        "RELATÓRIO final.txt",
+        "foto.png",
+    ] {
+        fs.write_file(alloc::format!("/{n}").as_str(), b"x", NOW)
+            .unwrap();
+    }
+    fs.mkdir("/Relatórios", NOW).unwrap();
+    let mut v = FileView::new();
+    v.refresh(&mut fs).unwrap();
+    v
+}
+
+#[test]
+fn the_filter_narrows_the_rows_and_comes_back() {
+    let mut v = searchable();
+    assert_eq!(v.rows.len(), 5);
+    v.set_filter(b"relat");
+    assert_eq!(
+        names(&v.rows),
+        vec!["Relatórios", "relatorio.pdf", "RELATÓRIO final.txt"]
+    );
+    assert_eq!(v.total_rows(), 5);
+    assert_eq!(v.filter(), b"relat");
+    v.set_filter("AÇÃO".as_bytes());
+    assert_eq!(names(&v.rows), vec!["Ação.txt"]);
+    v.set_filter(b"zzz");
+    assert!(v.rows.is_empty());
+    assert_eq!(v.summary(), "0 itens");
+    v.clear_filter();
+    assert_eq!(v.rows.len(), 5);
+    assert_eq!(v.total_rows(), 5);
+    assert!(v.filter().is_empty());
+}
+
+#[test]
+fn filtering_keeps_the_selection_by_name_and_follows_sorts() {
+    let mut v = searchable();
+    v.select_name("foto.png".as_bytes());
+    v.set_filter(b"o");
+    assert!(v.selected_rows().iter().any(|r| r.name == b"foto.png"));
+    v.set_filter(b"txt");
+    // The selected row no longer shows: nothing selected, nothing lost.
+    assert_eq!(v.sel.count(), 0);
+    v.click_header(SortKey::Name); // descending
+    assert_eq!(
+        names(&v.rows),
+        vec!["RELATÓRIO final.txt", "Ação.txt"],
+        "sort applies to the filtered rows"
+    );
+    v.clear_filter();
+    // The hidden rows were sorted too.
+    assert_eq!(v.rows[0].name, "Relatórios".as_bytes());
+    assert_eq!(v.rows.last().unwrap().name, "Ação.txt".as_bytes());
+}
+
+#[test]
+fn a_refresh_under_a_filter_reloads_and_refilters() {
+    let mut fs = fresh();
+    fs.write_file("/a.txt", b"", NOW).unwrap();
+    fs.write_file("/b.png", b"", NOW).unwrap();
+    let mut v = FileView::new();
+    v.refresh(&mut fs).unwrap();
+    v.set_filter(b"txt");
+    assert_eq!(names(&v.rows), vec!["a.txt"]);
+    fs.write_file("/c.txt", b"", NOW).unwrap();
+    fs.remove("/b.png").ok();
+    v.refresh(&mut fs).unwrap();
+    assert_eq!(names(&v.rows), vec!["a.txt", "c.txt"]);
+    assert_eq!(v.total_rows(), 2);
+}
+
+#[test]
+fn navigating_drops_the_filter_and_bumps_the_generation() {
+    let mut fs = fresh();
+    fs.mkdir("/d", NOW).unwrap();
+    fs.write_file("/d/in.txt", b"", NOW).unwrap();
+    fs.write_file("/x.txt", b"", NOW).unwrap();
+    let mut v = FileView::new();
+    v.refresh(&mut fs).unwrap();
+    v.set_filter(b"x");
+    let g = v.nav_gen;
+    v.navigate(&mut fs, b"/d").unwrap();
+    assert!(v.filter().is_empty());
+    assert_eq!(names(&v.rows), vec!["in.txt"]);
+    assert_ne!(v.nav_gen, g);
+    let g = v.nav_gen;
+    v.go_back(&mut fs).unwrap();
+    assert_ne!(v.nav_gen, g);
+    assert_eq!(v.rows.len(), 2);
+    // A failed navigation changes nothing.
+    v.set_filter(b"x");
+    let g = v.nav_gen;
+    assert!(v.navigate(&mut fs, b"/nope").is_err());
+    assert_eq!(v.nav_gen, g);
+    assert_eq!(v.filter(), b"x");
+    assert_eq!(names(&v.rows), vec!["x.txt"]);
+}
+
+#[test]
+fn set_sort_picks_a_column_without_flipping() {
+    let mut v = searchable();
+    v.set_sort(SortKey::Size);
+    assert_eq!(
+        v.sort,
+        Sort {
+            key: SortKey::Size,
+            asc: true
+        }
+    );
+    v.set_sort(SortKey::Size);
+    assert!(v.sort.asc);
+    v.set_sort(SortKey::Name);
+    assert_eq!(v.sort.key, SortKey::Name);
+}
+
+// ---- places ----
+
+#[test]
+fn places_map_to_paths_and_back() {
+    assert_eq!(Place::Home.path(), b"/home");
+    assert_eq!(Place::Disk.path(), b"/");
+    assert_eq!(Place::Trash.path(), TRASH_PATH);
+    assert_eq!(Place::Apps.path(), APPS_PATH);
+    assert_eq!(Place::of_path(b"/"), Place::Disk);
+    assert_eq!(Place::of_path(b"/Documentos"), Place::Documents);
+    assert_eq!(Place::of_path(b"/Documentos/a/b"), Place::Documents);
+    assert_eq!(Place::of_path(b"/DocumentosX"), Place::Disk);
+    assert_eq!(Place::of_path(b"/Imagens/ferias"), Place::Images);
+    assert_eq!(Place::of_path(b"/home"), Place::Home);
+    assert_eq!(Place::of_path(b"/outra"), Place::Disk);
+    assert_eq!(Place::of_path(TRASH_PATH), Place::Trash);
+    assert_eq!(Place::of_path(APPS_PATH), Place::Apps);
+    assert!(Place::Home.is_folder() && Place::Images.is_folder());
+    assert!(!Place::Trash.is_folder() && !Place::Apps.is_folder() && !Place::Disk.is_folder());
+}
+
+// ---- text input selection ----
+
+#[test]
+fn renaming_selects_the_stem() {
+    let mut t = TextInput::new(b"relatorio.final.pdf", 255);
+    assert_eq!(t.selection(), None);
+    t.select_stem();
+    assert_eq!(t.selection(), Some((0, 15)));
+    t.insert(b'X');
+    assert_eq!(t.text(), b"X.pdf");
+    assert_eq!(t.caret(), 1);
+    assert_eq!(t.selection(), None);
+    // No extension, or a leading dot: everything.
+    let mut t = TextInput::new(b"Nova pasta", 255);
+    t.select_stem();
+    assert_eq!(t.selection(), Some((0, 10)));
+    let mut t = TextInput::new(b".config", 255);
+    t.select_stem();
+    assert_eq!(t.selection(), Some((0, 7)));
+}
+
+#[test]
+fn selected_text_is_replaced_deleted_or_collapsed() {
+    let mut t = TextInput::new(b"abcdef", 255);
+    t.select_all();
+    assert_eq!(t.selection(), Some((0, 6)));
+    t.backspace();
+    assert_eq!(t.text(), b"");
+    let mut t = TextInput::new(b"abcdef", 255);
+    t.select_all();
+    t.delete();
+    assert_eq!(t.text(), b"");
+    let mut t = TextInput::new(b"abcdef", 255);
+    t.select_all();
+    t.left();
+    assert_eq!((t.caret(), t.selection()), (0, None));
+    let mut t = TextInput::new(b"abcdef", 255);
+    t.select_all();
+    t.right();
+    assert_eq!((t.caret(), t.selection()), (6, None));
+    let mut t = TextInput::new(b"abcdef", 255);
+    t.select_all();
+    t.home();
+    assert_eq!(t.selection(), None);
+    // Replacing does not overflow the limit even when the selection is bigger than the key.
+    let mut t = TextInput::new(b"abcd", 4);
+    t.select_all();
+    t.insert(b'z');
+    assert_eq!(t.text(), b"z");
+    t.insert(b'a');
+    t.insert(b'b');
+    t.insert(b'c');
+    t.insert(b'd');
+    assert_eq!(t.text(), b"zabc");
+}
+
+#[test]
+fn latin1_keys_are_stored_as_utf8() {
+    let mut t = TextInput::new(b"", 255);
+    for b in [b'a', 0xE7, 0xE3, b'o'] {
+        t.insert(b);
+    }
+    assert_eq!(t.text(), "açãо".replace('о', "o").as_bytes());
+    assert_eq!(t.to_string_lossy(), "ação");
+    t.backspace();
+    t.backspace();
+    assert_eq!(t.to_string_lossy(), "aç");
+    // The limit counts bytes, and a character never splits.
+    let mut t = TextInput::new(b"abc", 4);
+    t.insert(0xE7); // needs two bytes: no room
+    assert_eq!(t.text(), b"abc");
+    let t = TextInput::new("aç".as_bytes(), 2);
+    assert_eq!(t.text(), b"a");
 }

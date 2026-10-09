@@ -1102,6 +1102,11 @@ impl Desktop {
                 self.snap_window(d.win, p.zone);
                 self.force_full = true;
             }
+            // A press in a file manager ends: a click, a drop or the end of a band.
+            if matches!(d.mode, DragMode::Files) {
+                self.files_release(d.win, cx, cy);
+                scene = true;
+            }
         }
 
         if let Some(d) = &self.drag {
@@ -1151,6 +1156,7 @@ impl Desktop {
                     }
                     DragMode::PageSelect => self.browser_select_drag(w),
                     DragMode::Ui => self.live_drag(w, cx, cy),
+                    DragMode::Files => self.files_drag(w, cx, cy),
                 }
                 // NOT scene_dirty: a drag is driven by the per-frame damage path
                 // (keyed on `cursor_moved`), which repaints only the window's
@@ -1176,7 +1182,20 @@ impl Desktop {
         // buttons. Only an enter / leave changes pixels; skipped while dragging.
         if self.drag.is_none() {
             let hov = self.topmost_at(cx, cy);
+            // The item under the pointer in a file manager lights up.
+            if let Some(h) = hov.filter(|&h| self.kind_of(h) == Some(Kind::Files))
+                && cursor_moved
+                && !self.overlay_open()
+                && self.files_hover(h, cx, cy)
+                && let Some(win) = self.wm.get(h)
+            {
+                let b = self.window_box(win);
+                self.mark_dirty(b);
+            }
             if hov != self.hover {
+                if let Some(old) = self.hover.filter(|&o| self.kind_of(o) == Some(Kind::Files)) {
+                    self.files_unhover(old);
+                }
                 for id in [self.hover, hov].into_iter().flatten() {
                     if let Some(r) = self.wm.get(id).map(|w| self.window_box(w)) {
                         self.mark_dirty(r);
