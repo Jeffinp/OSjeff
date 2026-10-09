@@ -20,7 +20,7 @@ e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espa�
 endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
 o `#![forbid(unsafe_code)]` do crate `kitsune_core`, não hardware.
 
-- **Dois crates de código.** `kitsune_core` (dezenas de milhares de linhas com testes, 2927 testes
+- **Dois crates de código.** `kitsune_core` (dezenas de milhares de linhas com testes, 2949 testes
   passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
 - **Multitarefa preemptiva** a 250 Hz, com bloqueio. Cinco threads: `compositor`,
@@ -626,6 +626,7 @@ quadro (algumas dezenas de valores).
   reaponta sem salto, a animação de janela (`Anim`), o zoom e o salto de lançamento. Tudo avança
   por tempo real e reporta se ainda se move, e é isso que decide se o laço fica no caminho de
   animação (`has_animation`) ou volta a custar zero.
+- **Marca** (`brand`): a raposa do Kitsune como dado vetorial (12 polígonos numa grade 128 x 128, coordenadas em quartos de unidade), com as variantes `tile` (ícone), `mono` (silhueta de uma cor, vira o glifo do painel) e `halo` (com as caudas, vinheta e Sobre); `render` suaviza por supersampling e aplica dicas por tamanho (16 a 128 px), `to_svg` gera `docs/brand/`. O `iconart` só chama a marca.
 - **Cromo e shell** (`chrome`, `widgets`, `style`, `search`, `iconart`): geometria do painel
   superior (itens à esquerda, relógio centralizado, pílula de status), dos menus, da barra de tarefas
   (`taskbar`: disposição, hit test, indicadores, reordenação), do Apps (`launcher` e

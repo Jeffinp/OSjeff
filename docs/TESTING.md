@@ -393,11 +393,12 @@ Testes novos no `kitsune_core` (todos no host; o kernel só liga o framebuffer a
 | `anim` | 16 | bezier monotônico, mola sem divergir, `Tween` que reaponta sem salto, animação de janela interrompível, *reduzir movimento*, salto de lançamento |
 | `style`, `chrome`, `widgets` | 4, 11, 6 | paletas e aparência automática pela hora, geometria e acerto do painel superior (relógio centralizado, pílula, pontos das áreas de trabalho), menus, trilho do Apps, Busca, popovers (Configurações rápidas, calendário com notificações) e banners; segmentado, switch, controle deslizante, barra de rolagem |
 | `snap`, `taskbar`, `launcher` | 8, 7, 6 | zonas de encaixe nas bordas e cantos, divisão exata da área útil, tamanho mínimo, `Alt+setas`; barra de tarefas (layout, hit test, indicador, clique, reordenar com vizinhos que abrem espaço); categorias, filtro, recentes |
+| `brand` | 14 | a marca da raposa: polígonos dentro da grade e sem degenerados, simetria, mono de uma cor, cobertura e tinta distinta de olhos e nariz em 16 a 128 px, coroa de caudas, SVG, hash dourado do tile de 32 px (atualização: veja o comentário de `GOLDEN_TILE_32` em `kitsune_core/src/brand/tests.rs`), tela de contato com `BRAND_SHEET=/tmp/b.ppm cargo test -p kitsune_core dump_brand -- --ignored` |
 | `iconart`, `cursor` | 7, 4 | todos os ícones e glifos têm conteúdo, cantos transparentes, determinismo; sprites dentro da caixa, ponto quente sobre a forma |
 | `search` | 5 | ranqueamento, dobra de acentos, calculadora exata (overflow recusado, nunca embrulhado), nenhum texto curto derruba o *parser* |
 | `notify`, `settings`, `wallpaper`, `window`, `layout`, `winman` | 10, 15, 10, 21, 40, 44 | banners deslizando, chaves `appearance`/`reduce_motion` totais, esquemas claro e escuro, botões à direita (`title_layout`), encaixe e soltar pela barra, áreas de trabalho (`switch_workspace`, `move_to_workspace`), área útil entre o painel e a barra de tarefas |
 
-Cenários de tela (cada um fotografa e a imagem é revisada em claro e escuro):
+Cenários de tela (cada um fotografa e a imagem é revisada em claro e escuro). `tools/perf/scen/w33-brand.sh` (UEFI e BIOS, claro e escuro com `QEMU_EXTRA="-rtc base=2026-10-08T12:00:00"`) fotografa a vinheta de abertura, o painel e a barra de tarefas, o Apps, o menu do sistema, Ajustes > Sobre e `kitsune://sobre`:
 `w22-look`, `w22-apps` (todos os apps nas duas aparências), `w22-shell` (Busca, folha, galeria,
 HUD, menus de contexto), `w22-polish` (menus, Controles, calendário, Apps, Busca, folha),
 `w22-wm` (Alt+Tab, muitas janelas), `w22-toast` (banners; precisa de um gancho temporário de build, como o `w14-toast`), `w22-anim` (abrir, zoom, minimizar, restaurar em voo),

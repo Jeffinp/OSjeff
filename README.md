@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🦀 Kitsune
+<img src="docs/brand/kitsune-tile.svg" alt="Kitsune" width="112">
+
+# Kitsune™
 
 ### Um sistema operacional x86_64 escrito **do zero em Rust**: bare metal, sem Linux por baixo.
 
@@ -9,7 +11,7 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly--2026--10--05-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-2927%20passing-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-2949%20passing-success?style=for-the-badge)
 ![Fuzz](https://img.shields.io/badge/fuzz-17%20targets-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-PolyForm%20Strict-orange?style=for-the-badge)
 
@@ -103,7 +105,7 @@ que compila com `std` sob teste. O kernel só liga o hardware a ela.
 
 ```mermaid
 flowchart LR
-    CORE["kitsune_core<br/>no_std · forbid(unsafe) · 2927 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["kitsune_core<br/>no_std · forbid(unsafe) · 2949 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · unsafe documentado<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>builder da imagem BIOS/UEFI"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -113,7 +115,7 @@ flowchart LR
 
 | Verificação | Estado |
 |---|---|
-| Testes unitários | **2927** no `kitsune_core`; cobertura de linhas 96,6% (bruta, inclui os módulos de teste; medida com `cargo llvm-cov`) |
+| Testes unitários | **2949** no `kitsune_core`; cobertura de linhas 96,6% (bruta, inclui os módulos de teste; medida com `cargo llvm-cov`) |
 | Fuzzing | 17 alvos (rede, discos OJFS v2/v3, HTML/CSS/imagens/formulários, shell, editor, certificados X.509, manifesto e sandbox de apps); bugs achados são corrigidos com entrada mínima e teste de regressão |
 | `unsafe` | **100%** dos blocos do kernel com `// SAFETY:`, imposto por `clippy::undocumented_unsafe_blocks` |
 | Boot em QEMU | BIOS **e** UEFI em todo commit de kernel, desktop comparado pixel a pixel com a baseline (`tools/verify-boot.sh`) |

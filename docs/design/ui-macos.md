@@ -20,9 +20,9 @@ geometry, soft shadows, springy motion, generous spacing) and has its own identi
 
 | | Kitsune |
 |---|---|
-| Mark | a bold prompt chevron `>` (white) on an indigo squircle; the menu-bar version is the bare chevron. No fruit, no wordmark borrowed from anyone |
+| Mark | the Kitsune fox: a geometric front-view fox head (flat orange facets, cream muzzle) on an indigo squircle; the menu-bar version is the one-colour head. Specified in `docs/brand/README.md`, drawn by `kitsune_core::brand`. No fruit, no wordmark borrowed from anyone |
 | Names | **Apps** (the grid, replaces the start panel), **Busca** (one field for apps, files and sums), **Barra de apps** (the floating bar), **Controles** (network, appearance, switches), **Arquivos**, **Tarefas** (the activity monitor: CPU, Memória, Disco, Rede, Processos), **Registro** (the log), **Ajustes** (preferences), **Calculadora**, **Imagens**, **Componentes** (the widget gallery) |
-| Mark | a bold prompt chevron `>` (white) on a flat indigo rounded square; the panel version is the bare chevron. No fruit, no wordmark borrowed from anyone |
+| Mark | the Kitsune fox: a geometric front-view fox head on a flat indigo rounded square; the panel version is the one-colour head tinted by the foreground. Specified in `docs/brand/README.md`, drawn by `kitsune_core::brand`. No fruit, no wordmark borrowed from anyone |
 | Names | **Apps** (the grid, replaces the start panel), **Busca** (one field for apps, files and sums), **Barra de tarefas** (the floating bar), **Configurações rápidas** (network, appearance, switches), **Arquivos**, **Tarefas**, **Monitor**, **Registro**, **Imagens**, **Componentes** (the widget gallery) |
 | Accent | indigo `5B5CF6` by default; eight choices (Indigo, Turquesa, Violeta, Rosa, Coral, Âmbar, Verde, Grafite) |
 | Icon language | a thick white glyph on a flat saturated rounded-square tile (22 % radius) with one highlight facet across the top-left corner and a 1 px bevel, no gradient and no gloss; every glyph is drawn from our own vector paths (`kitsune_core::iconart`), none is a traced system icon |
