@@ -122,6 +122,18 @@ impl Desktop {
         // The panel shows the workspace dots.
         h ^= ((self.wm.workspace() as u64 + 1) << 52)
             | ((self.wm.visible_workspaces() as u64) << 56);
+        // Which system-app windows are kept out of the cached layer right now (Tarefas glides
+        // between samples): the layer is built without them, so when that set changes while
+        // another window animates (the Snake game) the layer must be rebuilt, or a window that
+        // stopped gliding would be missing from the cache and vanish until the next rebuild.
+        let live = self
+            .wm
+            .windows()
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| w.shown() && self.live_dynamic(w))
+            .fold(0u64, |m, (i, _)| m | (1u64 << (i % 64)));
+        h = h.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ live;
         h
     }
 
