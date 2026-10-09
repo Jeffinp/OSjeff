@@ -275,13 +275,6 @@ impl App for Notes {
             status: StrBuf::new(),
         };
         n.refresh_list();
-        n.say(format_args!(
-            "{}",
-            tr(
-                "Ctrl+S salva  Ctrl+N nova  Tab lista",
-                "Ctrl+S saves  Ctrl+N new  Tab list"
-            )
-        ));
         n
     }
 
@@ -415,7 +408,16 @@ impl App for Notes {
         }
         // status bar
         c.fill_rect(0, h - 22, w, 22, 0x181D27);
-        c.text(10, h - 15, self.status.as_str(), 0x9AA6BD, 1);
+        // Until something happens the bar shows the keys, in the language of the moment.
+        let status = if self.status.as_str().is_empty() {
+            tr(
+                "Ctrl+S salva  Ctrl+N nova  Tab lista",
+                "Ctrl+S saves  Ctrl+N new  Tab list",
+            )
+        } else {
+            self.status.as_str()
+        };
+        c.text(10, h - 15, status, 0x9AA6BD, 1);
     }
 }
 
