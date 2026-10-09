@@ -82,17 +82,11 @@ terminal, interpretador e comandos.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `kernel/src/desktop/shellhost.rs` | 10 | 0 | 9 | 0 |
-| `kernel/src/desktop/term.rs` | 3 | 0 | 2 | 0 |
-| `osjeff_core/src/shell/builtins.rs` | 107 | 0 | 102 | 1 |
-| `osjeff_core/src/shell/exec.rs` | 32 | 0 | 22 | 0 |
-| `osjeff_core/src/shell/fs.rs` | 11 | 0 | 9 | 2 |
-| `osjeff_core/src/shell/glob.rs` | 3 | 0 | 3 | 0 |
-| `osjeff_core/src/shell/line.rs` | 1 | 0 | 0 | 0 |
-| `osjeff_core/src/shell/netcmds.rs` | 17 | 0 | 13 | 1 |
-| `osjeff_core/src/shell/parse.rs` | 10 | 0 | 9 | 1 |
-| `osjeff_core/src/shell/regex.rs` | 2 | 0 | 2 | 0 |
-| `osjeff_core/src/shell/sys.rs` | 7 | 0 | 6 | 0 |
+| `kernel/src/desktop/shellhost.rs` | 2 | 0 | 0 | 0 |
+| `kernel/src/desktop/term.rs` | 2 | 0 | 0 | 0 |
+| `osjeff_core/src/shell/builtins.rs` | 3 | 0 | 0 | 0 |
+| `osjeff_core/src/shell/exec.rs` | 3 | 0 | 1 | 0 |
+| `osjeff_core/src/shell/netcmds.rs` | 2 | 0 | 0 | 0 |
 
 ### Tarefas
 
@@ -100,26 +94,7 @@ monitor de atividade.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `kernel/src/desktop/tarefas.rs` | 70 | 0 | 3 | 0 |
-| `osjeff_core/src/activity.rs` | 15 | 0 | 0 | 0 |
 | `osjeff_core/src/netstats.rs` | 4 | 0 | 0 | 1 |
-
-### Registro
-
-visualizador do registro.
-
-| Arquivo | Textos | Sem acento | Inglês | Misto |
-|---|---:|---:|---:|---:|
-| `kernel/src/desktop/logview.rs` | 19 | 0 | 0 | 0 |
-
-### Calculadora
-
-calculadora.
-
-| Arquivo | Textos | Sem acento | Inglês | Misto |
-|---|---:|---:|---:|---:|
-| `kernel/src/desktop/calc_ui.rs` | 1 | 0 | 0 | 0 |
-| `osjeff_core/src/calc.rs` | 1 | 0 | 0 | 0 |
 
 ### Imagens
 
@@ -255,20 +230,6 @@ núcleo sem dono claro.
 | `kernel/src/crash.rs:280` | `The system is halted. Reset or power-cycle the machine to restart.\nThe same report was written to the seri...` | misto |
 | `kernel/src/desktop/browser_ui.rs:133` | `load to first paint` | en |
 | `kernel/src/desktop/settings_ui.rs:1233` | `Total` | en |
-| `kernel/src/desktop/shellhost.rs:302` | `boot disk` | en |
-| `kernel/src/desktop/shellhost.rs:484` | `{p}: Is a directory` | en |
-| `kernel/src/desktop/shellhost.rs:490` | `usage: edit [FILE]` | en |
-| `kernel/src/desktop/shellhost.rs:528` | `edit [FILE]: open the text editor` | en |
-| `kernel/src/desktop/shellhost.rs:529` | `files: open the file manager` | en |
-| `kernel/src/desktop/shellhost.rs:530` | `tasks: open the task manager` | en |
-| `kernel/src/desktop/shellhost.rs:531` | `calc: open the calculator` | en |
-| `kernel/src/desktop/shellhost.rs:532` | `reboot: restart the machine` | en |
-| `kernel/src/desktop/shellhost.rs:533` | `shutdown: power the machine off` | en |
-| `kernel/src/desktop/tarefas.rs:1419` | `Total` | en |
-| `kernel/src/desktop/tarefas.rs:1578` | `Total` | en |
-| `kernel/src/desktop/tarefas.rs:2264` | `Encerrar “{name}”?` | en |
-| `kernel/src/desktop/term.rs:254` | `sh: too many commands waiting` | en |
-| `kernel/src/desktop/term.rs:259` | `sh: the command thread stopped` | en |
 | `kernel/src/interrupts.rs:314` | `stack overflow in thread '{owner}': guard page hit at {cr2:#x} ({code:?})` | en |
 | `kernel/src/interrupts.rs:321` | `page fault accessing {cr2:#x}: {code:?}` | en |
 | `kernel/src/io.rs:12` | `in al, dx` | en |
@@ -435,177 +396,7 @@ núcleo sem dono claro.
 | `osjeff_core/src/ppm.rs:45` | `invalid ppm header` | en |
 | `osjeff_core/src/ppm.rs:46` | `invalid ppm sample` | en |
 | `osjeff_core/src/ppm.rs:47` | `ppm image: {e}` | en |
-| `osjeff_core/src/shell/builtins.rs:19` | `help [CMD]: list commands or describe one` | en |
-| `osjeff_core/src/shell/builtins.rs:20` | `ls [-aF1l] [PATH...]: list directory contents` | en |
-| `osjeff_core/src/shell/builtins.rs:22` | `pwd: print the working directory` | en |
-| `osjeff_core/src/shell/builtins.rs:23` | `cat [-n] [FILE...]: print files or stdin` | en |
-| `osjeff_core/src/shell/builtins.rs:26` | `rm [-rf] PATH...: remove files or directories` | en |
-| `osjeff_core/src/shell/builtins.rs:27` | `rmdir DIR...: remove empty directories` | en |
-| `osjeff_core/src/shell/builtins.rs:28` | `mv SRC... DEST: move or rename` | en |
-| `osjeff_core/src/shell/builtins.rs:29` | `cp [-r] SRC... DEST: copy files or directories` | en |
-| `osjeff_core/src/shell/builtins.rs:30` | `touch FILE...: create empty files` | en |
-| `osjeff_core/src/shell/builtins.rs:31` | `head [-n N] [FILE...]: first lines` | en |
-| `osjeff_core/src/shell/builtins.rs:32` | `tail [-n N] [FILE...]: last lines` | en |
-| `osjeff_core/src/shell/builtins.rs:33` | `wc [-lwcm] [FILE...]: count lines, words, bytes` | en |
-| `osjeff_core/src/shell/builtins.rs:36` | `grep [-ivncFlqHh] PATTERN [FILE...]: search text` | en |
-| `osjeff_core/src/shell/builtins.rs:39` | `sort [-rnu] [FILE...]: sort lines` | en |
-| `osjeff_core/src/shell/builtins.rs:47` | `tee [-a] FILE...: copy stdin to stdout and files` | en |
-| `osjeff_core/src/shell/builtins.rs:50` | `clear: clear the terminal` | en |
-| `osjeff_core/src/shell/builtins.rs:54` | `export [NAME[=VALUE]...]: mark variables exported` | en |
-| `osjeff_core/src/shell/builtins.rs:57` | `unset NAME...: remove variables` | en |
-| `osjeff_core/src/shell/builtins.rs:60` | `history [N\|-c]: show or clear the command history` | en |
-| `osjeff_core/src/shell/builtins.rs:65` | `alias [NAME=VALUE...]: define or list aliases` | en |
-| `osjeff_core/src/shell/builtins.rs:68` | `unalias [-a] NAME...: remove aliases` | en |
-| `osjeff_core/src/shell/builtins.rs:69` | `which CMD...: show how a command resolves` | en |
-| `osjeff_core/src/shell/builtins.rs:70` | `date [+FORMAT]: print the date and time` | en |
-| `osjeff_core/src/shell/builtins.rs:71` | `uptime: time since boot` | en |
-| `osjeff_core/src/shell/builtins.rs:72` | `free [-bkm]: memory usage` | en |
-| `osjeff_core/src/shell/builtins.rs:73` | `df: disk usage` | en |
-| `osjeff_core/src/shell/builtins.rs:76` | `ping [-c N] HOST: test network reachability` | en |
-| `osjeff_core/src/shell/builtins.rs:81` | `sleep SECONDS: wait` | en |
-| `osjeff_core/src/shell/builtins.rs:82` | `seq [FIRST] LAST: print a sequence of numbers` | en |
-| `osjeff_core/src/shell/builtins.rs:85` | `basename PATH [SUFFIX]: last path component` | en |
-| `osjeff_core/src/shell/builtins.rs:90` | `dirname PATH: directory part of a path` | en |
-| `osjeff_core/src/shell/builtins.rs:93` | `stat PATH...: show kind and size` | en |
-| `osjeff_core/src/shell/builtins.rs:98` | `cut -d C -f N[,M]: select fields (stdin or files)` | en |
-| `osjeff_core/src/shell/builtins.rs:101` | `nl: number lines (stdin or files)` | en |
-| `osjeff_core/src/shell/builtins.rs:104` | `yes [WORD]: repeat a word (bounded by the output limit)` | en |
-| `osjeff_core/src/shell/builtins.rs:180` | `option requires an argument -- '{c}'` | en |
-| `osjeff_core/src/shell/builtins.rs:187` | `invalid option -- '{c}'` | en |
-| `osjeff_core/src/shell/builtins.rs:246` | `no help for '{name}'` | misto |
-| `osjeff_core/src/shell/builtins.rs:293` | `cannot access '{t}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:346` | `too many arguments` | en |
-| `osjeff_core/src/shell/builtins.rs:359` | `OLDPWD not set` | en |
-| `osjeff_core/src/shell/builtins.rs:465` | `missing operand` | en |
-| `osjeff_core/src/shell/builtins.rs:493` | `cannot create directory '{d}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:524` | `missing operand` | en |
-| `osjeff_core/src/shell/builtins.rs:534` | `refusing to remove '{p}'` | en |
-| `osjeff_core/src/shell/builtins.rs:541` | `cannot remove '{p}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:546` | `cannot remove '{p}': Is a directory` | en |
-| `osjeff_core/src/shell/builtins.rs:551` | `cannot remove '{at}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:563` | `missing operand` | en |
-| `osjeff_core/src/shell/builtins.rs:571` | `failed to remove '{d}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:577` | `failed to remove '{d}': Not a directory` | en |
-| `osjeff_core/src/shell/builtins.rs:582` | `failed to remove '{d}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:604` | `usage: mv SRC... DEST` | en |
-| `osjeff_core/src/shell/builtins.rs:610` | `target '{dst}' is not a directory` | en |
-| `osjeff_core/src/shell/builtins.rs:617` | `cannot move '{s}' to '{to}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:635` | `cannot stat '{src}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:640` | `cannot read '{src}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:644` | `cannot create '{dst}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:647` | `-r not specified; omitting directory '{src}'` | en |
-| `osjeff_core/src/shell/builtins.rs:650` | `'{src}': nesting too deep` | en |
-| `osjeff_core/src/shell/builtins.rs:655` | `cannot copy '{src}' into itself` | en |
-| `osjeff_core/src/shell/builtins.rs:659` | `cannot create directory '{dst}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:664` | `cannot read '{src}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:682` | `usage: cp [-r] SRC... DEST` | en |
-| `osjeff_core/src/shell/builtins.rs:688` | `target '{dst}' is not a directory` | en |
-| `osjeff_core/src/shell/builtins.rs:705` | `missing file operand` | en |
-| `osjeff_core/src/shell/builtins.rs:713` | `cannot touch '{f}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:730` | `invalid number of lines: '{v}'` | en |
-| `osjeff_core/src/shell/builtins.rs:823` | `usage: grep [OPTIONS] PATTERN [FILE...]` | en |
-| `osjeff_core/src/shell/builtins.rs:837` | `invalid pattern: {}` | en |
-| `osjeff_core/src/shell/builtins.rs:1063` | `'{a}': not a valid identifier` | en |
-| `osjeff_core/src/shell/builtins.rs:1072` | `cannot set '{name}'` | en |
-| `osjeff_core/src/shell/builtins.rs:1133` | `too many aliases` | en |
-| `osjeff_core/src/shell/builtins.rs:1140` | `invalid alias name in '{a}'` | en |
-| `osjeff_core/src/shell/builtins.rs:1146` | `{a}: not found` | en |
-| `osjeff_core/src/shell/builtins.rs:1161` | `usage: unalias [-a] NAME...` | en |
-| `osjeff_core/src/shell/builtins.rs:1167` | `{a}: not found` | en |
-| `osjeff_core/src/shell/builtins.rs:1176` | `usage: which CMD...` | en |
-| `osjeff_core/src/shell/builtins.rs:1208` | `{n} not found\n` | en |
-| `osjeff_core/src/shell/builtins.rs:1228` | `invalid date '{f}'` | en |
-| `osjeff_core/src/shell/builtins.rs:1272` | `up {d} {unit}, {h:02}:{m:02}:{s:02}` | en |
-| `osjeff_core/src/shell/builtins.rs:1274` | `up {h:02}:{m:02}:{s:02}` | en |
-| `osjeff_core/src/shell/builtins.rs:1385` | `invalid signal '{s}'` | en |
-| `osjeff_core/src/shell/builtins.rs:1394` | `usage: kill [-SIGNAL] PID...` | en |
-| `osjeff_core/src/shell/builtins.rs:1407` | `invalid pid '{p}'` | en |
-| `osjeff_core/src/shell/builtins.rs:1424` | `invalid count '{v}'` | en |
-| `osjeff_core/src/shell/builtins.rs:1430` | `usage: ping [-c N] HOST` | en |
-| `osjeff_core/src/shell/builtins.rs:1526` | `argument expected` | en |
-| `osjeff_core/src/shell/builtins.rs:1532` | `missing ')'` | en |
-| `osjeff_core/src/shell/builtins.rs:1560` | `integer expression expected` | en |
-| `osjeff_core/src/shell/builtins.rs:1611` | `too many arguments` | en |
-| `osjeff_core/src/shell/builtins.rs:1629` | `missing ']'` | en |
-| `osjeff_core/src/shell/builtins.rs:1638` | `missing operand` | en |
-| `osjeff_core/src/shell/builtins.rs:1656` | `invalid time interval '{arg}'` | en |
-| `osjeff_core/src/shell/builtins.rs:1675` | `usage: seq [FIRST [INCR]] LAST` | en |
-| `osjeff_core/src/shell/builtins.rs:1686` | `increment must not be zero` | en |
-| `osjeff_core/src/shell/builtins.rs:1707` | `missing operand` | en |
-| `osjeff_core/src/shell/builtins.rs:1729` | `missing operand` | en |
-| `osjeff_core/src/shell/builtins.rs:1750` | `missing operand` | en |
-| `osjeff_core/src/shell/builtins.rs:1765` | `cannot stat '{p}': {}` | en |
-| `osjeff_core/src/shell/builtins.rs:1838` | `usage: tr SET1 SET2 \| tr -d SET1` | en |
-| `osjeff_core/src/shell/builtins.rs:1866` | `you must specify a list of fields (-f)` | en |
-| `osjeff_core/src/shell/builtins.rs:1874` | `invalid field '{part}'` | en |
-| `osjeff_core/src/shell/exec.rs:326` | `exit [N]: leave the shell or script with status N` | en |
-| `osjeff_core/src/shell/exec.rs:327` | `return [N]: leave a function with status N` | en |
-| `osjeff_core/src/shell/exec.rs:329` | `continue [N]: next iteration of the Nth loop` | en |
-| `osjeff_core/src/shell/exec.rs:330` | `shift [N]: drop the first N positional arguments` | en |
-| `osjeff_core/src/shell/exec.rs:331` | `source FILE [ARGS]: run a script in this shell` | en |
-| `osjeff_core/src/shell/exec.rs:333` | `sh FILE [ARGS]: run a script file` | en |
-| `osjeff_core/src/shell/exec.rs:336` | `set [NAME=VALUE \| -- ARGS]: list variables or set them` | en |
-| `osjeff_core/src/shell/exec.rs:560` | `{name}: syntax error at line {l}, column {c}: {}\n` | en |
-| `osjeff_core/src/shell/exec.rs:761` | `too many functions` | en |
-| `osjeff_core/src/shell/exec.rs:863` | `cannot set variable` | en |
-| `osjeff_core/src/shell/exec.rs:953` | `{name}: Is a directory` | en |
-| `osjeff_core/src/shell/exec.rs:956` | `{name}: command not found` | en |
-| `osjeff_core/src/shell/exec.rs:968` | `{name}.sh` | en |
-| `osjeff_core/src/shell/exec.rs:1058` | `{path}: script too large` | en |
-| `osjeff_core/src/shell/exec.rs:1110` | `exit: numeric argument required` | en |
-| `osjeff_core/src/shell/exec.rs:1118` | `return: only valid in a function or sourced script` | en |
-| `osjeff_core/src/shell/exec.rs:1141` | `{}: bad loop count` | en |
-| `osjeff_core/src/shell/exec.rs:1157` | `shift: bad count` | en |
-| `osjeff_core/src/shell/exec.rs:1163` | `{}: file name required` | en |
-| `osjeff_core/src/shell/exec.rs:1198` | `set: invalid argument '{a}'` | en |
-| `osjeff_core/src/shell/exec.rs:1230` | `command substitution nested too deeply` | en |
-| `osjeff_core/src/shell/exec.rs:1248` | `command substitution output truncated` | en |
-| `osjeff_core/src/shell/fs.rs:32` | `No such file or directory` | misto |
-| `osjeff_core/src/shell/fs.rs:33` | `Not a directory` | en |
-| `osjeff_core/src/shell/fs.rs:34` | `Is a directory` | en |
-| `osjeff_core/src/shell/fs.rs:35` | `File exists` | en |
-| `osjeff_core/src/shell/fs.rs:36` | `Directory not empty` | en |
-| `osjeff_core/src/shell/fs.rs:37` | `No space left on device` | misto |
-| `osjeff_core/src/shell/fs.rs:38` | `File too large` | en |
-| `osjeff_core/src/shell/fs.rs:39` | `File name too long` | en |
-| `osjeff_core/src/shell/fs.rs:40` | `Invalid path` | en |
-| `osjeff_core/src/shell/fs.rs:41` | `Read-only file system` | en |
-| `osjeff_core/src/shell/fs.rs:42` | `Input/output error` | en |
-| `osjeff_core/src/shell/glob.rs:143` | `division by zero` | en |
-| `osjeff_core/src/shell/glob.rs:144` | `arithmetic syntax error` | en |
-| `osjeff_core/src/shell/glob.rs:145` | `arithmetic expression too deep` | en |
-| `osjeff_core/src/shell/netcmds.rs:24` | `nslookup HOST: look up the IPv4 addresses of a name` | en |
-| `osjeff_core/src/shell/netcmds.rs:29` | `curl [-sSfiL] [-o FILE\|-O] URL: fetch a http(s) URL` | en |
-| `osjeff_core/src/shell/netcmds.rs:34` | `wget [-q] [-O FILE\|-] URL: download a http(s) URL to a file` | en |
-| `osjeff_core/src/shell/netcmds.rs:37` | `ifconfig: show the network interface` | en |
-| `osjeff_core/src/shell/netcmds.rs:67` | `usage: nslookup HOST` | en |
-| `osjeff_core/src/shell/netcmds.rs:85` | `can't find {host}: NXDOMAIN` | en |
-| `osjeff_core/src/shell/netcmds.rs:139` | `usage: curl [-sSfiL] [-o FILE\|-O] URL` | en |
-| `osjeff_core/src/shell/netcmds.rs:168` | `Could not resolve host` | en |
-| `osjeff_core/src/shell/netcmds.rs:180` | `(22) The requested URL returned error: {}` | en |
-| `osjeff_core/src/shell/netcmds.rs:203` | `(23) body cut at {} bytes` | en |
-| `osjeff_core/src/shell/netcmds.rs:214` | `usage: wget [-q] [-O FILE\|-] URL` | en |
-| `osjeff_core/src/shell/netcmds.rs:241` | `{url}: server returned error {}` | en |
-| `osjeff_core/src/shell/netcmds.rs:253` | `warning: body cut at {} bytes` | en |
-| `osjeff_core/src/shell/netcmds.rs:264` | `no network interface` | misto |
-| `osjeff_core/src/shell/parse.rs:68` | `bad ${ } substitution` | en |
-| `osjeff_core/src/shell/parse.rs:69` | `unexpected token` | en |
-| `osjeff_core/src/shell/parse.rs:70` | `unexpected end of input` | en |
-| `osjeff_core/src/shell/parse.rs:71` | `expected '{what}'` | en |
-| `osjeff_core/src/shell/parse.rs:72` | `redirection needs a file name` | en |
-| `osjeff_core/src/shell/parse.rs:73` | `'&' (background jobs) is not supported` | en |
-| `osjeff_core/src/shell/parse.rs:74` | `'<<' (here-documents) is not supported` | en |
-| `osjeff_core/src/shell/parse.rs:76` | `descriptor redirections such as '2>' are not supported` | misto |
-| `osjeff_core/src/shell/parse.rs:78` | `invalid function name` | en |
-| `osjeff_core/src/shell/parse.rs:79` | `nesting is too deep` | en |
-| `osjeff_core/src/shell/regex.rs:27` | `nothing to repeat` | en |
-| `osjeff_core/src/shell/regex.rs:29` | `pattern too long` | en |
-| `osjeff_core/src/shell/sys.rs:90` | `not supported on this system` | en |
-| `osjeff_core/src/shell/sys.rs:92` | `operation not permitted` | en |
-| `osjeff_core/src/shell/sys.rs:93` | `network is unreachable` | en |
-| `osjeff_core/src/shell/sys.rs:94` | `host not found` | en |
-| `osjeff_core/src/shell/sys.rs:95` | `timed out` | en |
-| `osjeff_core/src/shell/sys.rs:97` | `transfer failed` | en |
+| `osjeff_core/src/shell/exec.rs:984` | `{name}.sh` | en |
 | `osjeff_core/src/sntp.rs:145` | `not a server reply` | en |
 | `osjeff_core/src/sntp.rs:148` | `bad stratum` | en |
 | `osjeff_core/src/sntp.rs:150` | `bad server timestamps` | en |
@@ -886,360 +677,44 @@ decida caso a caso se vão para o catálogo.
 
 ### Terminal
 
-**`kernel/src/desktop/shellhost.rs`** (10)
+**`kernel/src/desktop/shellhost.rs`** (2)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 301 | `hd{}` | neutro | `term.hd` |
-| 302 | `boot disk` | en | `term.boot_disk` |
-| 484 | `{p}: Is a directory` | en | `term.p_is_directory` |
-| 490 | `usage: edit [FILE]` | en | `term.usage_edit_file` |
-| 528 | `edit [FILE]: open the text editor` | en | `term.edit_file_open_text` |
-| 529 | `files: open the file manager` | en | `term.files_open_file_manager` |
-| 530 | `tasks: open the task manager` | en | `term.tasks_open_task_manager` |
-| 531 | `calc: open the calculator` | en | `term.calc_open_calculator` |
-| 532 | `reboot: restart the machine` | en | `term.reboot_restart_machine` |
-| 533 | `shutdown: power the machine off` | en | `term.shutdown_power_machine_off` |
+| 302 | `hd{}` | neutro | `term.hd` |
+| 645 | `sh: {}\n` | neutro | `term.sh` |
 
-**`kernel/src/desktop/term.rs`** (3)
+**`kernel/src/desktop/term.rs`** (2)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 254 | `sh: too many commands waiting` | en | `term.sh_too_many_commands` |
-| 259 | `sh: the command thread stopped` | en | `term.sh_command_thread_stopped` |
-| 261 | `sh: no shell` | pt | `term.sh_no_shell` |
+| 268 | `sh: {problem}\n` | neutro | `term.sh_problem` |
+| 396 | `sh: {}\n` | neutro | `term.sh` |
 
-**`osjeff_core/src/shell/builtins.rs`** (107)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 19 | `help [CMD]: list commands or describe one` | en | `term.help_cmd_list_commands` |
-| 20 | `ls [-aF1l] [PATH...]: list directory contents` | en | `term.ls_af1l_path_list` |
-| 22 | `pwd: print the working directory` | en | `term.pwd_print_working_directory` |
-| 23 | `cat [-n] [FILE...]: print files or stdin` | en | `term.cat_n_file_print` |
-| 26 | `rm [-rf] PATH...: remove files or directories` | en | `term.rm_rf_path_remove` |
-| 27 | `rmdir DIR...: remove empty directories` | en | `term.rmdir_dir_remove_empty` |
-| 28 | `mv SRC... DEST: move or rename` | en | `term.mv_src_dest_move` |
-| 29 | `cp [-r] SRC... DEST: copy files or directories` | en | `term.cp_r_src_dest` |
-| 30 | `touch FILE...: create empty files` | en | `term.touch_file_create_empty` |
-| 31 | `head [-n N] [FILE...]: first lines` | en | `term.head_n_n_file` |
-| 32 | `tail [-n N] [FILE...]: last lines` | en | `term.tail_n_n_file` |
-| 33 | `wc [-lwcm] [FILE...]: count lines, words, bytes` | en | `term.wc_lwcm_file_count` |
-| 36 | `grep [-ivncFlqHh] PATTERN [FILE...]: search text` | en | `term.grep_ivncflqhh_pattern_file` |
-| 39 | `sort [-rnu] [FILE...]: sort lines` | en | `term.sort_rnu_file_sort` |
-| 47 | `tee [-a] FILE...: copy stdin to stdout and files` | en | `term.tee_file_copy_stdin` |
-| 50 | `clear: clear the terminal` | en | `term.clear_clear_terminal` |
-| 54 | `export [NAME[=VALUE]...]: mark variables exported` | en | `term.export_name_value_mark` |
-| 57 | `unset NAME...: remove variables` | en | `term.unset_name_remove_variables` |
-| 60 | `history [N\|-c]: show or clear the command history` | en | `term.history_n_c_show` |
-| 65 | `alias [NAME=VALUE...]: define or list aliases` | en | `term.alias_name_value_define` |
-| 68 | `unalias [-a] NAME...: remove aliases` | en | `term.unalias_name_remove_aliases` |
-| 69 | `which CMD...: show how a command resolves` | en | `term.which_cmd_show_how` |
-| 70 | `date [+FORMAT]: print the date and time` | en | `term.date_format_print_date` |
-| 71 | `uptime: time since boot` | en | `term.uptime_time_since_boot` |
-| 72 | `free [-bkm]: memory usage` | en | `term.free_bkm_memory_usage` |
-| 73 | `df: disk usage` | en | `term.df_disk_usage` |
-| 76 | `ping [-c N] HOST: test network reachability` | en | `term.ping_c_n_host` |
-| 81 | `sleep SECONDS: wait` | en | `term.sleep_seconds_wait` |
-| 82 | `seq [FIRST] LAST: print a sequence of numbers` | en | `term.seq_first_last_print` |
-| 85 | `basename PATH [SUFFIX]: last path component` | en | `term.basename_path_suffix_last` |
-| 90 | `dirname PATH: directory part of a path` | en | `term.dirname_path_directory_part` |
-| 93 | `stat PATH...: show kind and size` | en | `term.stat_path_show_kind` |
-| 98 | `cut -d C -f N[,M]: select fields (stdin or files)` | en | `term.cut_d_c_f` |
-| 101 | `nl: number lines (stdin or files)` | en | `term.nl_number_lines_stdin` |
-| 104 | `yes [WORD]: repeat a word (bounded by the output limit)` | en | `term.yes_word_repeat_word` |
-| 180 | `option requires an argument -- '{c}'` | en | `term.option_requires_an_argument` |
-| 187 | `invalid option -- '{c}'` | en | `term.invalid_option_c` |
-| 246 | `no help for '{name}'` | misto | `term.no_help_for_name` |
-| 293 | `cannot access '{t}': {}` | en | `term.cannot_access_t` |
-| 346 | `too many arguments` | en | `term.too_many_arguments` |
-| 359 | `OLDPWD not set` | en | `term.oldpwd_not_set` |
-| 465 | `missing operand` | en | `term.missing_operand` |
-| 493 | `cannot create directory '{d}': {}` | en | `term.cannot_create_directory_d` |
-| 524 | `missing operand` | en | `term.missing_operand_2` |
-| 534 | `refusing to remove '{p}'` | en | `term.refusing_remove_p` |
-| 541 | `cannot remove '{p}': {}` | en | `term.cannot_remove_p` |
-| 546 | `cannot remove '{p}': Is a directory` | en | `term.cannot_remove_p_is` |
-| 551 | `cannot remove '{at}': {}` | en | `term.cannot_remove_at` |
-| 563 | `missing operand` | en | `term.missing_operand_3` |
-| 571 | `failed to remove '{d}': {}` | en | `term.failed_remove_d` |
-| 577 | `failed to remove '{d}': Not a directory` | en | `term.failed_remove_d_not` |
-| 582 | `failed to remove '{d}': {}` | en | `term.failed_remove_d_2` |
-| 604 | `usage: mv SRC... DEST` | en | `term.usage_mv_src_dest` |
-| 610 | `target '{dst}' is not a directory` | en | `term.target_dst_is_not` |
-| 617 | `cannot move '{s}' to '{to}': {}` | en | `term.cannot_move_s` |
-| 635 | `cannot stat '{src}': {}` | en | `term.cannot_stat_src` |
-| 640 | `cannot read '{src}': {}` | en | `term.cannot_read_src` |
-| 644 | `cannot create '{dst}': {}` | en | `term.cannot_create_dst` |
-| 647 | `-r not specified; omitting directory '{src}'` | en | `term.r_not_specified_omitting` |
-| 650 | `'{src}': nesting too deep` | en | `term.src_nesting_too_deep` |
-| 655 | `cannot copy '{src}' into itself` | en | `term.cannot_copy_src_into` |
-| 659 | `cannot create directory '{dst}': {}` | en | `term.cannot_create_directory_dst` |
-| 664 | `cannot read '{src}': {}` | en | `term.cannot_read_src_2` |
-| 682 | `usage: cp [-r] SRC... DEST` | en | `term.usage_cp_r_src` |
-| 688 | `target '{dst}' is not a directory` | en | `term.target_dst_is_not_2` |
-| 705 | `missing file operand` | en | `term.missing_file_operand` |
-| 713 | `cannot touch '{f}': {}` | en | `term.cannot_touch_f` |
-| 730 | `invalid number of lines: '{v}'` | en | `term.invalid_number_lines_v` |
-| 823 | `usage: grep [OPTIONS] PATTERN [FILE...]` | en | `term.usage_grep_options_pattern` |
-| 837 | `invalid pattern: {}` | en | `term.invalid_pattern` |
-| 1049 | `export {n}="{v}"\n` | neutro | `term.export_n_v` |
-| 1063 | `'{a}': not a valid identifier` | en | `term.not_valid_identifier` |
-| 1072 | `cannot set '{name}'` | en | `term.cannot_set_name` |
-| 1099 | `{a}: numeric argument required` | neutro | `term.numeric_argument_required` |
-| 1121 | `alias {k}='{v}'\n` | neutro | `term.alias_k_v` |
-| 1133 | `too many aliases` | en | `term.too_many_aliases` |
-| 1140 | `invalid alias name in '{a}'` | en | `term.invalid_alias_name_in` |
-| 1146 | `{a}: not found` | en | `term.not_found` |
-| 1161 | `usage: unalias [-a] NAME...` | en | `term.usage_unalias_name` |
-| 1167 | `{a}: not found` | en | `term.not_found_2` |
-| 1176 | `usage: which CMD...` | en | `term.usage_which_cmd` |
-| 1195 | `{n}.sh` | neutro | `term.n_sh` |
-| 1208 | `{n} not found\n` | en | `term.n_not_found` |
-| 1228 | `invalid date '{f}'` | en | `term.invalid_date_f` |
-| 1272 | `up {d} {unit}, {h:02}:{m:02}:{s:02}` | en | `term.up_d_unit_h` |
-| 1274 | `up {h:02}:{m:02}:{s:02}` | en | `term.up_h_02_m` |
-| 1385 | `invalid signal '{s}'` | en | `term.invalid_signal_s` |
-| 1394 | `usage: kill [-SIGNAL] PID...` | en | `term.usage_kill_signal_pid` |
-| 1407 | `invalid pid '{p}'` | en | `term.invalid_pid_p` |
-| 1424 | `invalid count '{v}'` | en | `term.invalid_count_v` |
-| 1430 | `usage: ping [-c N] HOST` | en | `term.usage_ping_c_n` |
-| 1526 | `argument expected` | en | `term.argument_expected` |
-| 1532 | `missing ')'` | en | `term.missing` |
-| 1560 | `integer expression expected` | en | `term.integer_expression_expected` |
-| 1611 | `too many arguments` | en | `term.too_many_arguments_2` |
-| 1629 | `missing ']'` | en | `term.missing_2` |
-| 1638 | `missing operand` | en | `term.missing_operand_4` |
-| 1656 | `invalid time interval '{arg}'` | en | `term.invalid_time_interval_arg` |
-| 1675 | `usage: seq [FIRST [INCR]] LAST` | en | `term.usage_seq_first_incr` |
-| 1686 | `increment must not be zero` | en | `term.increment_must_not_be` |
-| 1707 | `missing operand` | en | `term.missing_operand_5` |
-| 1729 | `missing operand` | en | `term.missing_operand_6` |
-| 1750 | `missing operand` | en | `term.missing_operand_7` |
-| 1765 | `cannot stat '{p}': {}` | en | `term.cannot_stat_p` |
-| 1838 | `usage: tr SET1 SET2 \| tr -d SET1` | en | `term.usage_tr_set1_set2` |
-| 1866 | `you must specify a list of fields (-f)` | en | `term.you_must_specify_list` |
-| 1874 | `invalid field '{part}'` | en | `term.invalid_field_part` |
-
-**`osjeff_core/src/shell/exec.rs`** (32)
+**`osjeff_core/src/shell/builtins.rs`** (3)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 326 | `exit [N]: leave the shell or script with status N` | en | `term.exit_n_leave_shell` |
-| 327 | `return [N]: leave a function with status N` | en | `term.return_n_leave_function` |
-| 329 | `continue [N]: next iteration of the Nth loop` | en | `term.continue_n_next_iteration` |
-| 330 | `shift [N]: drop the first N positional arguments` | en | `term.shift_n_drop_first` |
-| 331 | `source FILE [ARGS]: run a script in this shell` | en | `term.source_file_args_run` |
-| 333 | `sh FILE [ARGS]: run a script file` | en | `term.sh_file_args_run` |
-| 336 | `set [NAME=VALUE \| -- ARGS]: list variables or set them` | en | `term.set_name_value_args` |
-| 338 | `:: do nothing, successfully` | pt | `term.nothing_successfully` |
-| 560 | `{name}: syntax error at line {l}, column {c}: {}\n` | en | `term.name_syntax_error_at` |
-| 587 | `step limit exceeded, aborting` | neutro | `term.step_limit_exceeded_aborting` |
-| 606 | `pipe buffer limit reached, data dropped` | pt | `term.pipe_buffer_limit_reached` |
-| 675 | `pipe buffer limit reached, data dropped` | pt | `term.pipe_buffer_limit_reached_2` |
-| 717 | `loop iteration limit reached` | neutro | `term.loop_iteration_limit_reached` |
-| 737 | `loop iteration limit reached` | neutro | `term.loop_iteration_limit_reached_2` |
-| 761 | `too many functions` | en | `term.too_many_functions` |
-| 824 | `ambiguous redirect` | neutro | `term.ambiguous_redirect` |
-| 863 | `cannot set variable` | en | `term.cannot_set_variable` |
-| 953 | `{name}: Is a directory` | en | `term.name_is_directory` |
-| 956 | `{name}: command not found` | en | `term.name_command_not_found` |
-| 968 | `{name}.sh` | en | `term.name_sh` |
-| 1023 | `function call depth limit exceeded` | neutro | `term.function_call_depth_limit` |
-| 1058 | `{path}: script too large` | en | `term.path_script_too_large` |
-| 1070 | `script nesting limit exceeded` | neutro | `term.script_nesting_limit_exceeded` |
-| 1110 | `exit: numeric argument required` | en | `term.exit_numeric_argument_required` |
-| 1118 | `return: only valid in a function or sourced script` | en | `term.return_only_valid_in` |
-| 1126 | `return: numeric argument required` | neutro | `term.return_numeric_argument_required` |
-| 1141 | `{}: bad loop count` | en | `term.bad_loop_count` |
-| 1157 | `shift: bad count` | en | `term.shift_bad_count` |
-| 1163 | `{}: file name required` | en | `term.file_name_required` |
-| 1198 | `set: invalid argument '{a}'` | en | `term.set_invalid_argument` |
-| 1230 | `command substitution nested too deeply` | en | `term.command_substitution_nested_too` |
-| 1248 | `command substitution output truncated` | en | `term.command_substitution_output_truncated` |
+| 1037 | `export {n}="{v}"\n` | neutro | `term.export_n_v` |
+| 1109 | `alias {k}='{v}'\n` | neutro | `term.alias_k_v` |
+| 1183 | `{n}.sh` | neutro | `term.n_sh` |
 
-**`osjeff_core/src/shell/fs.rs`** (11)
+**`osjeff_core/src/shell/exec.rs`** (3)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 32 | `No such file or directory` | misto | `term.no_such_file_or` |
-| 33 | `Not a directory` | en | `term.not_directory` |
-| 34 | `Is a directory` | en | `term.is_directory` |
-| 35 | `File exists` | en | `term.file_exists` |
-| 36 | `Directory not empty` | en | `term.directory_not_empty` |
-| 37 | `No space left on device` | misto | `term.no_space_left_on` |
-| 38 | `File too large` | en | `term.file_too_large` |
-| 39 | `File name too long` | en | `term.file_name_too_long` |
-| 40 | `Invalid path` | en | `term.invalid_path` |
-| 41 | `Read-only file system` | en | `term.read_only_file_system` |
-| 42 | `Input/output error` | en | `term.input_output_error` |
+| 458 | `sh: {}\n` | neutro | `term.sh` |
+| 477 | `sh: {}\n` | neutro | `term.sh_2` |
+| 984 | `{name}.sh` | en | `term.name_sh` |
 
-**`osjeff_core/src/shell/glob.rs`** (3)
+**`osjeff_core/src/shell/netcmds.rs`** (2)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 143 | `division by zero` | en | `term.division_by_zero` |
-| 144 | `arithmetic syntax error` | en | `term.arithmetic_syntax_error` |
-| 145 | `arithmetic expression too deep` | en | `term.arithmetic_expression_too_deep` |
-
-**`osjeff_core/src/shell/line.rs`** (1)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 232 | `(reverse-i-search)'{}': ` | neutro | `term.reverse_i_search` |
-
-**`osjeff_core/src/shell/netcmds.rs`** (17)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 24 | `nslookup HOST: look up the IPv4 addresses of a name` | en | `term.nslookup_host_look_up` |
-| 29 | `curl [-sSfiL] [-o FILE\|-O] URL: fetch a http(s) URL` | en | `term.curl_ssfil_file_url` |
-| 34 | `wget [-q] [-O FILE\|-] URL: download a http(s) URL to a file` | en | `term.wget_q_file_url` |
-| 37 | `ifconfig: show the network interface` | en | `term.ifconfig_show_network_interface` |
-| 67 | `usage: nslookup HOST` | en | `term.usage_nslookup_host` |
-| 85 | `can't find {host}: NXDOMAIN` | en | `term.can_t_find_host` |
-| 139 | `usage: curl [-sSfiL] [-o FILE\|-O] URL` | en | `term.usage_curl_ssfil_file` |
-| 168 | `Could not resolve host` | en | `term.could_not_resolve_host` |
-| 180 | `(22) The requested URL returned error: {}` | en | `term.22_requested_url_returned` |
-| 203 | `(23) body cut at {} bytes` | en | `term.23_body_cut_at` |
-| 214 | `usage: wget [-q] [-O FILE\|-] URL` | en | `term.usage_wget_q_file` |
-| 241 | `{url}: server returned error {}` | en | `term.url_server_returned_error` |
-| 253 | `warning: body cut at {} bytes` | en | `term.warning_body_cut_at` |
-| 259 | `{}.{} KiB` | neutro | `term.kib` |
-| 264 | `no network interface` | misto | `term.no_network_interface` |
-| 274 | `  inet {ip}/{}` | neutro | `term.inet_ip` |
-| 276 | `  gateway {g}` | neutro | `term.gateway_g` |
-
-**`osjeff_core/src/shell/parse.rs`** (10)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 68 | `bad ${ } substitution` | en | `term.bad_substitution` |
-| 69 | `unexpected token` | en | `term.unexpected_token` |
-| 70 | `unexpected end of input` | en | `term.unexpected_end_input` |
-| 71 | `expected '{what}'` | en | `term.expected_what` |
-| 72 | `redirection needs a file name` | en | `term.redirection_needs_file_name` |
-| 73 | `'&' (background jobs) is not supported` | en | `term.background_jobs_is_not` |
-| 74 | `'<<' (here-documents) is not supported` | en | `term.here_documents_is_not` |
-| 76 | `descriptor redirections such as '2>' are not supported` | misto | `term.descriptor_redirections_such_as` |
-| 78 | `invalid function name` | en | `term.invalid_function_name` |
-| 79 | `nesting is too deep` | en | `term.nesting_is_too_deep` |
-
-**`osjeff_core/src/shell/regex.rs`** (2)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 27 | `nothing to repeat` | en | `term.nothing_repeat` |
-| 29 | `pattern too long` | en | `term.pattern_too_long` |
-
-**`osjeff_core/src/shell/sys.rs`** (7)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 90 | `not supported on this system` | en | `term.not_supported_on_this` |
-| 91 | `no such process` | pt | `term.no_such_process` |
-| 92 | `operation not permitted` | en | `term.operation_not_permitted` |
-| 93 | `network is unreachable` | en | `term.network_is_unreachable` |
-| 94 | `host not found` | en | `term.host_not_found` |
-| 95 | `timed out` | en | `term.timed_out` |
-| 97 | `transfer failed` | en | `term.transfer_failed` |
+| 263 | `  inet {ip}/{}` | neutro | `term.inet_ip` |
+| 265 | `  gateway {g}` | neutro | `term.gateway_g` |
 
 ### Tarefas
-
-**`kernel/src/desktop/tarefas.rs`** (70)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 203 | `Memória` | pt | `tasks.memoria` |
-| 203 | `Disco` | pt | `tasks.disco` |
-| 203 | `Rede` | pt | `tasks.rede` |
-| 211 | `Memória` | pt | `tasks.memoria_2` |
-| 212 | `Disco` | pt | `tasks.disco_2` |
-| 213 | `Rede` | pt | `tasks.rede_2` |
-| 672 | `{} encerrado.` | neutro | `tasks.encerrado` |
-| 687 | `{n} aplicativo(s) encerrado(s).` | neutro | `tasks.n_aplicativo_s_encerrado` |
-| 700 | `{n} comando(s) interrompido(s).` | pt | `tasks.n_comando_s_interrompido` |
-| 732 | `{} reiniciado.` | neutro | `tasks.reiniciado` |
-| 1124 | `Uso do processador` | pt | `tasks.uso_processador` |
-| 1168 | `Tempo ligado` | pt | `tasks.tempo_ligado` |
-| 1185 | `Carga média` | pt | `tasks.carga_media` |
-| 1193 | `{} processos` | neutro | `tasks.processos` |
-| 1216 | `Processador` | neutro | `tasks.processador` |
-| 1237 | `{vm}{feats} recursos` | neutro | `tasks.vm_feats_recursos` |
-| 1263 | `Por processo` | pt | `tasks.por_processo` |
-| 1322 | `Memória em uso` | pt | `tasks.memoria_em_uso` |
-| 1377 | `Pressão da memória` | pt | `tasks.pressao_memoria` |
-| 1406 | `do espaço do sistema` | pt | `tasks.espaco_sistema` |
-| 1417 | `Em uso` | pt | `tasks.em_uso` |
-| 1419 | `Total` | en | `tasks.total` |
-| 1422 | `Memória física` | pt | `tasks.memoria_fisica` |
-| 1448 | `Por aplicativo` | pt | `tasks.por_aplicativo` |
-| 1456 | `valores aproximados` | neutro | `tasks.valores_aproximados` |
-| 1478 | `Nenhum aplicativo aberto.` | pt | `tasks.nenhum_aplicativo_aberto` |
-| 1530 | `Disco principal` | pt | `tasks.disco_principal` |
-| 1531 | `Memória (sem disco)` | pt | `tasks.memoria_sem_disco` |
-| 1531 | `Os arquivos somem ao desligar` | pt | `tasks.os_arquivos_somem_ao` |
-| 1578 | `Total` | en | `tasks.total_2` |
-| 1580 | `Arquivos e pastas` | pt | `tasks.arquivos_pastas` |
-| 1603 | `Leitura e gravação` | pt | `tasks.leitura_gravacao` |
-| 1605 | `Gravação` | pt | `tasks.gravacao` |
-| 1639 | `Leitura {} · Gravação {} · {}` | pt | `tasks.leitura_gravacao_2` |
-| 1672 | `{} desde a inicialização` | pt | `tasks.desde_inicializacao` |
-| 1681 | `{} desde a inicialização` | pt | `tasks.desde_inicializacao_2` |
-| 1685 | `Gravação` | pt | `tasks.gravacao_2` |
-| 1702 | `Sem placa de rede` | pt | `tasks.sem_placa_rede` |
-| 1704 | `Sem sinal` | pt | `tasks.sem_sinal` |
-| 1706 | `Procurando endereço` | pt | `tasks.procurando_endereco` |
-| 1708 | `Conectado` | pt | `tasks.conectado` |
-| 1771 | `Estático` | pt | `tasks.estatico` |
-| 1773 | `{} restantes` | neutro | `tasks.restantes` |
-| 1775 | `Sem expiração` | pt | `tasks.sem_expiracao` |
-| 1787 | `Endereço IP` | pt | `tasks.endereco_ip` |
-| 1787 | `Máscara` | pt | `tasks.mascara` |
-| 1811 | `Concessão` | pt | `tasks.concessao` |
-| 1819 | `Tráfego` | pt | `tasks.trafego` |
-| 1821 | `Recebido` | pt | `tasks.recebido` |
-| 1821 | `Enviado` | pt | `tasks.enviado` |
-| 1855 | `Recebido {} · Enviado {} · {}` | pt | `tasks.recebido_enviado` |
-| 1886 | `{} · {} pacotes` | neutro | `tasks.pacotes` |
-| 1893 | `Recebido` | pt | `tasks.recebido_2` |
-| 1899 | `{} · {} pacotes` | neutro | `tasks.pacotes_2` |
-| 1906 | `Enviado` | pt | `tasks.enviado_2` |
-| 1916 | `Erros e descartes` | pt | `tasks.erros_descartes` |
-| 1933 | `Buscar` | pt | `tasks.buscar` |
-| 2142 | `Nada para mostrar.` | pt | `tasks.nada_para_mostrar` |
-| 2144 | `Nenhum processo corresponde à busca.` | pt | `tasks.nenhum_processo_corresponde_busca` |
-| 2176 | `{} processos · {} threads · CPU {} · Memória {} · Disco {}` | pt | `tasks.processos_threads_cpu_memoria` |
-| 2196 | `Nome interno: {} · {}` | pt | `tasks.nome_interno` |
-| 2200 | `serviço do sistema` | pt | `tasks.servico_sistema` |
-| 2219 | `Reiniciar` | pt | `tasks.reiniciar` |
-| 2226 | `Encerrar` | neutro | `tasks.encerrar` |
-| 2264 | `Encerrar “{name}”?` | en | `tasks.encerrar_name` |
-| 2274 | `Todos os aplicativos instalados serão fechados.` | pt | `tasks.todos_os_aplicativos_instalados` |
-| 2275 | `Os comandos em execução nos terminais serão interrompidos.` | pt | `tasks.os_comandos_em_execucao` |
-| 2278 | `É um serviço do sistema. {msg}` | pt | `tasks.servico_sistema_msg` |
-| 2296 | `Cancelar` | pt | `tasks.cancelar` |
-| 2303 | `Encerrar` | neutro | `tasks.encerrar_2` |
-
-**`osjeff_core/src/activity.rs`** (15)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 23 | `Rede (busca)` | pt | `tasks.rede_busca` |
-| 25 | `Terminal (execução)` | pt | `tasks.terminal_execucao` |
-| 27 | `Sistema` | pt | `tasks.sistema` |
-| 35 | `Arquivos` | pt | `tasks.arquivos` |
-| 36 | `Ajustes` | pt | `tasks.ajustes` |
-| 38 | `Imagens` | pt | `tasks.imagens` |
-| 143 | `{h} h {m:02} min` | neutro | `tasks.h_h_m_02` |
-| 145 | `{m} min {s:02} s` | neutro | `tasks.m_min_s_02` |
-| 170 | `há {secs} s` | pt | `tasks.ha_secs_s` |
-| 463 | `Atenção` | pt | `tasks.atencao` |
-| 464 | `Crítica` | pt | `tasks.critica` |
-| 504 | `Em espera` | pt | `tasks.em_espera` |
-| 536 | `Nome` | pt | `tasks.nome` |
-| 539 | `Memória` | pt | `tasks.memoria` |
-| 540 | `Tempo ativo` | pt | `tasks.tempo_ativo` |
 
 **`osjeff_core/src/netstats.rs`** (4)
 
@@ -1249,46 +724,6 @@ decida caso a caso se vão para o catálogo.
 | 353 | `no address` | misto | `tasks.no_address` |
 | 356 | ` lease={}s` | neutro | `tasks.lease_s` |
 | 362 | ` dhcp={} renew={} rebind={} lost={} \| dns q={} hit={} failover={} fail={} \| ping {}/{}` | neutro | `tasks.dhcp_renew_rebind_lost` |
-
-### Registro
-
-**`kernel/src/desktop/logview.rs`** (19)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 28 | `Tudo` | pt | `log.tudo` |
-| 28 | `Aviso` | pt | `log.aviso` |
-| 28 | `Erro` | pt | `log.erro` |
-| 322 | `Registro limpo.` | neutro | `log.registro_limpo` |
-| 332 | `Salvo em /var/log/syslog.txt.` | pt | `log.salvo_em_var_log` |
-| 334 | `Salvo em /var/log/syslog.txt (só o final).` | pt | `log.salvo_em_var_log_2` |
-| 336 | `Disco cheio: não foi possível salvar.` | pt | `log.disco_cheio_nao_foi` |
-| 337 | `Não foi possível salvar.` | pt | `log.nao_foi_possivel_salvar` |
-| 453 | `Buscar no registro` | pt | `log.buscar_no_registro` |
-| 461 | `Seguir` | neutro | `log.seguir` |
-| 471 | `Limpar` | pt | `log.limpar` |
-| 479 | `Salvar` | pt | `log.salvar` |
-| 486 | `Hora` | pt | `log.hora` |
-| 486 | `Nível` | pt | `log.nivel` |
-| 486 | `Origem` | pt | `log.origem` |
-| 591 | `O registro está vazio.` | pt | `log.registro_esta_vazio` |
-| 593 | `Nenhuma linha corresponde ao filtro.` | pt | `log.nenhuma_linha_corresponde_ao` |
-| 617 | `{} linhas` | neutro | `log.linhas` |
-| 619 | `{} de {} linhas` | pt | `log.linhas_2` |
-
-### Calculadora
-
-**`kernel/src/desktop/calc_ui.rs`** (1)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 280 | `Copiado` | neutro | `calc.copiado` |
-
-**`osjeff_core/src/calc.rs`** (1)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 422 | `Erro` | pt | `calc.erro` |
 
 ### Imagens
 

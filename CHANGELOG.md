@@ -3,6 +3,18 @@
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
 tem releases versionadas; as seções são marcos na `master`.
 
+## 2026-10 — Terminal, Tarefas, Registro e Calculadora em dois idiomas (W31)
+
+- Todo texto visível do **Terminal** (mensagens, uso e `help` de cada comando, títulos de `df`/`free`/`ps`/`ping`/
+  `ifconfig`, banner), de **Tarefas**, do **Registro** e da **Calculadora** vem do catálogo, com acentos em
+  português e texto natural em inglês (blocos `sh.*`, `term.*`, `tasks.*`, `log.*`, `calc.*`). As mensagens do
+  interpretador seguem o idioma **no momento da execução**; nomes de comandos, opções, status de saída e tudo que
+  um script pode ler ficam iguais nos dois idiomas (`shell::tests::i18n` roda o mesmo script nos dois).
+- Números, tamanhos, tempos e plurais usam os formatadores do idioma (`1,5 KiB` | `1.5 KiB`, `1 processo` | `1 process`);
+  a Calculadora usa a vírgula ou o ponto decimal do idioma.
+- Testes de idioma por thread (`i18n::testlang`), sem disputa entre testes em paralelo; cenários `w31-term.sh` e
+  `w31-apps.sh` no QEMU e quatro telas lado a lado em `docs/img/i18n-w31-*.png`.
+
 ## 2026-10 — Um compositor correto por construção (W27)
 
 - O desktop piscava com várias janelas abertas: sombras sumiam (a do Editor), o Snake piscava e uma

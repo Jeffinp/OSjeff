@@ -61,6 +61,12 @@ aberta e fotografam o inglês; `FS_IMG` como acima, com `/etc`, `/vazia`, `/Proj
 | `w30-files2.sh` | Arquivos: formato não suportado, copiado, folha de cópia, lixeira com item e menu, confirmações, cancelado, excluído, "não é possível colar na lixeira" |
 | `w30-viewer.sh` | Imagens: barra, painel de informações, folha de salvar e o erro "já existe", salvo, imagem inválida, janela vazia |
 | `w30-editor.sh` | Editor: barra de estado, buscar sem resultado, recomeçou, substituir, linha inválida, Abrir, Salvar como, pergunta de sobrescrever, pergunta ao fechar |
+Testes que dependem do idioma fixam o idioma **da própria thread** com `i18n::testlang::LangGuard::new(Lang::En)`
+(sobreposição por thread em `cfg(test)`, restaurada ao sair; não mexe no átomo global, então roda em paralelo).
+Só os testes da troca global de idioma usam `set_lang` com `LANG_LOCK`. O shell tem `shell::tests::i18n` (mesmas
+mensagens nos dois idiomas, mesmo script com saída e status idênticos). No QEMU, `tools/perf/scen/w31-term.sh`
+(Terminal) e `w31-apps.sh` (Tarefas em todas as abas, Registro, Calculadora) rodam em português, trocam em Ajustes
+e repetem em inglês (`QEMU_MEM=512M tools/perf/run.sh <img> uefi <saida> 240 <cenário>`, UEFI 1280x800).
 
 ## 2. Fuzzing
 
