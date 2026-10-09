@@ -97,7 +97,7 @@ fn emit_wat(out: &Path, name: &str, wat: &str) {
 }
 
 /// The Rust app crates under `wasm-apps/` that ship in the image.
-const BUNDLED_APPS: &[&str] = &["hello", "clock", "notes", "paint", "snake", "plasma"];
+const BUNDLED_APPS: &[&str] = &["clock", "notes", "paint", "snake"];
 
 /// Compile the workspace-detached `../wasm-apps/<crate>` to
 /// `wasm32-unknown-unknown` (release) and copy the resulting module to `dest`. Uses a dedicated target dir so the nested build never

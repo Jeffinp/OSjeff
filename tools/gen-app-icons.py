@@ -68,7 +68,9 @@ def write(name, img):
 
     png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", S, S, 8, 6, 0, 0, 0))
     png += chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
-    root = os.path.join(os.path.dirname(__file__), "..", "wasm-apps", name)
+    # hello and plasma are examples (not bundled): their sources live under wasm-apps/examples/.
+    sub = os.path.join("examples", name) if name in ("hello", "plasma") else name
+    root = os.path.join(os.path.dirname(__file__), "..", "wasm-apps", sub)
     os.makedirs(root, exist_ok=True)
     with open(os.path.join(root, "icon.png"), "wb") as f:
         f.write(png)

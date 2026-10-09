@@ -3,12 +3,12 @@
 version = 4
 
 [[package]]
+name = "kitsune-sdk"
+version = "0.1.0"
+
+[[package]]
 name = "nettest"
 version = "0.1.0"
 dependencies = [
  "kitsune-sdk",
 ]
-
-[[package]]
-name = "kitsune-sdk"
-version = "0.1.0"

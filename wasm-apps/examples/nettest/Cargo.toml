@@ -1,6 +1,6 @@
 # A test fixture, NOT bundled in the image: exercises `net_http_get` against the fake
 # public server of tools/nettest-server.py (see docs/TESTING.md, "Rede dos apps").
-# Build:  cd wasm-apps/nettest && cargo build --release --target wasm32-unknown-unknown
+# Build:  cd wasm-apps/examples/nettest && cargo build --release --target wasm32-unknown-unknown
 [package]
 name = "nettest"
 version = "0.1.0"
@@ -11,7 +11,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-kitsune-sdk = { path = "../sdk" }
+kitsune-sdk = { path = "../../sdk" }
 
 [profile.release]
 opt-level = "s"
