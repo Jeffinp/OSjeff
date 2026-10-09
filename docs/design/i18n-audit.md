@@ -14,21 +14,21 @@ de falha ficam em inglês de propósito e não entram na conta.
 
 | App / área | Arquivos | Textos | Sem acento | Inglês | Misto | Já no catálogo |
 |---|---:|---:|---:|---:|---:|---:|
-| Shell (migrado nesta onda) | 3 | 6 | 0 | 0 | 0 | 104 |
+| Shell (migrado nesta onda) | 3 | 6 | 0 | 0 | 0 | 106 |
 | Ajustes | 3 | 129 | 0 | 4 | 0 | 22 |
-| Arquivos | 13 | 220 | 14 | 43 | 5 | 0 |
-| Editor | 6 | 54 | 0 | 11 | 0 | 0 |
+| Arquivos | 6 | 39 | 0 | 37 | 2 | 218 |
+| Editor | 1 | 9 | 0 | 9 | 0 | 49 |
 | Terminal | 11 | 203 | 0 | 177 | 5 | 0 |
 | Tarefas | 3 | 89 | 0 | 3 | 1 | 0 |
 | Registro | 1 | 19 | 0 | 0 | 0 | 4 |
 | Calculadora | 2 | 2 | 0 | 0 | 0 | 0 |
-| Imagens | 7 | 90 | 0 | 33 | 9 | 0 |
-| Navegador | 11 | 81 | 31 | 11 | 1 | 0 |
+| Imagens | 5 | 46 | 0 | 33 | 9 | 46 |
+| Navegador | 14 | 134 | 17 | 14 | 3 | 0 |
 | Apps de terceiros (WASM) | 11 | 77 | 16 | 40 | 1 | 0 |
-| Kit de componentes | 2 | 40 | 1 | 0 | 0 | 12 |
-| Sistema (logs e tela de falha: ficam em inglês) | 6 | 31 | 0 | 24 | 1 | 0 |
-| Outros | 3 | 11 | 0 | 4 | 1 | 63 |
-| **Total** | 82 | 1052 | 62 | 350 | 24 | 205 |
+| Kit de componentes | 1 | 32 | 0 | 0 | 0 | 12 |
+| Sistema (logs e tela de falha: ficam em inglês) | 9 | 75 | 0 | 25 | 1 | 0 |
+| Outros | 5 | 13 | 0 | 6 | 1 | 63 |
+| **Total** | 75 | 873 | 33 | 348 | 23 | 520 |
 
 Cada app só mexe nos arquivos da sua linha; os arquivos de `Kit de componentes` e do `Shell` já
 foram tratados (Shell) ou só mudam se um app precisar de uma chave nova (use o prefixo do próprio app).
@@ -61,19 +61,12 @@ gerenciador de arquivos, lixeira, VFS.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `kernel/src/desktop/files.rs` | 76 | 0 | 4 | 2 |
-| `kernel/src/desktop/files_ui.rs` | 29 | 0 | 1 | 0 |
-| `kernel/src/desktop/sysstore.rs` | 1 | 1 | 0 | 0 |
-| `kernel/src/desktop/vfs.rs` | 4 | 4 | 0 | 0 |
-| `osjeff_core/src/fileman.rs` | 28 | 0 | 1 | 0 |
-| `osjeff_core/src/fileman/apps.rs` | 16 | 0 | 0 | 1 |
-| `osjeff_core/src/fileman/ui.rs` | 9 | 0 | 0 | 0 |
+| `osjeff_core/src/fileman.rs` | 1 | 0 | 1 | 0 |
 | `osjeff_core/src/fs3/dir.rs` | 1 | 0 | 1 | 0 |
 | `osjeff_core/src/fs3/extent.rs` | 2 | 0 | 2 | 0 |
 | `osjeff_core/src/fs3/fsck.rs` | 21 | 0 | 21 | 0 |
-| `osjeff_core/src/fs3/mod.rs` | 11 | 1 | 9 | 2 |
-| `osjeff_core/src/fs3/ops.rs` | 4 | 0 | 4 | 0 |
-| `osjeff_core/src/vfs.rs` | 18 | 8 | 0 | 0 |
+| `osjeff_core/src/fs3/mod.rs` | 11 | 0 | 9 | 2 |
+| `osjeff_core/src/fs3/ops.rs` | 3 | 0 | 3 | 0 |
 
 ### Editor
 
@@ -81,12 +74,7 @@ editor de texto e diálogos.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `kernel/src/desktop/edit.rs` | 10 | 0 | 0 | 0 |
-| `kernel/src/desktop/edit_ui.rs` | 19 | 0 | 0 | 0 |
-| `osjeff_core/src/editor2/dialog.rs` | 11 | 0 | 0 | 0 |
 | `osjeff_core/src/editor2/mod.rs` | 9 | 0 | 9 | 0 |
-| `osjeff_core/src/editor2/search.rs` | 2 | 0 | 2 | 0 |
-| `osjeff_core/src/editor2/ui.rs` | 3 | 0 | 0 | 0 |
 
 ### Terminal
 
@@ -139,13 +127,11 @@ visualizador de imagens e decodificadores.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `kernel/src/desktop/viewer.rs` | 22 | 0 | 0 | 0 |
 | `osjeff_core/src/bmp.rs` | 6 | 0 | 5 | 1 |
 | `osjeff_core/src/image.rs` | 10 | 0 | 7 | 0 |
 | `osjeff_core/src/inflate.rs` | 10 | 0 | 7 | 3 |
 | `osjeff_core/src/png.rs` | 15 | 0 | 10 | 4 |
 | `osjeff_core/src/ppm.rs` | 5 | 0 | 4 | 1 |
-| `osjeff_core/src/viewer.rs` | 22 | 0 | 0 | 0 |
 
 ### Navegador
 
@@ -153,17 +139,20 @@ navegador, páginas internas, erros de rede e TLS (outro agente está editando).
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `kernel/src/desktop/apps.rs` | 8 | 0 | 0 | 0 |
 | `kernel/src/netd.rs` | 2 | 0 | 0 | 0 |
 | `kernel/src/netstack.rs` | 1 | 0 | 1 | 0 |
-| `osjeff_core/src/browser.rs` | 20 | 11 | 0 | 0 |
+| `osjeff_core/src/browser.rs` | 20 | 0 | 0 | 0 |
 | `osjeff_core/src/browser/body_tests.rs` | 1 | 0 | 0 | 0 |
+| `osjeff_core/src/browser/errors.rs` | 29 | 0 | 0 | 0 |
+| `osjeff_core/src/browser/pages.rs` | 24 | 0 | 1 | 1 |
+| `osjeff_core/src/browser/tabs.rs` | 5 | 0 | 0 | 0 |
 | `osjeff_core/src/icmp.rs` | 7 | 0 | 6 | 1 |
 | `osjeff_core/src/net.rs` | 2 | 0 | 0 | 0 |
 | `osjeff_core/src/sntp.rs` | 4 | 0 | 4 | 0 |
 | `osjeff_core/src/tlsverify.rs` | 23 | 16 | 0 | 0 |
-| `osjeff_core/src/web/form.rs` | 8 | 3 | 0 | 0 |
-| `osjeff_core/src/web/imgcache.rs` | 5 | 1 | 0 | 0 |
+| `osjeff_core/src/web/form.rs` | 8 | 0 | 0 | 0 |
+| `osjeff_core/src/web/imgcache.rs` | 5 | 0 | 0 | 0 |
+| `osjeff_core/src/web/style.rs` | 3 | 1 | 2 | 1 |
 
 ### Apps de terceiros (WASM)
 
@@ -190,7 +179,6 @@ widgets, galeria e primitivas.
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
 | `kernel/src/desktop/gallery.rs` | 32 | 0 | 0 | 0 |
-| `kernel/src/desktop/input.rs` | 8 | 1 | 0 | 0 |
 
 ### Sistema (logs e tela de falha: ficam em inglês)
 
@@ -200,6 +188,9 @@ boot, falha grave, drivers.
 |---|---:|---:|---:|---:|
 | `kernel/src/boot.rs` | 1 | 0 | 0 | 0 |
 | `kernel/src/crash.rs` | 8 | 0 | 2 | 1 |
+| `kernel/src/desktop/browser.rs` | 7 | 0 | 0 | 0 |
+| `kernel/src/desktop/browser_input.rs` | 11 | 0 | 0 | 0 |
+| `kernel/src/desktop/browser_ui.rs` | 26 | 0 | 1 | 0 |
 | `kernel/src/interrupts.rs` | 2 | 0 | 2 | 0 |
 | `kernel/src/io.rs` | 6 | 0 | 6 | 0 |
 | `kernel/src/main.rs` | 12 | 0 | 12 | 0 |
@@ -212,6 +203,8 @@ núcleo sem dono claro.
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
 | `osjeff_core/src/base64.rs` | 4 | 0 | 3 | 1 |
+| `osjeff_core/src/compositor/sim/mod.rs` | 1 | 0 | 1 | 0 |
+| `osjeff_core/src/compositor/sim/paint.rs` | 1 | 0 | 1 | 0 |
 | `osjeff_core/src/i18n/audit.rs` | 1 | 0 | 1 | 0 |
 | `osjeff_core/src/i18n/template.rs` | 6 | 0 | 0 | 0 |
 
@@ -219,12 +212,6 @@ núcleo sem dono claro.
 
 | Arquivo:linha | Texto | Correção |
 |---|---|---|
-| `kernel/src/desktop/input.rs:507` | `endereco do formulario invalido` | endereco → endereço, formulario → (acento), invalido → inválido |
-| `kernel/src/desktop/sysstore.rs:65` | `Memoria (sem disco v3)` | Memoria → memória |
-| `kernel/src/desktop/vfs.rs:94` | `Disco pequeno demais: arquivos so na memoria` | memoria → memória |
-| `kernel/src/desktop/vfs.rs:95` | `Sem disco: arquivos so na memoria` | memoria → memória |
-| `kernel/src/desktop/vfs.rs:96` | `Disco desconhecido (intocado): arquivos so na memoria` | memoria → memória |
-| `kernel/src/desktop/vfs.rs:97` | `Falha no disco: arquivos so na memoria` | memoria → memória |
 | `kernel/src/desktop/wasmwin.rs:172` | `pacote nao encontrado` | nao → não |
 | `kernel/src/wasm/abi2.rs:94` | `sem memoria exportada` | memoria → memória |
 | `kernel/src/wasm/abi2.rs:95` | `ponteiro invalido` | invalido → inválido |
@@ -241,18 +228,6 @@ núcleo sem dono claro.
 | `kernel/src/wasm/mod.rs:411` | `saiu com codigo {code}` | codigo → código |
 | `kernel/src/wasm/mod.rs:417` | `acesso fora da memoria` | memoria → memória |
 | `kernel/src/wasm/mod.rs:422` | `assinatura de chamada invalida` | invalida → inválida |
-| `osjeff_core/src/browser.rs:67` | `Nao seguro` | Nao → não |
-| `osjeff_core/src/browser.rs:116` | `Falha ao carregar a pagina.` | pagina → página |
-| `osjeff_core/src/browser.rs:117` | `Nome nao encontrado: confira o endereco (DNS).` | nao → não, endereco → endereço |
-| `osjeff_core/src/browser.rs:119` | `Tempo esgotado: o servidor nao respondeu.` | nao → não |
-| `osjeff_core/src/browser.rs:120` | `Falha na negociacao TLS (conexao segura).` | negociacao → (acento), conexao → conexão |
-| `osjeff_core/src/browser.rs:123` | `Redirecionamento invalido.` | invalido → inválido |
-| `osjeff_core/src/browser.rs:126` | `O carregador de paginas falhou (thread encerrada).` | paginas → páginas |
-| `osjeff_core/src/browser.rs:448` | `Pagina cortada no limite de tamanho` | Pagina → página |
-| `osjeff_core/src/browser.rs:449` | `Pagina incompleta (conexao interrompida)` | Pagina → página, conexao → conexão |
-| `osjeff_core/src/browser.rs:450` | `Pagina com dados compactados corrompidos (parcial)` | Pagina → página |
-| `osjeff_core/src/browser.rs:451` | `Pagina com falha de verificacao (checksum)` | Pagina → página, verificacao → (acento) |
-| `osjeff_core/src/fs3/mod.rs:827` | `block range outside the data area` | area → área |
 | `osjeff_core/src/tlsverify.rs:86` | `ainda nao valido` | nao → não, valido → válido |
 | `osjeff_core/src/tlsverify.rs:87` | `nome nao confere` | nao → não |
 | `osjeff_core/src/tlsverify.rs:88` | `autoassinado, cadeia nao confiavel` | nao → não |
@@ -269,18 +244,7 @@ núcleo sem dono claro.
 | `osjeff_core/src/tlsverify.rs:111` | `Certificado inválido: autoridade invalida na cadeia` | invalida → inválida |
 | `osjeff_core/src/tlsverify.rs:112` | `Certificado inválido: restricao da cadeia violada` | restricao → (acento) |
 | `osjeff_core/src/tlsverify.rs:113` | `Certificado inválido: algoritmo nao suportado` | nao → não |
-| `osjeff_core/src/vfs.rs:73` | `Item nao encontrado` | nao → não |
-| `osjeff_core/src/vfs.rs:75` | `O destino nao e uma pasta` | nao → não |
-| `osjeff_core/src/vfs.rs:77` | `A pasta nao esta vazia` | nao → não |
-| `osjeff_core/src/vfs.rs:78` | `Nome invalido` | invalido → inválido |
-| `osjeff_core/src/vfs.rs:79` | `Nome longo demais (maximo 255 bytes)` | maximo → máximo |
-| `osjeff_core/src/vfs.rs:80` | `Caminho invalido` | invalido → inválido |
-| `osjeff_core/src/vfs.rs:82` | `Nao e possivel mover uma pasta para dentro dela mesma` | Nao → não, possivel → possível |
-| `osjeff_core/src/vfs.rs:90` | `Operacao cancelada` | Operacao → operação |
-| `osjeff_core/src/web/form.rs:95` | `formularios POST nao suportados` | nao → não |
-| `osjeff_core/src/web/form.rs:96` | `formulario grande demais para enviar` | formulario → (acento) |
-| `osjeff_core/src/web/form.rs:97` | `formulario invalido` | formulario → (acento), invalido → inválido |
-| `osjeff_core/src/web/imgcache.rs:72` | `formato nao suportado` | nao → não |
+| `osjeff_core/src/web/style.rs:17` | `\nhtml,body,div,p,h1,h2,h3,h4,h5,h6,ul,ol,dl,dt,dd,header,footer,article,section,nav,main,aside,blockquote,...` | area → área |
 
 ## Inglês e textos mistos numa interface em português
 
@@ -289,13 +253,7 @@ núcleo sem dono claro.
 | `kernel/src/crash.rs:234` | `UNSUPPORTED SCREEN` | en |
 | `kernel/src/crash.rs:271` | `ERROR  : {code:#018x}` | en |
 | `kernel/src/crash.rs:280` | `The system is halted. Reset or power-cycle the machine to restart.\nThe same report was written to the seri...` | misto |
-| `kernel/src/desktop/files.rs:350` | `{name} aberto` | en |
-| `kernel/src/desktop/files.rs:354` | `{name} instalado e aberto` | en |
-| `kernel/src/desktop/files.rs:358` | `{name} instalado` | en |
-| `kernel/src/desktop/files.rs:361` | `{name} removido` | en |
-| `kernel/src/desktop/files.rs:1818` | `Tamanho total: {}` | misto |
-| `kernel/src/desktop/files.rs:1887` | `Estado: não instalado (Enter instala e abre)` | misto |
-| `kernel/src/desktop/files_ui.rs:1008` | `Enter abre  ·  I instala  ·  Del remove` | en |
+| `kernel/src/desktop/browser_ui.rs:133` | `load to first paint` | en |
 | `kernel/src/desktop/settings_ui.rs:1233` | `Total` | en |
 | `kernel/src/desktop/shellhost.rs:302` | `boot disk` | en |
 | `kernel/src/desktop/shellhost.rs:484` | `{p}: Is a directory` | en |
@@ -319,21 +277,21 @@ núcleo sem dono claro.
 | `kernel/src/io.rs:39` | `in ax, dx` | en |
 | `kernel/src/io.rs:48` | `out dx, eax` | en |
 | `kernel/src/io.rs:57` | `in eax, dx` | en |
-| `kernel/src/main.rs:146` | `this screen resolution is not supported` | en |
-| `kernel/src/main.rs:148` | `Detected {}x{} (stride {}, {} bytes/pixel): the screen needs {} bytes, the bootloader provided a framebuffe...` | en |
-| `kernel/src/main.rs:196` | `wasm demo done` | en |
-| `kernel/src/main.rs:274` | `pci scan + virtio-gpu probe done` | en |
-| `kernel/src/main.rs:284` | `ata detect done` | en |
-| `kernel/src/main.rs:322` | `nic init done` | en |
-| `kernel/src/main.rs:327` | `dhcp done` | en |
-| `kernel/src/main.rs:365` | `storage init done` | en |
-| `kernel/src/main.rs:388` | `ui text engine ready` | en |
-| `kernel/src/main.rs:403` | `Desktop::new (fs load from ATA) done` | en |
-| `kernel/src/main.rs:411` | `wallpaper painted` | en |
-| `kernel/src/main.rs:1101` | `the kernel panicked` | en |
-| `kernel/src/netstack.rs:708` | `tcp stream error` | en |
-| `kernel/src/trace.rs:650` | `The quick brown fox jumps over the lazy dog 0123` | en |
-| `kernel/src/trace.rs:728` | `The quick brown fox jumps over the lazy dog 0123` | en |
+| `kernel/src/main.rs:145` | `this screen resolution is not supported` | en |
+| `kernel/src/main.rs:147` | `Detected {}x{} (stride {}, {} bytes/pixel): the screen needs {} bytes, the bootloader provided a framebuffe...` | en |
+| `kernel/src/main.rs:195` | `wasm demo done` | en |
+| `kernel/src/main.rs:273` | `pci scan + virtio-gpu probe done` | en |
+| `kernel/src/main.rs:283` | `ata detect done` | en |
+| `kernel/src/main.rs:321` | `nic init done` | en |
+| `kernel/src/main.rs:326` | `dhcp done` | en |
+| `kernel/src/main.rs:364` | `storage init done` | en |
+| `kernel/src/main.rs:387` | `ui text engine ready` | en |
+| `kernel/src/main.rs:402` | `Desktop::new (fs load from ATA) done` | en |
+| `kernel/src/main.rs:410` | `wallpaper painted` | en |
+| `kernel/src/main.rs:722` | `the kernel panicked` | en |
+| `kernel/src/netstack.rs:721` | `tcp stream error` | en |
+| `kernel/src/trace.rs:658` | `The quick brown fox jumps over the lazy dog 0123` | en |
+| `kernel/src/trace.rs:736` | `The quick brown fox jumps over the lazy dog 0123` | en |
 | `kernel/src/wasm/mod.rs:343` | `link host.draw_text` | en |
 | `kernel/src/wasm/mod.rs:364` | `link host.time_ms` | en |
 | `kernel/src/wasm/mod.rs:400` | `trap in entry` | en |
@@ -380,6 +338,10 @@ núcleo sem dono claro.
 | `osjeff_core/src/bmp.rs:76` | `invalid bmp dimensions` | en |
 | `osjeff_core/src/bmp.rs:79` | `invalid bmp colour masks` | en |
 | `osjeff_core/src/bmp.rs:80` | `bmp image: {e}` | en |
+| `osjeff_core/src/browser/pages.rs:14` | `body{margin:0;background:#ffffff;color:#1d1d1f;font-size:15px;line-height:1.5}.w{max-width:680px;margin:0 a...` | en |
+| `osjeff_core/src/browser/pages.rs:160` | `Espaço, PgDn, Home, End` | misto |
+| `osjeff_core/src/compositor/sim/mod.rs:170` | `{diff} pixels differ; first at ({x},{y}): incremental {:06X}, reference {:06X}; layers there (bottom to top...` | en |
+| `osjeff_core/src/compositor/sim/paint.rs:77` | `layer {:?} wrote ({x},{y}) outside its footprint {:?}` | en |
 | `osjeff_core/src/editor2/mod.rs:353` | `line index out of sync with the text` | en |
 | `osjeff_core/src/editor2/mod.rs:356` | `cursor past the end` | en |
 | `osjeff_core/src/editor2/mod.rs:359` | `cursor not at a valid position` | en |
@@ -389,10 +351,7 @@ núcleo sem dono claro.
 | `osjeff_core/src/editor2/mod.rs:374` | `row wider than the window` | en |
 | `osjeff_core/src/editor2/mod.rs:378` | `more rows than the window holds` | en |
 | `osjeff_core/src/editor2/mod.rs:383` | `cursor drawn outside the window` | en |
-| `osjeff_core/src/editor2/search.rs:368` | `Replace with: ` | en |
-| `osjeff_core/src/editor2/search.rs:371` | `Go to line: ` | en |
-| `osjeff_core/src/fileman.rs:941` | `Enter` | en |
-| `osjeff_core/src/fileman/apps.rs:98` | `pasta do usuário (/home)` | misto |
+| `osjeff_core/src/fileman.rs:940` | `Enter` | en |
 | `osjeff_core/src/fs3/dir.rs:56` | `hole in a directory` | en |
 | `osjeff_core/src/fs3/extent.rs:117` | `extent chain too long or cyclic` | en |
 | `osjeff_core/src/fs3/extent.rs:166` | `invalid extent` | en |
@@ -404,7 +363,7 @@ núcleo sem dono claro.
 | `osjeff_core/src/fs3/fsck.rs:178` | `duplicate name in directory` | en |
 | `osjeff_core/src/fs3/fsck.rs:182` | `entry points at an unallocated inode` | en |
 | `osjeff_core/src/fs3/fsck.rs:205` | `entry kind differs from inode kind` | en |
-| `osjeff_core/src/fs3/fsck.rs:216` | `trash flag does not match location` | en |
+| `osjeff_core/src/fs3/fsck.rs:216` | `trash flag disagrees with the location` | en |
 | `osjeff_core/src/fs3/fsck.rs:219` | `trashed entry lacks its original name` | en |
 | `osjeff_core/src/fs3/fsck.rs:230` | `root must hold exactly one .trash entry` | en |
 | `osjeff_core/src/fs3/fsck.rs:245` | `extent list invalid` | en |
@@ -418,7 +377,7 @@ núcleo sem dono claro.
 | `osjeff_core/src/fs3/fsck.rs:326` | `block in use but marked free` | en |
 | `osjeff_core/src/fs3/fsck.rs:328` | `block marked used but unowned (leak)` | en |
 | `osjeff_core/src/fs3/mod.rs:500` | `fsck found problems` | en |
-| `osjeff_core/src/fs3/mod.rs:535` | `bitmap does not cover the metadata` | en |
+| `osjeff_core/src/fs3/mod.rs:535` | `bitmap leaves the metadata uncovered` | en |
 | `osjeff_core/src/fs3/mod.rs:538` | `root/trash inode not allocated` | en |
 | `osjeff_core/src/fs3/mod.rs:581` | `journal target out of range` | en |
 | `osjeff_core/src/fs3/mod.rs:599` | `bad root inode` | en |
@@ -426,13 +385,12 @@ núcleo sem dono claro.
 | `osjeff_core/src/fs3/mod.rs:607` | `root has no .trash entry` | misto |
 | `osjeff_core/src/fs3/mod.rs:728` | `metadata block out of range` | en |
 | `osjeff_core/src/fs3/mod.rs:803` | `double free of an inode` | en |
-| `osjeff_core/src/fs3/mod.rs:827` | `block range outside the data area` | misto |
+| `osjeff_core/src/fs3/mod.rs:827` | `block range outside the data region` | misto |
 | `osjeff_core/src/fs3/mod.rs:831` | `block allocated or freed twice` | en |
 | `osjeff_core/src/fs3/ops.rs:121` | `directory entry points at a free inode` | en |
 | `osjeff_core/src/fs3/ops.rs:190` | `inode missing from its parent` | en |
 | `osjeff_core/src/fs3/ops.rs:321` | `directory entry changed under us` | en |
-| `osjeff_core/src/fs3/ops.rs:376` | `directory tree does not terminate` | en |
-| `osjeff_core/src/i18n/audit.rs:786` | `{file}:{line}: {w:?} should be {r} in {s:?}` | en |
+| `osjeff_core/src/i18n/audit.rs:795` | `{file}:{line}: {w:?} should be {r} in {s:?}` | en |
 | `osjeff_core/src/icmp.rs:247` | `destination unreachable (code {c})` | en |
 | `osjeff_core/src/icmp.rs:248` | `time exceeded` | en |
 | `osjeff_core/src/icmp.rs:249` | `no route to host` | misto |
@@ -442,7 +400,7 @@ núcleo sem dono claro.
 | `osjeff_core/src/icmp.rs:253` | `network busy` | en |
 | `osjeff_core/src/image.rs:56` | `image has a zero dimension` | en |
 | `osjeff_core/src/image.rs:57` | `image is larger than the pixel limit` | en |
-| `osjeff_core/src/image.rs:58` | `buffer size does not match the dimensions` | en |
+| `osjeff_core/src/image.rs:58` | `buffer length is wrong for the dimensions` | en |
 | `osjeff_core/src/image.rs:59` | `rectangle is outside the image` | en |
 | `osjeff_core/src/image.rs:60` | `out of memory` | en |
 | `osjeff_core/src/image.rs:172` | `Image({}x{})` | en |
@@ -660,6 +618,9 @@ núcleo sem dono claro.
 | `osjeff_core/src/wasmsec.rs:53` | `section extends past the end of the file` | en |
 | `osjeff_core/src/wasmsec.rs:54` | `unknown section id` | en |
 | `osjeff_core/src/wasmsec.rs:55` | `too many sections` | en |
+| `osjeff_core/src/web/style.rs:17` | `\nhtml,body,div,p,h1,h2,h3,h4,h5,h6,ul,ol,dl,dt,dd,header,footer,article,section,nav,main,aside,blockquote,...` | misto |
+| `osjeff_core/src/web/style.rs:460` | `courier new` | en |
+| `osjeff_core/src/web/style.rs:468` | `source code pro` | en |
 
 ## Todos os textos, por arquivo, com a chave proposta
 
@@ -680,9 +641,9 @@ decida caso a caso se vão para o catálogo.
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 483 | `Alt+↑` | neutro | `shell.alt` |
-| 490 | `Alt+←` | neutro | `shell.alt_2` |
-| 496 | `Alt+→` | neutro | `shell.alt_3` |
+| 481 | `Alt+↑` | neutro | `shell.alt` |
+| 488 | `Alt+←` | neutro | `shell.alt_2` |
+| 494 | `Alt+→` | neutro | `shell.alt_3` |
 
 **`kernel/src/desktop/taskbar.rs`** (1)
 
@@ -838,203 +799,11 @@ decida caso a caso se vão para o catálogo.
 
 ### Arquivos
 
-**`kernel/src/desktop/files.rs`** (76)
+**`osjeff_core/src/fileman.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 54 | `1 item` | neutro | `files.1_item` |
-| 56 | `{n} itens` | neutro | `files.n_itens` |
-| 69 | `Início` | pt | `files.inicio` |
-| 350 | `{name} aberto` | en | `files.name_aberto` |
-| 354 | `{name} instalado e aberto` | en | `files.name_instalado_aberto` |
-| 358 | `{name} instalado` | en | `files.name_instalado` |
-| 361 | `{name} removido` | en | `files.name_removido` |
-| 382 | `Formato não suportado` | pt | `files.formato_nao_suportado` |
-| 441 | `Nome` | pt | `files.nome` |
-| 442 | `Tamanho` | pt | `files.tamanho` |
-| 446 | `Data da exclusão` | pt | `files.data_exclusao` |
-| 450 | `Última modificação` | pt | `files.ultima_modificacao` |
-| 921 | `Disco` | pt | `files.disco` |
-| 942 | `{} na lixeira` | pt | `files.na_lixeira` |
-| 958 | `{} {} para {}` | pt | `files.para` |
-| 983 | `Já existe uma cópia em andamento` | pt | `files.ja_existe_copia_em` |
-| 991 | `Copiando` | pt | `files.copiando` |
-| 1097 | `Cancelado` | neutro | `files.cancelado` |
-| 1380 | `Novo arquivo.txt` | pt | `files.novo_arquivo_txt` |
-| 1382 | `Nova pasta` | pt | `files.nova_pasta` |
-| 1459 | `{} na lixeira` | pt | `files.na_lixeira_2` |
-| 1516 | `Papel de parede aplicado` | pt | `files.papel_parede_aplicado` |
-| 1550 | `Não é possível colar na lixeira` | pt | `files.nao_possivel_colar_na` |
-| 1558 | `Nada para colar` | pt | `files.nada_para_colar` |
-| 1606 | `Cópia cancelada` | pt | `files.copia_cancelada` |
-| 1633 | `Cópia concluída ({})` | pt | `files.copia_concluida` |
-| 1635 | `1 arquivo` | pt | `files.1_arquivo` |
-| 1637 | `{n} arquivos` | pt | `files.n_arquivos` |
-| 1727 | `Excluído` | pt | `files.excluido` |
-| 1752 | `Cancelado` | neutro | `files.cancelado_2` |
-| 1766 | `Local: Lixeira` | pt | `files.local_lixeira` |
-| 1768 | `Itens: {}` | neutro | `files.itens` |
-| 1772 | `Nome: {}` | pt | `files.nome_2` |
-| 1773 | `Local: {}` | pt | `files.local` |
-| 1778 | `Tipo: Pasta` | pt | `files.tipo_pasta` |
-| 1781 | `Conteúdo: {} arquivos, {} pastas` | pt | `files.conteudo_arquivos_pastas` |
-| 1786 | `Tamanho: {}` | pt | `files.tamanho_2` |
-| 1790 | `Tipo: {}` | pt | `files.tipo` |
-| 1794 | `Tamanho: {} ({} bytes)` | pt | `files.tamanho_bytes` |
-| 1799 | `Criado: {}` | neutro | `files.criado` |
-| 1800 | `Modificado: {}` | pt | `files.modificado` |
-| 1807 | `Erro: {}` | pt | `files.erro` |
-| 1810 | `Seleção: {} itens` | pt | `files.selecao_itens` |
-| 1818 | `Tamanho total: {}` | misto | `files.tamanho_total` |
-| 1822 | `Pasta: {}` | pt | `files.pasta` |
-| 1824 | `Itens: {}` | neutro | `files.itens_2` |
-| 1828 | `Livre: {} de {}` | pt | `files.livre` |
-| 1833 | `Volume: memória (não persiste)` | pt | `files.volume_memoria_nao_persiste` |
-| 1854 | `Cancelar` | pt | `files.cancelar` |
-| 1854 | `Excluir` | pt | `files.excluir` |
-| 1855 | `Concluído` | pt | `files.concluido` |
-| 1856 | `Cancelar` | pt | `files.cancelar_2` |
-| 1878 | `Erro: {}` | pt | `files.erro_2` |
-| 1882 | `Pacote: pacote de app válido` | pt | `files.pacote_pacote_app_valido` |
-| 1887 | `Estado: não instalado (Enter instala e abre)` | misto | `files.estado_nao_instalado_enter` |
-| 1892 | `Pacote: inválido ({e})` | pt | `files.pacote_invalido` |
-| 1907 | `Manifesto: indisponível` | pt | `files.manifesto_indisponivel` |
-| 1910 | `Estado: {}` | neutro | `files.estado` |
-| 1913 | `Pacote: {}` | neutro | `files.pacote` |
-| 1915 | `Arquivo: /apps/{app_id}.wasm` | pt | `files.arquivo_apps_app_id` |
-| 1917 | `Origem: embutido no sistema (I instala)` | pt | `files.origem_embutido_no_sistema` |
-| 2043 | `{} itens` | neutro | `files.itens_3` |
-| 2045 | `Seleção` | pt | `files.selecao` |
-| 2047 | `Tamanho` | pt | `files.tamanho_3` |
-| 2059 | `Aplicativo` | neutro | `files.aplicativo` |
-| 2061 | `Estado` | neutro | `files.estado_2` |
-| 2067 | `Pacote` | neutro | `files.pacote_2` |
-| 2067 | `Tamanho` | pt | `files.tamanho_4` |
-| 2073 | `Excluído` | pt | `files.excluido_2` |
-| 2073 | `Modificado` | pt | `files.modificado_2` |
-| 2084 | `Imagem grande demais para pré-visualizar` | pt | `files.imagem_grande_demais_para` |
-| 2094 | `Dimensões` | pt | `files.dimensoes` |
-| 2095 | `{} × {} px` | neutro | `files.px` |
-| 2100 | `Não foi possível abrir a imagem` | pt | `files.nao_foi_possivel_abrir` |
-| 2109 | `Sem pré-visualização` | pt | `files.sem_pre_visualizacao` |
-| 2118 | `Itens` | neutro | `files.itens_4` |
-
-**`kernel/src/desktop/files_ui.rs`** (29)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 111 | `Favoritos` | pt | `files.favoritos` |
-| 172 | `Início` | pt | `files.inicio` |
-| 174 | `Imagens` | pt | `files.imagens` |
-| 176 | `Lixeira` | pt | `files.lixeira` |
-| 179 | `Memória` | pt | `files.memoria` |
-| 181 | `Disco` | pt | `files.disco` |
-| 230 | `{} livres` | neutro | `files.livres` |
-| 372 | `Buscar` | pt | `files.buscar` |
-| 410 | `Data da exclusão` | pt | `files.data_exclusao` |
-| 414 | `Última modificação` | pt | `files.ultima_modificacao` |
-| 463 | `Nome` | pt | `files.nome` |
-| 471 | `Tamanho` | pt | `files.tamanho` |
-| 564 | `Nenhum resultado` | pt | `files.nenhum_resultado` |
-| 565 | `Nada encontrado para “{}”` | pt | `files.nada_encontrado_para` |
-| 568 | `Lixeira vazia` | pt | `files.lixeira_vazia` |
-| 570 | `Nenhum app` | pt | `files.nenhum_app` |
-| 574 | `Pasta vazia` | pt | `files.pasta_vazia` |
-| 575 | `Arraste itens para cá` | pt | `files.arraste_itens_para_ca` |
-| 858 | `Selecione um item` | pt | `files.selecione_item` |
-| 983 | `{} de {} itens` | pt | `files.itens` |
-| 1008 | `Enter abre  ·  I instala  ·  Del remove` | en | `files.enter_abre_i_instala` |
-| 1046 | `O item será apagado de vez. Isso não pode ser desfeito.` | pt | `files.item_sera_apagado_vez` |
-| 1049 | `Os {n} itens serão apagados de vez. Isso não pode ser desfeito.` | pt | `files.os_n_itens_serao` |
-| 1054 | `Excluir permanentemente?` | pt | `files.excluir_permanentemente` |
-| 1055 | `Excluir da lixeira?` | pt | `files.excluir_lixeira` |
-| 1057 | `Esvaziar a lixeira?` | pt | `files.esvaziar_lixeira` |
-| 1058 | `Tudo o que está na lixeira será apagado de vez.` | pt | `files.tudo_que_esta_na` |
-| 1087 | `Informações` | pt | `files.informacoes` |
-| 1140 | `{} {} arquivos` | pt | `files.arquivos` |
-
-**`kernel/src/desktop/sysstore.rs`** (1)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 65 | `Memoria (sem disco v3)` | pt sem-acento | `files.memoria_sem_disco_v3` |
-
-**`kernel/src/desktop/vfs.rs`** (4)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 94 | `Disco pequeno demais: arquivos so na memoria` | pt sem-acento | `files.disco_pequeno_demais_arquivos` |
-| 95 | `Sem disco: arquivos so na memoria` | pt sem-acento | `files.sem_disco_arquivos_so` |
-| 96 | `Disco desconhecido (intocado): arquivos so na memoria` | pt sem-acento | `files.disco_desconhecido_intocado_arquivos` |
-| 97 | `Falha no disco: arquivos so na memoria` | pt sem-acento | `files.falha_no_disco_arquivos` |
-
-**`osjeff_core/src/fileman.rs`** (28)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 941 | `Enter` | en | `files.enter` |
-| 949 | `Espaço` | pt | `files.espaco` |
-| 977 | `Abrir` | pt | `files.abrir` |
-| 980 | `Instalar e abrir` | pt | `files.instalar_abrir` |
-| 983 | `Informações` | pt | `files.informacoes` |
-| 990 | `Restaurar` | pt | `files.restaurar` |
-| 991 | `Excluir permanentemente` | pt | `files.excluir_permanentemente` |
-| 993 | `Esvaziar a lixeira` | pt | `files.esvaziar_lixeira` |
-| 995 | `Informações` | pt | `files.informacoes_2` |
-| 997 | `Selecionar tudo` | pt | `files.selecionar_tudo` |
-| 1002 | `Abrir` | pt | `files.abrir_2` |
-| 1003 | `Pré-visualizar` | pt | `files.pre_visualizar` |
-| 1006 | `Definir como papel de parede` | pt | `files.definir_como_papel_parede` |
-| 1008 | `Recortar` | pt | `files.recortar` |
-| 1009 | `Copiar` | pt | `files.copiar` |
-| 1011 | `Renomear` | pt | `files.renomear` |
-| 1013 | `Excluir` | pt | `files.excluir` |
-| 1014 | `Excluir permanentemente` | pt | `files.excluir_permanentemente_2` |
-| 1015 | `Informações` | pt | `files.informacoes_3` |
-| 1017 | `Novo arquivo` | pt | `files.novo_arquivo` |
-| 1018 | `Nova pasta` | pt | `files.nova_pasta` |
-| 1020 | `Colar` | pt | `files.colar` |
-| 1022 | `Selecionar tudo` | pt | `files.selecionar_tudo_2` |
-| 1024 | `Informações` | pt | `files.informacoes_4` |
-| 1477 | `1 item` | neutro | `files.1_item` |
-| 1479 | `{n} itens` | neutro | `files.n_itens` |
-| 1489 | `1 selecionado ({})` | neutro | `files.1_selecionado` |
-| 1491 | `{k} selecionados ({})` | neutro | `files.k_selecionados` |
-
-**`osjeff_core/src/fileman/apps.rs`** (16)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 49 | `não instalado` | pt | `files.nao_instalado` |
-| 83 | `Já instalado` | pt | `files.ja_instalado` |
-| 85 | `Não instalado` | pt | `files.nao_instalado_2` |
-| 92 | `1 (desenho contínuo)` | pt | `files.1_desenho_continuo` |
-| 93 | `2 (por eventos)` | pt | `files.2_por_eventos` |
-| 97 | `só /data/{}` | pt | `files.so_data` |
-| 98 | `pasta do usuário (/home)` | misto | `files.pasta_usuario_home` |
-| 102 | `HTTP e HTTPS (endereços públicos)` | pt | `files.http_https_enderecos_publicos` |
-| 107 | `ler e escrever` | pt | `files.ler_escrever` |
-| 110 | `App: {} ({})` | neutro | `files.app` |
-| 111 | `Versão: {}   ABI {}` | pt | `files.versao_abi` |
-| 112 | `Arquivos: {fs}` | pt | `files.arquivos_fs` |
-| 113 | `Rede: {net}` | pt | `files.rede_net` |
-| 114 | `Área de transferência: {clip}` | pt | `files.area_transferencia_clip` |
-| 115 | `Memória: {} MiB   Disco: {} KiB` | pt | `files.memoria_mib_disco_kib` |
-| 117 | `Arquivos abertos: {}   Janela {}x{}{}` | pt | `files.arquivos_abertos_janela_x` |
-
-**`osjeff_core/src/fileman/ui.rs`** (9)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 951 | `Pasta` | pt | `files.pasta` |
-| 959 | `Imagem {upper}` | pt | `files.imagem_upper` |
-| 960 | `Aplicativo` | neutro | `files.aplicativo` |
-| 961 | `Texto` | neutro | `files.texto` |
-| 962 | `Texto {upper}` | neutro | `files.texto_upper` |
-| 963 | `Arquivo` | pt | `files.arquivo` |
-| 964 | `Arquivo {upper}` | pt | `files.arquivo_upper` |
-| 1025 | `Hoje, {hm}` | pt | `files.hoje_hm` |
-| 1026 | `Ontem, {hm}` | pt | `files.ontem_hm` |
+| 940 | `Enter` | en | `files.enter` |
 
 **`osjeff_core/src/fs3/dir.rs`** (1)
 
@@ -1061,7 +830,7 @@ decida caso a caso se vão para o catálogo.
 | 178 | `duplicate name in directory` | en | `files.duplicate_name_in_directory` |
 | 182 | `entry points at an unallocated inode` | en | `files.entry_points_at_an` |
 | 205 | `entry kind differs from inode kind` | en | `files.entry_kind_differs_from` |
-| 216 | `trash flag does not match location` | en | `files.trash_flag_does_not` |
+| 216 | `trash flag disagrees with the location` | en | `files.trash_flag_disagrees_with` |
 | 219 | `trashed entry lacks its original name` | en | `files.trashed_entry_lacks_its` |
 | 230 | `root must hold exactly one .trash entry` | en | `files.root_must_hold_exactly` |
 | 245 | `extent list invalid` | en | `files.extent_list_invalid` |
@@ -1080,7 +849,7 @@ decida caso a caso se vão para o catálogo.
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 500 | `fsck found problems` | en | `files.fsck_found_problems` |
-| 535 | `bitmap does not cover the metadata` | en | `files.bitmap_does_not_cover` |
+| 535 | `bitmap leaves the metadata uncovered` | en | `files.bitmap_leaves_metadata_uncovered` |
 | 538 | `root/trash inode not allocated` | en | `files.root_trash_inode_not` |
 | 581 | `journal target out of range` | en | `files.journal_target_out_range` |
 | 599 | `bad root inode` | en | `files.bad_root_inode` |
@@ -1088,97 +857,18 @@ decida caso a caso se vão para o catálogo.
 | 607 | `root has no .trash entry` | misto | `files.root_has_no_trash` |
 | 728 | `metadata block out of range` | en | `files.metadata_block_out_range` |
 | 803 | `double free of an inode` | en | `files.double_free_an_inode` |
-| 827 | `block range outside the data area` | misto sem-acento | `files.block_range_outside_data` |
+| 827 | `block range outside the data region` | misto | `files.block_range_outside_data` |
 | 831 | `block allocated or freed twice` | en | `files.block_allocated_or_freed` |
 
-**`osjeff_core/src/fs3/ops.rs`** (4)
+**`osjeff_core/src/fs3/ops.rs`** (3)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 121 | `directory entry points at a free inode` | en | `files.directory_entry_points_at` |
 | 190 | `inode missing from its parent` | en | `files.inode_missing_from_its` |
 | 321 | `directory entry changed under us` | en | `files.directory_entry_changed_under` |
-| 376 | `directory tree does not terminate` | en | `files.directory_tree_does_not` |
-
-**`osjeff_core/src/vfs.rs`** (18)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 73 | `Item nao encontrado` | pt sem-acento | `files.item_nao_encontrado` |
-| 74 | `Ja existe um item com esse nome` | pt | `files.ja_existe_item_com` |
-| 75 | `O destino nao e uma pasta` | pt sem-acento | `files.destino_nao_pasta` |
-| 76 | `O item e uma pasta` | pt | `files.item_pasta` |
-| 77 | `A pasta nao esta vazia` | pt sem-acento | `files.pasta_nao_esta_vazia` |
-| 78 | `Nome invalido` | pt sem-acento | `files.nome_invalido` |
-| 79 | `Nome longo demais (maximo 255 bytes)` | pt sem-acento | `files.nome_longo_demais_maximo` |
-| 80 | `Caminho invalido` | pt sem-acento | `files.caminho_invalido` |
-| 81 | `Item reservado do sistema` | pt | `files.item_reservado_sistema` |
-| 82 | `Nao e possivel mover uma pasta para dentro dela mesma` | pt sem-acento | `files.nao_possivel_mover_pasta` |
-| 83 | `Disco cheio` | pt | `files.disco_cheio` |
-| 84 | `Limite de arquivos do disco atingido` | pt | `files.limite_arquivos_disco_atingido` |
-| 85 | `Arquivo grande demais` | pt | `files.arquivo_grande_demais` |
-| 86 | `Sistema de arquivos ocupado` | pt | `files.sistema_arquivos_ocupado` |
-| 87 | `Sem sistema de arquivos` | pt | `files.sem_sistema_arquivos` |
-| 88 | `Erro de leitura/escrita no disco` | pt | `files.erro_leitura_escrita_no` |
-| 89 | `Sistema de arquivos danificado` | pt | `files.sistema_arquivos_danificado` |
-| 90 | `Operacao cancelada` | pt sem-acento | `files.operacao_cancelada` |
 
 ### Editor
-
-**`kernel/src/desktop/edit.rs`** (10)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 150 | `sem nome` | pt | `editor.sem_nome` |
-| 196 | `Todos` | pt | `editor.todos` |
-| 210 | `Cancelar` | pt | `editor.cancelar` |
-| 210 | `Salvar` | pt | `editor.salvar` |
-| 221 | `Cancelar` | pt | `editor.cancelar_2` |
-| 225 | `Abrir` | pt | `editor.abrir` |
-| 227 | `Salvar` | pt | `editor.salvar_2` |
-| 596 | `Novo arquivo` | pt | `editor.novo_arquivo` |
-| 602 | `Editor: {}` | neutro | `editor.editor` |
-| 638 | `Salvo: {}` | neutro | `editor.salvo` |
-
-**`kernel/src/desktop/edit_ui.rs`** (19)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 51 | `Abrir` | pt | `editor.abrir` |
-| 53 | `Salvar como` | pt | `editor.salvar_como` |
-| 245 | `Ir para a linha` | pt | `editor.ir_para_linha` |
-| 246 | `Buscar` | pt | `editor.buscar` |
-| 272 | `Substituir por` | pt | `editor.substituir_por` |
-| 308 | `Todos` | pt | `editor.todos` |
-| 323 | `Nenhum resultado` | pt | `editor.nenhum_resultado` |
-| 324 | `Recomeçou do início` | pt | `editor.recomecou_inicio` |
-| 325 | `1 substituição` | pt | `editor.1_substituicao` |
-| 326 | `{n} substituições` | pt | `editor.n_substituicoes` |
-| 327 | `Linha inválida` | pt | `editor.linha_invalida` |
-| 373 | `Deseja salvar as alterações?` | pt | `editor.deseja_salvar_as_alteracoes` |
-| 379 | `As alterações em “{}” serão perdidas se você não as salvar.` | pt | `editor.as_alteracoes_em_serao` |
-| 399 | `Cancelar` | pt | `editor.cancelar` |
-| 400 | `Salvar` | pt | `editor.salvar` |
-| 449 | `Favoritos` | pt | `editor.favoritos` |
-| 583 | `Pasta vazia` | pt | `editor.pasta_vazia` |
-| 601 | `Nome do arquivo` | pt | `editor.nome_arquivo` |
-| 612 | `Já existe “{}”. Substituir?` | pt | `editor.ja_existe_substituir` |
-
-**`osjeff_core/src/editor2/dialog.rs`** (11)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 463 | `Salvar` | pt | `editor.salvar` |
-| 465 | `Cancelar` | pt | `editor.cancelar` |
-| 521 | `{}.{} KB` | neutro | `editor.kb` |
-| 524 | `{}.{} MB` | neutro | `editor.mb` |
-| 534 | `Ln {}, Col {}   {} linhas   {}   UTF-8   {}` | neutro | `editor.ln_col_linhas_utf` |
-| 545 | `   sel {}` | neutro | `editor.sel` |
-| 548 | `   SO LEITURA` | neutro | `editor.so_leitura` |
-| 550 | `   * modificado` | pt | `editor.modificado` |
-| 569 | `Ln {}, Col {}` | neutro | `editor.ln_col` |
-| 591 | `1 linha` | neutro | `editor.1_linha` |
-| 593 | `{} linhas` | neutro | `editor.linhas` |
 
 **`osjeff_core/src/editor2/mod.rs`** (9)
 
@@ -1193,21 +883,6 @@ decida caso a caso se vão para o catálogo.
 | 374 | `row wider than the window` | en | `editor.row_wider_than_window` |
 | 378 | `more rows than the window holds` | en | `editor.more_rows_than_window` |
 | 383 | `cursor drawn outside the window` | en | `editor.cursor_drawn_outside_window` |
-
-**`osjeff_core/src/editor2/search.rs`** (2)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 368 | `Replace with: ` | en | `editor.replace_with` |
-| 371 | `Go to line: ` | en | `editor.go_line` |
-
-**`osjeff_core/src/editor2/ui.rs`** (3)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 268 | `Início` | pt | `editor.inicio` |
-| 270 | `Imagens` | pt | `editor.imagens` |
-| 271 | `Disco` | pt | `editor.disco` |
 
 ### Terminal
 
@@ -1617,33 +1292,6 @@ decida caso a caso se vão para o catálogo.
 
 ### Imagens
 
-**`kernel/src/desktop/viewer.rs`** (22)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 69 | `Janelas demais abertas` | pt | `viewer.janelas_demais_abertas` |
-| 105 | `Não foi possível abrir a imagem` | pt | `viewer.nao_foi_possivel_abrir` |
-| 112 | `Arquivo grande demais` | pt | `viewer.arquivo_grande_demais` |
-| 113 | `O Imagens abre arquivos de até 24 MiB.` | pt | `viewer.imagens_abre_arquivos_ate` |
-| 130 | `Imagens — {}` | pt | `viewer.imagens` |
-| 294 | `Já existe um arquivo com esse nome` | pt | `viewer.ja_existe_arquivo_com` |
-| 304 | `Salvo como {}` | pt | `viewer.salvo_como` |
-| 463 | `Papel de parede aplicado` | pt | `viewer.papel_parede_aplicado` |
-| 648 | `Cancelar` | pt | `viewer.cancelar` |
-| 648 | `Salvar` | pt | `viewer.salvar` |
-| 828 | `Ajustar` | neutro | `viewer.ajustar` |
-| 828 | `Preencher` | neutro | `viewer.preencher` |
-| 871 | `Nenhuma imagem` | pt | `viewer.nenhuma_imagem` |
-| 872 | `Abra uma imagem pelo Arquivos.` | pt | `viewer.abra_imagem_pelo_arquivos` |
-| 1073 | `  ·  {} de {}` | pt | `viewer.text` |
-| 1110 | `Salvar como` | pt | `viewer.salvar_como` |
-| 1130 | `Nome do arquivo` | pt | `viewer.nome_arquivo` |
-| 1138 | `PNG, BMP ou PPM` | pt | `viewer.png_bmp_ou_ppm` |
-| 1153 | `Cancelar` | pt | `viewer.cancelar_2` |
-| 1153 | `Salvar` | pt | `viewer.salvar_2` |
-| 1159 | `Cancelar` | pt | `viewer.cancelar_3` |
-| 1167 | `Salvar` | pt | `viewer.salvar_3` |
-
 **`osjeff_core/src/bmp.rs`** (6)
 
 | Linha | Texto | Idioma | Chave proposta |
@@ -1661,7 +1309,7 @@ decida caso a caso se vão para o catálogo.
 |---:|---|---|---|
 | 56 | `image has a zero dimension` | en | `viewer.image_has_zero_dimension` |
 | 57 | `image is larger than the pixel limit` | en | `viewer.image_is_larger_than` |
-| 58 | `buffer size does not match the dimensions` | en | `viewer.buffer_size_does_not` |
+| 58 | `buffer length is wrong for the dimensions` | en | `viewer.buffer_length_is_wrong` |
 | 59 | `rectangle is outside the image` | en | `viewer.rectangle_is_outside_image` |
 | 60 | `out of memory` | en | `viewer.out_memory` |
 | 172 | `Image({}x{})` | en | `viewer.image_x` |
@@ -1715,47 +1363,7 @@ decida caso a caso se vão para o catálogo.
 | 46 | `invalid ppm sample` | en | `viewer.invalid_ppm_sample` |
 | 47 | `ppm image: {e}` | en | `viewer.ppm_image` |
 
-**`osjeff_core/src/viewer.rs`** (22)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 382 | `Nome` | pt | `viewer.nome` |
-| 385 | `Dimensões` | pt | `viewer.dimensoes` |
-| 385 | `{w} × {h} px` | neutro | `viewer.w_h_px` |
-| 388 | `Resolução` | pt | `viewer.resolucao` |
-| 389 | `{},{} Mpx` | neutro | `viewer.mpx` |
-| 392 | `Formato` | neutro | `viewer.formato` |
-| 400 | `Tamanho` | pt | `viewer.tamanho` |
-| 402 | `Transparência` | pt | `viewer.transparencia` |
-| 403 | `Sim` | neutro | `viewer.sim` |
-| 403 | `Não` | pt | `viewer.nao` |
-| 405 | `Zoom` | neutro | `viewer.zoom` |
-| 408 | `Posição` | pt | `viewer.posicao` |
-| 409 | `{} de {}` | pt | `viewer.text` |
-| 418 | `O arquivo {f} está danificado ou usa um recurso que o Imagens não suporta.` | pt | `viewer.arquivo_f_esta_danificado` |
-| 422 | `Formato não reconhecido` | pt | `viewer.formato_nao_reconhecido` |
-| 423 | `O Imagens abre arquivos PNG, BMP e PPM.` | pt | `viewer.imagens_abre_arquivos_png` |
-| 425 | `Não foi possível abrir a imagem` | pt | `viewer.nao_foi_possivel_abrir` |
-| 426 | `Não foi possível abrir a imagem` | pt | `viewer.nao_foi_possivel_abrir_2` |
-| 427 | `Não foi possível abrir a imagem` | pt | `viewer.nao_foi_possivel_abrir_3` |
-| 435 | `Imagem grande demais (limite de 16 Mpx)` | pt | `viewer.imagem_grande_demais_limite` |
-| 436 | `Memória insuficiente` | pt | `viewer.memoria_insuficiente` |
-| 437 | `Imagem inválida` | pt | `viewer.imagem_invalida` |
-
 ### Navegador
-
-**`kernel/src/desktop/apps.rs`** (8)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 52 | `Buscar: ` | pt | `web.buscar` |
-| 197 | `Pesquisar ou digitar um endereço` | pt | `web.pesquisar_ou_digitar_endereco` |
-| 498 | `A identidade do servidor não foi comprovada: a conexão pode ser interceptada.` | pt | `web.identidade_servidor_nao_foi` |
-| 508 | `Hora do sistema não confirmada: confira o relógio (sem resposta de servidor de hora).` | pt | `web.hora_sistema_nao_confirmada` |
-| 523 | `Continuar mesmo assim (inseguro)` | neutro | `web.continuar_mesmo_assim_inseguro` |
-| 531 | `Vale só para este site, nesta sessão.` | pt | `web.vale_so_para_este` |
-| 559 | `Navegador` | neutro | `web.navegador` |
-| 567 | `Pesquise ou digite um endereço na barra acima` | pt | `web.pesquise_ou_digite_endereco` |
 
 **`kernel/src/netd.rs`** (2)
 
@@ -1768,38 +1376,111 @@ decida caso a caso se vão para o catálogo.
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 708 | `tcp stream error` | en | `web.tcp_stream_error` |
+| 721 | `tcp stream error` | en | `web.tcp_stream_error` |
 
 **`osjeff_core/src/browser.rs`** (20)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 67 | `Nao seguro` | pt sem-acento | `web.nao_seguro` |
-| 68 | `Conexão segura` | pt | `web.conexao_segura` |
-| 69 | `Certificado inválido` | pt | `web.certificado_invalido` |
-| 116 | `Falha ao carregar a pagina.` | pt sem-acento | `web.falha_ao_carregar_pagina` |
-| 117 | `Nome nao encontrado: confira o endereco (DNS).` | pt sem-acento | `web.nome_nao_encontrado_confira` |
-| 118 | `Conexão recusada pelo servidor.` | pt | `web.conexao_recusada_pelo_servidor` |
-| 119 | `Tempo esgotado: o servidor nao respondeu.` | pt sem-acento | `web.tempo_esgotado_servidor_nao` |
-| 120 | `Falha na negociacao TLS (conexao segura).` | pt sem-acento | `web.falha_na_negociacao_tls` |
-| 122 | `Bloqueado: redirecionamento de HTTPS para HTTP.` | pt | `web.bloqueado_redirecionamento_https_para` |
-| 123 | `Redirecionamento invalido.` | pt sem-acento | `web.redirecionamento_invalido` |
-| 124 | `Redirecionamento em ciclo.` | pt | `web.redirecionamento_em_ciclo` |
-| 126 | `O carregador de paginas falhou (thread encerrada).` | pt sem-acento | `web.carregador_paginas_falhou_thread` |
-| 448 | `Pagina cortada no limite de tamanho` | pt sem-acento | `web.pagina_cortada_no_limite` |
-| 449 | `Pagina incompleta (conexao interrompida)` | pt sem-acento | `web.pagina_incompleta_conexao_interrompida` |
-| 450 | `Pagina com dados compactados corrompidos (parcial)` | pt sem-acento | `web.pagina_com_dados_compactados` |
-| 451 | `Pagina com falha de verificacao (checksum)` | pt sem-acento | `web.pagina_com_falha_verificacao` |
-| 928 | `&amp;` | neutro | `web.amp` |
-| 929 | `&lt;` | neutro | `web.lt` |
-| 930 | `&gt;` | neutro | `web.gt` |
-| 931 | `&quot;` | neutro | `web.quot` |
+| 77 | `Não seguro` | pt | `web.nao_seguro` |
+| 78 | `Conexão segura` | pt | `web.conexao_segura` |
+| 79 | `Certificado inválido` | pt | `web.certificado_invalido` |
+| 126 | `Falha ao carregar a página.` | pt | `web.falha_ao_carregar_pagina` |
+| 127 | `Nome não encontrado: confira o endereço (DNS).` | pt | `web.nome_nao_encontrado_confira` |
+| 128 | `Conexão recusada pelo servidor.` | pt | `web.conexao_recusada_pelo_servidor` |
+| 129 | `Tempo esgotado: o servidor não respondeu.` | pt | `web.tempo_esgotado_servidor_nao` |
+| 130 | `Falha na negociação TLS (conexão segura).` | pt | `web.falha_na_negociacao_tls` |
+| 132 | `Bloqueado: redirecionamento de HTTPS para HTTP.` | pt | `web.bloqueado_redirecionamento_https_para` |
+| 133 | `Redirecionamento inválido.` | pt | `web.redirecionamento_invalido` |
+| 134 | `Redirecionamento em ciclo.` | pt | `web.redirecionamento_em_ciclo` |
+| 136 | `O carregador de páginas falhou (thread encerrada).` | pt | `web.carregador_paginas_falhou_thread` |
+| 458 | `Página cortada no limite de tamanho` | pt | `web.pagina_cortada_no_limite` |
+| 459 | `Página incompleta: a conexão foi interrompida` | pt | `web.pagina_incompleta_conexao_foi` |
+| 460 | `Página parcial: os dados recebidos estão corrompidos` | pt | `web.pagina_parcial_os_dados` |
+| 461 | `A verificação da página falhou` | pt | `web.verificacao_pagina_falhou` |
+| 939 | `&amp;` | neutro | `web.amp` |
+| 940 | `&lt;` | neutro | `web.lt` |
+| 941 | `&gt;` | neutro | `web.gt` |
+| 942 | `&quot;` | neutro | `web.quot` |
 
 **`osjeff_core/src/browser/body_tests.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 39 | `HTTP/1.1 200 OKr\n{headers}r\n` | neutro | `web.http_1_1_200` |
+
+**`osjeff_core/src/browser/errors.rs`** (29)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 34 | `O certificado do site expirou.` | pt | `web.certificado_site_expirou` |
+| 35 | `O certificado do site ainda não é válido.` | pt | `web.certificado_site_ainda_nao` |
+| 36 | `O certificado não vale para este endereço.` | pt | `web.certificado_nao_vale_para` |
+| 37 | `O certificado foi emitido pelo próprio site.` | pt | `web.certificado_foi_emitido_pelo` |
+| 38 | `Quem emitiu o certificado não é confiável.` | pt | `web.quem_emitiu_certificado_nao` |
+| 39 | `A assinatura do certificado não confere.` | pt | `web.assinatura_certificado_nao_confere` |
+| 40 | `A hora do sistema ainda não foi confirmada.` | pt | `web.hora_sistema_ainda_nao` |
+| 41 | `O certificado do site está malformado.` | pt | `web.certificado_site_esta_malformado` |
+| 43 | `A cadeia de certificados do site não é aceitável.` | pt | `web.cadeia_certificados_site_nao` |
+| 45 | `O certificado usa um recurso que não é suportado.` | pt | `web.certificado_usa_recurso_que` |
+| 46 | `Não foi possível verificar o certificado do site.` | pt | `web.nao_foi_possivel_verificar` |
+| 55 | `Sem conexão` | pt | `web.sem_conexao` |
+| 56 | `Confira a rede e tente de novo.` | pt | `web.confira_rede_tente_novo` |
+| 60 | `Site não encontrado` | pt | `web.site_nao_encontrado` |
+| 61 | `Não achamos o servidor. Confira o endereço digitado.` | pt | `web.nao_achamos_servidor_confira` |
+| 65 | `Conexão recusada` | pt | `web.conexao_recusada` |
+| 66 | `O servidor não aceitou a conexão.` | pt | `web.servidor_nao_aceitou_conexao` |
+| 70 | `Tempo esgotado` | pt | `web.tempo_esgotado` |
+| 71 | `O servidor demorou demais para responder.` | pt | `web.servidor_demorou_demais_para` |
+| 75 | `Conexão segura recusada` | pt | `web.conexao_segura_recusada` |
+| 76 | `Não foi possível abrir uma conexão segura com o site.` | pt | `web.nao_foi_possivel_abrir` |
+| 80 | `Esta conexão não é segura` | pt | `web.esta_conexao_nao_segura` |
+| 86 | `O site tentou sair de uma conexão segura para uma sem proteção.` | pt | `web.site_tentou_sair_conexao` |
+| 90 | `Redirecionamento inválido` | pt | `web.redirecionamento_invalido` |
+| 91 | `O endereço para onde o site envia você não é válido.` | pt | `web.endereco_para_onde_site` |
+| 95 | `Redirecionamento em ciclo` | pt | `web.redirecionamento_em_ciclo` |
+| 96 | `O site volta sempre para um endereço já visitado.` | pt | `web.site_volta_sempre_para` |
+| 101 | `O site redirecionou mais vezes do que o permitido.` | pt | `web.site_redirecionou_mais_vezes` |
+| 106 | `O carregador de páginas parou de responder.` | pt | `web.carregador_paginas_parou_responder` |
+
+**`osjeff_core/src/browser/pages.rs`** (24)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 14 | `body{margin:0;background:#ffffff;color:#1d1d1f;font-size:15px;line-height:1.5}.w{max-width:680px;margin:0 a...` | en | `web.body_margin_0_background` |
+| 45 | `Início` | pt | `web.inicio` |
+| 46 | `Favoritos` | pt | `web.favoritos` |
+| 47 | `Histórico` | pt | `web.historico` |
+| 48 | `Sobre` | pt | `web.sobre` |
+| 76 | `{n} favoritos` | pt | `web.n_favoritos` |
+| 78 | `Favoritos` | pt | `web.favoritos_2` |
+| 78 | `Favoritos` | pt | `web.favoritos_3` |
+| 115 | `1 página` | pt | `web.1_pagina` |
+| 116 | `{n} páginas` | pt | `web.n_paginas` |
+| 118 | `Histórico` | pt | `web.historico_2` |
+| 118 | `Histórico` | pt | `web.historico_3` |
+| 138 | `Sobre o Navegador` | pt | `web.sobre_navegador` |
+| 141 | `O navegador do OSjeff.` | pt | `web.navegador_osjeff` |
+| 149 | `Nova aba` | pt | `web.nova_aba` |
+| 150 | `Fechar aba` | pt | `web.fechar_aba` |
+| 151 | `Próxima aba` | pt | `web.proxima_aba` |
+| 152 | `Ir para a aba (9 é a última)` | pt | `web.ir_para_aba_9` |
+| 153 | `Endereço` | pt | `web.endereco` |
+| 154 | `Adicionar aos favoritos` | pt | `web.adicionar_aos_favoritos` |
+| 155 | `Buscar na página` | pt | `web.buscar_na_pagina` |
+| 157 | `Voltar e avançar` | pt | `web.voltar_avancar` |
+| 158 | `Recarregar` | pt | `web.recarregar` |
+| 160 | `Espaço, PgDn, Home, End` | misto | `web.espaco_pgdn_home_end` |
+
+**`osjeff_core/src/browser/tabs.rs`** (5)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 181 | `Favoritos` | pt | `web.favoritos` |
+| 182 | `Histórico` | pt | `web.historico` |
+| 183 | `Sobre o Navegador` | pt | `web.sobre_navegador` |
+| 184 | `Nova aba` | pt | `web.nova_aba` |
+| 189 | `Nova aba` | pt | `web.nova_aba_2` |
 
 **`osjeff_core/src/icmp.rs`** (7)
 
@@ -1861,24 +1542,32 @@ decida caso a caso se vão para o catálogo.
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 95 | `formularios POST nao suportados` | pt sem-acento | `web.formularios_post_nao_suportados` |
-| 96 | `formulario grande demais para enviar` | pt sem-acento | `web.formulario_grande_demais_para` |
-| 97 | `formulario invalido` | pt sem-acento | `web.formulario_invalido` |
-| 169 | `AÁEÉIÍOÓUÚCÇYÝ` | pt | `web.aaeeiioouuccyy` |
-| 173 | `AÀEÈIÌOÒUÙ` | pt | `web.aaeeiioouu` |
-| 175 | `AÃOÕNÑ` | pt | `web.aaoonn` |
-| 178 | `AÂEÊIÎOÔUÛ` | pt | `web.aaeeiioouu_2` |
-| 182 | `AÄEËIÏOÖUÜ` | pt | `web.aaeeiioouu_3` |
+| 106 | `Formulários POST não são suportados.` | pt | `web.formularios_post_nao_sao` |
+| 107 | `Formulário grande demais para enviar.` | pt | `web.formulario_grande_demais_para` |
+| 108 | `Formulário inválido.` | pt | `web.formulario_invalido` |
+| 180 | `AÁEÉIÍOÓUÚCÇYÝ` | pt | `web.aaeeiioouuccyy` |
+| 184 | `AÀEÈIÌOÒUÙ` | pt | `web.aaeeiioouu` |
+| 186 | `AÃOÕNÑ` | pt | `web.aaoonn` |
+| 189 | `AÂEÊIÎOÔUÛ` | pt | `web.aaeeiioouu_2` |
+| 193 | `AÄEËIÏOÖUÜ` | pt | `web.aaeeiioouu_3` |
 
 **`osjeff_core/src/web/imgcache.rs`** (5)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 72 | `formato nao suportado` | pt sem-acento | `web.formato_nao_suportado` |
+| 72 | `formato não suportado` | pt | `web.formato_nao_suportado` |
 | 73 | `falha ao carregar` | pt | `web.falha_ao_carregar` |
 | 74 | `imagem grande demais` | pt | `web.imagem_grande_demais` |
 | 75 | `limite de imagens` | pt | `web.limite_imagens` |
 | 241 | `data:#{:016x}-{}` | pt | `web.data_016x` |
+
+**`osjeff_core/src/web/style.rs`** (3)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 17 | `\nhtml,body,div,p,h1,h2,h3,h4,h5,h6,ul,ol,dl,dt,dd,header,footer,article,section,nav,main,aside,blockquote,...` | misto sem-acento | `web.html_body_div_p` |
+| 460 | `courier new` | en | `web.courier_new` |
+| 468 | `source code pro` | en | `web.source_code_pro` |
 
 ### Apps de terceiros (WASM)
 
@@ -2053,19 +1742,6 @@ decida caso a caso se vão para o catálogo.
 | 500 | `Cores de destaque` | pt | `kit.cores_destaque` |
 | 545 | `Glifos` | neutro | `kit.glifos` |
 
-**`kernel/src/desktop/input.rs`** (8)
-
-| Linha | Texto | Idioma | Chave proposta |
-|---:|---|---|---|
-| 458 | `Favorito adicionado` | neutro | `kit.favorito_adicionado` |
-| 459 | `Favorito removido` | neutro | `kit.favorito_removido` |
-| 460 | `Nada para guardar aqui` | pt | `kit.nada_para_guardar_aqui` |
-| 483 | `Zoom {}%` | neutro | `kit.zoom` |
-| 507 | `endereco do formulario invalido` | pt sem-acento | `kit.endereco_formulario_invalido` |
-| 567 | `Favorito adicionado` | neutro | `kit.favorito_adicionado_2` |
-| 568 | `Favorito removido` | neutro | `kit.favorito_removido_2` |
-| 569 | `Nada para guardar aqui` | pt | `kit.nada_para_guardar_aqui_2` |
-
 ### Sistema (logs e tela de falha: ficam em inglês)
 
 **`kernel/src/boot.rs`** (1)
@@ -2086,6 +1762,65 @@ decida caso a caso se vão para o catálogo.
 | 271 | `ERROR  : {code:#018x}` | en | `sys.error_code_018x` |
 | 274 | `CR2    : {cr2:#018x}` | neutro | `sys.cr2_cr2_018x` |
 | 280 | `The system is halted. Reset or power-cycle the machine to restart.\nThe same report was written to the seri...` | misto | `sys.system_is_halted_reset` |
+
+**`kernel/src/desktop/browser.rs`** (7)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 55 | `Conexão segura` | pt | `sys.conexao_segura` |
+| 56 | `Não seguro` | pt | `sys.nao_seguro` |
+| 58 | `Certificado inválido` | pt | `sys.certificado_invalido` |
+| 379 | `Navegador` | neutro | `sys.navegador` |
+| 438 | `Navegador` | neutro | `sys.navegador_2` |
+| 600 | `Limite de 8 abas` | pt | `sys.limite_8_abas` |
+| 747 | `Navegador` | neutro | `sys.navegador_3` |
+
+**`kernel/src/desktop/browser_input.rs`** (11)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 291 | `Nada para guardar aqui` | pt | `sys.nada_para_guardar_aqui` |
+| 328 | `O endereço do formulário não é válido` | pt | `sys.endereco_formulario_nao_valido` |
+| 521 | `Esse link não pode ser aberto` | pt | `sys.esse_link_nao_pode` |
+| 575 | `Copiar` | pt | `sys.copiar` |
+| 576 | `Abrir link` | pt | `sys.abrir_link` |
+| 577 | `Copiar endereço do link` | pt | `sys.copiar_endereco_link` |
+| 578 | `Voltar` | pt | `sys.voltar` |
+| 579 | `Recarregar` | pt | `sys.recarregar` |
+| 583 | `Remover dos favoritos` | pt | `sys.remover_dos_favoritos` |
+| 585 | `Adicionar aos favoritos` | pt | `sys.adicionar_aos_favoritos` |
+| 614 | `Endereço copiado` | pt | `sys.endereco_copiado` |
+
+**`kernel/src/desktop/browser_ui.rs`** (26)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 133 | `load to first paint` | en | `sys.load_first_paint` |
+| 156 | `Carregando…` | pt | `sys.carregando` |
+| 338 | `Pesquisar ou digitar um endereço` | pt | `sys.pesquisar_ou_digitar_endereco` |
+| 489 | `Nova aba` | pt | `sys.nova_aba` |
+| 595 | `Pesquisar ou digitar um endereço` | pt | `sys.pesquisar_ou_digitar_endereco_2` |
+| 639 | `Favoritos` | pt | `sys.favoritos` |
+| 639 | `Sugestões` | pt | `sys.sugestoes` |
+| 685 | `Visitados recentemente` | neutro | `sys.visitados_recentemente` |
+| 806 | `Tentar novamente` | neutro | `sys.tentar_novamente` |
+| 822 | `A hora do sistema não foi confirmada: confira o relógio.` | pt | `sys.hora_sistema_nao_foi` |
+| 831 | `Continuar mesmo assim (inseguro)` | neutro | `sys.continuar_mesmo_assim_inseguro` |
+| 842 | `Vale só para este site, nesta sessão.` | pt | `sys.vale_so_para_este` |
+| 957 | `Buscar na página` | pt | `sys.buscar_na_pagina` |
+| 985 | `Nenhum` | pt | `sys.nenhum` |
+| 987 | `{} de {}` | pt | `sys.text` |
+| 1163 | `Válido de` | pt | `sys.valido` |
+| 1167 | `Válido até` | pt | `sys.valido_ate` |
+| 1173 | `Cadeia, nome e assinatura conferidos` | pt | `sys.cadeia_nome_assinatura_conferidos` |
+| 1174 | `A conexão é criptografada e a identidade do site foi comprovada.` | pt | `sys.conexao_criptografada_identidade_site` |
+| 1177 | `Não verificado` | pt | `sys.nao_verificado` |
+| 1178 | `Você escolheu continuar com este site nesta sessão. Não digite senhas nem dados pessoais.` | pt | `sys.voce_escolheu_continuar_com` |
+| 1182 | `Esta conexão não é criptografada: outras pessoas na rede podem ver o que você envia e recebe.` | pt | `sys.esta_conexao_nao_criptografada` |
+| 1186 | `Verificação` | pt | `sys.verificacao` |
+| 1228 | `Conexão segura` | pt | `sys.conexao_segura` |
+| 1229 | `Certificado inválido` | pt | `sys.certificado_invalido` |
+| 1230 | `Conexão não segura` | pt | `sys.conexao_nao_segura` |
 
 **`kernel/src/interrupts.rs`** (2)
 
@@ -2109,25 +1844,25 @@ decida caso a caso se vão para o catálogo.
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 146 | `this screen resolution is not supported` | en | `sys.this_screen_resolution_is` |
-| 148 | `Detected {}x{} (stride {}, {} bytes/pixel): the screen needs {} bytes, the bootloader provided a framebuffe...` | en | `sys.detected_x_stride_bytes` |
-| 196 | `wasm demo done` | en | `sys.wasm_demo_done` |
-| 274 | `pci scan + virtio-gpu probe done` | en | `sys.pci_scan_virtio_gpu` |
-| 284 | `ata detect done` | en | `sys.ata_detect_done` |
-| 322 | `nic init done` | en | `sys.nic_init_done` |
-| 327 | `dhcp done` | en | `sys.dhcp_done` |
-| 365 | `storage init done` | en | `sys.storage_init_done` |
-| 388 | `ui text engine ready` | en | `sys.ui_text_engine_ready` |
-| 403 | `Desktop::new (fs load from ATA) done` | en | `sys.desktop_new_fs_load` |
-| 411 | `wallpaper painted` | en | `sys.wallpaper_painted` |
-| 1101 | `the kernel panicked` | en | `sys.kernel_panicked` |
+| 145 | `this screen resolution is not supported` | en | `sys.this_screen_resolution_is` |
+| 147 | `Detected {}x{} (stride {}, {} bytes/pixel): the screen needs {} bytes, the bootloader provided a framebuffe...` | en | `sys.detected_x_stride_bytes` |
+| 195 | `wasm demo done` | en | `sys.wasm_demo_done` |
+| 273 | `pci scan + virtio-gpu probe done` | en | `sys.pci_scan_virtio_gpu` |
+| 283 | `ata detect done` | en | `sys.ata_detect_done` |
+| 321 | `nic init done` | en | `sys.nic_init_done` |
+| 326 | `dhcp done` | en | `sys.dhcp_done` |
+| 364 | `storage init done` | en | `sys.storage_init_done` |
+| 387 | `ui text engine ready` | en | `sys.ui_text_engine_ready` |
+| 402 | `Desktop::new (fs load from ATA) done` | en | `sys.desktop_new_fs_load` |
+| 410 | `wallpaper painted` | en | `sys.wallpaper_painted` |
+| 722 | `the kernel panicked` | en | `sys.kernel_panicked` |
 
 **`kernel/src/trace.rs`** (2)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 650 | `The quick brown fox jumps over the lazy dog 0123` | en | `sys.quick_brown_fox_jumps` |
-| 728 | `The quick brown fox jumps over the lazy dog 0123` | en | `sys.quick_brown_fox_jumps_2` |
+| 658 | `The quick brown fox jumps over the lazy dog 0123` | en | `sys.quick_brown_fox_jumps` |
+| 736 | `The quick brown fox jumps over the lazy dog 0123` | en | `sys.quick_brown_fox_jumps_2` |
 
 ### Outros
 
@@ -2140,11 +1875,23 @@ decida caso a caso se vão para o catálogo.
 | 31 | `base64 padding before the end` | en | `misc.base64_padding_before_end` |
 | 32 | `base64 data too large` | misto | `misc.base64_data_too_large` |
 
+**`osjeff_core/src/compositor/sim/mod.rs`** (1)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 170 | `{diff} pixels differ; first at ({x},{y}): incremental {:06X}, reference {:06X}; layers there (bottom to top...` | en | `misc.diff_pixels_differ_first` |
+
+**`osjeff_core/src/compositor/sim/paint.rs`** (1)
+
+| Linha | Texto | Idioma | Chave proposta |
+|---:|---|---|---|
+| 77 | `layer {:?} wrote ({x},{y}) outside its footprint {:?}` | en | `misc.layer_wrote_x_y` |
+
 **`osjeff_core/src/i18n/audit.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 786 | `{file}:{line}: {w:?} should be {r} in {s:?}` | en | `misc.file_line_w_should` |
+| 795 | `{file}:{line}: {w:?} should be {r} in {s:?}` | en | `misc.file_line_w_should` |
 
 **`osjeff_core/src/i18n/template.rs`** (6)
 

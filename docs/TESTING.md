@@ -51,6 +51,17 @@ a cobertura de glifos das quatro fontes e os formatadores (números, tamanhos, d
 `cargo test -p osjeff_core i18n_report -- --ignored --nocapture` lista os literais sem acento do resto da
 árvore; `python3 -I tools/i18n-audit.py --check` confere `docs/design/i18n-audit.md`.
 
+Cenários de tela dos apps migrados (W30; mostram o português, trocam o idioma em *Ajustes* com a janela
+aberta e fotografam o inglês; `FS_IMG` como acima, com `/etc`, `/vazia`, `/Projetos` e `/leiame.txt`;
+`FS_IMG=<disco.img> QEMU_MEM=512M tools/perf/run.sh <img> uefi <saida> 380 tools/perf/scen/<cen>`):
+
+| Cenário | O que faz |
+|---|---|
+| `w30-files.sh` | Arquivos: lista, seleção, informações (arquivo, várias, app), menus, ordenar, ícones, pré-visualização, Apps, Lixeira vazia, pasta vazia, busca sem resultado |
+| `w30-files2.sh` | Arquivos: formato não suportado, copiado, folha de cópia, lixeira com item e menu, confirmações, cancelado, excluído, "não é possível colar na lixeira" |
+| `w30-viewer.sh` | Imagens: barra, painel de informações, folha de salvar e o erro "já existe", salvo, imagem inválida, janela vazia |
+| `w30-editor.sh` | Editor: barra de estado, buscar sem resultado, recomeçou, substituir, linha inválida, Abrir, Salvar como, pergunta de sobrescrever, pergunta ao fechar |
+
 ## 2. Fuzzing
 
 Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
