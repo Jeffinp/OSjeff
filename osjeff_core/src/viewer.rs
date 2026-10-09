@@ -365,7 +365,7 @@ impl ImageList {
 // Text
 // ---------------------------------------------------------------------------
 
-/// The rows of the information inspector: label and value, in Portuguese.
+/// The rows of the information inspector: label and value, in the language in effect.
 #[allow(clippy::too_many_arguments)]
 pub fn info_rows(
     name: &[u8],
@@ -379,17 +379,20 @@ pub fn info_rows(
 ) -> Vec<(String, String)> {
     let mut v = Vec::new();
     v.push((
-        String::from("Nome"),
+        String::from(crate::t!("viewer.info.name")),
         String::from_utf8_lossy(name).into_owned(),
     ));
-    v.push((String::from("Dimensões"), alloc::format!("{w} × {h} px")));
+    v.push((
+        String::from(crate::t!("viewer.info.dimensions")),
+        crate::t!("viewer.dims", w = w, h = h),
+    ));
     let mpx = (w as u64 * h as u64 * 10 + 500_000) / 1_000_000;
     v.push((
-        String::from("Resolução"),
-        alloc::format!("{},{} Mpx", mpx / 10, mpx % 10),
+        String::from(crate::t!("viewer.info.resolution")),
+        crate::t!("viewer.mpx", mp = crate::i18n::dec(mpx as i64, 1)),
     ));
     v.push((
-        String::from("Formato"),
+        String::from(crate::t!("viewer.info.format")),
         String::from(match format {
             Some(Format::Png) => "PNG",
             Some(Format::Bmp) => "BMP",
@@ -397,44 +400,55 @@ pub fn info_rows(
             None => "—",
         }),
     ));
-    v.push((String::from("Tamanho"), format_size(file_bytes)));
     v.push((
-        String::from("Transparência"),
-        String::from(if transparent { "Sim" } else { "Não" }),
+        String::from(crate::t!("viewer.info.size")),
+        format_size(file_bytes),
     ));
-    v.push((String::from("Zoom"), zoom_label(zoom)));
+    v.push((
+        String::from(crate::t!("viewer.info.transparency")),
+        String::from(if transparent {
+            crate::t!("viewer.yes")
+        } else {
+            crate::t!("viewer.no")
+        }),
+    ));
+    v.push((
+        String::from(crate::t!("viewer.info.zoom")),
+        zoom_label(zoom),
+    ));
     if position.1 > 1 {
         v.push((
-            String::from("Posição"),
-            alloc::format!("{} de {}", position.0 + 1, position.1),
+            String::from(crate::t!("viewer.info.position")),
+            crate::t!("viewer.position", n = position.0 + 1, total = position.1),
         ));
     }
     v
 }
 
-/// What to tell the user when an image cannot be opened: a headline and one plain sentence.
+/// What to tell the user when an image cannot be opened: a headline and one plain sentence,
+/// in the language in effect.
 pub fn decode_error_message(e: &DecodeError) -> [String; 2] {
-    let kind = |f: &str| {
-        alloc::format!("O arquivo {f} está danificado ou usa um recurso que o Imagens não suporta.")
-    };
+    let kind = |f: &str| crate::t!("viewer.err.damaged", format = f);
     let (head, detail) = match e {
         DecodeError::UnknownFormat => (
-            "Formato não reconhecido",
-            String::from("O Imagens abre arquivos PNG, BMP e PPM."),
+            crate::t!("viewer.err.unknown_format"),
+            String::from(crate::t!("viewer.err.supported_formats")),
         ),
-        DecodeError::Png(_) => ("Não foi possível abrir a imagem", kind("PNG")),
-        DecodeError::Bmp(_) => ("Não foi possível abrir a imagem", kind("BMP")),
-        DecodeError::Ppm(_) => ("Não foi possível abrir a imagem", kind("PPM")),
+        DecodeError::Png(_) => (crate::t!("viewer.err.cannot_open"), kind("PNG")),
+        DecodeError::Bmp(_) => (crate::t!("viewer.err.cannot_open"), kind("BMP")),
+        DecodeError::Ppm(_) => (crate::t!("viewer.err.cannot_open"), kind("PPM")),
     };
     [String::from(head), detail]
 }
 
-/// Message for an image operation that failed (rotate, encode).
+/// Message for an image operation that failed (rotate, encode), in the language in effect.
 pub fn image_error_message(e: ImageError) -> &'static str {
     match e {
-        ImageError::TooLarge => "Imagem grande demais (limite de 16 Mpx)",
-        ImageError::OutOfMemory => "Memória insuficiente",
-        ImageError::ZeroSize | ImageError::BadBuffer | ImageError::OutOfBounds => "Imagem inválida",
+        ImageError::TooLarge => crate::t!("viewer.err.too_large"),
+        ImageError::OutOfMemory => crate::t!("viewer.err.no_memory"),
+        ImageError::ZeroSize | ImageError::BadBuffer | ImageError::OutOfBounds => {
+            crate::t!("viewer.err.invalid")
+        }
     }
 }
 
@@ -448,11 +462,12 @@ pub fn save_format(name: &[u8]) -> Option<Format> {
     }
 }
 
-/// A first guess for the "save as" name: `stem (copia).png`.
+/// A first guess for the "save as" name: `stem (cópia).png` (`stem (copy).png` in English).
 pub fn suggest_save_name(orig: &[u8]) -> Vec<u8> {
     let (stem, _) = vfs::split_ext(orig);
     let mut n = stem.to_vec();
-    n.extend_from_slice(b" (copia).png");
+    n.push(b' ');
+    n.extend_from_slice(crate::t!("viewer.save_suffix").as_bytes());
     n
 }
 

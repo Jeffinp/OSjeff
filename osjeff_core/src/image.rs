@@ -55,7 +55,7 @@ impl fmt::Display for ImageError {
         f.write_str(match self {
             ImageError::ZeroSize => "image has a zero dimension",
             ImageError::TooLarge => "image is larger than the pixel limit",
-            ImageError::BadBuffer => "buffer size does not match the dimensions",
+            ImageError::BadBuffer => "buffer length is wrong for the dimensions",
             ImageError::OutOfBounds => "rectangle is outside the image",
             ImageError::OutOfMemory => "out of memory",
         })

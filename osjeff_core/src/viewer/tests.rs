@@ -1,6 +1,7 @@
 //! Tests of the image viewer logic.
 
 use super::*;
+use crate::i18n::{Lang, testlang::LangGuard};
 use crate::image::Image;
 
 fn file(name: &str) -> Entry {
@@ -305,6 +306,7 @@ fn a_single_image_list_stays_put() {
 
 #[test]
 fn info_rows_describe_the_image() {
+    let _g = LangGuard::new(Lang::Pt);
     let l = info_rows(
         "foto.png".as_bytes(),
         1024,
@@ -328,6 +330,7 @@ fn info_rows_describe_the_image() {
 
 #[test]
 fn info_rows_keep_accents_and_skip_the_position_for_one_image() {
+    let _g = LangGuard::new(Lang::Pt);
     let l = info_rows(
         "ação.bmp".as_bytes(),
         2,
@@ -347,6 +350,7 @@ fn info_rows_keep_accents_and_skip_the_position_for_one_image() {
 
 #[test]
 fn decode_errors_have_friendly_messages() {
+    let _g = LangGuard::new(Lang::Pt);
     let e = crate::image::decode(b"not an image").unwrap_err();
     let m = decode_error_message(&e);
     assert_eq!(m[0], "Formato não reconhecido");
@@ -371,6 +375,7 @@ fn decode_errors_have_friendly_messages() {
 
 #[test]
 fn image_errors_have_messages() {
+    let _g = LangGuard::new(Lang::Pt);
     for e in [
         ImageError::TooLarge,
         ImageError::OutOfMemory,
@@ -464,8 +469,15 @@ fn save_formats_by_extension() {
 
 #[test]
 fn suggested_save_name_is_a_png_copy() {
-    assert_eq!(suggest_save_name(b"foto.bmp"), b"foto (copia).png");
-    assert_eq!(suggest_save_name(b"semext"), b"semext (copia).png");
+    let _g = LangGuard::new(Lang::Pt);
+    assert_eq!(
+        suggest_save_name(b"foto.bmp"),
+        "foto (cópia).png".as_bytes()
+    );
+    assert_eq!(
+        suggest_save_name(b"semext"),
+        "semext (cópia).png".as_bytes()
+    );
     assert_eq!(save_format(&suggest_save_name(b"x.ppm")), Some(Format::Png));
 }
 
@@ -506,4 +518,39 @@ fn flips_and_rotations_compose() {
     let mut f = img.rotate90().unwrap();
     f.flip_vertical();
     assert_eq!(f.pixels(), &[4, 2, 3, 1]);
+}
+
+#[test]
+fn viewer_texts_in_english() {
+    let _g = LangGuard::new(Lang::En);
+    let l = info_rows(
+        "photo.png".as_bytes(),
+        1024,
+        768,
+        Some(Format::Png),
+        3_000_000,
+        500,
+        (2, 12),
+        false,
+    );
+    let get = |k: &str| l.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str());
+    assert_eq!(get("Name"), Some("photo.png"));
+    assert_eq!(get("Dimensions"), Some("1024 × 768 px"));
+    assert_eq!(get("Resolution"), Some("0.8 Mpx"));
+    assert_eq!(get("Size"), Some("2.8 MiB"));
+    assert_eq!(get("Transparency"), Some("No"));
+    assert_eq!(get("Position"), Some("3 of 12"));
+    let e = crate::image::decode(b"not an image").unwrap_err();
+    let m = decode_error_message(&e);
+    assert_eq!(m[0], "Unrecognized format");
+    assert!(m[1].contains("PNG, BMP and PPM"), "{}", m[1]);
+    let e = crate::image::decode(b"BM\0\0\0").unwrap_err();
+    let m = decode_error_message(&e);
+    assert_eq!(m[0], "Could not open the image");
+    assert!(m[1].starts_with("The BMP file is damaged"), "{}", m[1]);
+    assert_eq!(
+        image_error_message(ImageError::TooLarge),
+        "Image too large (16 Mpx limit)"
+    );
+    assert_eq!(suggest_save_name(b"photo.bmp"), b"photo (copy).png");
 }

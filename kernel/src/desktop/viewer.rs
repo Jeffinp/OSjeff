@@ -18,6 +18,7 @@ use osjeff_core::appart::Tool;
 use osjeff_core::fileman::TextInput;
 use osjeff_core::image::{self, Filter, Format, Image};
 use osjeff_core::raster::Surface;
+use osjeff_core::t;
 use osjeff_core::viewer as vw;
 use osjeff_core::viewer::ui::{self as vui, FitMode, Hit, Layout};
 
@@ -66,10 +67,49 @@ impl Desktop {
             return None;
         }
         let Some(id) = self.open_new(Kind::Viewer) else {
-            return Some(String::from("Janelas demais abertas"));
+            return Some(String::from(t!("viewer.too_many")));
         };
         self.viewer_load(id, path, true);
         None
+    }
+
+    /// The language changed: every viewer's title, caption message and load error were written
+    /// in the old one.
+    pub(crate) fn viewer_language_changed_all(&mut self) {
+        let ids: Vec<WindowId> = self
+            .wm
+            .windows()
+            .iter()
+            .filter(|w| matches!(w.app.app, App::Viewer(_)))
+            .map(|w| w.id)
+            .collect();
+        for id in ids {
+            self.viewer_language_changed(id);
+        }
+    }
+
+    /// An error is rebuilt by reading the file again.
+    fn viewer_language_changed(&mut self, id: WindowId) {
+        let Some(v) = self.viewer_mut(id) else {
+            return;
+        };
+        v.msg = None;
+        let path = v.path.clone();
+        if path.is_empty() {
+            return;
+        }
+        if v.error.is_some() {
+            self.viewer_load(id, &path, false);
+            return;
+        }
+        let title = t!(
+            "viewer.title",
+            app = &instance::base_title(Kind::Viewer, 0),
+            name = &String::from_utf8_lossy(vfs::base_name(&path)).into_owned()
+        );
+        if let Some(w) = self.wm.get_mut(id) {
+            w.app.title = title;
+        }
     }
 
     /// Geometry of viewer window `id` as drawn.
@@ -100,17 +140,12 @@ impl Desktop {
     /// previous/next list; a failure shows in the window (never panics).
     pub(crate) fn viewer_load(&mut self, id: WindowId, path: &[u8], rebuild: bool) {
         let loaded: Result<(Image, Option<Format>, u64), [String; 2]> = (|| {
-            let friendly = |m: &str| {
-                [
-                    String::from("Não foi possível abrir a imagem"),
-                    String::from(m),
-                ]
-            };
+            let friendly = |m: &str| [String::from(t!("viewer.err.cannot_open")), String::from(m)];
             let info = vfs::stat(path).map_err(|e| friendly(e.message()))?;
             if info.size > MAX_FILE {
                 return Err([
-                    String::from("Arquivo grande demais"),
-                    String::from("O Imagens abre arquivos de até 24 MiB."),
+                    String::from(t!("viewer.err.too_big_title")),
+                    String::from(t!("viewer.err.too_big_body")),
                 ]);
             }
             let bytes = vfs::read_file(path).map_err(|e| friendly(e.message()))?;
@@ -127,7 +162,11 @@ impl Desktop {
         } else {
             None
         };
-        let title = alloc::format!("Imagens — {}", String::from_utf8_lossy(&name));
+        let title = t!(
+            "viewer.title",
+            app = &instance::base_title(Kind::Viewer, 0),
+            name = &String::from_utf8_lossy(&name).into_owned()
+        );
         if let Some(w) = self.wm.get_mut(id) {
             w.app.title = title;
         }
@@ -291,7 +330,7 @@ impl Desktop {
             vfs::validate_name(&name).map_err(|e| String::from(e.message()))?;
             let path = vfs::join(&dir, &name);
             if vfs::exists(&path) {
-                return Err(String::from("Já existe um arquivo com esse nome"));
+                return Err(String::from(t!("viewer.exists")));
             }
             let bytes =
                 image::encode(img, fmt).map_err(|e| String::from(vw::image_error_message(e)))?;
@@ -301,7 +340,10 @@ impl Desktop {
         match result {
             Ok(p) => {
                 v.msg = Some((
-                    alloc::format!("Salvo como {}", String::from_utf8_lossy(vfs::base_name(&p))),
+                    t!(
+                        "viewer.saved_as",
+                        name = &String::from_utf8_lossy(vfs::base_name(&p)).into_owned()
+                    ),
                     false,
                 ));
                 self.fs_changed();
@@ -460,7 +502,7 @@ impl Desktop {
                 if let Some(v) = self.viewer_mut(id) {
                     v.msg = Some(match r {
                         Some(m) => (m, true),
-                        None => (String::from("Papel de parede aplicado"), false),
+                        None => (String::from(t!("viewer.wallpaper")), false),
                     });
                 }
             }
@@ -645,7 +687,7 @@ impl Desktop {
         let btns = appui::button_row(
             panel.right() - appui::SHEET_PAD,
             panel.bottom() - appui::SHEET_PAD - appui::BUTTON_H,
-            &["Cancelar", "Salvar"],
+            &[t!("common.cancel"), t!("viewer.save")],
         );
         match btns.iter().position(|b| b.contains(px, py)) {
             Some(0) => {
@@ -825,7 +867,12 @@ impl Desktop {
         );
         appui::tool_button(c, lay.flip, Tool::FlipH, has, hv(Hit::Flip), false, false);
         let sel = vui::mode_of(&v.view).map_or(usize::MAX, FitMode::index);
-        ui::segmented(c, lay.modes, &["Ajustar", "Preencher", "100%"], sel);
+        ui::segmented(
+            c,
+            lay.modes,
+            &[t!("viewer.fit"), t!("viewer.fill"), "100%"],
+            sel,
+        );
         let multi = v.list.len() > 1;
         appui::tool_button(
             c,
@@ -868,8 +915,8 @@ impl Desktop {
                 let p = theme::pal();
                 let [l1, l2] = v.error.clone().unwrap_or_else(|| {
                     [
-                        String::from("Nenhuma imagem"),
-                        String::from("Abra uma imagem pelo Arquivos."),
+                        String::from(t!("viewer.empty_title")),
+                        String::from(t!("viewer.empty_hint")),
                     ]
                 });
                 let cx = cv.x + cv.w / 2;
@@ -973,7 +1020,14 @@ impl Desktop {
         );
         let a16 = t as u16;
         let mut y = r.y + vui::INFO_PAD;
-        let label_w = 98;
+        // The widest label sets the column (English labels are not as long as the Portuguese).
+        let label_w = rows
+            .iter()
+            .map(|(k, _)| text::measure(k, FOOTNOTE, Weight::Regular))
+            .max()
+            .unwrap_or(0)
+            .max(60)
+            + 14;
         for (k, val) in &rows {
             let row = Rect::new(r.x + 14, y, r.w - 28, vui::INFO_ROW_H);
             text::draw_a(
@@ -1069,10 +1123,11 @@ impl Desktop {
                     ));
                 }
                 if v.list.len() > 1 {
-                    s.push_str(&alloc::format!(
-                        "  ·  {} de {}",
-                        v.list.index() + 1,
-                        v.list.len()
+                    s.push_str("  ·  ");
+                    s.push_str(&t!(
+                        "viewer.position",
+                        n = v.list.index() + 1,
+                        total = v.list.len()
                     ));
                 }
                 (s, theme::solid(p.text_secondary))
@@ -1107,7 +1162,7 @@ impl Desktop {
             c,
             panel.x + appui::SHEET_PAD,
             panel.y + appui::SHEET_PAD,
-            "Salvar como",
+            t!("viewer.save_as"),
             text::TITLE3,
             Weight::Semibold,
             theme::solid(p.text),
@@ -1127,7 +1182,7 @@ impl Desktop {
                 caret: input.caret(),
                 selection: input.selection(),
             },
-            "Nome do arquivo",
+            t!("viewer.file_name"),
             true,
             256,
             None,
@@ -1135,7 +1190,7 @@ impl Desktop {
         );
         let hint = match &v.msg {
             Some((m, true)) => (m.as_str(), theme::danger()),
-            _ => ("PNG, BMP ou PPM", theme::solid(p.text_tertiary)),
+            _ => (t!("viewer.formats"), theme::solid(p.text_tertiary)),
         };
         text::draw_ellipsis(
             c,
@@ -1150,13 +1205,13 @@ impl Desktop {
         let btns = appui::button_row(
             panel.right() - appui::SHEET_PAD,
             panel.bottom() - appui::SHEET_PAD - appui::BUTTON_H,
-            &["Cancelar", "Salvar"],
+            &[t!("common.cancel"), t!("viewer.save")],
         );
         let hover = |b: &Rect| b.contains(self.cursor_x, self.cursor_y);
         appui::sheet_button(
             c,
             btns[0],
-            "Cancelar",
+            t!("common.cancel"),
             ButtonKind::Secondary,
             hover(&btns[0]),
             false,
@@ -1164,7 +1219,7 @@ impl Desktop {
         appui::sheet_button(
             c,
             btns[1],
-            "Salvar",
+            t!("viewer.save"),
             ButtonKind::Primary,
             hover(&btns[1]),
             false,
