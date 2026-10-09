@@ -14,6 +14,22 @@ tem releases versionadas; as seções são marcos na `master`.
   a Calculadora usa a vírgula ou o ponto decimal do idioma.
 - Testes de idioma por thread (`i18n::testlang`), sem disputa entre testes em paralelo; cenários `w31-term.sh` e
   `w31-apps.sh` no QEMU e quatro telas lado a lado em `docs/img/i18n-w31-*.png`.
+## 2026-10 — Navegador, Ajustes, apps e componentes nos dois idiomas (W32)
+
+- **Navegador**: barra de endereço, abas, página inicial, busca, menu de contexto, avisos, indicador de segurança
+  e as páginas de erro (sem conexão, site não encontrado, conexão recusada, tempo esgotado, cada problema de
+  certificado, redirecionamentos) saem do catálogo e seguem a troca de idioma na hora; `osjeff://favoritos`,
+  `historico` e `sobre` são geradas de novo no idioma novo (`<html lang>` acompanha). O pedido HTTP diz o
+  idioma da interface em `Accept-Language` (`pt-BR,pt;q=0.9,en;q=0.8` ou `en;q=1`).
+- **Ajustes**: todas as páginas, mensagens, nomes de papéis de parede, cores e das 52 cidades do fuso (`Lisboa`/
+  `Lisbon`); a busca de cidade acha pelos dois nomes; data e hora pelos formatadores do idioma.
+- **Apps WASM**: o manifesto aceita `name.pt=`/`name.en=` (com acentos); os apps que acompanham o sistema
+  viram Relógio, Notas, Pintura, Olá, Cobrinha e Teste de rede; erros de instalação e remoção, o motivo de um app
+  ter encerrado e a recusa de um arquivo que não é app (aviso na tela) estão nos dois idiomas. Novo `osj.lang()`,
+  texto UTF-8 em `draw_text` e `tr(pt, en)` no SDK: os apps escrevem com acentos e acompanham o idioma.
+- **Componentes e avisos**: a galeria sai do catálogo (e a amostra monoespaçada não cita linguagem de
+  programação); `notify::notify_key` mostra um aviso no idioma da interface e grava o texto em inglês no log.
+- Cenários de QEMU `w32-settings|web|apps|install|toast.sh` e quatro capturas lado a lado em `docs/img/i18n-w32-*`.
 
 ## 2026-10 — Um compositor correto por construção (W27)
 
