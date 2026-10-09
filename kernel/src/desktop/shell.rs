@@ -55,6 +55,8 @@ pub(crate) enum Cmd {
     ShowDesktop,
     /// Close every window of an app (app-bar menu).
     QuitOf(Kind),
+    /// A command of the file manager (its context and sort menus, the View menu).
+    Files(osjeff_core::fileman::Cmd),
 }
 
 /// One row of a menu.
@@ -446,11 +448,20 @@ impl Desktop {
             Cmd::Shutdown => self.ask_power(true),
             Cmd::NewWindow => {
                 let kind = target.map_or(Kind::Terminal, |(_, k)| k);
-                self.new_window(kind);
+                if let Some((id, Kind::Browser)) = target {
+                    // One browser window: "new" opens a tab.
+                    self.menu_ctrl_key_browser(id, 't');
+                } else {
+                    self.new_window(kind);
+                }
             }
             Cmd::CloseWindow => {
-                if let Some((id, _)) = target {
-                    self.request_close(id);
+                if let Some((id, kind)) = target {
+                    if kind == Kind::Browser {
+                        self.browser_close_active(id);
+                    } else {
+                        self.request_close(id);
+                    }
                 }
             }
             Cmd::Minimize => {
@@ -462,6 +473,17 @@ impl Desktop {
                 if let Some((id, _)) = target {
                     self.toggle_maximize(id);
                 }
+            }
+            Cmd::Copy | Cmd::Paste | Cmd::Cut | Cmd::SelectAll
+                if target.is_some_and(|(_, k)| k == Kind::Files) =>
+            {
+                use osjeff_core::fileman::Cmd as F;
+                self.files_run_focused(match cmd {
+                    Cmd::Copy => F::Copy,
+                    Cmd::Paste => F::Paste,
+                    Cmd::Cut => F::Cut,
+                    _ => F::SelectAll,
+                });
             }
             Cmd::Copy => self.copy_from_focused(),
             Cmd::Paste => self.paste_into_focused(),
@@ -501,6 +523,7 @@ impl Desktop {
             Cmd::NewOf(k) => {
                 self.new_window(k);
             }
+            Cmd::Files(c) => self.files_run_focused(c),
             Cmd::QuitOf(k) => {
                 let ids: Vec<WindowId> = self
                     .wm
@@ -515,6 +538,11 @@ impl Desktop {
             }
         }
         self.force_full = true;
+    }
+
+    /// A Ctrl chord for browser window `id` from a menu entry.
+    fn menu_ctrl_key_browser(&mut self, id: WindowId, c: char) {
+        self.browser_ctrl_chord(id, c);
     }
 
     /// Send a Ctrl chord to the focused app as if typed (menu entries reuse the keys).
@@ -553,14 +581,16 @@ impl Desktop {
         self.close_transients();
         self.shell.dialog = Some(Dialog {
             title: String::from(if shutdown {
-                "Desligar o computador?"
+                osjeff_core::t!("power.shutdown_title")
             } else {
-                "Reiniciar o computador?"
+                osjeff_core::t!("power.restart_title")
             }),
-            body: String::from(
-                "Os documentos com alterações sem salvar perguntam antes de fechar.",
-            ),
-            ok: String::from(if shutdown { "Desligar" } else { "Reiniciar" }),
+            body: String::from(osjeff_core::t!("power.body")),
+            ok: String::from(if shutdown {
+                osjeff_core::t!("power.shutdown")
+            } else {
+                osjeff_core::t!("power.restart")
+            }),
             cmd: if shutdown { Cmd::Shutdown } else { Cmd::Reboot },
             t: fade_in(MENU_FADE),
             closing: false,

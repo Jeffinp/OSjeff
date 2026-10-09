@@ -260,6 +260,20 @@ fn next_and_prev_wrap() {
 }
 
 #[test]
+fn path_at_and_go_to_address_images_by_index() {
+    let es = [file("b.png"), file("a.png"), file("c.bmp"), dir("sub")];
+    let mut l = ImageList::from_entries(b"/fotos", &es, b"a.png");
+    assert_eq!(l.len(), 3);
+    assert_eq!(l.path_at(0), Some(b"/fotos/a.png".to_vec()));
+    assert_eq!(l.path_at(2), Some(b"/fotos/c.bmp".to_vec()));
+    assert_eq!(l.path_at(3), None);
+    assert_eq!(l.go_to(2), Some(b"/fotos/c.bmp".to_vec()));
+    assert_eq!(l.index(), 2);
+    assert_eq!(l.go_to(9), None);
+    assert_eq!(l.index(), 2);
+}
+
+#[test]
 fn list_includes_the_current_file_even_if_unlisted() {
     let l = ImageList::from_entries(b"/d", &[file("a.png")], b"zz.png");
     assert_eq!(l.len(), 2);
@@ -290,8 +304,8 @@ fn a_single_image_list_stays_put() {
 // ---- text ----
 
 #[test]
-fn info_lines_describe_the_image() {
-    let l = info_lines(
+fn info_rows_describe_the_image() {
+    let l = info_rows(
         "foto.png".as_bytes(),
         1024,
         768,
@@ -299,19 +313,22 @@ fn info_lines_describe_the_image() {
         3_000_000,
         500,
         (2, 12),
+        false,
     );
-    assert_eq!(l[0], "foto.png");
-    assert_eq!(l[1], "1024 x 768 px");
-    assert_eq!(l[2], "0,8 Mpx");
-    assert_eq!(l[3], "Formato: PNG");
-    assert_eq!(l[4], "Arquivo: 2,8 MiB");
-    assert_eq!(l[5], "Zoom: 50%");
-    assert_eq!(l[6], "Imagem 3 de 12");
+    let get = |k: &str| l.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str());
+    assert_eq!(get("Nome"), Some("foto.png"));
+    assert_eq!(get("Dimensões"), Some("1024 × 768 px"));
+    assert_eq!(get("Resolução"), Some("0,8 Mpx"));
+    assert_eq!(get("Formato"), Some("PNG"));
+    assert_eq!(get("Tamanho"), Some("2,8 MiB"));
+    assert_eq!(get("Transparência"), Some("Não"));
+    assert_eq!(get("Zoom"), Some("50%"));
+    assert_eq!(get("Posição"), Some("3 de 12"));
 }
 
 #[test]
-fn info_lines_fold_names_and_skip_the_position_for_one_image() {
-    let l = info_lines(
+fn info_rows_keep_accents_and_skip_the_position_for_one_image() {
+    let l = info_rows(
         "ação.bmp".as_bytes(),
         2,
         2,
@@ -319,26 +336,37 @@ fn info_lines_fold_names_and_skip_the_position_for_one_image() {
         70,
         1000,
         (0, 1),
+        true,
     );
-    assert_eq!(l[0], "acao.bmp");
-    assert_eq!(l.len(), 6);
-    assert!(l.iter().all(|s| s.is_ascii()));
-    let l = info_lines(b"x", 1, 1, None, 0, 1000, (0, 1));
-    assert_eq!(l[3], "Formato: ?");
+    assert_eq!(l[0].1, "ação.bmp");
+    assert!(l.iter().all(|(k, _)| k != "Posição"));
+    assert!(l.iter().any(|(k, v)| k == "Transparência" && v == "Sim"));
+    let l = info_rows(b"x", 1, 1, None, 0, 1000, (0, 1), false);
+    assert!(l.iter().any(|(k, v)| k == "Formato" && v == "—"));
 }
 
 #[test]
-fn decode_errors_have_messages() {
+fn decode_errors_have_friendly_messages() {
     let e = crate::image::decode(b"not an image").unwrap_err();
     let m = decode_error_message(&e);
-    assert!(m[0].contains("desconhecido"));
+    assert_eq!(m[0], "Formato não reconhecido");
+    assert!(m[1].contains("PNG, BMP e PPM"));
     let e = crate::image::decode(b"\x89PNG\r\n\x1a\ngarbage").unwrap_err();
     let m = decode_error_message(&e);
-    assert!(m[0].contains("PNG") && m[0].is_ascii() && !m[1].is_empty());
+    assert!(m[1].contains("PNG") && !m[0].is_empty());
     let e = crate::image::decode(b"BM\0\0\0").unwrap_err();
-    assert!(decode_error_message(&e)[0].contains("BMP"));
+    assert!(decode_error_message(&e)[1].contains("BMP"));
     let e = crate::image::decode(b"P6\n").unwrap_err();
-    assert!(decode_error_message(&e)[0].contains("PPM"));
+    assert!(decode_error_message(&e)[1].contains("PPM"));
+    // Plain words for the user: no codes, no implementation talk.
+    for m in [
+        decode_error_message(&e),
+        decode_error_message(&crate::image::decode(b"x").unwrap_err()),
+    ] {
+        for line in &m {
+            assert!(!line.to_lowercase().contains("rust") && !line.contains("0x"));
+        }
+    }
 }
 
 #[test]
@@ -350,8 +378,64 @@ fn image_errors_have_messages() {
         ImageError::BadBuffer,
         ImageError::OutOfBounds,
     ] {
-        assert!(image_error_message(e).is_ascii());
+        assert!(!image_error_message(e).is_empty());
     }
+    assert_eq!(
+        image_error_message(ImageError::OutOfMemory),
+        "Memória insuficiente"
+    );
+}
+
+#[test]
+fn fill_covers_the_viewport_where_fit_stays_inside() {
+    // A wide picture in a squarer window: fit leaves bars, fill crops the sides.
+    let (iw, ih, vw, vh) = (800usize, 400usize, 500, 400);
+    let fit = fit_zoom(iw, ih, vw, vh);
+    let fill = fill_zoom(iw, ih, vw, vh);
+    assert_eq!(fit, 625);
+    assert_eq!(fill, 1000);
+    assert!(fill >= fit);
+    // Whatever the shape, the filled image covers both dimensions.
+    for (iw, ih, vw, vh) in [
+        (100, 300, 640, 480),
+        (4000, 3000, 300, 300),
+        (7, 5, 800, 600),
+    ] {
+        let z = fill_zoom(iw, ih, vw, vh).min(MAX_ZOOM);
+        assert!(
+            scaled_dim(iw, z) as i32 >= vw || z == MAX_ZOOM,
+            "{iw}x{ih} in {vw}x{vh}"
+        );
+        assert!(scaled_dim(ih, z) as i32 >= vh || z == MAX_ZOOM);
+    }
+    assert_eq!(fill_zoom(0, 5, 100, 100), 1000);
+    assert_eq!(fill_zoom(5, 5, 0, 100), 1000);
+    assert_eq!(fill_zoom(1, 1, 1000, 1000), MAX_ZOOM);
+}
+
+#[test]
+fn view_fill_mode_follows_the_viewport_and_leaves_on_zoom() {
+    let mut v = View::default();
+    v.fill_to(800, 400, 500, 400);
+    assert!(v.fill && !v.fit);
+    assert_eq!(v.zoom, 1000);
+    // Dragging the filled picture sideways is allowed; a resize keeps the pan.
+    v.pan_by(-60, 0, 800, 400, 500, 400);
+    assert_eq!(v.pan_x, -60);
+    v.relayout(800, 400, 560, 400);
+    assert!(v.fill);
+    assert_eq!(v.pan_x, -60);
+    assert_eq!(v.zoom, fill_zoom(800, 400, 560, 400));
+    // Zooming, fitting and 100% all leave fill mode.
+    let mut z = v;
+    z.zoom_in(800, 400, 560, 400);
+    assert!(!z.fill);
+    let mut f = v;
+    f.fit_to(800, 400, 560, 400);
+    assert!(f.fit && !f.fill);
+    let mut a = v;
+    a.actual();
+    assert!(!a.fill && !a.fit);
 }
 
 #[test]

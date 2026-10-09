@@ -1140,6 +1140,25 @@ fn prompt_swallows_editing_keys() {
 }
 
 #[test]
+fn a_click_on_a_bar_field_moves_the_focus() {
+    let mut e = ed("abc abc");
+    let mut clip = Clipboard::new();
+    e.open_replace();
+    assert_eq!(e.prompt().map(|p| p.active), Some(0));
+    e.prompt_focus(1);
+    assert_eq!(e.prompt().map(|p| p.active), Some(1));
+    press(&mut e, &mut clip, KeyCode::Char('x'), Mods::NONE);
+    assert_eq!(e.prompt().and_then(|p| p.text2), Some("x"));
+    e.prompt_focus(0);
+    assert_eq!(e.prompt().map(|p| p.active), Some(0));
+    // The find prompt has no replacement field to focus.
+    e.close_prompt();
+    e.open_find();
+    e.prompt_focus(1);
+    assert_eq!(e.prompt().map(|p| p.active), Some(0));
+}
+
+#[test]
 fn f3_finds_next() {
     let mut e = ed("x y x");
     e.set_search("x", true);

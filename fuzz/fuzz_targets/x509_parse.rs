@@ -85,6 +85,19 @@ fuzz_target!(|data: &[u8]| {
         }
     }
 
+    // What the security popover shows of a server certificate: any bytes, any host text.
+    if let Some(ci) = osjeff_core::browser::CertInfo::from_leaf(
+        rest,
+        &String::from_utf8_lossy(&rest[..rest.len().min(40)]),
+        usize::from(mode),
+        Some(&String::from_utf8_lossy(&rest[rest.len().saturating_sub(30)..])),
+    ) {
+        assert!(!ci.issuer.contains(['\n', '\r', '\0']));
+        assert!(!ci.host.contains(['\n', '\r', '\0']));
+        let _ = osjeff_core::browser::cert::format_date(ci.not_before);
+        let _ = osjeff_core::browser::cert::format_date(ci.not_after);
+    }
+
     // Chain validation against a real trust anchor (the first embedded root).
     let embedded = TrustStore::embedded();
     let Some(root) = embedded.der(0) else { return };

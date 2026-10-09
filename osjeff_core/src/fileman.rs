@@ -2,23 +2,24 @@
 //!
 //! The kernel draws and routes input; this module decides:
 //!
-//! * [`FileView`]: one window's state (current path, rows, sort, selection, scroll,
+//! * [`FileView`]: one window's state (current path, rows, sort, search filter, selection,
 //!   history) and how it reloads from a [`Backend`]. The trash is the pseudo path
-//!   [`TRASH_PATH`], so navigation history, the address bar and the sidebar treat it
-//!   like any other place.
+//!   [`TRASH_PATH`], so navigation history, the path bar and the sidebar treat it like any
+//!   other place.
 //! * Sorting ([`natural_cmp`], [`Sort`]), multi-selection ([`Selection`]: click,
-//!   Ctrl+click, Shift+click, Ctrl+A, Shift+arrows), breadcrumbs, [`History`].
-//! * [`Layout`]: the window's geometry and hit-testing, shared by the renderer and
-//!   the mouse handler so they cannot disagree.
+//!   Ctrl+click, Shift+click, Ctrl+A, Shift+arrows), breadcrumbs, [`History`], [`Place`].
+//! * [`ui`]: the window's geometry and hit-testing, the list and icon-grid models, the
+//!   path bar, rubber band, drag-and-drop rules, the smooth scroller and the preview
+//!   helpers, shared by the renderer and the mouse handler so they cannot disagree.
 //! * Small pure helpers: [`format_size`], [`format_datetime`], [`display_ascii`]
-//!   (UTF-8 names for the ASCII-only bitmap font), [`TextInput`] (the inline name
-//!   editor), [`PathClip`] (the shared copy/cut clipboard), [`classify`] (what
-//!   "open" means for a file), [`context_menu`].
+//!   (folding names for the accent-insensitive search), [`TextInput`] (the inline name
+//!   editor with selection), [`PathClip`] (the shared copy/cut clipboard), [`classify`]
+//!   (what "open" means for a file), [`context_menu`].
 
 pub mod apps;
+pub mod ui;
 
 use crate::vfs::{self, Backend, Entry, EntryKind, VfsError};
-use crate::window::Rect;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
@@ -361,10 +362,10 @@ pub struct Crumb {
     pub path: Vec<u8>,
 }
 
-/// The crumbs of `path`: `Raiz`, then one per folder (`Lixeira` for the trash).
+/// The crumbs of `path`: `Disco`, then one per folder (`Lixeira` for the trash).
 pub fn breadcrumbs(path: &[u8]) -> Vec<Crumb> {
     let mut out = alloc::vec![Crumb {
-        label: b"Raiz".to_vec(),
+        label: b"Disco".to_vec(),
         path: b"/".to_vec(),
     }];
     if path == TRASH_PATH {
@@ -391,25 +392,6 @@ pub fn breadcrumbs(path: &[u8]) -> Vec<Crumb> {
         });
     }
     out
-}
-
-/// Index of the first crumb to show so the bar fits in `max_chars` columns
-/// (labels joined by a 3-column separator, plus a 4-column `... ` marker when
-/// leading crumbs are hidden). The last crumb is always shown.
-pub fn first_visible_crumb(label_lens: &[usize], max_chars: usize) -> usize {
-    let n = label_lens.len();
-    if n == 0 {
-        return 0;
-    }
-    let width = |from: usize| -> usize {
-        let body: usize = label_lens[from..].iter().sum::<usize>() + 3 * (n - from - 1);
-        if from > 0 { body + 4 } else { body }
-    };
-    let mut from = 0;
-    while from + 1 < n && width(from) > max_chars {
-        from += 1;
-    }
-    from
 }
 
 /// Back/forward history of locations.
@@ -605,22 +587,29 @@ pub fn ellipsize(text: &[u8], max: usize) -> Vec<u8> {
 // Inline text input
 // ---------------------------------------------------------------------------
 
-/// A one-line text field (new name, rename, save-as).
+/// A one-line text field (new name, rename, save-as, search) with an optional selection.
 #[derive(Clone, Debug)]
 pub struct TextInput {
     buf: Vec<u8>,
     /// Byte offset of the caret, always on a UTF-8 boundary.
     cur: usize,
+    /// The other end of the selection (the caret is the moving end).
+    anchor: Option<usize>,
     max: usize,
 }
 
 impl TextInput {
     /// A field holding `initial`, caret at the end, at most `max` bytes.
     pub fn new(initial: &[u8], max: usize) -> Self {
-        let buf = initial[..initial.len().min(max)].to_vec();
+        let mut end = initial.len().min(max);
+        while end > 0 && end < initial.len() && initial[end] & 0xC0 == 0x80 {
+            end -= 1;
+        }
+        let buf = initial[..end].to_vec();
         TextInput {
             cur: buf.len(),
             buf,
+            anchor: None,
             max,
         }
     }
@@ -629,18 +618,77 @@ impl TextInput {
         &self.buf
     }
 
+    /// The text as a string (invalid UTF-8 shown as replacement characters).
+    pub fn to_string_lossy(&self) -> String {
+        String::from_utf8_lossy(&self.buf).into_owned()
+    }
+
     /// The caret's byte offset.
     pub fn caret(&self) -> usize {
         self.cur
     }
 
-    /// Insert a printable byte at the caret (control bytes and `/` are ignored).
+    /// The selected byte range `(start, end)`, if any.
+    pub fn selection(&self) -> Option<(usize, usize)> {
+        let a = self.anchor?;
+        (a != self.cur).then(|| (a.min(self.cur), a.max(self.cur)))
+    }
+
+    /// Select everything.
+    pub fn select_all(&mut self) {
+        self.anchor = Some(0);
+        self.cur = self.buf.len();
+    }
+
+    /// Select the name without its extension (what renaming starts with): up to the last dot,
+    /// unless the dot starts the name; everything when there is no extension.
+    pub fn select_stem(&mut self) {
+        let end = match self.buf.iter().rposition(|&b| b == b'.') {
+            Some(i) if i > 0 => i,
+            _ => self.buf.len(),
+        };
+        self.anchor = Some(0);
+        self.cur = end;
+    }
+
+    /// Delete the selected text, leaving the caret at its start. `true` when there was some.
+    fn delete_selection(&mut self) -> bool {
+        match self.selection() {
+            Some((a, b)) => {
+                self.buf.drain(a..b);
+                self.cur = a;
+                self.anchor = None;
+                true
+            }
+            None => {
+                self.anchor = None;
+                false
+            }
+        }
+    }
+
+    /// Insert a printable byte at the caret, replacing the selection (control bytes and `/`
+    /// are ignored). A byte above 127 is a Latin-1 character and is stored as UTF-8.
     pub fn insert(&mut self, b: u8) {
-        if b < 0x20 || b == 0x7F || b == b'/' || self.buf.len() >= self.max {
+        if b < 0x20 || b == 0x7F || b == b'/' {
             return;
         }
-        self.buf.insert(self.cur, b);
-        self.cur += 1;
+        let mut tmp = [0u8; 4];
+        let enc: &[u8] = if b < 0x80 {
+            tmp[0] = b;
+            &tmp[..1]
+        } else {
+            char::from(b).encode_utf8(&mut tmp).as_bytes()
+        };
+        let removed = self.selection().map_or(0, |(a, z)| z - a);
+        if self.buf.len() - removed + enc.len() > self.max {
+            return;
+        }
+        self.delete_selection();
+        for (k, &x) in enc.iter().enumerate() {
+            self.buf.insert(self.cur + k, x);
+        }
+        self.cur += enc.len();
     }
 
     fn prev_boundary(&self, mut i: usize) -> usize {
@@ -663,32 +711,52 @@ impl TextInput {
         i
     }
 
-    /// Delete the character before the caret.
+    /// Delete the selection, else the character before the caret.
     pub fn backspace(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
         let p = self.prev_boundary(self.cur);
         self.buf.drain(p..self.cur);
         self.cur = p;
     }
 
-    /// Delete the character at the caret.
+    /// Delete the selection, else the character at the caret.
     pub fn delete(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
         let n = self.next_boundary(self.cur);
         self.buf.drain(self.cur..n);
     }
 
+    /// Move left; over a selection, collapse to its start.
     pub fn left(&mut self) {
-        self.cur = self.prev_boundary(self.cur);
+        if let Some((a, _)) = self.selection() {
+            self.cur = a;
+        } else {
+            self.cur = self.prev_boundary(self.cur);
+        }
+        self.anchor = None;
     }
 
+    /// Move right; over a selection, collapse to its end.
     pub fn right(&mut self) {
-        self.cur = self.next_boundary(self.cur);
+        if let Some((_, b)) = self.selection() {
+            self.cur = b;
+        } else {
+            self.cur = self.next_boundary(self.cur);
+        }
+        self.anchor = None;
     }
 
     pub fn home(&mut self) {
+        self.anchor = None;
         self.cur = 0;
     }
 
     pub fn end(&mut self) {
+        self.anchor = None;
         self.cur = self.buf.len();
     }
 
@@ -696,6 +764,12 @@ impl TextInput {
     pub fn clear(&mut self) {
         self.buf.clear();
         self.cur = 0;
+        self.anchor = None;
+    }
+
+    /// Replace the whole text.
+    pub fn set(&mut self, text: &[u8]) {
+        *self = TextInput::new(text, self.max);
     }
 
     /// The caret's column in the folded display text ([`display_ascii`]).
@@ -833,6 +907,50 @@ pub enum Cmd {
     InstallApp,
     /// Apps place: remove the selected installed app.
     RemoveApp,
+    /// Sort by a column (the sort menu): the same column again flips the direction.
+    SortBy(SortKey),
+    /// Set the sort direction (`true` = ascending).
+    SortDir(bool),
+    /// Switch between the list and the icon grid.
+    SetView(ui::ViewMode),
+    /// Show or hide the preview pane (Space).
+    TogglePreview,
+}
+
+impl Cmd {
+    /// Menu group: entries of different groups are separated by a line.
+    pub fn group(self) -> u8 {
+        match self {
+            Cmd::Open | Cmd::Restore | Cmd::InstallApp | Cmd::TogglePreview => 0,
+            Cmd::SetWallpaper => 1,
+            Cmd::NewFile | Cmd::NewFolder => 2,
+            Cmd::Cut | Cmd::Copy | Cmd::Paste | Cmd::Rename => 3,
+            Cmd::Delete | Cmd::DeletePermanent | Cmd::EmptyTrash | Cmd::RemoveApp => 4,
+            Cmd::SelectAll
+            | Cmd::Refresh
+            | Cmd::Properties
+            | Cmd::SortBy(_)
+            | Cmd::SortDir(_)
+            | Cmd::SetView(_) => 5,
+        }
+    }
+
+    /// The keyboard shortcut shown next to the entry.
+    pub fn shortcut(self) -> &'static str {
+        match self {
+            Cmd::Open => "Enter",
+            Cmd::Copy => "Ctrl+C",
+            Cmd::Cut => "Ctrl+X",
+            Cmd::Paste => "Ctrl+V",
+            Cmd::Rename => "F2",
+            Cmd::Delete => "Del",
+            Cmd::SelectAll => "Ctrl+A",
+            Cmd::Refresh => "F5",
+            Cmd::TogglePreview => "Espaço",
+            Cmd::NewFolder => "N",
+            _ => "",
+        }
+    }
 }
 
 /// What the context menu is about to be shown for.
@@ -862,7 +980,7 @@ pub fn context_menu(ctx: MenuCtx) -> Vec<(Cmd, &'static str)> {
                 m.push((Cmd::Open, "Instalar e abrir"));
                 m.push((Cmd::InstallApp, "Instalar"));
             }
-            m.push((Cmd::Properties, "Propriedades"));
+            m.push((Cmd::Properties, "Informações"));
         }
         m.push((Cmd::Refresh, "Atualizar"));
         return m;
@@ -871,15 +989,18 @@ pub fn context_menu(ctx: MenuCtx) -> Vec<(Cmd, &'static str)> {
         if ctx.selected > 0 {
             m.push((Cmd::Restore, "Restaurar"));
             m.push((Cmd::DeletePermanent, "Excluir permanentemente"));
-            m.push((Cmd::Properties, "Propriedades"));
         }
-        m.push((Cmd::EmptyTrash, "Esvaziar lixeira"));
+        m.push((Cmd::EmptyTrash, "Esvaziar a lixeira"));
+        if ctx.selected > 0 {
+            m.push((Cmd::Properties, "Informações"));
+        }
         m.push((Cmd::SelectAll, "Selecionar tudo"));
         return m;
     }
     if ctx.selected > 0 {
         if ctx.selected == 1 {
             m.push((Cmd::Open, "Abrir"));
+            m.push((Cmd::TogglePreview, "Pré-visualizar"));
         }
         if ctx.selected == 1 && ctx.image {
             m.push((Cmd::SetWallpaper, "Definir como papel de parede"));
@@ -891,7 +1012,7 @@ pub fn context_menu(ctx: MenuCtx) -> Vec<(Cmd, &'static str)> {
         }
         m.push((Cmd::Delete, "Excluir"));
         m.push((Cmd::DeletePermanent, "Excluir permanentemente"));
-        m.push((Cmd::Properties, "Propriedades"));
+        m.push((Cmd::Properties, "Informações"));
     } else {
         m.push((Cmd::NewFile, "Novo arquivo"));
         m.push((Cmd::NewFolder, "Nova pasta"));
@@ -900,243 +1021,64 @@ pub fn context_menu(ctx: MenuCtx) -> Vec<(Cmd, &'static str)> {
         }
         m.push((Cmd::SelectAll, "Selecionar tudo"));
         m.push((Cmd::Refresh, "Atualizar"));
-        m.push((Cmd::Properties, "Propriedades"));
+        m.push((Cmd::Properties, "Informações"));
     }
     m
 }
 
 // ---------------------------------------------------------------------------
-// Layout and hit testing
+// Places
 // ---------------------------------------------------------------------------
 
 /// Sidebar places.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Place {
-    Root,
+    /// The user's folder (`/home`).
+    Home,
     Documents,
+    Images,
     /// Installed and bundled apps (`APPS_PATH`).
     Apps,
     Trash,
-    /// The disk entry (shows usage); opens the root.
+    /// The volume (its root); the entry shows the usage bar.
     Disk,
 }
 
-/// What a click landed on.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Hit {
-    Back,
-    Forward,
-    Up,
-    /// Crumb index (into the full crumb list).
-    Crumb(usize),
-    /// Empty part of the address bar.
-    Address,
-    Place(Place),
-    Header(SortKey),
-    /// A list row (absolute index; may be past the last row: check the count).
-    Row(usize),
-    /// The scrollbar track: fraction of the way down in permille.
-    Scroll(u32),
-    /// Empty space in the list.
-    Blank,
-}
-
-pub const TITLE_H: i32 = crate::window::TITLE_H;
-pub const TOOLBAR_H: i32 = 40;
-pub const SIDEBAR_W: i32 = 164;
-pub const HEADER_H: i32 = 24;
-pub const ROW_H: i32 = 24;
-pub const STATUS_H: i32 = 30;
-pub const SCROLL_W: i32 = 12;
-pub const SIZE_COL_W: i32 = 104;
-pub const DATE_COL_W: i32 = 204;
-pub const SIDE_ROW_H: i32 = 28;
-/// Advance of one character of the 2x font.
-pub const CELL: i32 = 12;
-
-/// Geometry of a file-manager window, all in screen coordinates.
-#[derive(Clone, Copy, Debug)]
-pub struct Layout {
-    pub window: Rect,
-    pub back: Rect,
-    pub forward: Rect,
-    pub up: Rect,
-    pub address: Rect,
-    pub sidebar: Rect,
-    pub header: Rect,
-    pub list: Rect,
-    pub status: Rect,
-    pub scrollbar: Rect,
-    /// X of the size column's left edge and of the date column's left edge.
-    pub size_x: i32,
-    pub date_x: i32,
-    pub name_x: i32,
-}
-
-impl Layout {
-    /// Geometry for a window at `r`.
-    pub fn of(r: Rect) -> Layout {
-        let top = r.y + TITLE_H;
-        let b = 28;
-        let by = top + (TOOLBAR_H - b) / 2;
-        let main_x = r.x + SIDEBAR_W;
-        let right = r.right();
-        let bottom = r.bottom();
-        let list_top = top + TOOLBAR_H + HEADER_H;
-        let list_h = (bottom - STATUS_H - list_top).max(0);
-        let date_x = right - SCROLL_W - DATE_COL_W;
-        Layout {
-            window: r,
-            back: Rect::new(r.x + 10, by, b, b),
-            forward: Rect::new(r.x + 10 + b + 6, by, b, b),
-            up: Rect::new(r.x + 10 + 2 * (b + 6), by, b, b),
-            address: Rect::new(
-                r.x + 10 + 3 * (b + 6) + 4,
-                by,
-                (right - 10 - (r.x + 10 + 3 * (b + 6) + 4)).max(0),
-                b,
-            ),
-            sidebar: Rect::new(
-                r.x,
-                top + TOOLBAR_H,
-                SIDEBAR_W,
-                (bottom - STATUS_H - top - TOOLBAR_H).max(0),
-            ),
-            header: Rect::new(main_x, top + TOOLBAR_H, (right - main_x).max(0), HEADER_H),
-            list: Rect::new(main_x, list_top, (right - main_x - SCROLL_W).max(0), list_h),
-            status: Rect::new(r.x, bottom - STATUS_H, r.w, STATUS_H),
-            scrollbar: Rect::new(right - SCROLL_W, list_top, SCROLL_W, list_h),
-            size_x: date_x - SIZE_COL_W,
-            date_x,
-            name_x: main_x + 34,
+impl Place {
+    /// The location the place opens.
+    pub fn path(self) -> &'static [u8] {
+        match self {
+            Place::Home => b"/home",
+            Place::Documents => b"/Documentos",
+            Place::Images => b"/Imagens",
+            Place::Apps => APPS_PATH,
+            Place::Trash => TRASH_PATH,
+            Place::Disk => b"/",
         }
     }
 
-    /// Rows that fit in the list area.
-    pub fn visible_rows(&self) -> usize {
-        (self.list.h / ROW_H).max(0) as usize
+    /// Whether the place has to exist as a folder on the volume (and is created when it does
+    /// not).
+    pub fn is_folder(self) -> bool {
+        !matches!(self, Place::Apps | Place::Trash | Place::Disk)
     }
 
-    /// Y of row `i` given the first visible row.
-    pub fn row_y(&self, i: usize, scroll: usize) -> i32 {
-        self.list.y + (i as i32 - scroll as i32) * ROW_H
-    }
-
-    /// Sidebar row rectangles `(place, rect)`; the disk entry is taller (usage bar).
-    pub fn places(&self) -> [(Place, Rect); 5] {
-        let x = self.sidebar.x + 8;
-        let w = SIDEBAR_W - 16;
-        let y0 = self.sidebar.y + 26;
-        [
-            (Place::Root, Rect::new(x, y0, w, SIDE_ROW_H)),
-            (
-                Place::Documents,
-                Rect::new(x, y0 + SIDE_ROW_H + 2, w, SIDE_ROW_H),
-            ),
-            (
-                Place::Apps,
-                Rect::new(x, y0 + 2 * (SIDE_ROW_H + 2), w, SIDE_ROW_H),
-            ),
-            (
-                Place::Trash,
-                Rect::new(x, y0 + 3 * (SIDE_ROW_H + 2), w, SIDE_ROW_H),
-            ),
-            (
-                Place::Disk,
-                Rect::new(x, y0 + 4 * (SIDE_ROW_H + 2) + 28, w, 46),
-            ),
-        ]
-    }
-
-    /// Where the address bar draws each visible crumb: `(index, x, width_px)`, and
-    /// whether leading crumbs were folded into a `...` marker.
-    pub fn crumb_spans(&self, labels: &[usize]) -> (Vec<(usize, i32, i32)>, bool) {
-        let inner = (self.address.w - 20).max(0) / CELL;
-        let first = first_visible_crumb(labels, inner as usize);
-        let mut x = self.address.x + 10;
-        if first > 0 {
-            x += 4 * CELL;
+    /// The place that contains `cwd`, for highlighting the sidebar: the deepest favourite
+    /// that is a prefix of the path, else the disk for any other folder.
+    pub fn of_path(cwd: &[u8]) -> Place {
+        if cwd == TRASH_PATH {
+            return Place::Trash;
         }
-        let mut out = Vec::new();
-        for (i, &len) in labels.iter().enumerate().skip(first) {
-            let w = len as i32 * CELL;
-            out.push((i, x, w));
-            x += w + 3 * CELL;
+        if cwd == APPS_PATH {
+            return Place::Apps;
         }
-        (out, first > 0)
-    }
-
-    /// Resolve a press at `(px, py)`. `scroll` is the first visible row and
-    /// `labels` the crumb label lengths.
-    pub fn hit(&self, px: i32, py: i32, scroll: usize, labels: &[usize]) -> Option<Hit> {
-        if !self.window.contains(px, py) {
-            return None;
-        }
-        if self.back.contains(px, py) {
-            return Some(Hit::Back);
-        }
-        if self.forward.contains(px, py) {
-            return Some(Hit::Forward);
-        }
-        if self.up.contains(px, py) {
-            return Some(Hit::Up);
-        }
-        if self.address.contains(px, py) {
-            let (spans, _) = self.crumb_spans(labels);
-            for (i, x, w) in spans {
-                if px >= x && px < x + w {
-                    return Some(Hit::Crumb(i));
-                }
+        for p in [Place::Home, Place::Documents, Place::Images] {
+            let base = p.path();
+            if cwd == base || (cwd.starts_with(base) && cwd.get(base.len()) == Some(&b'/')) {
+                return p;
             }
-            return Some(Hit::Address);
         }
-        if self.sidebar.contains(px, py) {
-            return self
-                .places()
-                .iter()
-                .find(|(_, r)| r.contains(px, py))
-                .map(|&(p, _)| Hit::Place(p));
-        }
-        if self.header.contains(px, py) {
-            let key = if px >= self.date_x {
-                SortKey::Modified
-            } else if px >= self.size_x {
-                SortKey::Size
-            } else {
-                SortKey::Name
-            };
-            return Some(Hit::Header(key));
-        }
-        if self.scrollbar.contains(px, py) {
-            let frac = ((py - self.scrollbar.y) as i64 * 1000 / self.scrollbar.h.max(1) as i64)
-                .clamp(0, 1000) as u32;
-            return Some(Hit::Scroll(frac));
-        }
-        if self.list.contains(px, py) {
-            let i = scroll + ((py - self.list.y) / ROW_H) as usize;
-            return Some(Hit::Row(i));
-        }
-        None
-    }
-
-    /// First visible row that a scrollbar press at `permille` maps to.
-    pub fn scroll_for(&self, permille: u32, rows: usize) -> usize {
-        let max = rows.saturating_sub(self.visible_rows());
-        ((max as u64 * permille as u64) / 1000) as usize
-    }
-
-    /// Scrollbar thumb `(y, height)` for the given scroll position.
-    pub fn thumb(&self, scroll: usize, rows: usize) -> (i32, i32) {
-        let vis = self.visible_rows();
-        let h = self.scrollbar.h;
-        if rows <= vis || rows == 0 {
-            return (self.scrollbar.y, h);
-        }
-        let th = ((h as i64 * vis as i64) / rows as i64).max(24) as i32;
-        let th = th.min(h);
-        let max = (rows - vis) as i64;
-        let y = self.scrollbar.y + ((h - th) as i64 * scroll as i64 / max) as i32;
-        (y, th)
+        Place::Disk
     }
 }
 
@@ -1162,14 +1104,19 @@ pub enum Activation {
 pub struct FileView {
     /// `/`, a folder path, [`TRASH_PATH`] or [`APPS_PATH`].
     pub cwd: Vec<u8>,
+    /// The rows shown: the folder's, filtered by the search and sorted.
     pub rows: Vec<Row>,
+    /// While a search filter is active: every row of the place (sorted), of which `rows` is
+    /// the part that matches. Empty otherwise, so an unfiltered view holds its rows once.
+    all: Vec<Row>,
+    filter: Vec<u8>,
     pub sort: Sort,
     pub sel: Selection,
-    /// First visible row.
-    pub scroll: usize,
     pub history: History,
     /// More rows existed than [`MAX_ROWS`].
     pub truncated: bool,
+    /// Bumped each time the view moves to another place, so the window can reset its scroll.
+    pub nav_gen: u32,
 }
 
 impl Default for FileView {
@@ -1184,11 +1131,13 @@ impl FileView {
         FileView {
             cwd: b"/".to_vec(),
             rows: Vec::new(),
+            all: Vec::new(),
+            filter: Vec::new(),
             sort: Sort::DEFAULT,
             sel: Selection::new(),
-            scroll: 0,
             history: History::new(b"/"),
             truncated: false,
+            nav_gen: 0,
         }
     }
 
@@ -1201,6 +1150,76 @@ impl FileView {
         self.cwd == APPS_PATH
     }
 
+    /// The search text (empty when not searching).
+    pub fn filter(&self) -> &[u8] {
+        &self.filter
+    }
+
+    /// How many rows the place has before the search filter.
+    pub fn total_rows(&self) -> usize {
+        if self.filter.is_empty() {
+            self.rows.len()
+        } else {
+            self.all.len()
+        }
+    }
+
+    /// Show only the rows whose name matches `query` (accent and case insensitive); an empty
+    /// query shows all. The selection follows the rows by name.
+    pub fn set_filter(&mut self, query: &[u8]) {
+        if query == &self.filter[..] {
+            return;
+        }
+        let keep = self.selected_names();
+        let cursor = self.rows.get(self.sel.cursor()).map(|r| r.name.clone());
+        // Back to the full list first, then filter it afresh.
+        if !self.filter.is_empty() {
+            self.rows = core::mem::take(&mut self.all);
+        }
+        self.filter = query.to_vec();
+        self.apply_filter();
+        self.sel.restore(&self.rows, &keep, cursor.as_deref());
+    }
+
+    /// Drop the search filter (the rows come back).
+    pub fn clear_filter(&mut self) {
+        self.set_filter(b"");
+    }
+
+    /// Filter `rows` (which hold the full list) in place, parking the full list in `all`.
+    fn apply_filter(&mut self) {
+        if self.filter.is_empty() {
+            return;
+        }
+        let key = ui::query_key(&self.filter);
+        let shown: Vec<Row> = self
+            .rows
+            .iter()
+            .filter(|r| ui::matches_key(&r.name, &key))
+            .cloned()
+            .collect();
+        self.all = core::mem::replace(&mut self.rows, shown);
+    }
+
+    fn selected_names(&self) -> Vec<Vec<u8>> {
+        self.sel
+            .selected()
+            .into_iter()
+            .filter_map(|i| self.rows.get(i).map(|r| r.name.clone()))
+            .collect()
+    }
+
+    /// Replace the place's rows with `rows` (sorted here), keeping selection by name.
+    fn load(&mut self, mut rows: Vec<Row>, keep: &[Vec<u8>], cursor: Option<&[u8]>) {
+        self.truncated = rows.len() > MAX_ROWS;
+        rows.truncate(MAX_ROWS);
+        sort_rows(&mut rows, self.sort);
+        self.all.clear();
+        self.rows = rows;
+        self.apply_filter();
+        self.sel.restore(&self.rows, keep, cursor);
+    }
+
     /// Reload the rows of the current place from `b`, keeping the selection by name.
     /// A folder that no longer exists moves the view to the closest existing parent.
     pub fn refresh<B: Backend + ?Sized>(&mut self, b: &mut B) -> Result<(), VfsError> {
@@ -1210,19 +1229,14 @@ impl FileView {
             // over from the folder we came from (app rows always have an id) go.
             if self.rows.iter().any(|r| r.id.is_empty()) {
                 self.rows.clear();
+                self.all.clear();
                 self.sel.reset(0);
             }
-            self.clamp_scroll();
             return Ok(());
         }
-        let keep: Vec<Vec<u8>> = self
-            .sel
-            .selected()
-            .into_iter()
-            .filter_map(|i| self.rows.get(i).map(|r| r.name.clone()))
-            .collect();
+        let keep = self.selected_names();
         let cursor = self.rows.get(self.sel.cursor()).map(|r| r.name.clone());
-        let mut rows: Vec<Row> = if self.in_trash() {
+        let rows: Vec<Row> = if self.in_trash() {
             b.trash_list()?
                 .into_iter()
                 .map(|t| Row {
@@ -1242,17 +1256,13 @@ impl FileView {
                         let up = vfs::parent(&self.cwd);
                         self.cwd = up;
                         self.history.replace_current(&self.cwd);
+                        self.nav_gen = self.nav_gen.wrapping_add(1);
                     }
                     Err(e) => return Err(e),
                 }
             }
         };
-        self.truncated = rows.len() > MAX_ROWS;
-        rows.truncate(MAX_ROWS);
-        sort_rows(&mut rows, self.sort);
-        self.sel.restore(&rows, &keep, cursor.as_deref());
-        self.rows = rows;
-        self.clamp_scroll();
+        self.load(rows, &keep, cursor.as_deref());
         Ok(())
     }
 
@@ -1270,13 +1280,17 @@ impl FileView {
             }
         }
         let old = core::mem::replace(&mut self.cwd, path.to_vec());
-        self.scroll = 0;
+        let old_filter = core::mem::take(&mut self.filter);
+        let old_all = core::mem::take(&mut self.all);
         self.sel.reset(0);
         if let Err(e) = self.refresh(b) {
             self.cwd = old;
+            self.filter = old_filter;
+            self.all = old_all;
             let _ = self.refresh(b);
             return Err(e);
         }
+        self.nav_gen = self.nav_gen.wrapping_add(1);
         self.history.push(&self.cwd);
         self.select_first();
         Ok(())
@@ -1288,20 +1302,22 @@ impl FileView {
     pub fn set_apps(&mut self, items: &[apps::AppItem]) {
         let cursor_id = self.rows.get(self.sel.cursor()).map(|r| r.id.clone());
         let had_selection = self.sel.count() > 0;
-        let mut rows = apps::rows(items);
+        let was_empty = self.rows.is_empty();
+        let rows = apps::rows(items);
         self.truncated = false;
-        sort_rows(&mut rows, self.sort);
-        self.sel.reset(rows.len());
-        if had_selection || self.rows.is_empty() {
+        self.all.clear();
+        self.rows = rows;
+        sort_rows(&mut self.rows, self.sort);
+        self.apply_filter();
+        self.sel.reset(self.rows.len());
+        if had_selection || was_empty {
             let at = cursor_id
-                .and_then(|id| rows.iter().position(|r| r.id == id))
+                .and_then(|id| self.rows.iter().position(|r| r.id == id))
                 .unwrap_or(0);
-            if !rows.is_empty() {
+            if !self.rows.is_empty() {
                 self.sel.only(at);
             }
         }
-        self.rows = rows;
-        self.clamp_scroll();
     }
 
     /// Put the cursor (and the selection) on the first row, if there is one.
@@ -1321,9 +1337,7 @@ impl FileView {
         if up == self.cwd {
             return Ok(());
         }
-        let r = self.navigate(b, &up);
-        // Land on the folder we came from.
-        r
+        self.navigate(b, &up)
     }
 
     /// History back.
@@ -1344,7 +1358,9 @@ impl FileView {
 
     fn go_to_history<B: Backend + ?Sized>(&mut self, b: &mut B, p: &[u8]) -> Result<(), VfsError> {
         self.cwd = p.to_vec();
-        self.scroll = 0;
+        self.filter.clear();
+        self.all.clear();
+        self.nav_gen = self.nav_gen.wrapping_add(1);
         self.sel.reset(0);
         let r = self.refresh(b);
         self.select_first();
@@ -1357,15 +1373,23 @@ impl FileView {
         self.resort();
     }
 
+    /// Sort by `key`: the same key as now flips nothing (menu entries pick, headers toggle).
+    pub fn set_sort(&mut self, key: SortKey) {
+        if self.sort.key != key {
+            self.sort = Sort { key, asc: true };
+            self.resort();
+        }
+    }
+
     fn resort(&mut self) {
-        let keep: Vec<Vec<u8>> = self
-            .sel
-            .selected()
-            .into_iter()
-            .filter_map(|i| self.rows.get(i).map(|r| r.name.clone()))
-            .collect();
+        let keep = self.selected_names();
         let cursor = self.rows.get(self.sel.cursor()).map(|r| r.name.clone());
-        sort_rows(&mut self.rows, self.sort);
+        if self.filter.is_empty() {
+            sort_rows(&mut self.rows, self.sort);
+        } else {
+            sort_rows(&mut self.all, self.sort);
+            sort_rows(&mut self.rows, self.sort);
+        }
         self.sel.restore(&self.rows, &keep, cursor.as_deref());
     }
 
@@ -1421,17 +1445,16 @@ impl FileView {
         Activation::Open(path, classify(&name))
     }
 
-    /// Select (and scroll to) the row called `name`.
-    pub fn select_name(&mut self, name: &[u8], visible: usize) {
+    /// Select the row called `name`.
+    pub fn select_name(&mut self, name: &[u8]) {
         if let Some(i) = self.rows.iter().position(|r| r.name == name) {
             self.sel.only(i);
-            self.ensure_visible(visible);
         }
     }
 
     /// Select every row whose name is in `names` (after a paste: the new items), the
-    /// cursor on the first of them, scrolled into view. Does nothing if none match.
-    pub fn select_names(&mut self, names: &[Vec<u8>], visible: usize) {
+    /// cursor on the first of them. Does nothing if none match.
+    pub fn select_names(&mut self, names: &[Vec<u8>]) {
         let idx: Vec<usize> = self
             .rows
             .iter()
@@ -1443,36 +1466,6 @@ impl FileView {
             return;
         }
         self.sel.select_set(&idx);
-        self.ensure_visible(visible);
-    }
-
-    /// Keep the cursor row on screen.
-    pub fn ensure_visible(&mut self, visible: usize) {
-        let c = self.sel.cursor();
-        if visible == 0 {
-            return;
-        }
-        if c < self.scroll {
-            self.scroll = c;
-        } else if c >= self.scroll + visible {
-            self.scroll = c + 1 - visible;
-        }
-        self.clamp_scroll_to(visible);
-    }
-
-    /// Scroll by `delta` rows.
-    pub fn scroll_by(&mut self, delta: isize, visible: usize) {
-        let max = self.rows.len().saturating_sub(visible);
-        self.scroll = (self.scroll as isize + delta).clamp(0, max as isize) as usize;
-    }
-
-    fn clamp_scroll(&mut self) {
-        self.scroll = self.scroll.min(self.rows.len().saturating_sub(1));
-    }
-
-    fn clamp_scroll_to(&mut self, visible: usize) {
-        let max = self.rows.len().saturating_sub(visible);
-        self.scroll = self.scroll.min(max);
     }
 
     /// Status text: item count, or selection count and size.

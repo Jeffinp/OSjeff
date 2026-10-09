@@ -175,7 +175,7 @@ impl Desktop {
             App::Calculator(k) => self.draw_calculator(c, r, k),
             App::Browser(b) => self.draw_browser(c, r, focused, b),
             App::Wasm(w) => self.draw_wasm(c, r, w),
-            App::Files(f) => self.draw_files(c, r, f),
+            App::Files(f) => self.draw_files(c, r, f, focused),
             App::Settings(s) => self.draw_settings(c, r, s),
             App::Log(l) => self.draw_log(c, r, l),
             App::Viewer(v) => self.draw_viewer(c, r, v),

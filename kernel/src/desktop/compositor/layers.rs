@@ -92,10 +92,14 @@ impl Desktop {
     fn window_activity(&self, w: &Win, footprint: Rect) -> Option<(Rect, bool)> {
         // The shape or the shadow changes (it moves, fades, zooms, is dragged, changes focus):
         // everything, shadow included.
-        let shape_busy = w.anim.is_some()
-            || w.zoom.is_some()
-            || self.drag.as_ref().is_some_and(|d| d.win == w.id)
-            || self.focus_busy(w.id);
+        let moving = self.drag.as_ref().is_some_and(|d| {
+            d.win == w.id
+                && matches!(
+                    d.mode,
+                    DragMode::Move { .. } | DragMode::Unsnap { .. } | DragMode::Resize { .. }
+                )
+        });
+        let shape_busy = w.anim.is_some() || w.zoom.is_some() || moving || self.focus_busy(w.id);
         if shape_busy {
             return Some((footprint, false));
         }
@@ -103,15 +107,29 @@ impl Desktop {
         // rectangle stays as it is, so it is not repainted.
         // A game redraws only its content area, well inside the window's opaque body, so nothing
         // under the window is touched (and none of the windows below are painted at all).
+        let box_ = self.window_box(w);
         if w.app.kind() == Kind::WasmApp {
-            let box_ = self.window_box(w);
             let area = wasm_content(box_).inflated(2);
             return Some((area.intersection(&box_).unwrap_or(box_), false));
         }
-        let content_busy = matches!(&w.app.app, App::Files(f) if f.job.is_some())
-            || matches!(&w.app.app, App::Terminal(t) if t.term.is_running());
+        // A browser that scrolls, loads or animates a tab changes only the area below the title
+        // bar (the page, the tab strip, the progress bar); the title bar, the shadow and
+        // everything around stay as they are.
+        if self.browser_busy(w) {
+            return Some((Self::client_rect(box_), false));
+        }
+        // Content that animates by itself (a caret, a copy, a running command, a viewer's
+        // transition): the window's rectangle; the shadow outside it is untouched.
+        let focused = self.focused() == Some(w.id);
+        let content_busy = match &w.app.app {
+            App::Files(f) => f.animating(),
+            App::Viewer(v) => v.animating(),
+            App::Editor(e) => e.animating(focused),
+            App::Terminal(t) => t.term.is_running() || t.animating(focused),
+            _ => false,
+        } || self.drag.as_ref().is_some_and(|d| d.win == w.id);
         if content_busy {
-            return Some((self.window_box(w), false));
+            return Some((box_, false));
         }
         if self.live_dynamic(w) {
             // The chart lies inside the window's opaque body: clipped to it, nothing under the

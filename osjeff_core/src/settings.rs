@@ -9,7 +9,8 @@
 //! wallpaper=2
 //! wallpaper_path=fotos/praia.png
 //! accent=3
-//! clock=24
+//! clock=auto
+//! language=pt-BR
 //! tz=-180
 //! keyboard=abnt2
 //! toasts=1
@@ -18,7 +19,15 @@
 //! toast_secs=4
 //! dock_zoom=100
 //! tz_city=17
+//! terminal_font=17
+//! editor_font=13
 //! ```
+//!
+//! `language` is a tag of [`Lang`] (`pt-BR`, `en`; `pt` and `en-US` read the same). `clock` is `24`,
+//! `12` or `auto` (the default: follow the language, 24 hours in Portuguese and 12 in English).
+//!
+//! `terminal_font` and `editor_font` (text size in pixels, [`FONT_MIN`] to [`FONT_MAX`]) are written
+//! only when they differ from the default ([`FONT_DEFAULT`]).
 //!
 //! Parsing is total: [`Settings::parse`] never fails. Blank lines, `#`
 //! comments, unknown keys and malformed or out-of-range values are skipped and
@@ -26,6 +35,7 @@
 //! configuration. A file with no `version` is read as version 1.
 
 use crate::hw::rtc::{TZ_MAX, TZ_MIN};
+use crate::i18n::Lang;
 use crate::keymap::Layout;
 use crate::klog::FixedBuf;
 use crate::style::AppearanceSetting;
@@ -154,6 +164,22 @@ pub const PATH_CAP: usize = 40;
 /// `/etc/osjeff.conf`).
 pub const FILE_NAME: &[u8] = b"osjeff.conf";
 
+/// Smallest, largest and default size of the terminal and editor text, in pixels.
+pub const FONT_MIN: u8 = 11;
+pub const FONT_MAX: u8 = 24;
+pub const FONT_DEFAULT: u8 = 15;
+
+/// The size one zoom step away from `px` (`dir` > 0 larger, < 0 smaller), kept in range;
+/// `dir == 0` is the default size.
+pub fn font_step(px: u8, dir: i32) -> u8 {
+    let px = px.clamp(FONT_MIN, FONT_MAX);
+    match dir {
+        0 => FONT_DEFAULT,
+        d if d > 0 => (px + 1).min(FONT_MAX),
+        _ => (px - 1).max(FONT_MIN),
+    }
+}
+
 /// Accent palette (`0xRRGGBB`). Entry 0 is the default indigo and must stay equal
 /// to `theme::ACCENT_DEFAULT`.
 pub const ACCENTS: [u32; 8] = [
@@ -169,7 +195,7 @@ pub const ACCENTS: [u32; 8] = [
 
 /// Names of the [`ACCENTS`] for the settings page.
 pub const ACCENT_NAMES: [&str; 8] = [
-    "Indigo", "Turquesa", "Violeta", "Rosa", "Coral", "Ambar", "Verde", "Grafite",
+    "Indigo", "Turquesa", "Violeta", "Rosa", "Coral", "Âmbar", "Verde", "Grafite",
 ];
 
 /// Which wallpaper is active.
@@ -188,8 +214,13 @@ pub struct Settings {
     image_len: u8,
     /// Index into [`ACCENTS`].
     pub accent: u8,
-    /// 24-hour clock (otherwise 12-hour with AM/PM).
+    /// 24-hour clock (otherwise 12-hour with AM/PM). While [`Settings::clock_auto`] is set this
+    /// follows the language; change it with [`Settings::set_clock24`] so the choice sticks.
     pub clock24: bool,
+    /// The clock format follows the language (until the user picks 24 or 12 hours).
+    pub clock_auto: bool,
+    /// The language of the interface.
+    pub lang: Lang,
     /// Minutes east of UTC.
     pub tz_minutes: i16,
     pub layout: Layout,
@@ -205,6 +236,10 @@ pub struct Settings {
     pub dock_zoom: u8,
     /// The city picked for `tz_minutes` (index into [`TIMEZONES`]) or [`CITY_NONE`].
     pub tz_city: u8,
+    /// Size of the terminal text in pixels ([`FONT_MIN`]..=[`FONT_MAX`]).
+    pub terminal_font: u8,
+    /// Size of the editor text in pixels.
+    pub editor_font: u8,
 }
 
 impl Default for Settings {
@@ -223,6 +258,8 @@ impl Settings {
             image_len: 0,
             accent: 0,
             clock24: true,
+            clock_auto: true,
+            lang: Lang::DEFAULT,
             tz_minutes: -180,
             layout: Layout::Us,
             toasts: true,
@@ -231,7 +268,30 @@ impl Settings {
             toast_secs: TOAST_SECS_DEFAULT,
             dock_zoom: DOCK_ZOOM_MAX,
             tz_city: DEFAULT_CITY,
+            terminal_font: FONT_DEFAULT,
+            editor_font: FONT_DEFAULT,
         }
+    }
+
+    /// Switch the interface language. While the clock format follows the language it changes
+    /// with it (24 hours in Portuguese, 12 in English).
+    pub fn set_language(&mut self, lang: Lang) {
+        self.lang = lang;
+        if self.clock_auto {
+            self.clock24 = crate::i18n::locale::default_clock24(lang);
+        }
+    }
+
+    /// Pick 24 or 12 hours for good (the format stops following the language).
+    pub fn set_clock24(&mut self, on: bool) {
+        self.clock24 = on;
+        self.clock_auto = false;
+    }
+
+    /// Let the clock format follow the language again.
+    pub fn follow_language_clock(&mut self) {
+        self.clock_auto = true;
+        self.clock24 = crate::i18n::locale::default_clock24(self.lang);
     }
 
     /// Set the time zone to listed city `i` (ignored for an index outside the list).
@@ -281,6 +341,10 @@ impl Settings {
         if s.wallpaper == WallpaperChoice::Image && s.image_len == 0 {
             s.wallpaper = WallpaperChoice::Preset(0);
         }
+        // `clock=auto` means the language decides, whichever line came first.
+        if s.clock_auto {
+            s.clock24 = crate::i18n::locale::default_clock24(s.lang);
+        }
         // The city must agree with the offset; otherwise the offset wins.
         let agrees = TIMEZONES
             .get(s.tz_city as usize)
@@ -311,10 +375,16 @@ impl Settings {
                 }
             }
             b"clock" => match val {
-                b"24" => self.clock24 = true,
-                b"12" => self.clock24 = false,
+                b"24" => self.set_clock24(true),
+                b"12" => self.set_clock24(false),
+                b"auto" => self.clock_auto = true,
                 _ => {}
             },
+            b"language" => {
+                if let Some(l) = Lang::from_code(val) {
+                    self.lang = l;
+                }
+            }
             b"tz" => {
                 if let Some(m) = parse_i32(val).filter(|m| (TZ_MIN..=TZ_MAX).contains(m)) {
                     self.tz_minutes = m as i16;
@@ -357,6 +427,20 @@ impl Settings {
                     self.tz_city = n as u8;
                 }
             }
+            b"terminal_font" => {
+                if let Some(n) =
+                    parse_u32(val).filter(|n| (FONT_MIN as u32..=FONT_MAX as u32).contains(n))
+                {
+                    self.terminal_font = n as u8;
+                }
+            }
+            b"editor_font" => {
+                if let Some(n) =
+                    parse_u32(val).filter(|n| (FONT_MIN as u32..=FONT_MAX as u32).contains(n))
+                {
+                    self.editor_font = n as u8;
+                }
+            }
             // `version` and anything unknown: nothing to do (forward compatible).
             _ => {}
         }
@@ -377,7 +461,14 @@ impl Settings {
             out.push(b'\n');
         }
         push_kv(&mut out, b"accent", self.accent as u32);
-        push_kv(&mut out, b"clock", if self.clock24 { 24 } else { 12 });
+        if self.clock_auto {
+            out.extend_from_slice(b"clock=auto\n");
+        } else {
+            push_kv(&mut out, b"clock", if self.clock24 { 24 } else { 12 });
+        }
+        out.extend_from_slice(b"language=");
+        out.extend_from_slice(self.lang.code().as_bytes());
+        out.push(b'\n');
         out.extend_from_slice(b"tz=");
         push_i32(&mut out, self.tz_minutes as i32);
         out.push(b'\n');
@@ -393,6 +484,12 @@ impl Settings {
         push_kv(&mut out, b"dock_zoom", self.dock_zoom as u32);
         if (self.tz_city as usize) < TIMEZONES.len() {
             push_kv(&mut out, b"tz_city", self.tz_city as u32);
+        }
+        if self.terminal_font != FONT_DEFAULT {
+            push_kv(&mut out, b"terminal_font", self.terminal_font as u32);
+        }
+        if self.editor_font != FONT_DEFAULT {
+            push_kv(&mut out, b"editor_font", self.editor_font as u32);
         }
         out
     }
@@ -501,6 +598,8 @@ mod tests {
             wallpaper: WallpaperChoice::Image,
             accent: 5,
             clock24: false,
+            clock_auto: false,
+            lang: Lang::En,
             tz_minutes: 330,
             tz_city: city_for_offset(330),
             layout: Layout::Abnt2,
@@ -514,6 +613,67 @@ mod tests {
         assert_eq!(Settings::parse(&text), s);
         // Idempotent.
         assert_eq!(Settings::parse(&text).to_text(), text);
+    }
+
+    #[test]
+    fn language_setting_parses_and_roundtrips() {
+        assert_eq!(Settings::default().lang, Lang::Pt);
+        for (text, want) in [
+            ("language=en\n", Lang::En),
+            ("language=en-US\n", Lang::En),
+            ("language=pt\n", Lang::Pt),
+            ("language=PT_br\n", Lang::Pt),
+            ("language=fr\n", Lang::Pt),
+            ("language=\n", Lang::Pt),
+            ("language=en\nlanguage=klingon\n", Lang::En),
+            ("language=\u{ff}\u{fe}\n", Lang::Pt),
+        ] {
+            assert_eq!(Settings::parse(text.as_bytes()).lang, want, "{text:?}");
+        }
+        let mut s = Settings::default();
+        s.set_language(Lang::En);
+        assert!(s.to_text().windows(11).any(|w| w == b"language=en"));
+        assert_eq!(Settings::parse(&s.to_text()), s);
+        s.set_language(Lang::Pt);
+        assert!(s.to_text().windows(14).any(|w| w == b"language=pt-BR"));
+        assert_eq!(Settings::parse(&s.to_text()), s);
+    }
+
+    #[test]
+    fn clock_follows_the_language_until_the_user_chooses() {
+        let mut s = Settings::default();
+        assert!(s.clock_auto && s.clock24);
+        s.set_language(Lang::En);
+        assert!(!s.clock24, "English defaults to 12 hours");
+        s.set_language(Lang::Pt);
+        assert!(s.clock24);
+        // An explicit choice sticks across language changes.
+        s.set_clock24(false);
+        assert!(!s.clock_auto && !s.clock24);
+        s.set_language(Lang::En);
+        s.set_language(Lang::Pt);
+        assert!(!s.clock24);
+        s.follow_language_clock();
+        assert!(s.clock_auto && s.clock24);
+        // Text form: `auto` or the number; the order of the lines does not matter.
+        assert!(
+            Settings::default()
+                .to_text()
+                .windows(10)
+                .any(|w| w == b"clock=auto")
+        );
+        let en = Settings::parse(b"clock=auto\nlanguage=en\n");
+        assert!(en.clock_auto && !en.clock24);
+        let en2 = Settings::parse(b"language=en\nclock=auto\n");
+        assert_eq!(en, en2);
+        let fixed = Settings::parse(b"language=en\nclock=24\n");
+        assert!(!fixed.clock_auto && fixed.clock24);
+        assert!(fixed.to_text().windows(8).any(|w| w == b"clock=24"));
+        // Files written before the language existed keep their explicit clock.
+        let old = Settings::parse(b"version=1\nclock=12\n");
+        assert!(!old.clock_auto && !old.clock24 && old.lang == Lang::Pt);
+        // Garbage keeps the default (auto).
+        assert!(Settings::parse(b"clock=banana\n").clock_auto);
     }
 
     #[test]
@@ -645,6 +805,59 @@ mod tests {
         );
         assert_eq!(old.toast_secs, TOAST_SECS_DEFAULT);
         assert_eq!(old.dock_zoom, DOCK_ZOOM_MAX);
+    }
+
+    #[test]
+    fn font_sizes_parse_inside_their_range_and_round_trip() {
+        let s = Settings::parse(b"terminal_font=18\neditor_font=12\n");
+        assert_eq!((s.terminal_font, s.editor_font), (18, 12));
+        let text = s.to_text();
+        assert!(text.ends_with(b"terminal_font=18\neditor_font=12\n"));
+        assert_eq!(Settings::parse(&text), s);
+        // Out of range, not a number, empty: the default stays, neighbours survive.
+        for bad in [
+            &b"terminal_font=10\n"[..],
+            b"terminal_font=25\n",
+            b"terminal_font=x\n",
+            b"terminal_font=\n",
+            b"terminal_font=-3\n",
+            b"terminal_font=99999999999\n",
+        ] {
+            assert_eq!(Settings::parse(bad).terminal_font, FONT_DEFAULT, "{bad:?}");
+        }
+        let s = Settings::parse(b"editor_font=40\nterminal_font=20\n");
+        assert_eq!((s.terminal_font, s.editor_font), (20, FONT_DEFAULT));
+        // The limits themselves are valid.
+        let s = Settings::parse(b"terminal_font=11\neditor_font=24\n");
+        assert_eq!((s.terminal_font, s.editor_font), (11, 24));
+        // The default is not written, so old and new files stay small and equal.
+        assert!(
+            !Settings::default()
+                .to_text()
+                .windows(5)
+                .any(|w| w == b"_font")
+        );
+    }
+
+    #[test]
+    fn font_steps_stay_in_range() {
+        assert_eq!(font_step(15, 1), 16);
+        assert_eq!(font_step(15, -1), 14);
+        assert_eq!(font_step(15, 0), FONT_DEFAULT);
+        assert_eq!(font_step(FONT_MAX, 1), FONT_MAX);
+        assert_eq!(font_step(FONT_MIN, -1), FONT_MIN);
+        // A stored value outside the range is first pulled in.
+        assert_eq!(font_step(200, -1), FONT_MAX - 1);
+        assert_eq!(font_step(0, 1), FONT_MIN + 1);
+        let mut px = FONT_DEFAULT;
+        for _ in 0..40 {
+            px = font_step(px, 1);
+        }
+        assert_eq!(px, FONT_MAX);
+        for _ in 0..40 {
+            px = font_step(px, -1);
+        }
+        assert_eq!(px, FONT_MIN);
     }
 
     #[test]

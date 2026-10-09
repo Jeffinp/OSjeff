@@ -189,6 +189,7 @@ impl<'a> Canvas<'a> {
     }
 
     /// Alpha-blit a tightly-packed RGBA image (`iw*ih*4` bytes) at `(x0, y0)`.
+    #[allow(dead_code)]
     pub fn draw_rgba(&mut self, data: &[u8], iw: usize, ih: usize, x0: usize, y0: usize) {
         for y in 0..ih {
             for x in 0..iw {
@@ -293,6 +294,7 @@ impl<'a> Canvas<'a> {
     /// Blend a solid color into one pixel. `alpha` in `0..=256`
     /// (0 = unchanged, 256 = fully `c`). Format-aware.
     #[inline]
+    #[allow(dead_code)]
     pub fn blend_pixel(&mut self, x: usize, y: usize, c: Color, alpha: u16) {
         if x < self.cx0 || x >= self.cx1 || y < self.cy0 || y >= self.cy1 {
             return;

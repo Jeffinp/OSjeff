@@ -3,6 +3,7 @@
 //! the highlights and scrolls to [`FindBar::current_y`].
 
 use super::layout::Page;
+use super::metrics::TextMetrics;
 use super::textops::Span;
 use crate::Key;
 use alloc::string::String;
@@ -37,9 +38,9 @@ impl FindBar {
     }
 
     /// Show the bar (the old query is kept so Ctrl+F, Enter repeats a search).
-    pub fn open(&mut self, page: Option<&Page>) {
+    pub fn open(&mut self, page: Option<&Page>, m: &dyn TextMetrics) {
         self.open = true;
-        self.refresh(page);
+        self.refresh(page, m);
     }
 
     /// Hide the bar and forget the matches.
@@ -59,9 +60,9 @@ impl FindBar {
 
     /// Recompute the matches against `page` (after typing, a relayout, a new page),
     /// keeping the current match index when it still exists.
-    pub fn refresh(&mut self, page: Option<&Page>) {
+    pub fn refresh(&mut self, page: Option<&Page>, m: &dyn TextMetrics) {
         self.matches = match (self.open, page) {
-            (true, Some(p)) => p.find(&self.query),
+            (true, Some(p)) => p.find(&self.query, m),
             _ => Vec::new(),
         };
         if self.cur >= self.matches.len() {
@@ -118,7 +119,13 @@ impl FindBar {
     }
 
     /// Handle a key while the bar is open. `shift` turns Enter into "previous".
-    pub fn on_key(&mut self, key: Key, shift: bool, page: Option<&Page>) -> FindOutcome {
+    pub fn on_key(
+        &mut self,
+        key: Key,
+        shift: bool,
+        page: Option<&Page>,
+        m: &dyn TextMetrics,
+    ) -> FindOutcome {
         if !self.open {
             return FindOutcome::Ignored;
         }
@@ -127,14 +134,14 @@ impl FindBar {
                 if self.query.len() < MAX_QUERY {
                     self.query.push(c as char);
                     self.cur = 0;
-                    self.refresh(page);
+                    self.refresh(page, m);
                 }
                 FindOutcome::Changed
             }
             Key::Backspace => {
                 self.query.pop();
                 self.cur = 0;
-                self.refresh(page);
+                self.refresh(page, m);
                 FindOutcome::Changed
             }
             Key::Enter | Key::Down => {
@@ -161,7 +168,7 @@ impl FindBar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::web::render;
+    use crate::web::{FixedAdvance, render};
 
     fn page() -> Page {
         render(
@@ -172,7 +179,7 @@ mod tests {
 
     fn type_str(f: &mut FindBar, s: &str, p: &Page) {
         for b in s.bytes() {
-            f.on_key(Key::Char(b), false, Some(p));
+            f.on_key(Key::Char(b), false, Some(p), &FixedAdvance);
         }
     }
 
@@ -181,7 +188,7 @@ mod tests {
         let mut f = FindBar::new();
         let p = page();
         assert_eq!(
-            f.on_key(Key::Char(b'a'), false, Some(&p)),
+            f.on_key(Key::Char(b'a'), false, Some(&p), &FixedAdvance),
             FindOutcome::Ignored
         );
         assert!(!f.is_open());
@@ -192,7 +199,7 @@ mod tests {
     fn typing_finds_matches_live() {
         let p = page();
         let mut f = FindBar::new();
-        f.open(Some(&p));
+        f.open(Some(&p), &FixedAdvance);
         type_str(&mut f, "tw", &p);
         assert_eq!(f.count(), 3);
         type_str(&mut f, "o", &p);
@@ -200,7 +207,7 @@ mod tests {
         type_str(&mut f, "x", &p);
         assert_eq!(f.count(), 0);
         assert_eq!(f.position(), 0);
-        f.on_key(Key::Backspace, false, Some(&p));
+        f.on_key(Key::Backspace, false, Some(&p), &FixedAdvance);
         assert_eq!(f.count(), 3);
     }
 
@@ -208,15 +215,15 @@ mod tests {
     fn enter_walks_forward_and_wraps_shift_enter_goes_back() {
         let p = page();
         let mut f = FindBar::new();
-        f.open(Some(&p));
+        f.open(Some(&p), &FixedAdvance);
         type_str(&mut f, "two", &p);
         assert_eq!(f.position(), 1);
-        f.on_key(Key::Enter, false, Some(&p));
+        f.on_key(Key::Enter, false, Some(&p), &FixedAdvance);
         assert_eq!(f.position(), 2);
-        f.on_key(Key::Enter, false, Some(&p));
-        f.on_key(Key::Enter, false, Some(&p));
+        f.on_key(Key::Enter, false, Some(&p), &FixedAdvance);
+        f.on_key(Key::Enter, false, Some(&p), &FixedAdvance);
         assert_eq!(f.position(), 1, "wraps to the first");
-        f.on_key(Key::Enter, true, Some(&p));
+        f.on_key(Key::Enter, true, Some(&p), &FixedAdvance);
         assert_eq!(f.position(), 3, "shift+enter wraps backwards");
     }
 
@@ -224,7 +231,7 @@ mod tests {
     fn current_match_has_a_scroll_target_and_the_others_are_listed() {
         let p = page();
         let mut f = FindBar::new();
-        f.open(Some(&p));
+        f.open(Some(&p), &FixedAdvance);
         type_str(&mut f, "two", &p);
         let y1 = f.current_y().unwrap();
         f.next();
@@ -238,12 +245,15 @@ mod tests {
     fn esc_closes_and_clears_matches_but_keeps_the_query() {
         let p = page();
         let mut f = FindBar::new();
-        f.open(Some(&p));
+        f.open(Some(&p), &FixedAdvance);
         type_str(&mut f, "two", &p);
-        assert_eq!(f.on_key(Key::Esc, false, Some(&p)), FindOutcome::Closed);
+        assert_eq!(
+            f.on_key(Key::Esc, false, Some(&p), &FixedAdvance),
+            FindOutcome::Closed
+        );
         assert!(!f.is_open());
         assert_eq!(f.count(), 0);
-        f.open(Some(&p));
+        f.open(Some(&p), &FixedAdvance);
         assert_eq!(f.query(), "two");
         assert_eq!(f.count(), 3);
     }
@@ -252,7 +262,7 @@ mod tests {
     fn query_length_is_capped() {
         let p = page();
         let mut f = FindBar::new();
-        f.open(Some(&p));
+        f.open(Some(&p), &FixedAdvance);
         type_str(&mut f, &"a".repeat(200), &p);
         assert_eq!(f.query().len(), MAX_QUERY);
     }
@@ -261,15 +271,15 @@ mod tests {
     fn refresh_after_a_relayout_keeps_a_valid_index() {
         let p = page();
         let mut f = FindBar::new();
-        f.open(Some(&p));
+        f.open(Some(&p), &FixedAdvance);
         type_str(&mut f, "two", &p);
         f.next();
         f.next();
         let small = render(b"<p>two</p>", 600);
-        f.refresh(Some(&small));
+        f.refresh(Some(&small), &FixedAdvance);
         assert_eq!(f.count(), 1);
         assert_eq!(f.position(), 1);
-        f.refresh(None);
+        f.refresh(None, &FixedAdvance);
         assert_eq!(f.count(), 0);
     }
 
@@ -277,11 +287,14 @@ mod tests {
     fn control_keys_are_ignored_and_empty_query_matches_nothing() {
         let p = page();
         let mut f = FindBar::new();
-        f.open(Some(&p));
+        f.open(Some(&p), &FixedAdvance);
         assert_eq!(f.count(), 0);
-        assert_eq!(f.on_key(Key::Tab, false, Some(&p)), FindOutcome::Ignored);
         assert_eq!(
-            f.on_key(Key::Char(0x01), false, Some(&p)),
+            f.on_key(Key::Tab, false, Some(&p), &FixedAdvance),
+            FindOutcome::Ignored
+        );
+        assert_eq!(
+            f.on_key(Key::Char(0x01), false, Some(&p), &FixedAdvance),
             FindOutcome::Ignored
         );
         f.next();

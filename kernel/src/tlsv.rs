@@ -83,6 +83,11 @@ impl Verifier {
         self.chain.map(Outcome::Verified)
     }
 
+    /// The server's own certificate (DER), once the handshake has read it.
+    pub fn leaf_der(&self) -> &[u8] {
+        &self.leaf
+    }
+
     pub fn root_name(&self, v: &Verified) -> &'static str {
         v.root
             .and_then(TrustStore::manifest_entry)

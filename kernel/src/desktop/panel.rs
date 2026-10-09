@@ -12,41 +12,12 @@ use osjeff_core::chrome::{
     self, MenuRow, QuickTile, centre_geom, menu_geom, panel_layout, popover_centered, popover_rect,
     quick_geom,
 };
+use osjeff_core::i18n::{self, Civil, DateStyle};
 use osjeff_core::iconart::Glyph;
 use osjeff_core::snap::SnapZone;
 use osjeff_core::style::{PANEL_H, R_CONTROL, R_MENU, R_POPOVER};
+use osjeff_core::t;
 
-const WEEKDAYS: [&str; 7] = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
-const WEEKDAYS_LONG: [&str; 7] = [
-    "Domingo",
-    "Segunda-feira",
-    "Terça-feira",
-    "Quarta-feira",
-    "Quinta-feira",
-    "Sexta-feira",
-    "Sábado",
-];
-const MONTHS: [&str; 12] = [
-    "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez",
-];
-const MONTH_NAMES: [&str; 12] = [
-    "Janeiro",
-    "Fevereiro",
-    "Março",
-    "Abril",
-    "Maio",
-    "Junho",
-    "Julho",
-    "Agosto",
-    "Setembro",
-    "Outubro",
-    "Novembro",
-    "Dezembro",
-];
-
-/// Widest the clock text can be: reserves the item's width so it never reflows.
-const CLOCK_TEMPLATE: &str = "qua 00 out  00:00";
-const CLOCK_TEMPLATE_12: &str = "qua 00 out  00:00 PM";
 /// Room kept left of the clock text for the unread-notifications dot.
 const CLOCK_DOT_W: i32 = 14;
 /// Most notifications kept for the centre.
@@ -60,13 +31,7 @@ pub(crate) struct Notif {
 }
 
 fn level_title(l: crate::klog::Level) -> &'static str {
-    use crate::klog::Level;
-    match l {
-        Level::Trace | Level::Debug | Level::Info => "Informação",
-        Level::Warn => "Aviso",
-        Level::Error => "Erro",
-        Level::Fatal => "Falha grave",
-    }
+    osjeff_core::i18n::tr(l.title_key())
 }
 
 fn level_color(l: crate::klog::Level) -> Color {
@@ -83,9 +48,9 @@ fn level_color(l: crate::klog::Level) -> Color {
 fn age_text(now_ms: u32, ms: u32) -> String {
     let secs = now_ms.wrapping_sub(ms) / 1000;
     match secs {
-        0..=44 => String::from("agora"),
-        45..=3599 => alloc::format!("{} min", (secs + 30) / 60),
-        _ => alloc::format!("{} h", secs / 3600),
+        0..=44 => String::from(t!("time.ago.now")),
+        45..=3599 => t!("time.ago.min", n = (secs + 30) / 60),
+        _ => t!("time.ago.hour", n = secs / 3600),
     }
 }
 
@@ -95,55 +60,33 @@ impl Desktop {
         Rect::new(0, 0, self.sw, PANEL_H)
     }
 
-    /// The text of the clock item (`qui 8 out  18:09`).
+    /// The text of the clock item (`qui 8 out  18:09` / `Thu Oct 8  6:09 PM`).
     fn clock_text(&self, time: Time) -> String {
-        let (_, month, day) = self.today.get();
-        let wd = self.weekday.get() as usize % 7;
-        let mut buf = [0u8; osjeff_core::hw::rtc::CLOCK_LEN];
-        let n = osjeff_core::hw::rtc::format_clock(
-            osjeff_core::hw::rtc::Time {
-                h: time.h,
-                m: time.m,
-                s: time.s,
-            },
-            crate::settings::clock24(),
-            &mut buf,
-        );
-        // `format_clock` gives `HH:MM:SS` (or with AM/PM): the bar shows no seconds.
-        let full = core::str::from_utf8(&buf[..n]).unwrap_or("");
-        let hm: String = {
-            let mut parts = full.splitn(3, ':');
-            let h = parts.next().unwrap_or("");
-            let m = parts.next().unwrap_or("");
-            let rest = parts.next().unwrap_or("");
-            let suffix = rest.split_once(' ').map(|(_, s)| s).unwrap_or("");
-            if suffix.is_empty() {
-                alloc::format!("{h}:{m}")
-            } else {
-                alloc::format!("{h}:{m} {suffix}")
-            }
-        };
-        alloc::format!(
-            "{} {} {}  {}",
-            WEEKDAYS[wd],
+        let (year, month, day) = self.today.get();
+        let civil = Civil {
+            year,
+            month,
             day,
-            MONTHS[(month as usize).clamp(1, 12) - 1],
-            hm
-        )
+            weekday: self.weekday.get(),
+            hour: time.h,
+            minute: time.m,
+            second: time.s,
+        };
+        i18n::format_date(civil, DateStyle::Panel, crate::settings::clock24())
     }
 
     fn clock_width(&self) -> i32 {
         let t = if crate::settings::clock24() {
-            CLOCK_TEMPLATE
+            t!("panel.clock_template_24")
         } else {
-            CLOCK_TEMPLATE_12
+            t!("panel.clock_template_12")
         };
         text::measure(t, BODY, Weight::Medium) + CLOCK_DOT_W
     }
 
     /// Every panel item with its rectangle.
     pub(crate) fn panel_items(&self) -> Vec<(PanelItem, Rect)> {
-        let apps_w = 16 + 8 + text::measure("Apps", BODY, Weight::Medium);
+        let apps_w = 16 + 8 + text::measure(t!("panel.apps"), BODY, Weight::Medium);
         let ws_w = chrome::workspace_width(self.wm.visible_workspaces());
         let left = [apps_w, 16, ws_w];
         let right = [chrome::pill_width(3)];
@@ -229,7 +172,7 @@ impl Desktop {
                     c,
                     rect.x + PANEL_PAD + 16 + 8,
                     ty,
-                    "Apps",
+                    t!("panel.apps"),
                     BODY,
                     Weight::Medium,
                     fg,
@@ -321,51 +264,72 @@ impl Desktop {
 
     pub(crate) fn system_menu(&self) -> Vec<Entry> {
         alloc::vec![
-            Entry::item("Sobre o OSjeff", "", Cmd::About),
+            Entry::item(t!("menu.system.about"), "", Cmd::About),
             Entry::sep(),
-            Entry::item("Ajustes do sistema…", "", Cmd::Settings),
-            Entry::item("Componentes", "Ctrl+Alt+G", Cmd::Gallery),
+            Entry::item(t!("menu.system.settings"), "", Cmd::Settings),
+            Entry::item(t!("menu.system.gallery"), "Ctrl+Alt+G", Cmd::Gallery),
             Entry::sep(),
-            Entry::item("Reiniciar…", "", Cmd::Reboot),
-            Entry::item("Desligar…", "", Cmd::Shutdown),
+            Entry::item(t!("menu.system.restart"), "", Cmd::Reboot),
+            Entry::item(t!("menu.system.shutdown"), "", Cmd::Shutdown),
         ]
     }
 
-    /// The focused app's menu called `name` ("Arquivo", "Editar", "Visualizar", "Janela").
+    /// The focused app's menu `name` (`file`, `edit`, `view`; anything else is the window menu).
     fn named_menu(&self, name: &str) -> Vec<Entry> {
         let kind = self.focused().and_then(|id| self.kind_of(id));
         let wasm = kind == Some(Kind::WasmApp);
         match name {
-            "Arquivo" => {
+            "file" => {
+                let browser = kind == Some(Kind::Browser);
                 let mut v = alloc::vec![Entry::item(
-                    "Nova janela",
-                    if wasm { "" } else { "Ctrl+N" },
+                    if browser {
+                        t!("menu.file.new_tab")
+                    } else {
+                        t!("menu.file.new_window")
+                    },
+                    if wasm {
+                        ""
+                    } else if browser {
+                        "Ctrl+T"
+                    } else {
+                        "Ctrl+N"
+                    },
                     Cmd::NewWindow
                 )];
                 match kind {
                     Some(Kind::Editor) => {
-                        v.push(Entry::item("Abrir…", "Ctrl+O", Cmd::OpenFile));
-                        v.push(Entry::item("Salvar", "Ctrl+S", Cmd::SaveFile));
+                        v.push(Entry::item(t!("menu.file.open"), "Ctrl+O", Cmd::OpenFile));
+                        v.push(Entry::item(t!("menu.file.save"), "Ctrl+S", Cmd::SaveFile));
                     }
                     None => {}
                     _ => {}
                 }
                 v.push(Entry::sep());
                 v.push(
-                    Entry::item("Fechar janela", "Ctrl+W", Cmd::CloseWindow)
-                        .disabled_if(kind.is_none()),
+                    Entry::item(
+                        if browser {
+                            t!("menu.file.close_tab")
+                        } else {
+                            t!("menu.file.close_window")
+                        },
+                        "Ctrl+W",
+                        Cmd::CloseWindow,
+                    )
+                    .disabled_if(kind.is_none()),
                 );
                 v
             }
-            "Editar" => {
+            "edit" => {
                 let editor = kind == Some(Kind::Editor);
+                let files = kind == Some(Kind::Files);
                 alloc::vec![
-                    Entry::item("Desfazer", "Ctrl+Z", Cmd::Undo).disabled_if(!editor),
-                    Entry::item("Refazer", "Ctrl+Y", Cmd::Redo).disabled_if(!editor),
+                    Entry::item(t!("menu.edit.undo"), "Ctrl+Z", Cmd::Undo).disabled_if(!editor),
+                    Entry::item(t!("menu.edit.redo"), "Ctrl+Y", Cmd::Redo).disabled_if(!editor),
                     Entry::sep(),
-                    Entry::item("Recortar", "Ctrl+X", Cmd::Cut).disabled_if(!editor),
+                    Entry::item(t!("menu.edit.cut"), "Ctrl+X", Cmd::Cut)
+                        .disabled_if(!editor && !files),
                     Entry::item(
-                        "Copiar",
+                        t!("menu.edit.copy"),
                         if kind == Some(Kind::Terminal) {
                             "Ctrl+Shift+C"
                         } else {
@@ -374,30 +338,76 @@ impl Desktop {
                         Cmd::Copy
                     )
                     .disabled_if(kind.is_none() || wasm),
-                    Entry::item("Colar", "Ctrl+V", Cmd::Paste).disabled_if(kind.is_none() || wasm),
+                    Entry::item(t!("menu.edit.paste"), "Ctrl+V", Cmd::Paste)
+                        .disabled_if(kind.is_none() || wasm),
                     Entry::sep(),
-                    Entry::item("Selecionar tudo", "Ctrl+A", Cmd::SelectAll).disabled_if(!editor),
+                    Entry::item(t!("menu.edit.select_all"), "Ctrl+A", Cmd::SelectAll)
+                        .disabled_if(!editor && !files),
                 ]
             }
-            "Visualizar" => {
+            "view" => {
                 let browser = kind == Some(Kind::Browser);
                 let mut v = alloc::vec![];
                 if browser {
-                    v.push(Entry::item("Ampliar", "Ctrl++", Cmd::BrowserZoomIn));
-                    v.push(Entry::item("Reduzir", "Ctrl+-", Cmd::BrowserZoomOut));
-                    v.push(Entry::item("Tamanho real", "Ctrl+0", Cmd::BrowserZoomReset));
+                    v.push(Entry::item(
+                        t!("menu.view.zoom_in"),
+                        "Ctrl++",
+                        Cmd::BrowserZoomIn,
+                    ));
+                    v.push(Entry::item(
+                        t!("menu.view.zoom_out"),
+                        "Ctrl+-",
+                        Cmd::BrowserZoomOut,
+                    ));
+                    v.push(Entry::item(
+                        t!("menu.view.zoom_reset"),
+                        "Ctrl+0",
+                        Cmd::BrowserZoomReset,
+                    ));
                     v.push(Entry::sep());
                 }
-                v.push(Entry::item("Zoom da janela", "", Cmd::Zoom));
+                if let Some(fid) = self.focused().filter(|_| kind == Some(Kind::Files))
+                    && let Some(App::Files(f)) = self.wm.get(fid).map(|w| &w.app.app)
+                {
+                    use osjeff_core::fileman::{Cmd as FCmd, ui::ViewMode};
+                    let mut list = Entry::item(
+                        t!("menu.view.as_list"),
+                        "Ctrl+1",
+                        Cmd::Files(FCmd::SetView(ViewMode::List)),
+                    );
+                    list.checked = f.mode == ViewMode::List;
+                    let mut icons = Entry::item(
+                        t!("menu.view.as_icons"),
+                        "Ctrl+2",
+                        Cmd::Files(FCmd::SetView(ViewMode::Icons)),
+                    );
+                    icons.checked = f.mode == ViewMode::Icons;
+                    v.push(list);
+                    v.push(icons);
+                    let mut pv = Entry::item(
+                        t!("menu.view.preview"),
+                        t!("menu.shortcut.preview"),
+                        Cmd::Files(FCmd::TogglePreview),
+                    );
+                    pv.checked = f.preview_open;
+                    v.push(pv);
+                    v.push(Entry::sep());
+                }
+                v.push(Entry::item(t!("menu.view.window_zoom"), "", Cmd::Zoom));
                 v.push(Entry::sep());
-                v.push(Entry::item("Mostrar apps", "", Cmd::ShowApps));
-                v.push(Entry::item("Buscar", "Ctrl+Espaço", Cmd::ShowSearch));
+                v.push(Entry::item(t!("menu.view.show_apps"), "", Cmd::ShowApps));
+                v.push(Entry::item(
+                    t!("menu.view.search"),
+                    t!("menu.shortcut.search"),
+                    Cmd::ShowSearch,
+                ));
                 v
             }
             _ => {
                 let mut v = alloc::vec![
-                    Entry::item("Minimizar", "Ctrl+M", Cmd::Minimize).disabled_if(kind.is_none()),
-                    Entry::item("Zoom", "", Cmd::Zoom).disabled_if(kind.is_none()),
+                    Entry::item(t!("menu.window.minimize"), "Ctrl+M", Cmd::Minimize)
+                        .disabled_if(kind.is_none()),
+                    Entry::item(t!("menu.window.zoom"), "", Cmd::Zoom).disabled_if(kind.is_none()),
                 ];
                 let list = self.wm.switch_list();
                 if !list.is_empty() {
@@ -444,10 +454,10 @@ impl Desktop {
             }
             v.extend(out);
         };
-        section(&mut v, self.named_menu("Arquivo"), true);
-        section(&mut v, self.named_menu("Editar"), false);
+        section(&mut v, self.named_menu("file"), true);
+        section(&mut v, self.named_menu("edit"), false);
         let view: Vec<Entry> = self
-            .named_menu("Visualizar")
+            .named_menu("view")
             .into_iter()
             .filter(|e| !matches!(e.cmd, Cmd::Zoom | Cmd::ShowApps | Cmd::ShowSearch))
             .collect();
@@ -457,17 +467,33 @@ impl Desktop {
             .get(id)
             .map(|w| (w.snap_state().is_some(), w.resizable));
         let (tiled, resizable) = state.unwrap_or((false, false));
-        let mut win = alloc::vec![Entry::item("Minimizar", "Ctrl+M", Cmd::Minimize)];
+        let mut win = alloc::vec![Entry::item(
+            t!("menu.window.minimize"),
+            "Ctrl+M",
+            Cmd::Minimize
+        )];
         let mut zoom = Entry::item(
-            if tiled { "Restaurar" } else { "Maximizar" },
+            if tiled {
+                t!("menu.window.restore")
+            } else {
+                t!("menu.window.maximize")
+            },
             "Alt+↑",
             Cmd::Zoom,
         );
         zoom.enabled = resizable;
         win.push(zoom);
-        let mut left = Entry::item("Ajustar à esquerda", "Alt+←", Cmd::Snap(SnapZone::Left));
+        let mut left = Entry::item(
+            t!("menu.window.snap_left"),
+            "Alt+←",
+            Cmd::Snap(SnapZone::Left),
+        );
         left.enabled = resizable;
-        let mut right = Entry::item("Ajustar à direita", "Alt+→", Cmd::Snap(SnapZone::Right));
+        let mut right = Entry::item(
+            t!("menu.window.snap_right"),
+            "Alt+→",
+            Cmd::Snap(SnapZone::Right),
+        );
         right.enabled = resizable;
         win.push(left);
         win.push(right);
@@ -478,7 +504,7 @@ impl Desktop {
             .filter(|&i| i != cur)
             .map(|i| {
                 Entry::item(
-                    &alloc::format!("Mover para a área de trabalho {}", i + 1),
+                    &t!("menu.window.move_to_workspace", n = i + 1),
                     "",
                     Cmd::MoveToWorkspace(i),
                 )
@@ -694,7 +720,7 @@ impl Desktop {
         text::draw_left(
             c,
             g.title,
-            "Configurações rápidas",
+            t!("quick.title"),
             TITLE3,
             Weight::Semibold,
             theme::solid(p.text),
@@ -709,11 +735,11 @@ impl Desktop {
                     } else {
                         Glyph::NetworkOff
                     },
-                    "Rede",
+                    t!("quick.network"),
                     match (&st.config, up) {
                         (Some(cfg), true) => alloc::format!("{}", cfg.ip),
-                        (None, true) => String::from("Conectando..."),
-                        _ => String::from("Sem rede"),
+                        (None, true) => String::from(t!("quick.network.connecting")),
+                        _ => String::from(t!("quick.network.offline")),
                     },
                     up,
                 ),
@@ -723,47 +749,57 @@ impl Desktop {
                     } else {
                         Glyph::Sun
                     },
-                    "Aparência",
+                    t!("quick.appearance"),
                     String::from(match s.appearance {
-                        osjeff_core::style::AppearanceSetting::Auto => "Automática",
-                        osjeff_core::style::AppearanceSetting::Light => "Clara",
-                        osjeff_core::style::AppearanceSetting::Dark => "Escura",
+                        osjeff_core::style::AppearanceSetting::Auto => t!("quick.appearance.auto"),
+                        osjeff_core::style::AppearanceSetting::Light => {
+                            t!("quick.appearance.light")
+                        }
+                        osjeff_core::style::AppearanceSetting::Dark => t!("quick.appearance.dark"),
                     }),
                     theme::dark(),
                 ),
                 QuickTile::ReduceMotion => (
                     Glyph::Wave,
-                    "Movimento",
+                    t!("quick.motion"),
                     String::from(if s.reduce_motion {
-                        "Reduzido"
+                        t!("quick.motion.reduced")
                     } else {
-                        "Completo"
+                        t!("quick.motion.full")
                     }),
                     s.reduce_motion,
                 ),
                 QuickTile::DoNotDisturb => (
                     Glyph::Bell,
-                    "Não perturbe",
-                    String::from(if s.toasts { "Desligado" } else { "Ligado" }),
+                    t!("quick.dnd"),
+                    String::from(if s.toasts {
+                        t!("quick.dnd.off")
+                    } else {
+                        t!("quick.dnd.on")
+                    }),
                     !s.toasts,
                 ),
                 QuickTile::Clock24 => (
                     Glyph::Clock,
-                    "Relógio 24 h",
-                    String::from(if s.clock24 { "24 horas" } else { "12 horas" }),
+                    t!("quick.clock24"),
+                    String::from(if s.clock24 {
+                        t!("quick.clock24.on")
+                    } else {
+                        t!("quick.clock24.off")
+                    }),
                     s.clock24,
                 ),
                 QuickTile::Settings => (
                     Glyph::Control,
-                    "Configurações",
-                    String::from("Abrir"),
+                    t!("quick.settings"),
+                    String::from(t!("common.open")),
                     false,
                 ),
             };
             let hover = rect.contains(self.cursor_x, self.cursor_y);
             self.draw_tile(c, *rect, glyph, label, &sub, on, hover);
         }
-        ui::caption(c, g.accent_label.x, g.accent_label.y, "Cor de destaque");
+        ui::caption(c, g.accent_label.x, g.accent_label.y, t!("quick.accent"));
         for (i, sw) in g.swatches.iter().enumerate() {
             let rgb = osjeff_core::settings::ACCENTS[i];
             let col = Color::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
@@ -782,14 +818,14 @@ impl Desktop {
         ui::push_button(
             c,
             g.restart,
-            "Reiniciar",
+            t!("power.restart"),
             ui::ButtonKind::Secondary,
             hov(g.restart),
         );
         ui::push_button(
             c,
             g.shutdown,
-            "Desligar",
+            t!("power.shutdown"),
             ui::ButtonKind::Secondary,
             hov(g.shutdown),
         );
@@ -871,23 +907,26 @@ impl Desktop {
     fn draw_centre(&self, c: &mut Canvas, r: Rect, month_off: i32) {
         let p = theme::pal();
         let g = centre_geom(r);
-        let (_, month, day) = self.today.get();
-        let wd = self.weekday.get() as usize % 7;
+        let (year, month, day) = self.today.get();
+        let civil = Civil {
+            year,
+            month,
+            day,
+            weekday: self.weekday.get(),
+            hour: 0,
+            minute: 0,
+            second: 0,
+        };
+        let clock24 = crate::settings::clock24();
         text::draw_left(
             c,
             g.day,
-            WEEKDAYS_LONG[wd],
+            &i18n::format_date(civil, DateStyle::Weekday, clock24),
             TITLE2,
             Weight::Semibold,
             theme::solid(p.text),
         );
-        let (year, _, _) = self.today.get();
-        let date = alloc::format!(
-            "{} de {} de {}",
-            day,
-            MONTH_NAMES[(month as usize).clamp(1, 12) - 1].to_lowercase(),
-            year
-        );
+        let date = i18n::format_date(civil, DateStyle::LongNoWeekday, clock24);
         text::draw_left(
             c,
             g.date,
@@ -899,7 +938,7 @@ impl Desktop {
         text::draw_left(
             c,
             g.notif_title,
-            "Notificações",
+            t!("centre.notifications"),
             BODY,
             Weight::Semibold,
             theme::solid(p.text),
@@ -913,7 +952,7 @@ impl Desktop {
             text::draw_centered(
                 c,
                 g.clear,
-                "Limpar",
+                t!("centre.clear"),
                 FOOTNOTE,
                 Weight::Medium,
                 theme::accent(),
@@ -923,7 +962,7 @@ impl Desktop {
             text::draw_centered(
                 c,
                 g.empty,
-                "Sem notificações",
+                t!("centre.empty"),
                 BODY,
                 Weight::Regular,
                 theme::solid(p.text_tertiary),
@@ -969,7 +1008,7 @@ impl Desktop {
         text::draw_left(
             c,
             g.dnd_label,
-            "Não perturbe",
+            t!("quick.dnd"),
             BODY,
             Weight::Regular,
             theme::solid(p.text),
@@ -992,7 +1031,19 @@ impl Desktop {
         let (ty, tm, td) = self.today.get();
         let idx = (ty * 12 + tm as i32 - 1) + month_off;
         let (year, month) = (idx.div_euclid(12), (idx.rem_euclid(12) + 1) as u8);
-        let title = alloc::format!("{} {}", MONTH_NAMES[month as usize - 1], year);
+        let title = i18n::format_date(
+            Civil {
+                year,
+                month,
+                day: 1,
+                weekday: 0,
+                hour: 0,
+                minute: 0,
+                second: 0,
+            },
+            DateStyle::MonthYear,
+            true,
+        );
         text::draw_left(
             c,
             g.title,
@@ -1017,11 +1068,11 @@ impl Desktop {
         );
         let mirrored = mirror_x(chev);
         c.blit_surface(&mirrored, g.prev.x + 4, g.prev.y + 6, 256);
-        for (i, wd) in ["D", "S", "T", "Q", "Q", "S", "S"].iter().enumerate() {
+        for (i, wd_rect) in g.weekdays.iter().enumerate() {
             text::draw_centered(
                 c,
-                g.weekdays[i],
-                wd,
+                *wd_rect,
+                i18n::locale::weekday_initial(i18n::lang(), i as u8),
                 FOOTNOTE,
                 Weight::Medium,
                 theme::solid(p.text_tertiary),
@@ -1085,7 +1136,7 @@ impl Desktop {
                         QuickTile::Appearance => s.appearance = s.appearance.next(),
                         QuickTile::ReduceMotion => s.reduce_motion = !s.reduce_motion,
                         QuickTile::DoNotDisturb => s.toasts = !s.toasts,
-                        QuickTile::Clock24 => s.clock24 = !s.clock24,
+                        QuickTile::Clock24 => s.set_clock24(!s.clock24),
                     }
                 } else if let Some(i) = g.swatches.iter().position(|r| r.inflated(3).contains(x, y))
                 {

@@ -75,6 +75,9 @@ pub(crate) enum DragMode {
     PageSelect,
     /// A control of a system app being dragged (a slider of Ajustes).
     Ui,
+    /// A press in a file manager: a click, a drag of items or a rubber band (the gesture
+    /// lives in the window's state).
+    Files,
 }
 
 pub(crate) struct Drag {
@@ -125,6 +128,9 @@ pub struct Desktop {
     /// Set by operations that change pixels outside the focused window (maximize,
     /// restore, ...); makes the next steady frame upload the whole screen.
     force_full: bool,
+    /// A browser window whose client area is the only thing that changed since the last frame
+    /// (a scroll, a hover, a keystroke in its bar): the compositor repaints just that area.
+    client_dirty: Option<WindowId>,
     /// Region to upload on the next steady frame besides the focused window.
     extra_dirty: Rect,
     cursor_x: i32,
@@ -183,6 +189,7 @@ impl Desktop {
             tex_key: core::cell::Cell::new(None),
             clicks: ClickTracker::new(DOUBLE_CLICK_TICKS),
             force_full: false,
+            client_dirty: None,
             extra_dirty: Rect::new(0, 0, 0, 0),
             cursor_x: sw / 2,
             cursor_y: sh / 2,
@@ -365,15 +372,6 @@ impl Desktop {
         }
     }
 
-    /// The (single) browser window, if open.
-    fn browser_id(&self) -> Option<WindowId> {
-        self.wm
-            .windows()
-            .iter()
-            .find(|w| w.app.kind() == Kind::Browser && !w.is_closing())
-            .map(|w| w.id)
-    }
-
     pub(crate) fn request_close(&mut self, id: WindowId) {
         // An editor with unsaved changes asks before it goes.
         if self.editor_holds_close(id) {
@@ -412,13 +410,15 @@ impl Desktop {
     /// is still animating (the caller keeps rendering).
     pub fn animate(&mut self, dt: f32) -> bool {
         self.step_file_jobs();
+        let files_busy = self.step_files(dt) | self.step_viewers(dt) | self.step_editors(dt);
         self.step_shell_jobs();
         self.sync_text_windows();
         self.live_step(dt);
         let (active, gone) = self.wm.step(dt);
         let focus_busy = self.step_focus(dt);
         let shell_busy = self.step_shell(dt);
-        let active = active || focus_busy || shell_busy;
+        let browser_busy = self.step_browser(dt);
+        let active = active || focus_busy || shell_busy || files_busy || browser_busy;
         if !active {
             // Nothing animates any more: the next animation re-captures its window.
             self.tex_key.set(None);
@@ -502,8 +502,11 @@ impl Desktop {
                         || w.zoom.is_some()
                         || self.focus_busy(w.id)
                         || w.app.kind() == Kind::WasmApp
-                        || matches!(&w.app.app, App::Files(f) if f.job.is_some())
-                        || matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
+                        || matches!(&w.app.app, App::Files(f) if f.animating())
+                        || matches!(&w.app.app, App::Viewer(v) if v.animating())
+                        || matches!(&w.app.app, App::Editor(e) if e.animating(self.focused() == Some(w.id)))
+                        || matches!(&w.app.app, App::Terminal(t) if t.term.is_running() || t.animating(self.focused() == Some(w.id)))
+                        || self.browser_busy(w))
             })
     }
 
@@ -515,6 +518,11 @@ impl Desktop {
     /// Is the reference mode (Ctrl+Alt+R, see the `reference` field) on?
     pub fn reference_mode(&self) -> bool {
         self.reference
+    }
+
+    /// Consume the "only this window's client area changed" note.
+    pub fn take_client_dirty(&mut self) -> Option<WindowId> {
+        self.client_dirty.take()
     }
 
     /// Consume the "repaint everything" request (maximize, restore, ...).
@@ -532,301 +540,21 @@ impl Desktop {
     pub(crate) fn mark_dirty(&mut self, r: Rect) {
         self.extra_dirty = self.extra_dirty.union(&r);
     }
-
-    // ---- browser networking hand-off (driven by the kernel main loop) ----
-
-    /// If the browser app has a pending navigation, copy the target URL into
-    /// `out` and return its length (clearing the pending flag). The kernel then
-    /// performs the blocking fetch and reports back with [`browser_load`] /
-    /// [`browser_fail`].
-    pub fn browser_take_request(&mut self, out: &mut [u8]) -> Option<usize> {
-        let id = self.browser_id()?;
-        self.browser_state_mut(id)?
-            .browser
-            .take_request()
-            .map(|url| {
-                let n = url.len().min(out.len());
-                out[..n].copy_from_slice(&url[..n]);
-                n
-            })
-    }
-
-    /// The host the user allowed past a certificate error for the navigation just
-    /// taken by [`browser_take_request`] (empty when none): copied into `out`.
-    pub fn browser_insecure_host(&mut self, out: &mut [u8]) -> usize {
-        let Some(id) = self.browser_id() else {
-            return 0;
-        };
-        let Some(b) = self.browser_state_mut(id) else {
-            return 0;
-        };
-        match b.browser.insecure_host() {
-            Some(h) => {
-                let n = h.len().min(out.len());
-                out[..n].copy_from_slice(&h[..n]);
-                n
-            }
-            None => 0,
-        }
-    }
-
-    /// Render a fetched raw HTTP response with the `web` engine and keep the
-    /// resulting display list for painting/scrolling. `conn` says how the final
-    /// connection was authenticated and `truncated` that the response hit the
-    /// size cap; both feed the address-bar badge and the truncation notice.
-    /// Dropped when the browser window was closed meanwhile.
-    pub fn browser_load(&mut self, resp: &[u8], conn: osjeff_core::browser::Conn, truncated: bool) {
-        let Some(id) = self.browser_id() else {
-            return;
-        };
-        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
-            return;
-        };
-        let content_w = BrowserChrome::of(rect).content.w;
-        // A cut or damaged compressed body still renders what was decoded; the note says why
-        // the page is partial (shown as a banner).
-        let page = osjeff_core::browser::page_body_partial(resp, truncated);
-        let body = page.body;
-        if let Some(b) = self.browser_state_mut(id) {
-            b.doc = Some(osjeff_core::web::Doc::parse(&body));
-            b.images.begin_page();
-            b.img_inflight = None;
-            b.scroll = 0;
-            b.browser.loaded_with_note(conn, page.note);
-            b.layout_w = content_w;
-            layout_browser(b, content_w, true);
-        }
-        self.browser_page_changed(id);
-    }
-
-    /// Render the HTML of a page the browser generated itself (`osjeff://...`), if one was just
-    /// opened. Called every frame by the main loop, right next to the network hand-off.
-    pub fn browser_poll_internal(&mut self) -> bool {
-        let Some(id) = self.browser_id() else {
-            return false;
-        };
-        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
-            return false;
-        };
-        let content_w = BrowserChrome::of(rect).content.w;
-        let Some(b) = self.browser_state_mut(id) else {
-            return false;
-        };
-        let Some(html) = b.browser.take_internal() else {
-            return false;
-        };
-        b.doc = Some(osjeff_core::web::Doc::parse(&html));
-        b.images.begin_page();
-        b.img_inflight = None;
-        b.scroll = 0;
-        b.layout_w = content_w;
-        layout_browser(b, content_w, true);
-        self.browser_page_changed(id);
-        true
-    }
-
-    /// A new page is on screen: window title from its `<title>`, selection and find reset.
-    fn browser_page_changed(&mut self, id: WindowId) {
-        let mut title = String::from("NAVEGADOR");
-        if let Some(b) = self.browser_state_mut(id) {
-            let t = b
-                .doc
-                .as_ref()
-                .map(|d| String::from(d.title()))
-                .unwrap_or_default();
-            b.browser.set_page_title(&t);
-            b.sel = None;
-            b.sel_anchor = None;
-            b.notice = None;
-            b.find.refresh(b.page.as_ref());
-            if !t.is_empty() {
-                title.push_str(" - ");
-                title.extend(t.chars().take(48));
-            }
-        }
-        if let Some(w) = self.wm.get_mut(id) {
-            w.app.title = title;
-        }
-    }
-
-    /// Mark the in-flight browser fetch as failed.
-    pub fn browser_fail(&mut self, reason: osjeff_core::browser::FailReason) {
-        if let Some(id) = self.browser_id()
-            && let Some(b) = self.browser_state_mut(id)
-        {
-            b.page = None;
-            b.doc = None;
-            b.sel = None;
-            b.browser.fail_with(reason);
-        }
-        if let Some(id) = self.browser_id()
-            && let Some(w) = self.wm.get_mut(id)
-        {
-            w.app.title = String::from("NAVEGADOR");
-        }
-    }
-
-    /// Scroll the rendered page of browser window `id` by `dy` pixels, clamped
-    /// to its content height.
-    pub(crate) fn scroll_page(&mut self, id: WindowId, dy: i32) -> bool {
-        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
-            return false;
-        };
-        let view_h = BrowserChrome::of(rect).content.h;
-        let Some(b) = self.browser_state_mut(id) else {
-            return false;
-        };
-        let max = b
-            .page
-            .as_ref()
-            .map(|p| (p.height - view_h).max(0))
-            .unwrap_or(0);
-        let before = b.scroll;
-        b.scroll = (b.scroll + dy).clamp(0, max);
-        b.scroll != before
-    }
-
-    /// Wheel over browser window `id`: three text lines per notch.
-    pub(crate) fn browser_wheel(&mut self, id: WindowId, notches: i32) -> bool {
-        self.scroll_page(id, notches * 54)
-    }
-
-    /// Lay the browser page out again for the window's current width (after a
-    /// resize or maximize). Cheap no-op when the width did not change.
-    pub(crate) fn relayout_browser(&mut self, id: WindowId) {
-        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
-            return;
-        };
-        let content = BrowserChrome::of(rect).content;
-        if let Some(b) = self.browser_state_mut(id)
-            && b.page.is_some()
-            && b.layout_w != content.w
-        {
-            b.layout_w = content.w;
-            layout_browser(b, content.w, false);
-            let max = b.page.as_ref().map_or(0, |p| (p.height - content.h).max(0));
-            b.scroll = b.scroll.clamp(0, max);
-        }
-    }
-
-    /// The next picture of the page that has to be downloaded, if the fetcher is free: copies its
-    /// URL into `out` and returns the length and the column width to scale it to. Inline `data:`
-    /// pictures are decoded right here (they are small) and never reach the fetcher.
-    pub fn browser_next_image(&mut self, out: &mut [u8]) -> Option<(usize, usize)> {
-        let id = self.browser_id()?;
-        let rect = self.wm.get(id).map(|w| w.rect)?;
-        let content = BrowserChrome::of(rect).content;
-        let b = self.browser_state_mut(id)?;
-        if b.img_inflight.is_some() {
-            return None;
-        }
-        let fit_w = (content.w - 24).max(16) as usize;
-        let mut inline_done = false;
-        let mut result = None;
-        while let Some((key, data)) = b.images.next_pending() {
-            if let Some(uri) = data {
-                let r = osjeff_core::web::imgcache::decode_data_uri(&uri, fit_w);
-                b.images.finish(&key, r);
-                inline_done = true;
-                continue;
-            }
-            let n = key.len().min(out.len());
-            out[..n].copy_from_slice(&key.as_bytes()[..n]);
-            b.img_inflight = Some(key);
-            result = Some((n, fit_w));
-            break;
-        }
-        if inline_done {
-            layout_browser(b, content.w, false);
-        }
-        result
-    }
-
-    /// A picture request finished: store it and lay the page out again (images change sizes).
-    pub fn browser_image_done(
-        &mut self,
-        res: Result<osjeff_core::web::imgcache::Loaded, osjeff_core::web::imgcache::ImgFail>,
-    ) {
-        let Some(id) = self.browser_id() else {
-            return;
-        };
-        let Some(rect) = self.wm.get(id).map(|w| w.rect) else {
-            return;
-        };
-        let content = BrowserChrome::of(rect).content;
-        if let Some(b) = self.browser_state_mut(id)
-            && let Some(key) = b.img_inflight.take()
-        {
-            b.images.finish(&key, res);
-            layout_browser(b, content.w, false);
-            let max = b.page.as_ref().map_or(0, |p| (p.height - content.h).max(0));
-            b.scroll = b.scroll.clamp(0, max);
-        }
-    }
 }
 
-/// Lay the document of `b` out for `width` pixels with the current zoom and whatever the image
-/// cache knows. `register` (a new page) first lays out with the images unknown to learn which
-/// pictures the page has, asks the cache for them, then lays out again.
-fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
-    use osjeff_core::web::imgcache::{PageImages, image_key};
-    use osjeff_core::web::{Cmd, Layout};
-    let Some(doc) = &b.doc else {
-        return;
-    };
-    let base = b.browser.nav_url().to_vec();
-    let lay = |images: &osjeff_core::web::imgcache::ImageCache| {
-        doc.layout(&Layout {
-            width,
-            zoom: b.zoom,
-            images: &PageImages {
-                cache: images,
-                base: &base,
-            },
-        })
-    };
-    let mut page = lay(&b.images);
-    if register {
-        b.forms = osjeff_core::web::form::FormState::new(&page.forms);
-        b.img_keys.clear();
-        for r in &page.images {
-            let key = image_key(&base, &r.src);
-            if let Some(k) = &key {
-                let data = (k.starts_with("data:#")).then_some(r.src.as_str());
-                b.images.want(k, data);
-            }
-            b.img_keys.push(key);
-        }
-        if page.images.len() > osjeff_core::web::imgcache::MAX_PAGE_IMAGES {
-            page = lay(&b.images);
-        }
-    }
-    // Make each stored picture exactly the size of its box so painting is a plain copy.
-    let mut changed = false;
-    for c in &page.cmds {
-        if let Cmd::Image { w, h, idx, .. } = c
-            && let Some(Some(k)) = b.img_keys.get(*idx)
-        {
-            changed |= b.images.fit_to(k, *w as usize, *h as usize);
-        }
-    }
-    let _ = changed;
-    b.page = Some(page);
-    // The words moved: the selection (word indices) and the find matches follow the new layout.
-    b.find.refresh(b.page.as_ref());
-    if let Some(p) = &b.page
-        && b.sel.is_some_and(|(_, e)| e >= p.word_count())
-    {
-        b.sel = None;
-    }
-}
-
+mod appart;
 mod apps;
+mod appui;
+mod browser;
+mod browser_input;
+mod browser_paint;
+mod browser_ui;
 pub(crate) mod calc_ui;
 mod chrome;
 mod compositor;
 mod cursor;
 mod edit;
+mod edit_ui;
 mod files;
 mod files_ui;
 mod gallery;
@@ -834,6 +562,7 @@ mod glass;
 mod input;
 mod instance;
 mod kit;
+mod lang;
 mod live;
 mod logview;
 mod overlays;

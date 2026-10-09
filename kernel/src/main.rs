@@ -470,6 +470,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
 
+        // A browser window whose client area is the only thing that changed.
+        let client_dirty = desk.take_client_dirty();
         let input_irq_tsc = if got_input { trace::input_taken() } else { 0 };
         let mut report_due = false;
         if rt.s != last_sec {
@@ -527,6 +529,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 input: scene_dirty || force_full,
                 force_full,
                 extra_dirty,
+                client: client_dirty,
                 external,
                 cursor_moved,
                 clock_tick,
@@ -600,7 +603,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         if let Some(result) = fetch::take_result() {
             match result {
-                Ok(page) => desk.browser_load(&page.data, page.conn, page.truncated),
+                Ok(page) => desk.browser_load(&page.data, page.conn, page.truncated, page.cert),
                 Err(reason) => desk.browser_fail(reason),
             }
             browser_redraw = true;

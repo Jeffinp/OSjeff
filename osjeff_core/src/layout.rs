@@ -5,6 +5,7 @@
 //! so the two can never disagree. Nothing here touches pixels.
 
 use crate::window::{Rect, TITLE_H};
+use alloc::vec::Vec;
 
 /// Calculator keypad: the input byte for each cell, six rows of four. The first row is the
 /// memory keys (`MC MR M- M+`, see `calc::KEY_*`), then `C`, backspace (`0x08`), percent and
@@ -101,88 +102,332 @@ pub fn calc_button_at(r: Rect, px: i32, py: i32) -> Option<u8> {
 
 // --------------------------------------------------------------------- browser
 
+/// Height of the toolbar band under the title bar.
+pub const BROWSER_TOOLBAR_H: i32 = 48;
+/// Height of the tab strip (shown from two tabs on).
+pub const BROWSER_STRIP_H: i32 = 36;
+/// Side of the toolbar buttons.
+pub const BROWSER_BTN: i32 = 32;
+/// Height of a tab.
+pub const BROWSER_TAB_H: i32 = 28;
+/// Widest and narrowest a tab gets.
+pub const BROWSER_TAB_MAX_W: i32 = 208;
+pub const BROWSER_TAB_MIN_W: i32 = 72;
+
 /// Browser chrome geometry, shared by drawing and hit-testing so the toolbar
-/// buttons, address bar and content area always agree.
+/// buttons, omnibox, tabs and content area always agree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BrowserChrome {
+    /// The band under the title bar that holds the buttons and the omnibox.
+    pub toolbar: Rect,
     pub back: Rect,
     pub forward: Rect,
     pub reload: Rect,
-    pub home: Rect,
-    pub go: Rect,
+    /// The omnibox.
     pub bar: Rect,
-    /// The favourite star, inside the right end of the address bar.
+    /// The security indicator, inside the left end of the omnibox (empty when there is none).
+    pub shield: Rect,
+    /// The favourite star, inside the right end of the omnibox.
     pub star: Rect,
+    /// The "new tab" button right of the omnibox.
+    pub newtab: Rect,
+    /// The loading progress track under the omnibox.
+    pub progress: Rect,
+    /// The tab strip (zero height with a single tab).
+    pub strip: Rect,
+    /// The page area, edge to edge below the chrome.
     pub content: Rect,
 }
 
 impl BrowserChrome {
-    pub fn of(r: Rect) -> Self {
-        let pad = 14;
-        let btn = 36;
-        let gap = 8;
-        let ty = r.y + TITLE_H + 12;
-        let back = Rect::new(r.x + pad, ty, btn, btn);
-        let forward = Rect::new(back.right() + gap, ty, btn, btn);
-        let reload = Rect::new(forward.right() + gap, ty, btn, btn);
-        let home = Rect::new(reload.right() + gap, ty, btn, btn);
-        let go = Rect::new(r.right() - pad - btn, ty, btn, btn);
-        let bar_x = home.right() + gap;
-        let bar = Rect::new(bar_x, ty, (go.x - gap - bar_x).max(60), btn);
-        let star = Rect::new(bar.right() - 34, ty + 6, 24, 24);
-        let cy = ty + btn + 16;
-        let content = Rect::new(r.x + pad, cy, r.w - pad * 2, (r.bottom() - 14 - cy).max(0));
+    /// Geometry for window `r` with `tabs` tabs; `shield_w` is the width of the security
+    /// indicator (0 for none: the start page and internal pages).
+    pub fn of(r: Rect, tabs: usize, shield_w: i32) -> Self {
+        Self::with_strip(r, shield_w, if tabs >= 2 { BROWSER_STRIP_H } else { 0 })
+    }
+
+    /// [`BrowserChrome::of`] with the strip `strip_h` pixels tall (it grows and shrinks while a
+    /// second tab opens or the second to last closes).
+    pub fn with_strip(r: Rect, shield_w: i32, strip_h: i32) -> Self {
+        let pad = 12;
+        let y0 = r.y + TITLE_H;
+        let toolbar = Rect::new(r.x, y0, r.w, BROWSER_TOOLBAR_H);
+        let by = y0 + (BROWSER_TOOLBAR_H - BROWSER_BTN) / 2;
+        let back = Rect::new(r.x + pad, by, BROWSER_BTN, BROWSER_BTN);
+        let forward = Rect::new(back.right() + 4, by, BROWSER_BTN, BROWSER_BTN);
+        let reload = Rect::new(forward.right() + 8, by, BROWSER_BTN, BROWSER_BTN);
+        let newtab = Rect::new(r.right() - pad - BROWSER_BTN, by, BROWSER_BTN, BROWSER_BTN);
+        let bar_x = reload.right() + 12;
+        let bar = Rect::new(bar_x, by, (newtab.x - 8 - bar_x).max(120), BROWSER_BTN);
+        let shield = if shield_w > 0 {
+            Rect::new(bar.x + 4, bar.y + 4, shield_w.min(bar.w / 2), 24)
+        } else {
+            Rect::new(bar.x + 4, bar.y + 4, 0, 24)
+        };
+        let star = Rect::new(bar.right() - 4 - 24, bar.y + 4, 24, 24);
+        let progress = Rect::new(bar.x + 12, bar.bottom() + 3, (bar.w - 24).max(0), 2);
+        let strip = Rect::new(
+            r.x,
+            toolbar.bottom(),
+            r.w,
+            strip_h.clamp(0, BROWSER_STRIP_H),
+        );
+        let cy = strip.bottom();
+        let content = Rect::new(r.x, cy, r.w, (r.bottom() - cy).max(0));
         Self {
+            toolbar,
             back,
             forward,
             reload,
-            home,
-            go,
             bar,
+            shield,
             star,
+            newtab,
+            progress,
+            strip,
             content,
+        }
+    }
+
+    /// Left edge of the address text inside the omnibox.
+    pub fn text_x(&self) -> i32 {
+        if self.shield.w > 0 {
+            self.shield.right() + 8
+        } else {
+            self.bar.x + 36
         }
     }
 }
 
-/// Rect of suggestion row `i` under the address bar (rows are 26 px tall).
-pub fn browser_suggestion_row(bar: Rect, i: usize) -> Rect {
-    Rect::new(bar.x, bar.bottom() + 2 + i as i32 * 26, bar.w, 26)
+/// The tabs of a strip: one rectangle per entry of `weights` (0..=256, how far each tab
+/// has grown while it opens or closes), left to right with 4 px between them. Tabs
+/// share the strip equally up to [`BROWSER_TAB_MAX_W`] and never get below
+/// [`BROWSER_TAB_MIN_W`] (the strip then overflows and the caller scrolls or clips).
+pub fn browser_tab_rects(strip: Rect, weights: &[i32]) -> Vec<Rect> {
+    let n = weights.len() as i32;
+    if n == 0 {
+        return Vec::new();
+    }
+    let total: i32 = weights.iter().map(|w| (*w).clamp(0, 256)).sum();
+    let avail = (strip.w - 24 - 4 * (n - 1)).max(0);
+    // One full tab's width: the room shared by the full tabs (a growing one counts less).
+    let slot = if total == 0 {
+        BROWSER_TAB_MAX_W
+    } else {
+        (avail * 256 / total).clamp(BROWSER_TAB_MIN_W, BROWSER_TAB_MAX_W)
+    };
+    let mut x = strip.x + 12;
+    let y = strip.y + (strip.h - BROWSER_TAB_H) / 2;
+    weights
+        .iter()
+        .map(|w| {
+            let w = (*w).clamp(0, 256);
+            let tw = slot * w / 256;
+            let r = Rect::new(x, y, tw, BROWSER_TAB_H);
+            x += tw + if w > 0 { 4 * w / 256 } else { 0 };
+            r
+        })
+        .collect()
 }
 
-/// Row of the suggestion list under page-space point `(px, py)` when `n` rows are shown.
+/// The close button inside tab `tab`.
+pub fn browser_tab_close(tab: Rect) -> Rect {
+    Rect::new(tab.right() - 6 - 20, tab.y + (tab.h - 20) / 2, 20, 20)
+}
+
+/// The index of the tab under `(x, y)`.
+pub fn browser_tab_at(rects: &[Rect], x: i32, y: i32) -> Option<usize> {
+    rects.iter().position(|r| r.w > 0 && r.contains(x, y))
+}
+
+/// Rows of the suggestion list are 32 px tall.
+pub const BROWSER_SUGGEST_ROW: i32 = 32;
+
+/// The panel of `n` suggestions hanging under the omnibox `bar`.
+pub fn browser_suggest_panel(bar: Rect, n: usize) -> Rect {
+    Rect::new(
+        bar.x,
+        bar.bottom() + 6,
+        bar.w,
+        n as i32 * BROWSER_SUGGEST_ROW + 12,
+    )
+}
+
+/// Rect of suggestion row `i` under the omnibox.
+pub fn browser_suggestion_row(bar: Rect, i: usize) -> Rect {
+    let p = browser_suggest_panel(bar, 0);
+    Rect::new(
+        p.x + 6,
+        p.y + 6 + i as i32 * BROWSER_SUGGEST_ROW,
+        bar.w - 12,
+        BROWSER_SUGGEST_ROW,
+    )
+}
+
+/// Row of the suggestion list under point `(px, py)` when `n` rows are shown.
 pub fn browser_suggestion_at(bar: Rect, n: usize, px: i32, py: i32) -> Option<usize> {
     (0..n).find(|&i| browser_suggestion_row(bar, i).contains(px, py))
 }
 
-/// Rect of the error page's "continue anyway (insecure)" button, offered only for
-/// certificate errors. Inside the content box, below the message lines.
-pub fn browser_continue_button(content: Rect) -> Rect {
+/// The popover that explains the security indicator, `h` tall, under the omnibox's left end,
+/// kept inside window `win`.
+pub fn browser_popover(bar: Rect, win: Rect, h: i32) -> Rect {
+    let w = 328.min(win.w - 16).max(120);
+    let x = bar.x.clamp(win.x + 8, (win.right() - w - 8).max(win.x + 8));
+    Rect::new(x, bar.bottom() + 8, w, h)
+}
+
+/// Where everything of the find bar goes: a slim bar in the top right of the page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FindLayout {
+    pub bar: Rect,
+    pub field: Rect,
+    pub count: Rect,
+    pub prev: Rect,
+    pub next: Rect,
+    pub close: Rect,
+}
+
+/// Layout of the find bar in page area `content`.
+pub fn browser_find_layout(content: Rect) -> FindLayout {
+    let w = 372.min(content.w - 24).max(200);
+    let bar = Rect::new(
+        (content.right() - 12 - w).max(content.x + 4),
+        content.y + 12,
+        w,
+        40,
+    );
+    let close = Rect::new(bar.right() - 8 - 24, bar.y + 8, 24, 24);
+    let next = Rect::new(close.x - 4 - 24, bar.y + 8, 24, 24);
+    let prev = Rect::new(next.x - 24, bar.y + 8, 24, 24);
+    let count = Rect::new(prev.x - 8 - 64, bar.y + 8, 64, 24);
+    let field = Rect::new(
+        bar.x + 8,
+        bar.y + 6,
+        (count.x - 8 - (bar.x + 8)).max(40),
+        28,
+    );
+    FindLayout {
+        bar,
+        field,
+        count,
+        prev,
+        next,
+        close,
+    }
+}
+
+/// The zoom pill at the bottom right of the page.
+pub fn browser_zoom_pill(content: Rect) -> Rect {
     Rect::new(
-        content.x + 8,
-        content.y + 104,
-        (content.w - 16).clamp(0, 420),
-        34,
+        content.right() - 16 - 72,
+        content.bottom() - 16 - 28,
+        72,
+        28,
     )
 }
 
-/// Start-page layout: the brand logo rect and the four shortcut-tile rects,
-/// centered in the content box.
-pub fn browser_home_layout(content: Rect) -> (Rect, [Rect; 4]) {
+/// Where the parts of an error page go, centred in the page area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ErrorLayout {
+    /// The illustration.
+    pub art: Rect,
+    pub title: Rect,
+    pub cause: Rect,
+    pub retry: Rect,
+    /// "Continue anyway" (certificate errors only).
+    pub proceed: Rect,
+    /// The one-line warning under it.
+    pub note: Rect,
+}
+
+/// Layout of an error page in `content`; `cert` adds the "continue anyway" row.
+pub fn browser_error_layout(content: Rect, cert: bool) -> ErrorLayout {
+    let cw = (content.w - 48).clamp(120, 520);
     let cx = content.x + content.w / 2;
-    let logo_sz = 84;
-    let logo = Rect::new(cx - logo_sz / 2, content.y + 30, logo_sz, logo_sz);
-    let tile_w = 150;
-    let tile_h = 96;
-    let gap = 18;
-    let total = 4 * tile_w + 3 * gap;
-    let sx = cx - total / 2;
-    let ty = logo.bottom() + 108;
-    let mut tiles = [Rect::new(0, 0, 0, 0); 4];
-    for (i, t) in tiles.iter_mut().enumerate() {
-        *t = Rect::new(sx + i as i32 * (tile_w + gap), ty, tile_w, tile_h);
+    // The block is centred vertically a little above the middle.
+    let block_h = 96 + 24 + 32 + 8 + 24 + 28 + 40 + if cert { 12 + 32 + 8 + 20 } else { 0 };
+    let top = content.y + ((content.h - block_h) / 2 - 12).max(16);
+    let art = Rect::new(cx - 48, top, 96, 96);
+    let title = Rect::new(cx - cw / 2, art.bottom() + 24, cw, 32);
+    let cause = Rect::new(cx - cw / 2, title.bottom() + 8, cw, 24);
+    let retry = Rect::new(cx - 88, cause.bottom() + 28, 176, 40);
+    let pw = (cw).min(300);
+    let proceed = Rect::new(cx - pw / 2, retry.bottom() + 12, pw, 32);
+    let note = Rect::new(cx - cw / 2, proceed.bottom() + 8, cw, 20);
+    ErrorLayout {
+        art,
+        title,
+        cause,
+        retry,
+        proceed,
+        note,
     }
-    (logo, tiles)
+}
+
+/// Where the parts of the new-tab page go.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StartLayout {
+    /// The big search field.
+    pub search: Rect,
+    /// Heading rows of the tile grid and of the recent list.
+    pub tiles_heading: Rect,
+    pub tiles: Vec<Rect>,
+    pub recent_heading: Rect,
+    pub recents: Vec<Rect>,
+}
+
+/// Layout of the new-tab page in `content` for up to `nt` tiles and `nr` recent rows; what
+/// does not fit is left out.
+pub fn browser_start_layout(content: Rect, nt: usize, nr: usize) -> StartLayout {
+    let cw = (content.w - 48).clamp(160, 600);
+    let cx = content.x + content.w / 2;
+    let left = cx - cw / 2;
+    let search = Rect::new(left, content.y + (content.h / 8).clamp(24, 72), cw, 48);
+    let tiles_heading = Rect::new(left, search.bottom() + 28, cw, 20);
+    // Tiles: as many columns of 104 px as fit (at most 5), 16 px apart.
+    let cols = (((cw + 16) / (104 + 16)).clamp(1, 5)) as usize;
+    let tile_w = (cw - 16 * (cols as i32 - 1)) / cols as i32;
+    let tile_h = 96;
+    let mut tiles = Vec::new();
+    let mut y = tiles_heading.bottom() + 12;
+    let room_for_rows = |y: i32, extra: i32| y + tile_h + extra <= content.bottom() - 8;
+    let mut i = 0;
+    while i < nt && room_for_rows(y, 0) {
+        let row = (nt - i).min(cols);
+        for k in 0..row {
+            tiles.push(Rect::new(
+                left + k as i32 * (tile_w + 16),
+                y,
+                tile_w,
+                tile_h,
+            ));
+        }
+        i += row;
+        y += tile_h + 16;
+    }
+    let tiles_bottom = if tiles.is_empty() {
+        tiles_heading.bottom()
+    } else {
+        y - 16
+    };
+    let recent_heading = Rect::new(left, tiles_bottom + 24, cw, 20);
+    let mut recents = Vec::new();
+    let mut ry = recent_heading.bottom() + 8;
+    for _ in 0..nr {
+        if ry + 40 > content.bottom() - 8 {
+            break;
+        }
+        recents.push(Rect::new(left, ry, cw, 40));
+        ry += 40;
+    }
+    StartLayout {
+        search,
+        tiles_heading,
+        tiles,
+        recent_heading,
+        recents,
+    }
 }
 
 // ------------------------------------------------------------- work area & fit
@@ -379,64 +624,199 @@ mod tests {
     #[test]
     fn browser_chrome_toolbar_is_ordered_and_inside_the_window() {
         let r = Rect::new(80, 60, 700, 500);
-        let c = BrowserChrome::of(r);
-        assert!(c.back.right() < c.forward.x);
+        let c = BrowserChrome::of(r, 1, 0);
+        assert!(c.back.right() <= c.forward.x);
         assert!(c.forward.right() < c.reload.x);
-        assert!(c.reload.right() < c.home.x);
-        assert!(c.home.right() < c.bar.x);
-        assert!(c.bar.right() < c.go.x);
+        assert!(c.reload.right() < c.bar.x);
+        assert!(c.bar.right() < c.newtab.x);
         assert!(c.star.x >= c.bar.x && c.star.right() <= c.bar.right());
-        assert_eq!(c.go.right(), r.right() - 14);
-        assert_eq!(c.back.y, r.y + TITLE_H + 12);
-        assert!(c.content.y > c.home.bottom());
-        assert_eq!(c.content.bottom(), r.bottom() - 14);
+        assert_eq!(c.newtab.right(), r.right() - 12);
+        assert_eq!(c.toolbar.y, r.y + TITLE_H);
+        assert_eq!(c.toolbar.h, BROWSER_TOOLBAR_H);
+        // Every control is vertically centred in the toolbar and on the 4 px grid.
+        for b in [c.back, c.forward, c.reload, c.bar, c.newtab] {
+            assert_eq!(b.y - c.toolbar.y, (BROWSER_TOOLBAR_H - b.h) / 2);
+            assert_eq!(b.h % 4, 0);
+        }
+        // The page is edge to edge below the chrome.
+        assert_eq!(c.content.x, r.x);
+        assert_eq!(c.content.w, r.w);
+        assert_eq!(c.content.y, c.toolbar.bottom());
+        assert_eq!(c.content.bottom(), r.bottom());
+        assert!(c.progress.y > c.bar.bottom() && c.progress.bottom() <= c.toolbar.bottom());
+    }
+
+    #[test]
+    fn the_tab_strip_appears_from_two_tabs_and_pushes_the_page_down() {
+        let r = Rect::new(0, 0, 700, 500);
+        let one = BrowserChrome::of(r, 1, 0);
+        let two = BrowserChrome::of(r, 2, 0);
+        assert_eq!(one.strip.h, 0);
+        assert_eq!(two.strip.h, BROWSER_STRIP_H);
+        assert_eq!(two.content.y, one.content.y + BROWSER_STRIP_H);
+        assert_eq!(two.strip.y, two.toolbar.bottom());
+    }
+
+    #[test]
+    fn the_shield_takes_room_from_the_address_text() {
+        let r = Rect::new(0, 0, 700, 500);
+        let none = BrowserChrome::of(r, 1, 0);
+        let some = BrowserChrome::of(r, 1, 120);
+        assert_eq!(none.shield.w, 0);
+        assert_eq!(some.shield.w, 120);
+        assert!(some.text_x() > none.text_x());
+        assert!(some.shield.x >= some.bar.x && some.shield.right() <= some.bar.right());
+        // Never wider than half the omnibox.
+        let wide = BrowserChrome::of(Rect::new(0, 0, 400, 300), 1, 5000);
+        assert!(wide.shield.w <= wide.bar.w / 2);
+    }
+
+    #[test]
+    fn tab_rects_share_the_strip_and_animate_with_their_weights() {
+        let strip = Rect::new(0, 100, 700, 36);
+        let full = browser_tab_rects(strip, &[256, 256, 256]);
+        assert_eq!(full.len(), 3);
+        for r in &full {
+            assert_eq!(r.h, BROWSER_TAB_H);
+            assert!(r.w >= BROWSER_TAB_MIN_W && r.w <= BROWSER_TAB_MAX_W);
+            assert_eq!(r.y, strip.y + 4);
+        }
+        assert_eq!(full[1].x - full[0].right(), 4);
+        // Eight tabs in a narrow strip bottom out at the minimum.
+        let tiny = browser_tab_rects(Rect::new(0, 0, 300, 36), &[256; 8]);
+        assert!(tiny.iter().all(|r| r.w == BROWSER_TAB_MIN_W));
+        // A tab that is opening is narrower and the others close ranks around it.
+        let half = browser_tab_rects(strip, &[256, 128, 256]);
+        assert!(half[1].w < full[1].w);
+        assert!(half[1].w > 0);
+        let zero = browser_tab_rects(strip, &[256, 0, 256]);
+        assert_eq!(zero[1].w, 0);
+        assert_eq!(zero[2].x, zero[0].right() + 4);
+        assert!(browser_tab_rects(strip, &[]).is_empty());
+        // Two tabs in a wide strip stop at the maximum width.
+        let wide = browser_tab_rects(Rect::new(0, 0, 1280, 36), &[256, 256]);
+        assert!(wide.iter().all(|r| r.w == BROWSER_TAB_MAX_W));
+    }
+
+    #[test]
+    fn tab_hit_testing_and_close_button() {
+        let rects = browser_tab_rects(Rect::new(0, 0, 700, 36), &[256, 256, 0]);
+        assert_eq!(
+            browser_tab_at(&rects, rects[1].x + 5, rects[1].y + 5),
+            Some(1)
+        );
+        assert_eq!(browser_tab_at(&rects, 2, 2), None);
+        // A closed (zero width) tab cannot be hit.
+        assert_eq!(browser_tab_at(&rects, rects[2].x, rects[2].y + 5), None);
+        let x = browser_tab_close(rects[0]);
+        assert!(x.x >= rects[0].x && x.right() <= rects[0].right());
+        assert!(x.y >= rects[0].y && x.bottom() <= rects[0].bottom());
     }
 
     #[test]
     fn suggestion_rows_stack_under_the_bar() {
-        let bar = Rect::new(100, 50, 400, 36);
+        let bar = Rect::new(100, 50, 400, 32);
+        let panel = browser_suggest_panel(bar, 3);
         let r0 = browser_suggestion_row(bar, 0);
         let r1 = browser_suggestion_row(bar, 1);
-        assert_eq!((r0.x, r0.w), (bar.x, bar.w));
-        assert!(r0.y > bar.bottom());
-        assert_eq!(r1.y - r0.y, 26);
+        assert!(panel.x == bar.x && panel.w == bar.w && panel.y > bar.bottom());
+        assert!(r0.x > panel.x && r0.right() < panel.right());
+        assert!(r0.y > panel.y);
+        assert_eq!(r1.y - r0.y, BROWSER_SUGGEST_ROW);
+        assert!(browser_suggestion_row(bar, 2).bottom() < panel.bottom());
         assert_eq!(browser_suggestion_at(bar, 3, 120, r1.y + 3), Some(1));
         assert_eq!(browser_suggestion_at(bar, 1, 120, r1.y + 3), None);
         assert_eq!(browser_suggestion_at(bar, 3, 5, r0.y), None);
     }
 
     #[test]
-    fn continue_button_is_inside_the_content_box() {
-        let content = Rect::new(100, 200, 600, 300);
-        let b = browser_continue_button(content);
-        assert!(b.x >= content.x && b.right() <= content.right());
-        assert!(b.y > content.y + 60 && b.bottom() <= content.bottom());
-        assert_eq!(b.w, 420);
-        // Narrow windows shrink it instead of overflowing.
-        let narrow = browser_continue_button(Rect::new(0, 0, 200, 300));
-        assert_eq!(narrow.w, 184);
+    fn popover_stays_inside_the_window() {
+        let win = Rect::new(100, 100, 500, 400);
+        let bar = Rect::new(380, 150, 200, 32);
+        let p = browser_popover(bar, win, 200);
+        assert!(p.x >= win.x && p.right() <= win.right());
+        assert_eq!(p.y, bar.bottom() + 8);
+        let narrow = browser_popover(bar, Rect::new(0, 0, 200, 300), 100);
+        assert!(narrow.right() <= 200);
+    }
+
+    #[test]
+    fn find_bar_sits_in_the_top_right_and_its_parts_fit() {
+        let content = Rect::new(0, 80, 700, 400);
+        let f = browser_find_layout(content);
+        assert!(f.bar.x >= content.x && f.bar.right() <= content.right());
+        assert_eq!(f.bar.y, content.y + 12);
+        for r in [f.field, f.count, f.prev, f.next, f.close] {
+            assert!(r.x >= f.bar.x && r.right() <= f.bar.right(), "{r:?}");
+            assert!(r.y >= f.bar.y && r.bottom() <= f.bar.bottom());
+        }
+        assert!(f.field.right() <= f.count.x);
+        assert!(f.count.right() <= f.prev.x);
+        assert!(f.prev.right() <= f.next.x && f.next.right() <= f.close.x);
+        // Tiny windows do not push it out to the left.
+        let t = browser_find_layout(Rect::new(0, 0, 150, 100));
+        assert!(t.bar.x >= 0);
+    }
+
+    #[test]
+    fn error_page_parts_are_stacked_and_inside_the_page() {
+        let content = Rect::new(0, 80, 800, 480);
+        for cert in [false, true] {
+            let e = browser_error_layout(content, cert);
+            for r in [e.art, e.title, e.cause, e.retry] {
+                assert!(r.x >= content.x && r.right() <= content.right(), "{r:?}");
+                assert!(r.y >= content.y && r.bottom() <= content.bottom(), "{r:?}");
+            }
+            assert!(e.art.bottom() < e.title.y && e.title.bottom() <= e.cause.y);
+            assert!(e.cause.bottom() < e.retry.y);
+            assert_eq!(e.art.x + e.art.w / 2, content.x + content.w / 2);
+            assert_eq!(e.retry.x + e.retry.w / 2, content.x + content.w / 2);
+            if cert {
+                assert!(e.proceed.y > e.retry.bottom());
+                assert!(e.note.bottom() <= content.bottom());
+            }
+        }
+    }
+
+    #[test]
+    fn start_page_has_a_search_field_tiles_and_recents_that_fit() {
+        let content = Rect::new(0, 80, 900, 480);
+        let s = browser_start_layout(content, 8, 6);
+        assert_eq!(s.search.x + s.search.w / 2, content.x + content.w / 2);
+        assert!(s.search.h == 48);
+        assert!(!s.tiles.is_empty() && s.tiles.len() <= 8);
+        for t in s.tiles.iter().chain(&s.recents) {
+            assert!(t.x >= content.x && t.right() <= content.right());
+            assert!(t.y >= content.y && t.bottom() <= content.bottom(), "{t:?}");
+        }
+        // Tiles are in a grid: the second is right of the first, 16 px apart.
+        assert_eq!(s.tiles[1].x - s.tiles[0].right(), 16);
+        assert!(s.tiles_heading.bottom() <= s.tiles[0].y);
+        assert!(s.recent_heading.y >= s.tiles.last().unwrap().bottom());
+        // A short window drops what does not fit.
+        let short = browser_start_layout(Rect::new(0, 0, 900, 260), 8, 6);
+        assert!(short.tiles.len() < s.tiles.len() || short.recents.len() < s.recents.len());
+        for t in short.tiles.iter().chain(&short.recents) {
+            assert!(t.bottom() <= 260);
+        }
+        // Zero items, narrow window: still sane.
+        let n = browser_start_layout(Rect::new(0, 0, 200, 300), 0, 0);
+        assert!(n.tiles.is_empty() && n.recents.is_empty());
+        assert!(n.search.x >= 0 && n.search.right() <= 200);
+    }
+
+    #[test]
+    fn zoom_pill_is_at_the_bottom_right() {
+        let content = Rect::new(0, 80, 700, 400);
+        let z = browser_zoom_pill(content);
+        assert!(z.right() < content.right() && z.bottom() < content.bottom());
     }
 
     #[test]
     fn browser_chrome_survives_tiny_windows() {
-        let c = BrowserChrome::of(Rect::new(0, 0, 50, 50));
-        assert_eq!(c.bar.w, 60); // address bar never collapses below 60
+        let c = BrowserChrome::of(Rect::new(0, 0, 50, 50), 2, 80);
+        assert_eq!(c.bar.w, 120); // the omnibox never collapses below 120
         assert_eq!(c.content.h, 0); // negative height clamps to empty
-    }
-
-    #[test]
-    fn browser_home_tiles_are_centered_and_disjoint() {
-        let content = Rect::new(100, 200, 600, 300);
-        let (logo, tiles) = browser_home_layout(content);
-        assert_eq!(logo.x + logo.w / 2, content.x + content.w / 2);
-        assert_eq!(logo.y, content.y + 30);
-        for pair in tiles.windows(2) {
-            assert_eq!(pair[1].x - pair[0].right(), 18);
-        }
-        let left_margin = tiles[0].x - content.x;
-        let right_margin = content.right() - tiles[3].right();
-        assert!((left_margin - right_margin).abs() <= 1);
-        assert!(tiles.iter().all(|t| t.y == logo.bottom() + 108));
     }
 
     // ---- start panel ----

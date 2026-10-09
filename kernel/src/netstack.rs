@@ -45,6 +45,8 @@ pub struct Fetched {
     pub data: Vec<u8>,
     /// The response was cut at [`MAX_RESPONSE_BYTES`]; the rest was discarded.
     pub truncated: bool,
+    /// The server certificate of an https response (what the browser's popover shows).
+    pub cert: Option<osjeff_core::browser::CertInfo>,
 }
 
 // ---- a Port as a smoltcp phy::Device ----
@@ -397,6 +399,7 @@ impl Net {
         Ok(Fetched {
             data: out,
             truncated,
+            cert: None,
         })
     }
 
@@ -501,8 +504,11 @@ impl Net {
         }
         HS_DEADLINE.store(0, Ordering::Relaxed);
         let hs_ms = now_ms().saturating_sub(hs_start);
+        let (mut chain_len, mut root) = (1usize, None);
         let conn = match verifier.outcome() {
             Some(crate::tlsv::Outcome::Verified(v)) => {
+                chain_len = v.chain_len;
+                root = Some(verifier.root_name(&v));
                 crate::serial_println!(
                     "tls: chain verified for {} ({} certs, root {}); handshake {} ms",
                     host,
@@ -566,10 +572,17 @@ impl Net {
         if out.is_empty() {
             Err(FailReason::Network)
         } else {
+            let cert = osjeff_core::browser::CertInfo::from_leaf(
+                verifier.leaf_der(),
+                host,
+                chain_len,
+                root,
+            );
             Ok((
                 Fetched {
                     data: out,
                     truncated,
+                    cert,
                 },
                 conn,
             ))

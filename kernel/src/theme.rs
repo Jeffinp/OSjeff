@@ -75,15 +75,16 @@ pub const ACCENT_TEXT: Color = Color::rgb(0xFF, 0xFF, 0xFF);
 
 // ---- legacy app-interior colours (light surfaces) ----
 
+#[allow(dead_code)]
 pub const ACCENT_2: Color = Color::rgb(0x7C, 0x6C, 0xFF); // violet
 
 // Surfaces.
-pub const DOCK_EDGE: Color = Color::rgb(0x2A, 0x33, 0x52);
 /// App interiors are drawn on this: the unified window colour of the current appearance.
 #[inline]
 pub fn window_body() -> Color {
     solid(pal().window_bg)
 }
+#[allow(dead_code)]
 pub const HEADER: Color = Color::rgb(0x18, 0x21, 0x39);
 pub const HEADER_TEXT: Color = Color::rgb(0xE8, 0xED, 0xF7);
 
@@ -99,11 +100,7 @@ pub fn text_muted() -> Color {
 
 // Status / controls.
 pub const CLOSE: Color = Color::rgb(0xFF, 0x6B, 0x63);
-pub const SHADOW: Color = Color::rgb(0, 0, 0);
 pub const WHITE: Color = Color::rgb(0xFF, 0xFF, 0xFF);
-
-// Terminal palette.
-pub const TERM_PROMPT: Color = Color::rgb(0x18, 0xB8, 0x9A);
 
 // ---- semantic colours of the app interiors (they follow the appearance) ----
 
@@ -124,6 +121,7 @@ pub fn surface() -> Color {
 }
 /// Alternate list rows.
 #[inline]
+#[allow(dead_code)]
 pub fn zebra() -> Color {
     if dark() {
         Color::rgb(0x25, 0x25, 0x28)
@@ -133,6 +131,7 @@ pub fn zebra() -> Color {
 }
 /// Hairlines and the outline of controls.
 #[inline]
+#[allow(dead_code)]
 pub fn line() -> Color {
     if dark() {
         Color::rgb(0x3E, 0x3E, 0x42)
@@ -157,11 +156,6 @@ pub fn tool_bg() -> Color {
     } else {
         Color::rgb(0xEA, 0xEA, 0xEF)
     }
-}
-/// Icon ink on toolbars.
-#[inline]
-pub fn ink() -> Color {
-    text()
 }
 /// Disabled icon ink.
 #[inline]

@@ -136,3 +136,10 @@ path = "fuzz_targets/compositor_ops.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "i18n_format"
+path = "fuzz_targets/i18n_format.rs"
+test = false
+doc = false
+bench = false

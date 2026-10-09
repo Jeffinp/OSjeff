@@ -3,40 +3,52 @@
 //! The text engine is `osjeff_core::editor2` (gap buffer, UTF-8, selection,
 //! undo/redo, find/replace, line numbers) and the questions it does not own (the
 //! Open / Save-as picker, "save changes?") are `editor2::dialog`; all of it is
-//! tested on the host. This file feeds keys and the mouse in, paints what the
-//! engine exposes, and reaches files only through [`vfs`](super::vfs).
+//! tested on the host, and so is the window geometry (`editor2::ui`). This file feeds
+//! keys and the mouse in, keeps the animation state (eased caret, selection, sheets,
+//! scrollbar) and reaches files only through [`vfs`](super::vfs); the pixels are in
+//! `edit_ui.rs`.
 //!
 //! A window with unsaved changes never closes silently: every way to close it
 //! (title-bar button, Ctrl+Q, the task manager, the terminal's `kill`, power
 //! actions) goes through [`Desktop::request_close`], which asks first.
 
-use super::term::latin1;
+use super::appui;
+use super::sysstore::VfsStore;
+use super::vfs;
 use super::*;
-use super::{ui, vfs};
+use crate::text::{self, BODY, Weight};
+use osjeff_core::anim::{Spring, Tween, curves};
+use osjeff_core::editor2::ui::{self as eui, FindHit, FindLay, Lay, Metrics};
 use osjeff_core::editor2::{
-    CloseAsk, CloseChoice, Editor as Ed2, Event as EdEvent, Notice, PickEvent, PickMode, PickRow,
-    Picker, PromptKind, PromptView, status_line,
+    CloseAsk, CloseChoice, Editor as Ed2, Event as EdEvent, PickEvent, PickMode, PickRow, Picker,
+    PromptKind,
 };
-use osjeff_core::fileman;
 use osjeff_core::input::{KeyCode, KeyEvent};
+use osjeff_core::settings::{FONT_MAX, FONT_MIN, font_step};
+use osjeff_core::sysif::SettingsStore;
 use osjeff_core::vfs::VfsError;
+use osjeff_core::widgets::ScrollbarFade;
 
 /// Largest file the editor opens (the gap buffer, undo and a copy for saving all live in the heap).
 pub(crate) const MAX_OPEN: u64 = 16 * 1024 * 1024;
 
-const PAD: i32 = 10;
-/// Character cell of the monospace face (9 px pitch at 15 px).
-const CELL_W: i32 = 9;
-const LINE_H: i32 = 20;
-const STATUS_H: i32 = 24;
-const PROMPT_H: i32 = 26;
-const TOP: i32 = TITLE_H + 6;
+/// Size of the "save changes?" sheet.
+pub(crate) const CLOSE_SIZE: (i32, i32) = (430, 168);
 
 /// A question or dialog over the text.
 pub(crate) enum EdModal {
     Open(Picker),
     SaveAs { picker: Picker, then_close: bool },
     Close(CloseAsk),
+}
+
+/// What the pointer is over, for the hover wash.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum EdHit {
+    Bar(FindHit),
+    /// A button of the open sheet, left to right.
+    Sheet(usize),
+    Place(usize),
 }
 
 /// An editor window.
@@ -54,6 +66,22 @@ pub(crate) struct EditorState {
     /// Where the last text press happened: a "drag" that has not moved leaves a word or line
     /// selection (double / triple click) alone.
     press_at: (i32, i32),
+    /// Tick of the last key or click: the caret holds still, then blinks (and rests again).
+    pub last_input: u64,
+    /// Where the caret is drawn: pixels right of the first text column. It glides along a row.
+    pub caret_x: Spring,
+    /// Top line, left column and screen row the caret target was last computed for: a change
+    /// of any of them jumps instead of gliding.
+    caret_seen: (usize, usize, usize),
+    /// The selection fading in.
+    pub sel_t: Tween,
+    had_sel: bool,
+    /// The sheet sliding down.
+    pub sheet_t: Tween,
+    pub hover: Option<EdHit>,
+    pub hover_t: Tween,
+    pub scroll_fade: ScrollbarFade,
+    seen_top: usize,
 }
 
 impl EditorState {
@@ -68,6 +96,16 @@ impl EditorState {
             force_close: false,
             last_click: (0, 0, 0),
             press_at: (-1, -1),
+            last_input: 0,
+            caret_x: Spring::pixels(0.0, 1100.0, 66.0),
+            caret_seen: (0, 0, 0),
+            sel_t: Tween::at(1.0),
+            had_sel: false,
+            sheet_t: Tween::at(1.0),
+            hover: None,
+            hover_t: Tween::at(1.0),
+            scroll_fade: ScrollbarFade::new(),
+            seen_top: 0,
         }
     }
 
@@ -77,6 +115,14 @@ impl EditorState {
         self.path = Some(path);
         self.modal = None;
         self.msg = None;
+    }
+
+    /// Put a dialog or question over the text, sliding in.
+    fn raise(&mut self, m: EdModal) {
+        self.modal = Some(m);
+        self.sheet_t = Tween::at(0.0);
+        self.sheet_t.retarget(1.0, 0.24, curves::ENTER);
+        self.hover = None;
     }
 
     /// Count a click at `pos` (a byte offset, or a list row) at `ticks`: 1, then 2
@@ -98,82 +144,103 @@ impl EditorState {
     }
 
     /// File name for the title and messages.
-    fn name(&self) -> String {
+    pub(crate) fn name(&self) -> String {
         match &self.path {
             Some(p) => String::from_utf8_lossy(vfs::base_name(p)).into_owned(),
             None => String::from("sem nome"),
         }
     }
+
+    /// Whether the window needs frames: a blinking or gliding caret, a selection fading in, a
+    /// sheet sliding, a fading scrollbar. `focused` windows blink their caret, others rest.
+    pub(crate) fn animating(&self, focused: bool) -> bool {
+        (focused && self.modal.is_none() && appui::caret_animating(self.last_input))
+            || !self.caret_x.at_rest()
+            || !self.sel_t.finished()
+            || !self.sheet_t.finished()
+            || !self.hover_t.finished()
+            || self.scroll_fade.active(appui::now_ms())
+    }
 }
 
 // ---- geometry ----------------------------------------------------------------
 
-struct Lay {
-    /// The text area (a whole number of cells).
-    text: Rect,
-    prompt: Rect,
-    status: Rect,
-    rows: usize,
-    cols: usize,
+/// The text size in pixels (a setting shared by all editors).
+pub(crate) fn font_px() -> u16 {
+    crate::settings::get().editor_font.clamp(FONT_MIN, FONT_MAX) as u16
 }
 
-fn editor_layout(r: Rect, prompt: bool) -> Lay {
-    let prompt_h = if prompt { PROMPT_H } else { 0 };
-    let avail_h = r.h - TOP - STATUS_H - prompt_h - 4;
-    let rows = (avail_h / LINE_H).max(1);
-    let cols = ((r.w - 2 * PAD) / CELL_W).max(2);
-    Lay {
-        text: Rect::new(r.x + PAD, r.y + TOP, cols * CELL_W, rows * LINE_H),
-        prompt: Rect::new(
-            r.x + PAD,
-            r.y + r.h - STATUS_H - prompt_h,
-            r.w - 2 * PAD,
-            prompt_h,
-        ),
-        status: Rect::new(r.x, r.y + r.h - STATUS_H, r.w, STATUS_H),
-        rows: rows as usize,
-        cols: cols as usize,
+/// The character cell: the face's pitch and a line a little taller than its natural height.
+pub(crate) fn metrics() -> Metrics {
+    let (cw, lh) = text::mono_cell_px(font_px());
+    Metrics { cw, lh: lh + 3 }
+}
+
+/// Height of the find bar the engine's prompt needs (0 with none open).
+fn bar_height(ed: &Ed2) -> i32 {
+    match ed.prompt().map(|p| p.kind) {
+        Some(PromptKind::Replace) => eui::REPLACE_H,
+        Some(_) => eui::FIND_H,
+        None => 0,
     }
 }
 
-/// Geometry of the Open / Save-as dialog inside the window `r`.
-struct PickLay {
-    frame: Rect,
-    path: Rect,
-    list: Rect,
-    field: Rect,
-    hint: Rect,
-    rows: usize,
+/// The geometry of window `r` for the state of the engine.
+pub(crate) fn geom(r: Rect, ed: &Ed2) -> Lay {
+    eui::layout(r, metrics(), bar_height(ed), ed.gutter_width())
 }
 
-const PICK_ROW_H: i32 = 20;
-
-fn picker_layout(r: Rect) -> PickLay {
-    let w = (r.w - 24).clamp(260, 560);
-    let h = (r.h - TITLE_H - 16).clamp(180, 340);
-    let x = r.x + (r.w - w) / 2;
-    let y = r.y + TITLE_H + 8;
-    let rows = ((h - 58 - 74) / PICK_ROW_H).max(1);
-    PickLay {
-        frame: Rect::new(x, y, w, h),
-        path: Rect::new(x + 12, y + 32, w - 24, 20),
-        list: Rect::new(x + 12, y + 58, w - 24, rows * PICK_ROW_H),
-        field: Rect::new(x + 12, y + h - 66, w - 24, 28),
-        hint: Rect::new(x + 12, y + h - 30, w - 24, 20),
-        rows: rows as usize,
-    }
+/// Widths of the two buttons of the replace row.
+fn replace_widths() -> (i32, i32) {
+    let w = |s: &str| text::measure(s, BODY, Weight::Medium) + 28;
+    (w("Substituir"), w("Todos"))
 }
 
-/// The three buttons of the close question inside the window `r`.
-fn close_layout(r: Rect) -> (Rect, [Rect; 3]) {
-    let w = (r.w - 30).clamp(260, 420);
-    let h = 120;
-    let x = r.x + (r.w - w) / 2;
-    let y = r.y + TITLE_H + (r.h - TITLE_H - h).max(0) / 2;
-    let bw = (w - 28 - 16) / 3;
-    let by = y + h - 44;
-    let btn = |i: i32| Rect::new(x + 14 + i * (bw + 8), by, bw, 32);
-    (Rect::new(x, y, w, h), [btn(0), btn(1), btn(2)])
+/// The controls of the find bar, if one is open.
+pub(crate) fn find_lay(lay: &Lay, ed: &Ed2) -> Option<FindLay> {
+    let bar = lay.bar?;
+    let replace = ed.prompt().is_some_and(|p| p.kind == PromptKind::Replace);
+    let (one, all) = replace_widths();
+    Some(eui::find_layout(bar, replace, one, all))
+}
+
+/// Widths of the buttons of the close question, in the order Descartar, Cancelar, Salvar.
+fn close_widths() -> [i32; 3] {
+    let w = |s: &str| (text::measure(s, BODY, Weight::Medium) + 32).max(76);
+    [w("Descartar"), w("Cancelar"), w("Salvar")]
+}
+
+/// The close question's buttons (Descartar, Cancelar, Salvar) in its panel.
+pub(crate) fn close_rects(panel: Rect) -> [Rect; 3] {
+    eui::close_buttons(panel, close_widths())
+}
+
+/// Labels of the picker's two buttons.
+pub(crate) fn picker_labels(picker: &Picker) -> [&'static str; 2] {
+    [
+        "Cancelar",
+        if picker.asking().is_some() {
+            "Substituir"
+        } else if picker.mode == PickMode::Open {
+            "Abrir"
+        } else {
+            "Salvar"
+        },
+    ]
+}
+
+/// The panel of the dialog over window `r`.
+pub(crate) fn picker_panel(r: Rect, picker: &Picker) -> Rect {
+    appui::sheet_rect(r, eui::picker_size(r, picker.mode == PickMode::SaveAs))
+}
+
+/// The picker's two buttons in its panel.
+pub(crate) fn picker_buttons(panel: Rect, picker: &Picker) -> Vec<Rect> {
+    appui::button_row(
+        panel.right() - appui::SHEET_PAD,
+        panel.bottom() - appui::SHEET_PAD - appui::BUTTON_H,
+        &picker_labels(picker),
+    )
 }
 
 fn listing(dir: &str) -> Result<Vec<PickRow>, vfs::VfsError> {
@@ -219,13 +286,18 @@ impl Desktop {
         self.wm.get(id).map(|w| w.rect)
     }
 
-    /// Make the engine's window size match the window (and the find bar).
+    /// Make the engine's window size match the window (and the find bar), and the dialog's
+    /// list the sheet.
     pub(crate) fn sync_editor(&mut self, id: WindowId) {
         let Some(rect) = self.rect_of(id) else { return };
         let Some(e) = self.editor_mut(id) else { return };
-        let lay = editor_layout(rect, e.ed.is_prompt_open());
+        let lay = geom(rect, &e.ed);
         if e.ed.viewport() != (lay.rows, lay.cols) {
             e.ed.resize(lay.rows, lay.cols);
+        }
+        if let Some(EdModal::Open(p) | EdModal::SaveAs { picker: p, .. }) = &mut e.modal {
+            let rows = eui::picker_layout(picker_panel(rect, p), p.mode == PickMode::SaveAs).rows;
+            p.set_visible(rows);
         }
     }
 
@@ -243,15 +315,16 @@ impl Desktop {
         }
     }
 
-    /// Title-bar text: `OSJEFF EDIT - name *` (the star marks unsaved changes).
+    /// Title-bar text: `Editor — name`, with a dot after the name while there are unsaved
+    /// changes.
     pub(crate) fn refresh_editor_title(&mut self, id: WindowId) {
         let Some(w) = self.wm.get(id) else { return };
         let App::Editor(e) = &w.app.app else { return };
         let mut t = base_title(Kind::Editor, w.app.index);
-        t.push_str(" - ");
+        t.push_str(" \u{2014} ");
         t.push_str(&e.name());
         if e.ed.is_modified() {
-            t.push_str(" *");
+            t.push_str(" \u{2022}");
         }
         if w.app.title != t
             && let Some(w) = self.wm.get_mut(id)
@@ -276,6 +349,7 @@ impl Desktop {
         if let Some(modal) = e.modal.take() {
             self.editor_modal_key(id, modal, ev);
             self.refresh_editor_title(id);
+            self.editor_track(id);
             return true;
         }
         e.msg = None;
@@ -288,6 +362,18 @@ impl Desktop {
                 }
                 's' if ev.mods.shift => {
                     self.editor_save_as_dialog(id, false);
+                    return true;
+                }
+                '+' | '=' => {
+                    self.editor_zoom(1);
+                    return true;
+                }
+                '-' | '_' => {
+                    self.editor_zoom(-1);
+                    return true;
+                }
+                '0' => {
+                    self.editor_zoom(0);
                     return true;
                 }
                 _ => {}
@@ -308,7 +394,68 @@ impl Desktop {
             EdEvent::Handled | EdEvent::Ignored => {}
         }
         self.refresh_editor_title(id);
+        self.editor_track(id);
         true
+    }
+
+    /// Ctrl +, Ctrl - and Ctrl 0: the text size of every editor, kept in the settings file.
+    fn editor_zoom(&mut self, dir: i32) {
+        let mut s = crate::settings::get();
+        let n = font_step(s.editor_font, dir);
+        if n == s.editor_font {
+            return;
+        }
+        s.editor_font = n;
+        crate::settings::set(s);
+        let _ = VfsStore.save(&s.to_text());
+        self.sync_text_windows();
+        // Every editor redraws at the new size; the carets do not glide to it.
+        self.force_full = true;
+        let ids: Vec<WindowId> = self
+            .wm
+            .windows()
+            .iter()
+            .filter(|w| matches!(w.app.app, App::Editor(_)))
+            .map(|w| w.id)
+            .collect();
+        for other in ids {
+            if let Some(e) = self.editor_mut(other) {
+                e.caret_seen = (usize::MAX, 0, 0);
+            }
+            self.editor_track(other);
+        }
+    }
+
+    /// After input: restart the blink, aim the caret, start the selection fade and show the
+    /// scrollbar when the text moved.
+    pub(crate) fn editor_track(&mut self, id: WindowId) {
+        let Some(rect) = self.rect_of(id) else { return };
+        let Some(e) = self.editor_mut(id) else { return };
+        let lay = geom(rect, &e.ed);
+        e.last_input = appui::ticks();
+        let top = e.ed.top_line();
+        if top != e.seen_top {
+            e.seen_top = top;
+            e.scroll_fade.touch(appui::now_ms());
+        }
+        if let Some((row, col)) = e.ed.cursor_screen() {
+            let (x, _) = lay.cell_xy(row, col);
+            let rel = (x - lay.text_x) as f32;
+            let seen = (top, e.ed.left_col(), row);
+            e.caret_x.set_target(rel);
+            if seen != e.caret_seen {
+                e.caret_x.jump(rel);
+                e.caret_seen = seen;
+            }
+        }
+        let has = e.ed.has_selection();
+        if has && !e.had_sel {
+            e.sel_t = Tween::at(0.0);
+            e.sel_t.retarget(1.0, 0.14, curves::STANDARD);
+        } else if !has {
+            e.sel_t = Tween::at(1.0);
+        }
+        e.had_sel = has;
     }
 
     /// A key while a dialog is open. `modal` was taken out of the state; put it
@@ -376,7 +523,7 @@ impl Desktop {
         );
         let mut p = Picker::new(PickMode::Open, &dir, "");
         picker_go(&mut p, &dir);
-        e.modal = Some(EdModal::Open(p));
+        e.raise(EdModal::Open(p));
     }
 
     /// The user picked `path` in the Open dialog `p`.
@@ -514,7 +661,7 @@ impl Desktop {
         };
         let mut picker = Picker::new(PickMode::SaveAs, &dir, &name);
         picker_go(&mut picker, &dir);
-        e.modal = Some(EdModal::SaveAs { picker, then_close });
+        e.raise(EdModal::SaveAs { picker, then_close });
     }
 
     /// The user chose `path` in the Save-as dialog. An existing file other than the
@@ -567,7 +714,7 @@ impl Desktop {
             return false;
         }
         if !matches!(e.modal, Some(EdModal::Close(_))) {
-            e.modal = Some(EdModal::Close(CloseAsk::new()));
+            e.raise(EdModal::Close(CloseAsk::new()));
         }
         self.wm.activate(id);
         true
@@ -590,6 +737,13 @@ impl Desktop {
 
     // ---- mouse ----
 
+    fn editor_ref(&self, id: WindowId) -> Option<&EditorState> {
+        match self.wm.get(id).map(|w| &w.app.app) {
+            Some(App::Editor(e)) => Some(e),
+            _ => None,
+        }
+    }
+
     /// Press in editor `id` at `(px, py)`.
     pub(crate) fn editor_click(&mut self, id: WindowId, rect: Rect, px: i32, py: i32) {
         self.sync_editor(id);
@@ -598,12 +752,14 @@ impl Desktop {
         let Some(e) = self.editor_mut(id) else { return };
         match e.modal.take() {
             Some(EdModal::Close(mut ask)) => {
-                let (_, btns) = close_layout(rect);
-                let hit = btns.iter().position(|b| b.contains(px, py));
-                match hit {
-                    Some(i) => {
-                        let choice = CloseAsk::LABELS[i].0;
-                        ask.select(choice);
+                let btns = close_rects(appui::sheet_rect(rect, CLOSE_SIZE));
+                let choice = btns
+                    .iter()
+                    .position(|b| b.contains(px, py))
+                    .map(|i| [CloseChoice::Discard, CloseChoice::Cancel, CloseChoice::Save][i]);
+                match choice {
+                    Some(ch) => {
+                        ask.select(ch);
                         // A click answers: replay it as Enter on that button.
                         self.editor_modal_key(
                             id,
@@ -614,47 +770,113 @@ impl Desktop {
                     None => self.set_modal(id, Some(EdModal::Close(ask))),
                 }
             }
-            Some(EdModal::Open(mut p)) => {
-                let ev = match picker_row_at(&p, rect, px, py) {
-                    Some(i) => {
-                        let double = e.click_count(ticks, i) >= 2;
-                        p.click(i, double)
-                    }
-                    None => PickEvent::None,
-                };
-                self.after_picker_click(id, EdModal::Open(p), ev);
+            Some(m @ (EdModal::Open(_) | EdModal::SaveAs { .. })) => {
+                self.editor_picker_click(id, rect, m, px, py);
             }
-            Some(EdModal::SaveAs {
-                mut picker,
-                then_close,
-            }) => {
-                let ev = match picker_row_at(&picker, rect, px, py) {
-                    Some(i) => {
-                        let double = e.click_count(ticks, i) >= 2;
-                        picker.click(i, double)
-                    }
-                    None => PickEvent::None,
-                };
-                self.after_picker_click(id, EdModal::SaveAs { picker, then_close }, ev);
-            }
-            None => {
-                let lay = editor_layout(rect, e.ed.is_prompt_open());
-                if !lay.text.contains(px, py) {
-                    return;
+            _ => {
+                let lay = geom(rect, &e.ed);
+                if lay.bar.is_some_and(|b| b.contains(px, py)) {
+                    self.editor_bar_click(id, rect, px, py);
+                } else if lay.in_text(px, py) {
+                    let (row, col) = lay.cell_at(px, py);
+                    let pos = e.ed.pos_at_screen(row, col);
+                    // Same spot within half a second: double (word), triple (line).
+                    let count = e.click_count(ticks, pos);
+                    e.ed.mouse_down(row, col, count, shift);
+                    e.press_at = (px, py);
+                    self.drag = Some(Drag {
+                        win: id,
+                        mode: DragMode::Select,
+                    });
                 }
-                let row = ((py - lay.text.y) / LINE_H) as usize;
-                let col = ((px - lay.text.x) / CELL_W) as usize;
-                let pos = e.ed.pos_at_screen(row, col);
-                // Same spot within half a second: double (word), triple (line).
-                let count = e.click_count(ticks, pos);
-                e.ed.mouse_down(row, col, count, shift);
-                e.press_at = (px, py);
-                self.drag = Some(Drag {
-                    win: id,
-                    mode: DragMode::Select,
-                });
             }
         }
+        self.editor_track(id);
+    }
+
+    /// A press while the Open / Save-as sheet is up.
+    fn editor_picker_click(&mut self, id: WindowId, rect: Rect, modal: EdModal, px: i32, py: i32) {
+        let ticks = crate::interrupts::ticks();
+        let (mut picker, then_close, save_as) = match modal {
+            EdModal::Open(p) => (p, false, false),
+            EdModal::SaveAs { picker, then_close } => (picker, then_close, true),
+            m => {
+                self.set_modal(id, Some(m));
+                return;
+            }
+        };
+        let rebuild = |p: Picker| {
+            if save_as {
+                EdModal::SaveAs {
+                    picker: p,
+                    then_close,
+                }
+            } else {
+                EdModal::Open(p)
+            }
+        };
+        let panel = picker_panel(rect, &picker);
+        let lay = eui::picker_layout(panel, save_as);
+        let btns = picker_buttons(panel, &picker);
+        if btns[0].contains(px, py) {
+            return;
+        }
+        if btns[1].contains(px, py) {
+            self.editor_modal_key(id, rebuild(picker), KeyEvent::plain(KeyCode::Enter));
+            return;
+        }
+        if let Some(i) = lay.place_at(px, py) {
+            picker_go(&mut picker, eui::PLACES[i].1);
+            self.set_modal(id, Some(rebuild(picker)));
+            return;
+        }
+        let ev = match lay
+            .row_at(picker.scroll(), px, py)
+            .filter(|&i| i < picker.rows().len())
+        {
+            Some(i) => {
+                let double = self
+                    .editor_mut(id)
+                    .is_some_and(|e| e.click_count(ticks, i) >= 2);
+                picker.click(i, double)
+            }
+            None => PickEvent::None,
+        };
+        self.after_picker_click(id, rebuild(picker), ev);
+    }
+
+    /// A press inside the find bar.
+    fn editor_bar_click(&mut self, id: WindowId, rect: Rect, px: i32, py: i32) {
+        let Some(e) = self.editor_mut(id) else { return };
+        let lay = geom(rect, &e.ed);
+        let Some(fl) = find_lay(&lay, &e.ed) else {
+            return;
+        };
+        let goto = e.ed.prompt().is_some_and(|p| p.kind == PromptKind::Goto);
+        match fl.hit(px, py, goto) {
+            Some(FindHit::Find) => e.ed.prompt_focus(0),
+            Some(FindHit::Replace) => e.ed.prompt_focus(1),
+            Some(FindHit::Prev) => {
+                e.ed.find_prev();
+            }
+            Some(FindHit::Next) => {
+                e.ed.find_next();
+            }
+            Some(FindHit::Case) => {
+                let on = e.ed.config().case_sensitive;
+                e.ed.set_case_sensitive(!on);
+            }
+            Some(FindHit::Close) => e.ed.close_prompt(),
+            Some(FindHit::ReplaceOne) => {
+                e.ed.replace_current();
+            }
+            Some(FindHit::ReplaceAll) => {
+                e.ed.replace_all();
+            }
+            None => {}
+        }
+        self.sync_editor(id);
+        self.refresh_editor_title(id);
     }
 
     /// What a click inside a dialog led to.
@@ -697,16 +919,16 @@ impl Desktop {
         if e.modal.is_some() || (px, py) == e.press_at {
             return;
         }
-        let lay = editor_layout(rect, e.ed.is_prompt_open());
+        let lay = geom(rect, &e.ed);
         // Dragging above or below the text scrolls it.
-        if py < lay.text.y {
+        if py < lay.top {
             e.ed.scroll_by(-1);
-        } else if py >= lay.text.y + lay.text.h {
+        } else if py >= lay.top + lay.rows as i32 * lay.m.lh {
             e.ed.scroll_by(1);
         }
-        let row = ((py - lay.text.y).max(0) / LINE_H).min(lay.rows as i32 - 1) as usize;
-        let col = ((px - lay.text.x).max(0) / CELL_W).min(lay.cols as i32 - 1) as usize;
+        let (row, col) = lay.cell_at(px, py);
         e.ed.mouse_drag(row, col);
+        self.editor_track(id);
     }
 
     /// Wheel over editor `id` (`notches` > 0 = up).
@@ -717,385 +939,95 @@ impl Desktop {
                 p.scroll_by(-(notches as isize) * 3);
             }
             Some(EdModal::Close(_)) => {}
-            None => e.ed.scroll_by(-(notches as isize) * 3),
+            None => {
+                e.ed.scroll_by(-(notches as isize) * 3);
+                e.scroll_fade.touch(appui::now_ms());
+                e.seen_top = e.ed.top_line();
+            }
         }
     }
 
-    // ---- drawing ----
-
-    pub(crate) fn draw_editor(&self, c: &mut Canvas, r: Rect, e: &EditorState, focused: bool) {
-        let ed = &e.ed;
-        let prompt = ed.prompt();
-        let lay = editor_layout(r, prompt.is_some());
-        // The engine's grid is fitted on the next tick after a resize; never paint outside the window.
-        let (vrows, vcols) = ed.viewport();
-        let rows = vrows.min(lay.rows);
-        let cols = vcols.min(lay.cols);
-        let gutter = ed.gutter_width().min(cols.saturating_sub(1));
-        let tx = lay.text.x.max(0) as usize;
-        let ty = lay.text.y.max(0) as usize;
-        let sel_bg = theme::accent().lerp(theme::WHITE, 150);
-        if gutter > 0 {
-            ui::fill(
-                c,
-                Rect::new(
-                    lay.text.x - 4,
-                    lay.text.y,
-                    (gutter as i32) * CELL_W + 2,
-                    rows as i32 * LINE_H,
-                ),
-                theme::toolbar(),
-            );
-        }
-        for (i, row) in ed.visible_rows().enumerate().take(rows) {
-            let y = ty + i * LINE_H as usize;
-            if let Some(n) = row.line_number {
-                let s = alloc::format!("{n}");
-                let w = s.len().min(gutter.saturating_sub(1));
-                crate::text::draw_mono(
-                    c,
-                    (tx + (gutter - 1 - w) * CELL_W as usize) as i32,
-                    y as i32,
-                    &s[s.len() - w..],
-                    crate::text::MONO_PX,
-                    theme::text_muted(),
-                );
-            }
-            let x0 = tx + gutter * CELL_W as usize;
-            let mut x = x0;
-            let mut line = String::new();
-            for cell in row.cells().take(cols - gutter) {
-                if cell.selected {
-                    c.fill_rect(x, y, CELL_W as usize, LINE_H as usize, sel_bg);
-                }
-                line.push(cell.ch);
-                x += CELL_W as usize;
-            }
-            crate::text::draw_mono(
-                c,
-                x0 as i32,
-                y as i32,
-                &line,
-                crate::text::MONO_PX,
-                theme::text(),
-            );
-        }
-        if focused
-            && e.modal.is_none()
-            && let Some((row, col)) = ed.cursor_screen()
-            && row < rows
-            && col < cols
-        {
-            c.fill_rect(
-                tx + col * CELL_W as usize,
-                ty + row * LINE_H as usize + 2,
-                2,
-                LINE_H as usize - 4,
-                theme::accent(),
-            );
-        }
-        if let Some(p) = &prompt {
-            self.draw_find_bar(c, lay.prompt, p);
-        }
-        self.draw_editor_status(c, lay.status, e);
+    /// What the pointer at `(px, py)` is over in editor `id`.
+    fn editor_hit_at(&self, id: WindowId, px: i32, py: i32) -> Option<EdHit> {
+        let rect = self.rect_of(id)?;
+        let e = self.editor_ref(id)?;
         match &e.modal {
-            Some(EdModal::Close(ask)) => self.draw_close_ask(c, r, e, ask),
-            Some(EdModal::Open(p)) => self.draw_picker(c, r, p, "Abrir arquivo"),
-            Some(EdModal::SaveAs { picker, .. }) => self.draw_picker(c, r, picker, "Salvar como"),
-            None => {}
-        }
-    }
-
-    fn draw_editor_status(&self, c: &mut Canvas, st: Rect, e: &EditorState) {
-        ui::fill(c, st, theme::toolbar());
-        let (text, color): (String, Color) = match &e.msg {
-            Some((m, err)) => (m.clone(), if *err { theme::danger() } else { theme::ok() }),
-            None => (status_line(&e.ed.status(), false), theme::text_muted()),
-        };
-        let room = (st.w - 2 * PAD).max(0);
-        let ty = crate::text::center_y(
-            st.y,
-            st.h,
-            crate::text::FOOTNOTE,
-            crate::text::Weight::Regular,
-        );
-        crate::text::draw_ellipsis(
-            c,
-            st.x + PAD,
-            ty,
-            room,
-            &text,
-            crate::text::FOOTNOTE,
-            crate::text::Weight::Regular,
-            color,
-        );
-    }
-
-    fn draw_find_bar(&self, c: &mut Canvas, r: Rect, p: &PromptView<'_>) {
-        ui::fill_round(c, r, 6, theme::toolbar());
-        let y = r.y + (r.h - 14) / 2;
-        let mut x = r.x + 8;
-        // The fields share what the labels and the notice (right edge) leave.
-        let (nfields, labels) = match p.kind {
-            PromptKind::Replace => (2, "Buscar:Trocar:".len()),
-            PromptKind::Find => (1, "Buscar:".len()),
-            PromptKind::Goto => (1, "Linha:".len()),
-        };
-        let notice_w = 22 * 6;
-        let avail = r.w - 16 - notice_w - labels as i32 * CELL_W - nfields * 12;
-        let field_w = (avail / nfields).max(CELL_W * 4);
-        let label = |active: bool, s: &str, x: &mut i32, c: &mut Canvas, v: &str| {
-            ui::text(c, *x, y, 200, s.as_bytes(), theme::text_muted());
-            *x += s.len() as i32 * CELL_W;
-            let w = field_w;
-            let box_r = Rect::new(*x - 2, r.y + 2, w + 4, r.h - 4);
-            ui::fill_round(
-                c,
-                box_r,
-                5,
-                if active {
-                    theme::accent()
-                } else {
-                    theme::line()
-                },
-            );
-            ui::fill_round(
-                c,
-                Rect::new(box_r.x + 1, box_r.y + 1, box_r.w - 2, box_r.h - 2),
-                4,
-                theme::WHITE,
-            );
-            let chars = ((w / CELL_W) as usize).max(1);
-            let skip = v.chars().count().saturating_sub(chars);
-            let tail: String = v.chars().skip(skip).collect();
-            crate::text::draw_mono(c, *x, y - 3, &tail, crate::text::MONO_PX, theme::text());
-            if active {
-                let cx = *x + tail.chars().count() as i32 * CELL_W;
-                ui::fill(c, Rect::new(cx, y, 2, 14), theme::accent());
+            Some(EdModal::Close(_)) => close_rects(appui::sheet_rect(rect, CLOSE_SIZE))
+                .iter()
+                .position(|b| b.contains(px, py))
+                .map(EdHit::Sheet),
+            Some(EdModal::Open(p)) | Some(EdModal::SaveAs { picker: p, .. }) => {
+                let panel = picker_panel(rect, p);
+                let btns = picker_buttons(panel, p);
+                btns.iter()
+                    .position(|b| b.contains(px, py))
+                    .map(EdHit::Sheet)
+                    .or_else(|| {
+                        eui::picker_layout(panel, p.mode == PickMode::SaveAs)
+                            .place_at(px, py)
+                            .map(EdHit::Place)
+                    })
             }
-            *x += w + 12;
-        };
-        match p.kind {
-            PromptKind::Goto => label(true, "Linha:", &mut x, c, p.text),
-            PromptKind::Find => label(true, "Buscar:", &mut x, c, p.text),
-            PromptKind::Replace => {
-                label(p.active == 0, "Buscar:", &mut x, c, p.text);
-                label(p.active == 1, "Trocar:", &mut x, c, p.text2.unwrap_or(""));
+            None => {
+                let lay = geom(rect, &e.ed);
+                let fl = find_lay(&lay, &e.ed)?;
+                let goto = e.ed.prompt().is_some_and(|p| p.kind == PromptKind::Goto);
+                fl.hit(px, py, goto).map(EdHit::Bar)
             }
         }
-        let note = match p.notice {
-            Notice::None => "",
-            Notice::NotFound => "nao encontrado",
-            Notice::Wrapped => "recomecou do inicio",
-            Notice::Replaced(_) => "substituido",
-            Notice::InvalidLine => "linha invalida",
-        };
-        let mut tail = String::new();
-        if let Notice::Replaced(n) = p.notice {
-            tail = alloc::format!("{n} troca(s)");
-        } else if !note.is_empty() {
-            tail.push_str(note);
-        } else if p.case_sensitive {
-            tail.push_str("Aa");
-        }
-        let color = if p.notice == Notice::NotFound || p.notice == Notice::InvalidLine {
-            theme::danger()
-        } else {
-            theme::text_muted()
-        };
-        let w = tail.len() as i32 * 6;
-        crate::text::legacy::draw_text(
-            c,
-            (r.right() - w - 8).max(x).max(0) as usize,
-            (r.y + (r.h - 7) / 2).max(0) as usize,
-            &tail,
-            color,
-            1,
-        );
     }
 
-    fn draw_close_ask(&self, c: &mut Canvas, r: Rect, e: &EditorState, ask: &CloseAsk) {
-        let (frame, btns) = close_layout(r);
-        ui::fill_round(
-            c,
-            Rect::new(frame.x - 3, frame.y - 3, frame.w + 6, frame.h + 6),
-            12,
-            theme::danger(),
-        );
-        ui::fill_round(c, frame, 10, theme::window_body());
-        ui::text(
-            c,
-            frame.x + 14,
-            frame.y + 12,
-            frame.w - 28,
-            b"Salvar alteracoes?",
-            theme::text(),
-        );
-        let mut name: Vec<u8> = e.name().chars().map(latin1).collect();
-        // "Ha alteracoes em " takes 17 cells of the line.
-        name = fileman::ellipsize(
-            &name,
-            (((frame.w - 28) / CELL_W) as usize).saturating_sub(17),
-        );
-        let mut line = Vec::from(&b"Ha alteracoes em "[..]);
-        line.extend_from_slice(&name);
-        ui::text(
-            c,
-            frame.x + 14,
-            frame.y + 40,
-            frame.w - 28,
-            &line,
-            theme::text_muted(),
-        );
-        for (i, (choice, label)) in CloseAsk::LABELS.iter().enumerate() {
-            let state = if *choice == ask.selected() {
-                ui::Btn::On
-            } else {
-                ui::Btn::Normal
-            };
-            ui::button(c, btns[i], label.as_bytes(), state);
+    /// The pointer moved over editor `id`. `true` when something under it changed.
+    pub(crate) fn editor_hover(&mut self, id: WindowId, px: i32, py: i32) -> bool {
+        let hit = self.editor_hit_at(id, px, py);
+        let Some(e) = self.editor_mut(id) else {
+            return false;
+        };
+        if e.hover == hit {
+            return false;
+        }
+        e.hover = hit;
+        e.hover_t = Tween::at(0.0);
+        e.hover_t.retarget(1.0, 0.12, curves::STANDARD);
+        true
+    }
+
+    pub(crate) fn editor_unhover(&mut self, id: WindowId) {
+        if let Some(e) = self.editor_mut(id) {
+            e.hover = None;
         }
     }
 
-    fn draw_picker(&self, c: &mut Canvas, r: Rect, p: &Picker, title: &str) {
-        let lay = picker_layout(r);
-        let f = lay.frame;
-        ui::fill_round(
-            c,
-            Rect::new(f.x - 3, f.y - 3, f.w + 6, f.h + 6),
-            12,
-            theme::line(),
-        );
-        ui::fill_round(c, f, 10, theme::window_body());
-        ui::text(
-            c,
-            f.x + 12,
-            f.y + 10,
-            f.w - 24,
-            title.as_bytes(),
-            theme::text(),
-        );
-        // Folder shown, cut from the left when long.
-        let dir: Vec<u8> = p.dir().chars().map(latin1).collect();
-        let room = (lay.path.w / CELL_W) as usize;
-        let shown = if dir.len() > room {
-            let mut v = Vec::from(&b"..."[..]);
-            v.extend_from_slice(&dir[dir.len() - (room.saturating_sub(3))..]);
-            v
-        } else {
-            dir
+    /// Whether the pointer at `(cx, cy)` is over the text of editor `id` (it shows an I-beam).
+    pub(crate) fn editor_text_at(&self, id: WindowId, cx: i32, cy: i32) -> bool {
+        let (Some(rect), Some(e)) = (self.rect_of(id), self.editor_ref(id)) else {
+            return false;
         };
-        ui::text(
-            c,
-            lay.path.x,
-            lay.path.y,
-            lay.path.w,
-            &shown,
-            theme::text_muted(),
-        );
-        // The list.
-        ui::fill_round(
-            c,
-            Rect::new(
-                lay.list.x - 2,
-                lay.list.y - 2,
-                lay.list.w + 4,
-                lay.list.h + 4,
-            ),
-            6,
-            theme::line(),
-        );
-        ui::fill_round(c, lay.list, 5, theme::surface());
-        let first = p.scroll();
-        for (k, row) in p.rows().iter().skip(first).take(lay.rows).enumerate() {
-            let y = lay.list.y + k as i32 * PICK_ROW_H;
-            if first + k == p.selected() {
-                ui::fill(
-                    c,
-                    Rect::new(lay.list.x, y, lay.list.w, PICK_ROW_H),
-                    theme::accent().lerp(theme::WHITE, 150),
-                );
+        e.modal.is_none() && geom(rect, &e.ed).in_text(cx, cy)
+    }
+
+    // ---- per-frame state ----
+
+    /// Advance the animations of every editor by `dt`. Returns whether any still needs frames.
+    pub(crate) fn step_editors(&mut self, dt: f32) -> bool {
+        let focus = self.focused();
+        let ids: Vec<WindowId> = self
+            .wm
+            .windows()
+            .iter()
+            .filter(|w| matches!(w.app.app, App::Editor(_)) && w.shown())
+            .map(|w| w.id)
+            .collect();
+        let mut busy = false;
+        for id in ids {
+            if let Some(e) = self.editor_mut(id) {
+                e.caret_x.step(dt);
+                e.sel_t.step(dt);
+                e.sheet_t.step(dt);
+                e.hover_t.step(dt);
+                busy |= e.animating(focus == Some(id));
             }
-            let mut name: Vec<u8> = row.name.chars().map(latin1).collect();
-            if row.dir && row.name != ".." {
-                name.push(b'/');
-            }
-            let size = if row.dir {
-                Vec::new()
-            } else {
-                fileman::format_size(row.size).into_bytes()
-            };
-            let room = ((lay.list.w - 12) / CELL_W) as usize;
-            let name = fileman::ellipsize(&name, room.saturating_sub(size.len() + 1));
-            ui::text(
-                c,
-                lay.list.x + 6,
-                y + 3,
-                lay.list.w,
-                &name,
-                if row.dir {
-                    theme::accent()
-                } else {
-                    theme::text()
-                },
-            );
-            ui::text_right(
-                c,
-                Rect::new(lay.list.x, y, lay.list.w - 6, PICK_ROW_H - 4),
-                &size,
-                theme::text_muted(),
-            );
         }
-        if p.rows().is_empty() {
-            ui::text(
-                c,
-                lay.list.x + 6,
-                lay.list.y + 3,
-                lay.list.w,
-                b"(pasta vazia)",
-                theme::text_muted(),
-            );
-        }
-        if p.rows().len() > lay.rows {
-            let track = Rect::new(lay.list.right() - 5, lay.list.y + 2, 3, lay.list.h - 4);
-            ui::fill_round(c, track, 1, theme::line());
-            let total = p.rows().len();
-            let th = ((track.h as i64 * lay.rows as i64) / total as i64).max(10) as i32;
-            let ty =
-                track.y + ((track.h - th) as i64 * first as i64 / (total - lay.rows) as i64) as i32;
-            ui::fill_round(c, Rect::new(track.x, ty, 3, th), 1, theme::accent());
-        }
-        // The name field.
-        let (text, caret) = p.field();
-        let bytes: Vec<u8> = text.chars().map(latin1).collect();
-        ui::input_box(c, lay.field, &bytes, b"nome ou caminho", true);
-        let _ = caret;
-        // Hint, error or the overwrite question.
-        let (msg, color): (Vec<u8>, Color) = if let Some(path) = p.asking() {
-            let mut m = Vec::from(&b"Substituir "[..]);
-            m.extend(fileman::ellipsize(
-                &path.chars().map(latin1).collect::<Vec<u8>>(),
-                ((lay.hint.w / CELL_W) as usize).saturating_sub(24),
-            ));
-            m.extend_from_slice(b"? Enter sim  Esc nao");
-            (m, theme::danger())
-        } else if let Some(err) = p.error() {
-            (err.chars().map(latin1).collect(), theme::danger())
-        } else {
-            (
-                Vec::from(&b"Enter confirma  Tab completa  Esc cancela"[..]),
-                theme::text_muted(),
-            )
-        };
-        ui::text(c, lay.hint.x, lay.hint.y, lay.hint.w, &msg, color);
+        busy
     }
-}
-
-/// The list row under `(px, py)` in the dialog of window `r`, if any.
-fn picker_row_at(p: &Picker, r: Rect, px: i32, py: i32) -> Option<usize> {
-    let lay = picker_layout(r);
-    if !lay.list.contains(px, py) {
-        return None;
-    }
-    Some(p.scroll() + ((py - lay.list.y) / PICK_ROW_H) as usize)
 }

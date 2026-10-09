@@ -4,7 +4,7 @@
 use super::*;
 use osjeff_core::style::PANEL_H;
 
-pub(crate) use osjeff_core::layout::{BrowserChrome, browser_home_layout};
+pub(crate) use osjeff_core::layout::BrowserChrome;
 
 /// Alt+Tab panel geometry.
 pub(crate) const SWITCH_W: i32 = 380;

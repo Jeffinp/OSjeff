@@ -290,7 +290,7 @@ fn unsupported_codings_are_refused_with_a_notice_never_garbage() {
         );
         let body = page_body(&resp);
         assert!(
-            String::from_utf8_lossy(&body).contains("nao suportada"),
+            String::from_utf8_lossy(&body).contains("não suportada"),
             "{ce}"
         );
     }
@@ -299,7 +299,7 @@ fn unsupported_codings_are_refused_with_a_notice_never_garbage() {
 #[test]
 fn too_many_stacked_codings_are_refused() {
     let resp = response("Content-Encoding: gzip, gzip, gzip, gzip, gzip\r\n", b"xx");
-    assert!(String::from_utf8_lossy(&page_body(&resp)).contains("nao suportada"));
+    assert!(String::from_utf8_lossy(&page_body(&resp)).contains("não suportada"));
 }
 
 #[test]
@@ -339,7 +339,7 @@ fn browser_keeps_the_note_for_the_banner() {
     assert_eq!(b.note(), Some(PageNote::Truncated));
     assert_eq!(
         PageNote::Truncated.label(),
-        "Pagina cortada no limite de tamanho"
+        "Página cortada no limite de tamanho"
     );
     b.open(b"example.org");
     assert!(b.take_request().is_some());

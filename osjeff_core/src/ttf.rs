@@ -67,7 +67,13 @@ pub struct Font<'a> {
     cmap4: usize,
     /// Offsets (from the start of the file) of the `PairPos` subtables.
     pairs: Vec<usize>,
+    /// Glyphs of U+0000..U+00FF, so common text skips the `cmap` search.
+    latin: [u16; 256],
+    /// Recently looked up kerning pairs, direct mapped: `(1 << 31 | left << 16 | right, value)`.
+    kern_cache: [core::cell::Cell<(u32, i16)>; KERN_CACHE],
 }
+
+const KERN_CACHE: usize = 512;
 
 fn find_table(d: Rd<'_>, tag: &[u8; 4]) -> Option<(usize, usize)> {
     let n = d.u16(4)? as usize;
@@ -173,8 +179,13 @@ impl<'a> Font<'a> {
             num_hmetrics,
             cmap4,
             pairs: Vec::new(),
+            latin: [0; 256],
+            kern_cache: [const { core::cell::Cell::new((0, 0)) }; KERN_CACHE],
         };
         font.load_kerning();
+        for cp in 0..256u16 {
+            font.latin[usize::from(cp)] = font.cmap4_lookup(cp).unwrap_or(0);
+        }
         Some(font)
     }
 
@@ -185,6 +196,9 @@ impl<'a> Font<'a> {
     /// Glyph for `c`, or `0` (`.notdef`) when the font has none.
     pub fn glyph_index(&self, c: char) -> u16 {
         let cp = c as u32;
+        if cp < 256 {
+            return self.latin[cp as usize];
+        }
         if cp > 0xFFFF {
             return 0;
         }
@@ -486,12 +500,21 @@ impl<'a> Font<'a> {
         if self.pairs.is_empty() || left == 0 || right == 0 {
             return 0;
         }
+        let key = 1 << 31 | u32::from(left) << 16 | u32::from(right);
+        let slot = &self.kern_cache[(usize::from(left) * 31 + usize::from(right)) % KERN_CACHE];
+        let (k, v) = slot.get();
+        if k == key {
+            return v;
+        }
+        let mut found = 0;
         for &sub in &self.pairs {
             if let Some(Some(v)) = self.pair_value(sub, left, right) {
-                return v;
+                found = v;
+                break;
             }
         }
-        0
+        slot.set((key, found));
+        found
     }
 
     /// `Some(None)`: subtable does not apply (glyph not covered / pair absent),

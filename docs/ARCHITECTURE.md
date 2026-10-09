@@ -20,7 +20,7 @@ e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espa�
 endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
 o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
 
-- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2532 testes
+- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2846 testes
   passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
 - **Multitarefa preemptiva** a 250 Hz, com bloqueio. Cinco threads: `compositor`,
@@ -640,6 +640,15 @@ superfície abre, e `ui.rs`/`gallery.rs` são o toolkit e sua vitrine. A janela 
 banners e o HUD usam o mesmo vidro. Aparência (automática pelo relógio, clara, escura), cor de
 destaque e *reduzir movimento* vêm de `osjeff_core::settings` e valem na hora.
 
+**Idiomas (`osjeff_core::i18n`).** Todo texto do shell sai de catálogos `chave = valor`
+(`assets/i18n/pt.txt` e `en.txt`) compilados em tabelas ordenadas por uma `const fn`; a consulta
+(`t!`, `tp!`) cai do idioma atual para o inglês e depois para a própria chave, sem alocar. O idioma
+é `Settings::lang`; `Desktop::language_changed` (`desktop/lang.rs`) refaz títulos de janela e
+camadas transitórias e pede repintura total. Datas, números, tamanhos e plurais seguem o idioma.
+A tela de falha e os logs ficam em inglês. Projeto, convenções, guia de tradução e como acrescentar
+um idioma: [`docs/design/i18n.md`](design/i18n.md); o que falta migrar:
+[`docs/design/i18n-audit.md`](design/i18n-audit.md).
+
 ## 7. Apps e window manager
 
 ### 7.1 Janelas e instâncias
@@ -733,17 +742,25 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   histórico, Ctrl+R, Tab, Ctrl+C/L/D) sobre um `Shell` de 52 comandos cujo sistema de arquivos é o VFS
   (`VfsFs`, diretório corrente por terminal, `rm` vai para a lixeira) e cujas informações do sistema
   (`KSys`) são relógio (SNTP/RTC), uptime, heap, processos e threads, discos, `ping` (`netd`),
-  `nslookup`/`curl`/`wget` (`fetch::run_job`) e `ifconfig`. A grade é o que cabe na janela (escala 2:
-  maximizar mostra mais texto). As linhas rodam em duas threads `shelld` (fila única, resultado
+  `nslookup`/`curl`/`wget` (`fetch::run_job`) e `ifconfig`. A grade é o que cabe na janela (fonte monoespaçada de 11 a 24 px, Ctrl +/−/0, guardada em
+  `terminal_font`; maximizar mostra mais texto). A faixa sob o título mostra a aba com a pasta, o prompt
+  tem o caminho em destaque e o símbolo discreto, o mouse seleciona (duplo clique a palavra, triplo a
+  linha) e Ctrl+Shift+C copia; cursor em bloco no fim da linha e em barra entre caracteres, barra de
+  rolagem sobreposta. Geometria, seleção e extração são `osjeff_core::termui` (testado no host). Sem
+  cores ANSI. As linhas rodam em duas threads `shelld` (fila única, resultado
   recolhido em `step_shell_jobs` a cada tick), então um comando que espera nunca congela o desktop; Ctrl+C
   cancela. `edit`, `files`, `tasks`, `calc`, `reboot` e `shutdown` pedem ao compositor por uma fila.
 - **Editor** (`desktop/edit.rs`): `osjeff_core::editor2` (UTF-8, desfazer/refazer, buscar/substituir,
   números de linha, mouse, roda, arquivos de até 16 MiB inteiros) com abrir/salvar como pelo VFS
   (`Picker`, Ctrl+O, Ctrl+S, Ctrl+Shift+S) e a pergunta **Salvar / Descartar / Cancelar** em toda forma de
   fechar uma janela com alterações (`request_close`: botão, Ctrl+Q, Tarefas, `kill`, Reiniciar/
-  Desligar). Cada janela tem seu buffer e seu caminho (`EditorState::path`, `None` = sem nome); o título
-  mostra `nome *` enquanto há alterações. A grade acompanha a janela (`sync_editor`) e nada é desenhado
-  fora dela.
+  Desligar), agora como folha presa à janela (o Abrir e o Salvar como reusam o visual do Arquivos: barra
+  lateral de lugares, ícones de arquivo, barra de rolagem). Cada janela tem seu buffer e seu caminho
+  (`EditorState::path`, `None` = sem nome); o título é `Editor — nome`, com ` •` enquanto há alterações. A
+  grade acompanha a janela (`sync_editor`) e nada é desenhado fora dela. A janela é descrita por
+  `osjeff_core::editor2::ui` (margem de números, linha atual, guias de indentação, barra de buscar fina e
+  clicável, barra de estado, folhas) e desenhada em `desktop/edit_ui.rs`; o cursor desliza na linha e
+  pisca suave por 12 s depois da última tecla, Ctrl +/−/0 mudam o tamanho (`editor_font`).
 - **Calculadora:** quatro operações, entrada de até 16 caracteres, formatador decimal sem
   intrínsecos de `f64` do `std`. As teclas se esticam com a janela (`calc_layout`).
 - **Gerenciador de arquivos (v2):** navegação por **caminho** sobre o OJFS v3, uma
@@ -753,7 +770,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   colunas Nome/Tamanho/Modificado (clique no cabeçalho ordena; pastas sempre primeiro; ordem
   natural: `f2` antes de `f10`), seleção múltipla (Shift/Ctrl+clique, Shift+setas, Ctrl+A),
   rolagem (roda, PageUp/PageDown, barra) com até 20 000 linhas, nomes UTF-8 de até 255 bytes
-  (desenhados dobrados para ASCII: a fonte 5x7 não tem acentos). Operações: `F` novo arquivo,
+  (acentos e UTF-8 desenhados como são). Operações: `F` novo arquivo,
   `N` nova pasta, F2 renomear (campo de nome em linha), Ctrl+C/X/V (área de transferência de
   **caminhos** compartilhada entre janelas: recortar+colar é um `rename`, instantâneo; copiar
   vira um `CopyJob` que avança 128 KiB por quadro com barra de progresso, Esc cancela e apaga o
@@ -774,9 +791,16 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   de 100 % a imagem é reduzida uma vez por mudança de zoom (filtro de caixa, em cache); a 100 %
   ou mais a amostragem é por vizinho mais próximo direto da origem. Lógica pura em
   `osjeff_core::viewer` (zoom, pan, caixa de ajuste, lista da pasta, texto de informações).
-  Está no overlay Apps e na Busca. Capturas:
-  `docs/img/files-list.png`, `files-copy-progress.png`, `files-trash-confirm.png`,
-  `viewer-photo.png`, `viewer-transparency.png`, `viewer-error.png`.
+  Está no overlay Apps e na Busca. Capturas: `docs/img/w23-files-*.png`, `w23-viewer-*.png`.
+  **Interface (W23):** o Arquivos tem barra lateral translúcida (Favoritos, Locais, disco), barra de
+  ferramentas com caminho clicável, vistas em lista e em ícones, busca que filtra, ordenação pelo
+  cabeçalho, painel de pré-visualização (Espaço), seleção por retângulo, arrastar e soltar (destino
+  destacado, Lixeira incluída), renomear no lugar, folhas de cópia/confirmação/propriedades, rolagem
+  com inércia e barra sobreposta, lista virtualizada. O Visualizador tem faixa de miniaturas (feitas
+  uma por vez), ajustar/preencher/real com zoom por mola, arrasto com inércia, giro animado, painel de
+  informações e apresentação. Geometria, acerto, plano de soltar, filtro, miniaturas, inércia e os
+  glifos são lógica pura (`fileman::ui`, `viewer::ui`, `appart`), `desktop/{files,files_ui,viewer,appui,
+  appart}.rs` desenham e roteiam. Os quadros só são pedidos enquanto algo se move (`animating()`).
 - **Navegador:** a barra de endereço e a área de conteúdo seguem a janela, e a página é
   **diagramada de novo** para a nova largura ao terminar de redimensionar (o corpo HTML
   fica guardado na instância). Fechar a janela descarta página e estado.
@@ -1080,7 +1104,7 @@ ganha `https://`. A tela inicial
 tem 4 atalhos (Bing, Wikipedia, Cloudflare, Exemplo), escolhidos por aceitarem o
 handshake P-256 do cliente.
 
-**Rótulo de segurança.** O enum `Security` tem `None`, `Http` ("Nao seguro"),
+**Rótulo de segurança.** O enum `Security` tem `None`, `Http` ("Não seguro"),
 `HttpsVerified` ("Conexão segura") e `HttpsInvalid` ("Certificado inválido", só depois do
 "continuar mesmo assim"). **"Seguro" só existe como `HttpsVerified`**, que só sai de
 `Browser::loaded_with(Conn::Verified, ..)`: o `fetcher` devolve `Conn::Verified` apenas
@@ -1109,6 +1133,16 @@ testados; `browser::` ganhou favoritos (`BookmarkStore`), sugestões e páginas 
 Detalhes e provas em [`design/tls-browser.md`](design/tls-browser.md) §8. A roda do mouse é
 do sistema todo: `hw::ps2` decodifica pacotes de 3 e 4 bytes e `Desktop::handle_wheel` entrega
 a rolagem à janela sob o ponteiro.
+
+**W24: texto proporcional e abas.** O layout mede por `web::metrics::TextMetrics` (o kernel usa
+Inter e JetBrains Mono; o host usa `FixedAdvance`), com tabelas (`web/layout/table.rs`), caixas em
+linha, estilos de `font-size` a `display` e regras indexadas pelo nome do elemento. A janela do
+navegador tem uma `TabList` (até 8) com histórico, DOM, rolagem e formulários por aba; o `fetcher`
+segue único: `browser_take_request` serve a aba ativa e depois as outras e devolve o resultado ao
+id que pediu. `CertInfo` (emissor, validade) viaja com a resposta para o balão de segurança.
+Um scroll, hover ou tecla que só muda a área do cliente repinta só ela
+(`Desktop::client_dirty`, `render_client_only`). Detalhes em
+[`design/tls-browser.md`](design/tls-browser.md) §9.
 
 ## 10. WebAssembly
 

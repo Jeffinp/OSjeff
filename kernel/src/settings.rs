@@ -32,6 +32,7 @@ pub fn set(s: Settings) {
     CLOCK24.store(s.clock24, Ordering::Relaxed);
     TOASTS.store(s.toasts, Ordering::Relaxed);
     osjeff_core::anim::set_reduce_motion(s.reduce_motion);
+    osjeff_core::i18n::set_lang(s.lang);
 }
 
 /// 24-hour clock (otherwise 12-hour with AM/PM).

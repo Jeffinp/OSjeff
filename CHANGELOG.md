@@ -23,6 +23,20 @@ tem releases versionadas; as seções são marcos na `master`.
   `wm::scene_signature`. O painel é uma camada opaca acima das janelas. Arrastar ficou 35 % mais barato;
   Snake + Tarefas, de 13 para 5 ms por quadro. Projeto: `docs/design/compositor.md`.
 
+## 2026-10 — Idiomas e acentos (W28)
+
+- **Português do Brasil e inglês**, trocados ao vivo em *Ajustes > Idioma e região* (nova seção, cada opção no
+  próprio idioma, formato da hora "pelo idioma / 24 h / 12 h" e uma dica, sem troca forçada, para usar o teclado
+  ABNT2). `language=` e `clock=auto` entram no arquivo de configurações; arquivos antigos continuam valendo.
+- `osjeff_core::i18n`: catálogos `chave = valor` (`assets/i18n/`) compilados por uma `const fn`, consulta com
+  reserva (idioma, inglês, a chave) sem alocar, marcadores `{nome}` tipados, plurais (`pt`: 0 e 1 no singular),
+  números, tamanhos, datas e horas por idioma, macros `t!`/`tp!`/`tk!`. Um idioma novo é só um arquivo de texto.
+- Painel, menus, configurações rápidas, calendário, barra de apps, Apps, Busca, folha de energia, banners e a
+  lateral de Ajustes saem do catálogo. A tela de falha e os logs ficam em inglês.
+- Testes que acusam chave faltando ou sobrando, marcador diferente, plural incompleto, **palavra sem acento**
+  (lista de ~190) e glifo ausente nas fontes; alvo de fuzz `i18n_format`; `tools/i18n-audit.py` e
+  `docs/design/i18n-audit.md` listam o que falta migrar, por app.
+
 ## 2026-10 — Os apps do sistema (W25)
 
 - **Tarefas** reúne o Gerenciador de tarefas e o Monitor de recursos num monitor de atividade com
@@ -92,6 +106,50 @@ tem releases versionadas; as seções são marcos na `master`.
   levam a janela focada, o painel mostra pontos clicáveis e o menu da janela tem "Mover para a área de
   trabalho N"; ativar uma janela de outra área (barra de tarefas, `Alt+Tab`) traz a área dela.
   Lógica em `osjeff_core::winman` (`switch_workspace`, `move_to_workspace`, `visible_workspaces`).
+## 2026-10 — Arquivos, Imagens, Editor e Terminal (W23)
+
+- **Arquivos** no estilo do Finder: barra lateral (Favoritos, Locais, disco com barra de uso),
+  barra de ferramentas com voltar/avançar, caminho clicável, vistas em lista e em ícones, busca que
+  filtra a pasta, ordenação pelo cabeçalho, painel de pré-visualização (Espaço), seleção por
+  retângulo, arrastar e soltar entre pastas, barra lateral, migalhas e Lixeira (com destaque do
+  alvo), renomear no lugar, menus de contexto no estilo novo, rolagem com inércia e barra de
+  rolagem sobreposta, cópia com folha de progresso e cancelamento, estados vazios. Lista
+  virtualizada: 2000 arquivos rolam sem custo extra por arquivo.
+- **Imagens**: faixa de miniaturas, ajustar/preencher/100 % com zoom por mola, arrasto com inércia,
+  giro animado, painel de informações translúcido, apresentação (Espaço e setas), xadrez sob a
+  transparência, folha de salvar, mensagens de erro em português.
+- **Editor**: margem com números de linha, linha atual destacada, guias de indentação, cursor que
+  desliza e pisca suave, seleção que aparece, barra de buscar/substituir fina (não modal) com botões,
+  barra de estado (Ln/Col, codificação, fim de linha, tamanho), título `Editor — nome •`, a pergunta
+  de salvar e os diálogos Abrir/Salvar como folhas presas à janela com o visual do Arquivos.
+- **Terminal**: faixa com a aba e a pasta, prompt colorido, seleção com o mouse (duplo clique pega a
+  palavra, triplo a linha) e cópia com Ctrl+Shift+C, barra de rolagem sobreposta, cursor em bloco ou
+  barra. Cores ANSI ficaram de fora.
+- **Ctrl + / Ctrl - / Ctrl 0** mudam o tamanho do texto do editor e do terminal; os valores
+  (`editor_font`, `terminal_font`) ficam em `/etc/osjeff.conf` (leitor total, com limites).
+- Geometria, acerto do mouse, arrastar e soltar, filtro, pré-visualização, miniaturas, inércia,
+  apresentação, seleção do terminal e as folhas são lógica pura no `osjeff_core`
+  (`fileman::ui`, `viewer::ui`, `editor2::ui`, `termui`, `appart`), testada no host; o kernel só
+  desenha. Nenhum `text::legacy` restou nesses apps.
+- Testes: 2590 no `osjeff_core` (eram 2497); custo de quadro e capturas em `docs/TESTING.md` e
+  `docs/design/ui-macos.md`.
+## 2026-10 — Navegador novo (W24)
+
+- **Páginas com texto proporcional.** O layout mede cada palavra na fonte real (Inter, JetBrains
+  Mono em `pre`/`code`), com tamanhos, negrito, itálico (inclinação sintetizada), quebra pela
+  largura medida, alinhamento, altura de linha, listas, citações, tabelas, caixas em linha,
+  formulários no estilo do sistema e os estilos de fonte, cor, fundo, margem, borda e `display`.
+- **Moldura nova:** barra única (voltar, avançar, recarregar/parar, campo com indicador de
+  segurança e estrela, progresso), balão do certificado (host, emissor, validade), sugestões em
+  vidro, **abas** (até 8, Ctrl+T/W/Tab/1..9), tela de **Nova aba**, páginas de erro com
+  "Tentar novamente", busca na página, pílula de zoom, rolagem com inércia, menu de contexto.
+- `osjeff://favoritos`, `historico` e `sobre` viraram HTML e CSS pelo mesmo motor.
+- Rolar, passar o mouse e digitar no navegador repintam só a área do cliente; o layout de uma
+  página de 2000 nós caiu de 62,7 para 25,4 ms (cache de glifos, índice de regras, menos alocações).
+- Corrigido: a palavra de mais de 4096 caracteres contava entre palavras e cortava palavras
+  comuns de textos longos; células de tabela deslocavam as vizinhas; bordas recolhidas perdiam
+  o topo das linhas.
+- Testes: 2631 no `osjeff_core` (eram 2497).
 
 ## 2026-10 — Nova interface (W22)
 

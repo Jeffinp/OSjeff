@@ -391,24 +391,40 @@ impl Desktop {
             entries.push(e);
         }
         if wins.is_empty() {
-            entries.push(Entry::item("Abrir", "", Cmd::Launch(k)));
+            entries.push(Entry::item(
+                osjeff_core::t!("common.open"),
+                "",
+                Cmd::Launch(k),
+            ));
         }
         entries.push(Entry::sep());
         if k.multi() {
-            entries.push(Entry::item("Nova janela", "", Cmd::NewOf(k)));
+            entries.push(Entry::item(
+                osjeff_core::t!("taskbar.menu.new_window"),
+                "",
+                Cmd::NewOf(k),
+            ));
         }
         if self.shell.task.pinned.contains(&k) {
-            entries.push(Entry::item("Desafixar da barra", "", Cmd::Unpin(k)));
+            entries.push(Entry::item(
+                osjeff_core::t!("taskbar.menu.unpin"),
+                "",
+                Cmd::Unpin(k),
+            ));
         } else if k.pinnable() {
-            entries.push(Entry::item("Fixar na barra", "", Cmd::Pin(k)));
+            entries.push(Entry::item(
+                osjeff_core::t!("taskbar.menu.pin"),
+                "",
+                Cmd::Pin(k),
+            ));
         }
         if !wins.is_empty() {
             entries.push(Entry::sep());
             entries.push(Entry::item(
                 if wins.len() > 1 {
-                    "Fechar todas as janelas"
+                    osjeff_core::t!("taskbar.menu.close_all")
                 } else {
-                    "Fechar janela"
+                    osjeff_core::t!("taskbar.menu.close_window")
                 },
                 "",
                 Cmd::QuitOf(k),
@@ -546,14 +562,19 @@ impl Desktop {
         if d.tip.value() > 0.5 && d.drag.is_none() {
             match d.hover {
                 Some(Hit::Apps) => {
-                    ui::tooltip(c, l.apps.x + l.apps.w / 2, panel.y - 6, "Apps");
+                    ui::tooltip(
+                        c,
+                        l.apps.x + l.apps.w / 2,
+                        panel.y - 6,
+                        osjeff_core::t!("taskbar.apps"),
+                    );
                 }
                 Some(Hit::Sliver) => {
                     ui::tooltip(
                         c,
                         l.sliver.x + l.sliver.w / 2,
                         panel.y - 6,
-                        "Mostrar área de trabalho",
+                        osjeff_core::t!("taskbar.show_desktop"),
                     );
                 }
                 _ => {
@@ -565,7 +586,7 @@ impl Desktop {
                             .filter(|w| w.app.kind() == k && !w.is_closing())
                             .count();
                         let label = if n > 1 {
-                            alloc::format!("{} ({n})", k.label())
+                            osjeff_core::tp!("taskbar.tip", n, name = k.label())
                         } else {
                             String::from(k.label())
                         };

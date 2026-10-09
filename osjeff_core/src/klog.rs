@@ -86,6 +86,17 @@ impl Level {
         }
     }
 
+    /// Catalog key of the severity's title in notifications and banners
+    /// (`Information`, `Warning`, `Error`, `Critical failure`).
+    pub const fn title_key(self) -> &'static str {
+        match self {
+            Level::Trace | Level::Debug | Level::Info => crate::tk!("level.info"),
+            Level::Warn => crate::tk!("level.warn"),
+            Level::Error => crate::tk!("level.error"),
+            Level::Fatal => crate::tk!("level.fatal"),
+        }
+    }
+
     /// One-letter tag for the compact viewer line.
     pub const fn letter(self) -> u8 {
         match self {

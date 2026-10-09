@@ -119,6 +119,11 @@ impl TextEngine {
         ((adv * px as i64 * 256 + f.units_per_em as i64 / 2) / f.units_per_em as i64) as i32
     }
 
+    /// Does face `w` have a glyph of its own for `c` (not the `?` stand-in)?
+    pub fn has_glyph(&self, w: Weight, c: char) -> bool {
+        self.font(w).glyph_index(c) != 0
+    }
+
     /// Character cell of the monospace face at `px`: `(pitch, line height)` in whole
     /// pixels. Terminal and editor grids are built from this.
     pub fn mono_cell(&self, px: u16) -> (i32, i32) {

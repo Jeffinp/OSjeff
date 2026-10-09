@@ -43,6 +43,9 @@ pub struct FrameIn {
     pub force_full: bool,
     /// Extra region the handlers marked as changed.
     pub extra_dirty: Option<Rect>,
+    /// A browser window whose client area is the only thing that changed (a scroll, a hover, a
+    /// keystroke in its bar): just that area is repainted, not the frame and shadow around it.
+    pub client: Option<WindowId>,
     /// An asynchronous result (a fetched page) changed a window that may not have the focus.
     pub external: bool,
     pub cursor_moved: bool,
@@ -115,8 +118,13 @@ impl Compositor {
         let hover = cursor_moved && desk.overlay_open();
         let tick = any_anim && (i.tick_changed || cursor_moved);
         let reference = desk.reference_mode() && (any_anim || i.input || i.clock_tick);
-        let due = i.input || hover || tick || settle || i.clock_tick;
-        let work = any_anim || i.input || i.clock_tick || cursor_moved || self.was_anim;
+        let due = i.input || hover || tick || settle || i.clock_tick || i.client.is_some();
+        let work = any_anim
+            || i.input
+            || i.client.is_some()
+            || i.clock_tick
+            || cursor_moved
+            || self.was_anim;
         let frame_start = crate::io::rdtsc();
         let cpu_start = trace::cpu_now();
 
@@ -239,6 +247,13 @@ impl Compositor {
     /// animating.
     fn invalidate_for(&mut self, desk: &Desktop, i: &FrameIn, cause: Cause) {
         let eng = &mut self.engine;
+        if let Some(w) = i
+            .client
+            .and_then(|id| desk.wm.get(id))
+            .filter(|w| w.shown())
+        {
+            eng.invalidate(Desktop::client_rect(desk.window_box(w)));
+        }
         let mut window = |id: Option<WindowId>| {
             if let Some(w) = id.and_then(|id| desk.wm.get(id)).filter(|w| w.shown()) {
                 eng.invalidate(desk.window_box(w));

@@ -29,12 +29,7 @@ fn level_color(l: Level) -> Color {
 }
 
 fn level_title(l: Level) -> &'static str {
-    match l {
-        Level::Trace | Level::Debug | Level::Info => "Informação",
-        Level::Warn => "Aviso",
-        Level::Error => "Erro",
-        Level::Fatal => "Falha grave",
-    }
+    osjeff_core::i18n::tr(l.title_key())
 }
 
 impl Desktop {
@@ -170,7 +165,7 @@ impl Desktop {
                 theme::solid(p.text),
             );
             if t.count > 1 {
-                let n = alloc::format!("×{}", t.count);
+                let n = osjeff_core::t!("toast.repeat", n = t.count);
                 text::draw_right(
                     c,
                     Rect::new(r.x, r.y + 10, r.w - 14, 20),

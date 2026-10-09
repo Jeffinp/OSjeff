@@ -3,6 +3,7 @@
 use super::form::*;
 use super::imgcache::{ImageLookup, ImgState, NoImages};
 use super::layout::img_box;
+use super::textops::CharPos;
 use super::*;
 use crate::Key;
 
@@ -19,6 +20,7 @@ fn lay(html: &str, w: i32, zoom: u16, lookup: &dyn ImageLookup) -> Page {
         width: w,
         zoom,
         images: lookup,
+        metrics: &FixedAdvance,
     })
 }
 
@@ -117,7 +119,7 @@ fn failed_states_get_a_message_box() {
         ImgState::TooBig,
         ImgState::TooMany,
     ] {
-        assert_eq!(img_box(0, 0, s, 600, 100), (240, 34));
+        assert_eq!(img_box(0, 0, s, 600, 100), (240, 48));
     }
 }
 
@@ -208,18 +210,18 @@ fn unsupported_image_shows_alt_and_the_message() {
     );
     let t = texts(&p);
     assert!(t.iter().any(|s| s.contains("Foto da praia")), "{t:?}");
-    assert!(t.iter().any(|s| s == "formato nao suportado"), "{t:?}");
+    assert!(t.iter().any(|s| s == "formato não suportado"), "{t:?}");
 }
 
 #[test]
-fn alt_text_is_folded_to_ascii() {
+fn alt_text_keeps_its_accents() {
     let p = lay(
         "<img src=a.jpg alt='A\u{e7}\u{e3}o &eacute; boa'>",
         600,
         100,
         &Fixed(ImgState::Unsupported),
     );
-    assert_eq!(p.images[0].alt, "Acao e boa");
+    assert_eq!(p.images[0].alt, "A\u{e7}\u{e3}o \u{e9} boa");
 }
 
 #[test]
@@ -232,8 +234,8 @@ fn alt_is_clipped_to_the_box() {
         &Fixed(ImgState::Failed),
     );
     for c in &p.cmds {
-        if let Cmd::Text { text, .. } = c {
-            assert!(text.chars().count() * 6 <= 100, "{}", text.len());
+        if let Cmd::Text { x, w, text, .. } = c {
+            assert!(*x + *w <= 100, "{} wide at {x}", text.len());
         }
     }
 }
@@ -301,7 +303,8 @@ fn text_and_image_share_a_line_bottom_aligned() {
         })
         .unwrap();
     assert!(text_y > img_y, "text sits at the bottom of the tall line");
-    assert!(text_y + 18 <= img_y + img_h + 1);
+    // The baseline (16 px below the text's top with the test metrics) is the picture's bottom.
+    assert_eq!(text_y + 16, img_y + img_h);
 }
 
 #[test]
@@ -363,23 +366,23 @@ fn zoom_steps_walk_up_and_down() {
 }
 
 #[test]
-fn zoom_changes_the_font_scale_and_height() {
+fn zoom_changes_the_font_size_and_height() {
     let html = "<p>hello world</p>";
-    let scale = |zoom| {
+    let size = |zoom| {
         let p = lay(html, 600, zoom, &NoImages);
         p.cmds
             .iter()
             .find_map(|c| match c {
-                Cmd::Text { scale, .. } => Some(*scale),
+                Cmd::Text { font, .. } => Some(font.size),
                 _ => None,
             })
             .unwrap()
     };
-    assert_eq!(scale(100), 2);
-    assert_eq!(scale(50), 1);
-    assert_eq!(scale(150), 3);
-    assert_eq!(scale(200), 4);
-    assert_eq!(scale(300), 6);
+    assert_eq!(size(100), 16);
+    assert_eq!(size(50), 8);
+    assert_eq!(size(150), 24);
+    assert_eq!(size(200), 32);
+    assert_eq!(size(300), 48);
     let h = |zoom| lay(html, 600, zoom, &NoImages).height;
     assert!(h(200) > h(100) && h(100) > h(50));
 }
@@ -418,11 +421,11 @@ fn hostile_lengths_at_max_zoom_do_not_overflow() {
 // ---- title ----
 
 #[test]
-fn title_is_extracted_and_folded() {
+fn title_is_extracted_and_collapsed() {
     let d = Doc::parse(
         "<html><head><title> Ol\u{e1}  mundo </title></head><body>x</body></html>".as_bytes(),
     );
-    assert_eq!(d.title(), "Ola mundo");
+    assert_eq!(d.title(), "Ol\u{e1} mundo");
 }
 
 #[test]
@@ -481,15 +484,19 @@ fn button_is_a_submit_with_its_text() {
 }
 
 #[test]
-fn button_type_button_is_plain_text_not_a_control() {
-    let p = form_page("<form><button type=button>Nada</button></form>");
-    assert!(p.forms[0].fields.is_empty());
+fn button_type_button_is_a_button_that_submits_nothing() {
+    let p =
+        form_page("<form><input name=q value=a><button type=button name=b>Nada</button></form>");
+    assert_eq!(p.forms[0].fields[1].kind, FieldKind::PushButton);
+    assert_eq!(p.forms[0].fields[1].label, "Nada");
+    let st = FormState::new(&p.forms);
+    assert_eq!(st.query(&p.forms, 0, Some(1)).unwrap(), "q=a");
 }
 
 #[test]
 fn unsupported_controls_are_skipped() {
     let p = form_page(
-        "<form><input type=checkbox name=c><input type=radio name=r><input type=file name=f><select name=s><option>um</option></select><textarea name=t>txt</textarea></form>",
+        "<form><input type=file name=f><input type=range name=g><select name=s><option>um</option></select><textarea name=t>txt</textarea></form>",
     );
     assert!(p.forms[0].fields.is_empty());
     // The option text and textarea content are not rendered as page text.
@@ -739,7 +746,7 @@ fn post_forms_are_refused_with_a_message() {
     let st = FormState::new(&forms);
     let e = st.target(&forms, 0, None).unwrap_err();
     assert_eq!(e, FormError::Post);
-    assert_eq!(e.message(), "formularios POST nao suportados");
+    assert_eq!(e.message(), "Formulários POST não são suportados.");
 }
 
 #[test]
@@ -792,31 +799,6 @@ fn editing_multibyte_text_stays_on_char_boundaries() {
     assert_eq!(st.value(0, 0), "\u{e3}o");
     st.on_key(&forms, Key::Delete);
     assert_eq!(st.value(0, 0), "o");
-}
-
-#[test]
-fn visible_slice_follows_the_caret() {
-    let forms = form_page("<form><input name=q></form>").forms;
-    let mut st = FormState::new(&forms);
-    st.set_focus(&forms, 0, 0);
-    st.insert_str(&forms, "0123456789");
-    let (s, c) = st.visible(&forms, 0, 0, 5);
-    assert_eq!(s, "6789");
-    assert_eq!(c, 4);
-    st.on_key(&forms, Key::Home);
-    let (s, c) = st.visible(&forms, 0, 0, 5);
-    assert_eq!((s.as_str(), c), ("01234", 0));
-}
-
-#[test]
-fn visible_folds_accents_and_masks_passwords() {
-    let forms = form_page(
-        "<form><input name=q value='a\u{e7}\u{e3}o'><input type=password name=p value=segredo></form>",
-    )
-    .forms;
-    let st = FormState::new(&forms);
-    assert_eq!(st.visible(&forms, 0, 0, 20).0, "acao");
-    assert_eq!(st.visible(&forms, 0, 1, 20).0, "*******");
 }
 
 // ---- dead keys ----
@@ -912,20 +894,20 @@ fn text_page() -> Page {
 #[test]
 fn find_is_case_insensitive_and_counts_matches() {
     let p = text_page();
-    assert_eq!(p.find("the").len(), 3);
-    assert_eq!(p.find("THE").len(), 3);
-    assert_eq!(p.find("fox").len(), 1);
-    assert_eq!(p.find("zebra").len(), 0);
-    assert!(p.find("").is_empty());
+    assert_eq!(p.find("the", &FixedAdvance).len(), 3);
+    assert_eq!(p.find("THE", &FixedAdvance).len(), 3);
+    assert_eq!(p.find("fox", &FixedAdvance).len(), 1);
+    assert_eq!(p.find("zebra", &FixedAdvance).len(), 0);
+    assert!(p.find("", &FixedAdvance).is_empty());
 }
 
 #[test]
 fn find_matches_inside_a_word_with_a_precise_box() {
     let p = render(b"<p>abcdef</p>", 600);
-    let m = p.find("cd");
+    let m = p.find("cd", &FixedAdvance);
     assert_eq!(m.len(), 1);
     let s = m[0][0];
-    assert_eq!(s.w, 2 * 12); // two cells at scale 2
+    assert_eq!(s.w, 2 * 8); // two characters of 8 px
     let word_x = p
         .cmds
         .iter()
@@ -934,21 +916,22 @@ fn find_matches_inside_a_word_with_a_precise_box() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(s.x, word_x + 2 * 12);
+    assert_eq!(s.x, word_x + 2 * 8);
 }
 
 #[test]
-fn find_spans_words() {
+fn find_inside_one_run_is_one_box() {
     let p = text_page();
-    let m = p.find("quick brown");
+    let m = p.find("quick brown", &FixedAdvance);
     assert_eq!(m.len(), 1);
-    assert_eq!(m[0].len(), 2);
+    assert_eq!(m[0].len(), 1);
+    assert_eq!(m[0][0].w, "quick brown".len() as i32 * 8);
 }
 
 #[test]
 fn find_spans_lines() {
     let p = text_page();
-    let m = p.find("fox jumps");
+    let m = p.find("fox jumps", &FixedAdvance);
     assert_eq!(m.len(), 1);
     assert!(m[0][1].y > m[0][0].y);
 }
@@ -956,61 +939,83 @@ fn find_spans_lines() {
 #[test]
 fn find_matches_are_in_reading_order() {
     let p = text_page();
-    let ys: Vec<i32> = p.find("the").iter().map(|m| m[0].y).collect();
+    let ys: Vec<i32> = p
+        .find("the", &FixedAdvance)
+        .iter()
+        .map(|m| m[0].y)
+        .collect();
     assert!(ys.windows(2).all(|w| w[0] <= w[1]));
 }
 
 #[test]
 fn find_does_not_overlap_matches() {
     let p = render(b"<p>aaaa</p>", 600);
-    assert_eq!(p.find("aa").len(), 2);
+    assert_eq!(p.find("aa", &FixedAdvance).len(), 2);
 }
 
 #[test]
 fn find_with_a_huge_needle_or_page_is_bounded() {
     let p = text_page();
-    assert!(p.find(&"x".repeat(500)).is_empty());
+    assert!(p.find(&"x".repeat(500), &FixedAdvance).is_empty());
     let html = format!("<p>{}</p>", "a ".repeat(5000));
     let big = render(html.as_bytes(), 600);
-    assert!(big.find("a").len() <= super::textops::MAX_MATCHES);
+    assert!(big.find("a", &FixedAdvance).len() <= super::textops::MAX_MATCHES);
 }
 
 // ---- selection ----
 
-#[test]
-fn drag_selects_a_range_of_words() {
-    let p = text_page();
-    let words: Vec<(i32, i32)> = p
-        .cmds
+fn first_run(p: &Page) -> (i32, i32) {
+    p.cmds
         .iter()
-        .filter_map(|c| match c {
+        .find_map(|c| match c {
             Cmd::Text { x, y, .. } => Some((*x, *y)),
             _ => None,
         })
-        .collect();
-    let a = (words[1].0 + 1, words[1].1 + 1); // "quick"
-    let b = (words[3].0 + 1, words[3].1 + 1); // "fox"
-    let r = p.select(a, b).unwrap();
-    assert_eq!(r, (1, 3));
-    assert_eq!(p.selection_text(r), "quick brown fox");
-    assert_eq!(p.selection_spans(r).len(), 3);
+        .unwrap()
+}
+
+#[test]
+fn drag_selects_a_range_of_characters() {
+    let p = text_page();
+    let (x0, y0) = first_run(&p);
+    // "The quick brown fox": 8 px per character; from inside "quick" to inside "fox".
+    let a = (x0 + 4 * 8 + 1, y0 + 2);
+    let b = (x0 + 19 * 8 - 1, y0 + 2);
+    let r = p.select(a, b, &FixedAdvance).unwrap();
+    assert_eq!(p.selection_text(&r), "quick brown fox");
+    let spans = p.selection_spans(&r, &FixedAdvance);
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].x, x0 + 4 * 8);
+    assert_eq!(spans[0].w, 15 * 8);
+}
+
+#[test]
+fn a_drag_snaps_to_the_nearer_character_boundary() {
+    let p = text_page();
+    let (x0, y0) = first_run(&p);
+    // 3 px into the 'T' (8 px wide) is nearer its left edge; 5 px into the fourth character
+    // is nearer its right edge.
+    let r = p
+        .select((x0 + 3, y0 + 2), (x0 + 3 * 8 + 5, y0 + 2), &FixedAdvance)
+        .unwrap();
+    assert_eq!(p.selection_text(&r), "The ");
 }
 
 #[test]
 fn dragging_backwards_is_the_same_selection() {
     let p = text_page();
-    let a = (400, 40);
-    let b = (30, 40);
-    let r = p.select(a, b).unwrap();
-    assert_eq!(p.select(b, a), Some(r));
+    let (_, y0) = first_run(&p);
+    let a = (400, y0 + 2);
+    let b = (30, y0 + 2);
+    let r = p.select(a, b, &FixedAdvance).unwrap();
+    assert_eq!(p.select(b, a, &FixedAdvance), Some(r));
 }
 
 #[test]
 fn selection_across_lines_has_a_newline() {
     let p = text_page();
-    let n = p.word_count();
-    let r = (0, n - 1);
-    let t = p.selection_text(r);
+    let r = p.select((0, 0), (5000, 5000), &FixedAdvance).unwrap();
+    let t = p.selection_text(&r);
     assert!(t.starts_with("The quick brown fox\njumps"), "{t}");
     assert!(t.ends_with("The end."));
 }
@@ -1018,29 +1023,38 @@ fn selection_across_lines_has_a_newline() {
 #[test]
 fn a_click_without_movement_selects_nothing() {
     let p = text_page();
-    assert_eq!(p.select((50, 40), (50, 40)), None);
+    assert_eq!(p.select((50, 40), (50, 40), &FixedAdvance), None);
 }
 
 #[test]
 fn selection_on_a_page_without_text_is_none() {
     let p = render(b"<div></div>", 600);
-    assert_eq!(p.select((1, 1), (50, 50)), None);
+    assert_eq!(p.select((1, 1), (50, 50), &FixedAdvance), None);
     assert_eq!(p.word_count(), 0);
-    assert_eq!(p.selection_text((0, 5)), "");
 }
 
 #[test]
 fn dragging_below_the_page_selects_to_the_end() {
     let p = text_page();
-    let r = p.select((20, 20), (20, 5000)).unwrap();
-    assert_eq!(r.1, p.word_count() - 1);
+    let (x0, y0) = first_run(&p);
+    let r = p.select((x0, y0 + 2), (20, 5000), &FixedAdvance).unwrap();
+    assert!(p.selection_text(&r).ends_with("The end."));
 }
 
 #[test]
 fn dragging_above_the_page_selects_from_the_start() {
     let p = text_page();
-    let r = p.select((20, 0), (400, 5000)).unwrap();
-    assert_eq!(r.0, 0);
+    let r = p.select((20, 0), (400, 5000), &FixedAdvance).unwrap();
+    assert_eq!(r.start, CharPos { run: 0, off: 0 });
+}
+
+#[test]
+fn double_click_picks_a_word() {
+    let p = text_page();
+    let (x0, y0) = first_run(&p);
+    let r = p.select_word(x0 + 6 * 8, y0 + 2, &FixedAdvance).unwrap();
+    assert_eq!(p.selection_text(&r), "quick");
+    assert!(p.select_word(2, 2, &FixedAdvance).is_none());
 }
 
 // ---- hostile input ----
@@ -1065,7 +1079,7 @@ fn hostile_img_and_form_markup_does_not_panic() {
             assert!(p.height >= 0);
         }
         let p = lay(j, 300, 100, &NoImages);
-        let _ = p.find("x");
-        let _ = p.select((0, 0), (100, 100));
+        let _ = p.find("x", &FixedAdvance);
+        let _ = p.select((0, 0), (100, 100), &FixedAdvance);
     }
 }

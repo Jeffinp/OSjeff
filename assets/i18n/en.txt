@@ -1,0 +1,233 @@
+# OSjeff messages (English).
+# One `key = value` per line; see docs/design/i18n.md. Keep this file and the other
+# language file on exactly the same keys and placeholders (cargo test -p osjeff_core i18n).
+
+
+# Language metadata and formats. Every language file defines these.
+meta.code = en
+meta.name = English
+fmt.decimal = .
+fmt.group = ,
+fmt.plural = one
+fmt.clock24_default = 0
+fmt.am = AM
+fmt.pm = PM
+fmt.time.24 = {hour}:{minute}
+fmt.time.24s = {hour}:{minute}:{second}
+fmt.time.12 = {hour12}:{minute} {ampm}
+fmt.time.12s = {hour12}:{minute}:{second} {ampm}
+fmt.date.short = {month2}/{day2}/{year}
+fmt.date.medium = {month_short} {day}, {year}
+fmt.date.long = {weekday_long}, {month_long} {day}, {year}
+fmt.date.long_nowd = {month_long} {day}, {year}
+fmt.date.month_year = {month_long} {year}
+fmt.date.weekday = {weekday_long}
+fmt.datetime.full = {weekday}, {month_short} {day} {year} {time}
+fmt.datetime.panel = {weekday} {month_short} {day}  {time}
+
+# Weekday and month names. Short forms for the panel, long forms for headings.
+date.wd.0 = Sun
+date.wd.1 = Mon
+date.wd.2 = Tue
+date.wd.3 = Wed
+date.wd.4 = Thu
+date.wd.5 = Fri
+date.wd.6 = Sat
+date.wdl.0 = Sunday
+date.wdl.1 = Monday
+date.wdl.2 = Tuesday
+date.wdl.3 = Wednesday
+date.wdl.4 = Thursday
+date.wdl.5 = Friday
+date.wdl.6 = Saturday
+date.wd1.0 = S
+date.wd1.1 = M
+date.wd1.2 = T
+date.wd1.3 = W
+date.wd1.4 = T
+date.wd1.5 = F
+date.wd1.6 = S
+date.mon.1 = Jan
+date.mon.2 = Feb
+date.mon.3 = Mar
+date.mon.4 = Apr
+date.mon.5 = May
+date.mon.6 = Jun
+date.mon.7 = Jul
+date.mon.8 = Aug
+date.mon.9 = Sep
+date.mon.10 = Oct
+date.mon.11 = Nov
+date.mon.12 = Dec
+date.monl.1 = January
+date.monl.2 = February
+date.monl.3 = March
+date.monl.4 = April
+date.monl.5 = May
+date.monl.6 = June
+date.monl.7 = July
+date.monl.8 = August
+date.monl.9 = September
+date.monl.10 = October
+date.monl.11 = November
+date.monl.12 = December
+
+# Relative times (notification centre)
+time.ago.now = now
+time.ago.min = {n} min
+time.ago.hour = {n} h
+
+# Severity titles of notifications and banners
+level.info = Information
+level.warn = Warning
+level.error = Error
+level.fatal = Critical failure
+toast.repeat = ×{n}
+
+# App names (title bars, menus, tooltips, Apps, Busca)
+app.terminal = Terminal
+app.editor = Editor
+app.tasks = Tasks
+app.calculator = Calculator
+app.browser = Browser
+app.wasm = Applications
+app.wasm_title = Application
+app.files = Files
+app.settings = Settings
+app.log = Log
+app.viewer = Images
+app.gallery = Components
+
+# Common words
+common.cancel = Cancel
+common.open = Open
+common.open_app = Open {app}
+
+# Power
+power.restart = Restart
+power.shutdown = Shut down
+power.restart_title = Restart the computer?
+power.shutdown_title = Shut down the computer?
+power.body = Documents with unsaved changes ask before closing.
+
+# Top panel
+panel.apps = Apps
+panel.clock_template_24 = Wed 00 Oct  00:00
+panel.clock_template_12 = Wed 00 Oct  00:00 PM
+
+# System menu (Apps button area) and desktop context menu
+menu.system.about = About OSjeff
+menu.system.settings = System settings…
+menu.system.gallery = Components
+menu.system.restart = Restart…
+menu.system.shutdown = Shut down…
+menu.desktop.show_desktop = Show desktop
+
+# Window menu: File, Edit, View and window commands
+menu.file.new_window = New window
+menu.file.open = Open…
+menu.file.save = Save
+menu.file.new_tab = New tab
+menu.file.close_tab = Close tab
+menu.file.close_window = Close window
+menu.edit.undo = Undo
+menu.edit.redo = Redo
+menu.edit.cut = Cut
+menu.edit.copy = Copy
+menu.edit.paste = Paste
+menu.edit.select_all = Select all
+menu.view.zoom_in = Zoom in
+menu.view.zoom_out = Zoom out
+menu.view.zoom_reset = Actual size
+menu.view.as_list = As list
+menu.view.as_icons = As icons
+menu.view.preview = Preview
+menu.view.window_zoom = Window zoom
+menu.view.show_apps = Show apps
+menu.view.search = Search
+menu.window.minimize = Minimize
+menu.window.zoom = Zoom
+menu.window.maximize = Maximize
+menu.window.restore = Restore
+menu.window.snap_left = Snap left
+menu.window.snap_right = Snap right
+menu.window.move_to_workspace = Move to workspace {n}
+menu.shortcut.search = Ctrl+Space
+menu.shortcut.preview = Space
+
+# Quick settings popover
+quick.title = Quick settings
+quick.network = Network
+quick.network.connecting = Connecting…
+quick.network.offline = No network
+quick.appearance = Appearance
+quick.appearance.auto = Automatic
+quick.appearance.light = Light
+quick.appearance.dark = Dark
+quick.motion = Motion
+quick.motion.reduced = Reduced
+quick.motion.full = Full
+quick.dnd = Do not disturb
+quick.dnd.on = On
+quick.dnd.off = Off
+quick.clock24 = 24-hour clock
+quick.clock24.on = 24 hours
+quick.clock24.off = 12 hours
+quick.settings = Settings
+quick.accent = Accent color
+
+# Calendar and notification centre
+centre.notifications = Notifications
+centre.clear = Clear
+centre.empty = No notifications
+
+# Taskbar (Barra de apps)
+taskbar.apps = Apps
+taskbar.show_desktop = Show desktop
+taskbar.tip.one = {name}
+taskbar.tip.other = {name} · {n} windows
+taskbar.menu.new_window = New window
+taskbar.menu.pin = Pin to the bar
+taskbar.menu.unpin = Unpin from the bar
+taskbar.menu.close_window = Close window
+taskbar.menu.close_all = Close all windows
+
+# Apps overlay and Busca
+launcher.search_apps = Search apps
+launcher.recents = Recent
+launcher.empty = No apps found
+launcher.cat.all = All
+launcher.cat.system = System
+launcher.cat.internet = Internet
+launcher.cat.media = Media
+launcher.cat.utilities = Utilities
+search.placeholder = Search apps, files and calculations
+search.calc_hint = Calculator · Enter copies
+search.kind_app = App
+search.tasks_tab = {app} · {tab}
+
+# Ajustes: sidebar sections
+settings.sec.appearance = Appearance
+settings.sec.wallpaper = Wallpaper
+settings.sec.dock = App bar
+settings.sec.keyboard = Keyboard
+settings.sec.time = Date & time
+settings.sec.language = Language & region
+settings.sec.network = Network
+settings.sec.disk = Disk
+settings.sec.power = Power
+settings.sec.about = About
+
+# Ajustes: Idioma e região page
+settings.lang.title = Language & region
+settings.lang.h_language = Language
+settings.lang.note = The change applies at once, without restarting.
+settings.lang.h_formats = Formats
+settings.lang.clock = Time format
+settings.lang.clock_auto = By language
+settings.lang.clock_24 = 24 hours
+settings.lang.clock_12 = 12 hours
+settings.lang.example = Example
+settings.lang.kbd_hint = Tip: the ABNT2 keyboard layout has the ç and accent keys.
+settings.lang.kbd_use = Use ABNT2
+settings.lang.kbd_note = The keyboard stays as it is until you choose.

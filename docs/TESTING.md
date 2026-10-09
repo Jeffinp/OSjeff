@@ -42,6 +42,15 @@ Leia a tabela com cuidado: a coluna **Cover** à esquerda é de *regiões*; a de
 então a cobertura de **código de produção** é menor (~88% na auditoria). O CI
 falha abaixo de 90% de linhas.
 
+### Idiomas (`cargo test -p osjeff_core i18n`)
+
+Confere os dois catálogos (mesmas chaves e marcadores, plurais completos), as chaves usadas em
+`kernel/` e `osjeff_core/` (nenhuma faltando, nenhuma sobrando), os acentos do português
+(`tools/i18n/accents.txt`, ~190 palavras e sufixos) nos catálogos e nos literais dos arquivos já migrados,
+a cobertura de glifos das quatro fontes e os formatadores (números, tamanhos, datas, plurais).
+`cargo test -p osjeff_core i18n_report -- --ignored --nocapture` lista os literais sem acento do resto da
+árvore; `python3 -I tools/i18n-audit.py --check` confere `docs/design/i18n-audit.md`.
+
 ## 2. Fuzzing
 
 Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
@@ -63,6 +72,7 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 | `http_body` | `[modo, corte(2 B), ...bytes]`: os bytes como resposta HTTP inteira, como corpo sob cabeçalhos hostis (`gzip, gzip, deflate`, `br`, `Content-Length` enorme...), em leitura parcial do `Inflater`, e (modo `0x10`) comprimidos por nosso codificador (gzip, zlib, deflate cru, gzip em cadeia, `chunked`), **cortados** em qualquer ponto | `browser::body_partial`/`page_body_partial`/`body_bytes`, `appnet::app_response`, `Inflater::read_partial`. Invariantes: nunca pânico, corpo <= `MAX_DECODED_BYTES`, um fluxo válido cortado decodifica para **prefixo do original** e inteiro decodifica exato e sem aviso (regressões: `fuzz/regressions/http_body/`) |
 | `app_manifest` | bytes como `.wasm` inteiro, como payload de `osjeff.manifest` ou de `osjeff.icon` (embrulhado numa seção válida), ou como manifesto/ícone soltos | `wasmsec` (cabeçalho, seções, LEB128), `appmanifest` (chaves, quotas, `net_hosts`, ícone PNG até 64x64) e as invariantes do manifesto aceito (inclui: `net_hosts` limitado, só com permissão de rede, nunca admite o que o filtro de destinos recusa) |
 | `compositor_ops` | sequência de operações de área de trabalho (abrir, fechar, mover, redimensionar, focar, minimizar, encaixar, áreas de trabalho, overlays, ticks de animação, janelas vivas, relógio, quadros ociosos), 1 a 4 por quadro | `osjeff_core::compositor`: depois de cada quadro o resultado incremental é idêntico ao redesenho completo, o pintor nunca escreve fora do footprint, um quadro ocioso não planeja nada. 5 minutos: 25 351 execuções (84/s, até 400 quadros cada), 0 falhas |
+| `i18n_format` | `[modo, idioma, ...bytes]`: modelos de mensagem hostis (chaves desbalanceadas, nomes enormes, índices posicionais), números/tamanhos crus, datas fora de faixa, chaves e etiquetas de idioma arbitrárias | `osjeff_core::i18n`: nunca pânico, saída limitada, números só com dígitos e separadores, todo texto do catálogo formata com argumentos hostis |
 | `entropy_api` | sequência de operações (`add` com id e crédito declarado quaisquer, timestamps, `fill` de qualquer tamanho, reseed, relógio) | `osjeff_core::entropy`: nunca pânico; crédito por fonte <= 8 bits por byte e nunca decrescente; nota nunca decrescente e timing sozinho nunca Strong; crédito na chave <= 256 por classe; nenhuma saída de 32 bytes se repete |
 | `app_sandbox` | sequência de operações com caminhos em bytes crus sobre dois apps que dividem um `MemFs` **ou** um `VolumeFs` sobre um OJFS v3 de 1 MiB em RAM (o primeiro bool escolhe; mais URLs) | `appfs` (normalização, `Sandbox`, `VolumeFs`, cota, descritores) e `appnet`: nada existe fora de `/data/<id>`, os arquivos do sistema e do usuário ficam intactos, a cota vale, `fsck` limpo, URL aceita nunca é local |
 
@@ -83,6 +93,7 @@ cargo fuzz run http_body -- -max_total_time=600 -print_final_stats=1
 
 cargo fuzz run app_manifest -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run app_sandbox -- -max_total_time=600 -print_final_stats=1
+cargo fuzz run i18n_format -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run entropy_api -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run compositor_ops -- -max_total_time=300 -print_final_stats=1
 cargo fuzz run html_img_form -- -max_total_time=600 -print_final_stats=1
@@ -431,6 +442,82 @@ mais caro: o tempo dos retângulos arredondados no rastro por primitiva dobra me
 número de chamadas (a janela arrastada é o Terminal, que não mudou), e a soma da composição só sobe
 uns 5 %; não achei a causa e não é efeito do repintar parcial (desligado numa imagem de teste, o
 resultado é o mesmo). Fica como lacuna conhecida.
+### Arquivos, Imagens, Editor e Terminal (W23): testes e custo de quadro
+
+Testes novos no `osjeff_core` (todos no host; o kernel só desenha e roteia; 2497 → 2590 passando, 3 ignorados):
+
+| Módulo | Testes | O que prova |
+|---|---|---|
+| `appart` | 8 (+1 ignorado, que gera a folha de contato) | cada tipo de arquivo tem conteúdo em todos os tamanhos, cantos transparentes, ícones distintos e determinísticos, o destaque tinge pastas e apps e não documentos, glifos na cor pedida, pares espelhados, tamanhos limitados |
+| `fileman::ui` | 32 | layout da janela (barra estreita com busca aberta recolhe o caminho), colunas, migalhas, acerto, geometria dos itens (lista e ícones), itens visíveis sem fora-por-um, seleção por retângulo, rolagem de borda, plano de soltar (mover/copiar, pasta dentro de si mesma recusada, Lixeira), `Scroller` (mola criticamente amortecida), chaves de busca com acentos, tipo de pré-visualização e texto |
+| `fileman` (estado) | 93 no módulo | filtro da pasta, lugares, `TextInput` com seleção e bytes Latin-1, ordenação, seleção por nome |
+| `viewer::ui` | 22 | layout (com e sem faixa), acerto, faixa de miniaturas (rolagem, visíveis, ordem de criação), `Inertia`, `Slideshow`, `RotMap` e limites girados |
+| `editor2::ui` | 15 | grade e margem, célula sob o mouse com cliques na margem e fora, trechos de seleção, guias de indentação, folhas (tamanho, lista, lugares, botões), barra de buscar (controles não se sobrepõem, acerto de cada um) |
+| `editor2` (busca, diálogo) | +3 | foco do campo da barra, nome inicial "fresco", barra de estado |
+| `termui` | 6 | grade dentro da janela, mouse → célula com limites, ordem e trechos da seleção, palavras, extração de texto sem pânico, prompt separado |
+| `anim` | +2 | piscar suave do cursor (monótono, sólido depois da entrada e depois de 12 s) |
+| `settings` | +2 | `editor_font`/`terminal_font` totais com limites, degraus de `font_step` |
+
+Cenários de tela (cada um fotografa; todas as imagens são revisadas em claro e escuro,
+`QEMU_MEM=256M tools/perf/run.sh <img> bios <saida> 300 <cen>`; `FS_IMG` é um disco preparado com o
+`fs3_inject`: `/Imagens/*.png` (inclusive `transparente.png` e `corrompida.png`), `/Documentos`,
+`/Projetos`, `/big.bin` de 3 MB, `/leiame.txt`, `--files 2000 /many` e
+`/etc/osjeff.conf` com `appearance=light` ou `appearance=dark`):
+
+| Cenário | O que faz |
+|---|---|
+| `w23-files.sh` | lista, renomear, menu de contexto, ordenar, Imagens, ícones, pré-visualização (Espaço), busca, seleção por retângulo, arrastar e soltar com destino destacado, confirmação, propriedades, Lixeira vazia |
+| `w23-many.sh` | `/many` (2000 arquivos): roda, PageDown, setas, Home/End, arrastar a barra de rolagem |
+| `w23-viewer.sh` | ajustar, painel de informações, preencher, zoom, giro (quadro no meio), PNG transparente, imagem corrompida, apresentação, folha de salvar |
+| `w23-editor.sh` | digitar, seleção, buscar, substituir, Abrir, Ctrl +/-/0, Salvar como, salvo, a pergunta ao fechar, abrir pelo diálogo |
+| `w23-terminal.sh` | prompt, seleção com o mouse, copiar e colar, rolagem, Ctrl +/-/0, "executando" |
+| `w23-idle.sh` | desktop ocioso com Imagens, Arquivos, Terminal e Editor abertos; `tools/perf/idle_tail.py <saida>` conta os quadros por segundo dos últimos segundos |
+
+Custo de quadro (QEMU/TCG sem KVM, 1280x720, `perf-trace`, `tools/perf/summ.py`; a máquina é
+compartilhada, então cada cenário rodou duas vezes; antes = `bc31f5e`, mesmo disco e mesmos cenários):
+
+| Cenário | antes | depois |
+|---|---|---|
+| ocioso, quadros por segundo depois do boot | 1 (relógio) | 1 (relógio) |
+| ocioso com Imagens, Arquivos, Terminal e Editor abertos (`w23-idle.sh`) | n/a | 1 (relógio), nenhum quadro de app |
+| arrastar a janela (quadro de dano, média das duas rodadas) | 6,4 e 7,2 ms | 8,0 e 6,7 ms |
+| pasta de 2000 arquivos, rolagem (quadro de animação / estável) | 16,4 ms (estável, pico 40 ms) | 9,3 ms (animação, pico 49 ms) |
+
+O cursor que pisca pede quadros só na janela em foco, por 12 s depois da última tecla ou clique; uma
+janela que nunca recebeu entrada não pisca e não pede quadros (corrigido durante o trabalho: o
+terminal aberto no boot fazia cerca de cem quadros por segundo nos primeiros 12 s).
+### Navegador na W24: testes, fuzz e custo
+
+Testes novos no `osjeff_core` (todos no host): `web::layout_tests` (quebra por largura medida,
+zoom 50 a 300, tabelas, estilos aninhados, palavras longas, texto vazio, páginas enormes,
+alinhamento vertical, colunas com largura em px), `web::css` (índice de regras), `browser::tabs`,
+`browser::{cert,errors,motion,pages}`, `browser::ui_tests` (abas compartilham favoritos,
+recarregar, parar, recentes), `layout` (geometria da moldura, balão, busca, erro, nova aba).
+Total: 2631 no `osjeff_core` (eram 2497).
+
+Fuzz: `web_parse` (agora também tabelas, seletores, vários zooms e métricas hostis),
+`html_img_form` (formas de tabela, estilo, listas, abas, páginas `osjeff://`) e `x509_parse`
+(resumo de certificado para o balão). Execuções: `web_parse` 361 s (1178 execuções, entradas pesadas), `html_img_form` 331 s (10 798) e `x509_parse` 121 s (1,46 milhão), sem falha restante; `html_img_form` achou um marcador de lista fora da página (corrigido, `fuzz/regressions/html_img_form/w24-list-marker-off-page`).
+
+Custo (QEMU `-icount shift=0`, determinístico, 1 GHz virtual; mesmo cenário e mesma página de
+2000 nós; antes = base `bc31f5e` com os mesmos ganchos `[trace] browser ...`):
+
+| Medida | antes | depois |
+|---|---|---|
+| análise (46 KB, `/big?n=2000`) | 8,9 ms | 20,6 ms (35 ms antes das otimizações) |
+| layout da página de 2000 nós | 15,5 ms (5679 comandos, fonte fixa) | 25,4 ms (2019 comandos; 62,7 ms antes das otimizações) |
+| página pequena (`/type`): carga até o primeiro quadro | 10 ms | 19 ms |
+| página grande: carga até o primeiro quadro | 33,5 ms | 61 ms (116 ms antes das otimizações) |
+| quadro de rolagem (roda, setas) | 14 a 21 ms (recompõe a área de trabalho) | 5,2 a 6,3 ms (só a área do cliente) |
+| salto de página (PgDn) numa página grande | 14 a 21 ms | 11 ms |
+| navegador aberto e ocioso | 0 quadros | 0 quadros (só o tique do relógio) |
+
+O texto proporcional custa mais que a fonte fixa na carga (cada palavra é medida na fonte
+real); o cache de glifos e kerning, o índice de regras e menos alocações cortaram o layout
+pela metade. Cenários: `w24-pages.sh`, `w24-chrome.sh`, `w24-chrome2.sh`, `w24-errors.sh`,
+`w24-internal.sh`, `w24-overlap.sh`, `w24-perf.sh` (+ `tools/perf/w24-perf.py`), `w24-readme.sh`;
+servidores: `tools/w24-site.py` (:8079) e `tools/nettest-server.py` (HTTPS autoassinado :8078).
+Os números de tempo real do TCG variam com a carga do hospedeiro; use `-icount` para comparar.
 
 ### Compositor (W27): teste diferencial, oráculo no QEMU e custo de quadro
 

@@ -108,6 +108,8 @@ pub struct Loaded {
     pub conn: Conn,
     /// The response was cut at the size cap.
     pub truncated: bool,
+    /// Summary of the server certificate (HTTPS only), for the security popover.
+    pub cert: Option<osjeff_core::browser::CertInfo>,
 }
 
 /// Outcome of one navigation: the page, or why it failed.
@@ -664,6 +666,7 @@ fn fetch_url(
             data: r.data,
             conn,
             truncated: r.truncated,
+            cert: r.cert,
         });
     }
 }
