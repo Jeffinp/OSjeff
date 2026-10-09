@@ -89,7 +89,7 @@ impl Kind {
             Kind::Browser => "Navegador",
             Kind::WasmApp => "Aplicativo",
             Kind::Files => "Arquivos",
-            Kind::Settings => "Configurações",
+            Kind::Settings => "Ajustes",
             Kind::LogViewer => "Registro",
             Kind::Viewer => "Imagens",
             Kind::Gallery => "Componentes",
@@ -106,7 +106,7 @@ impl Kind {
             Kind::Browser => "Navegador",
             Kind::WasmApp => "Aplicativos",
             Kind::Files => "Arquivos",
-            Kind::Settings => "Configurações",
+            Kind::Settings => "Ajustes",
             Kind::LogViewer => "Registro",
             Kind::Viewer => "Imagens",
             Kind::Gallery => "Componentes",
@@ -157,7 +157,7 @@ impl Kind {
             Kind::Files => Rect::new(220, 110, 860, 520),
             Kind::Viewer => Rect::new(200, 90, 820, 540),
             Kind::Gallery => Rect::new(160, 70, 900, 600),
-            Kind::Settings => Rect::new(220, 84, 820, 560),
+            Kind::Settings => Rect::new(220, 56, 820, 596),
             Kind::LogViewer => Rect::new(200, 80, 880, 540),
         }
     }
@@ -174,7 +174,7 @@ impl Kind {
             Kind::Files => (580, 320),
             Kind::Viewer => (360, 260),
             Kind::Gallery => (560, 380),
-            Kind::Settings => (700, 460),
+            Kind::Settings => (720, 480),
             Kind::LogViewer => (720, 360),
         }
     }

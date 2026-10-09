@@ -793,7 +793,11 @@ impl Desktop {
                 self.log_wheel(w, notches);
                 true
             }
-            Kind::Calculator | Kind::WasmApp | Kind::Settings | Kind::Gallery => false,
+            Kind::Settings => {
+                self.settings_wheel(w, notches);
+                true
+            }
+            Kind::Calculator | Kind::WasmApp | Kind::Gallery => false,
         };
         if changed && let Some(r) = self.wm.get(w).map(|win| self.window_box(win)) {
             // The target may not be the focused window: make sure it is uploaded.
@@ -965,6 +969,9 @@ impl Desktop {
         }
 
         if released && let Some(d) = self.drag.take() {
+            if matches!(d.mode, DragMode::Ui) {
+                self.live_drop(d.win);
+            }
             // A resized browser lays its page out again for the new width.
             if matches!(d.mode, DragMode::Resize { .. }) {
                 self.relayout_browser(d.win);
@@ -1000,6 +1007,7 @@ impl Desktop {
                         self.wm.resize(w, edge, start, (cx - ox, cy - oy), (sw, sh));
                     }
                     DragMode::PageSelect => self.browser_select_drag(w),
+                    DragMode::Ui => self.live_drag(w, cx, cy),
                 }
                 // NOT scene_dirty: a drag is driven by the per-frame damage path
                 // (keyed on `cursor_moved`), which repaints only the window's

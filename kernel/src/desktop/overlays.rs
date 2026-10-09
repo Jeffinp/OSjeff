@@ -1026,7 +1026,7 @@ impl Desktop {
             Entry::item("Abrir Arquivos", "", Cmd::Launch(Kind::Files)),
             Entry::item("Abrir Terminal", "", Cmd::Launch(Kind::Terminal)),
             Entry::sep(),
-            Entry::item("Configurações do sistema...", "", Cmd::Settings),
+            Entry::item("Ajustes do sistema…", "", Cmd::Settings),
         ];
         self.open_menu(MenuOrigin::Context, entries, (x, y));
     }

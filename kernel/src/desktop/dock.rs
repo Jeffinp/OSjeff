@@ -89,7 +89,11 @@ impl Desktop {
     /// Advance the dock's springs, tooltip timer and bounces.
     pub(crate) fn step_dock(&mut self, dt: f32) -> bool {
         let (_, rest) = self.dock_rest_layout();
-        let targets = chrome::dock_magnify(&rest, self.shell.dock.pointer_x);
+        let targets = chrome::dock_magnify_scaled(
+            &rest,
+            self.shell.dock.pointer_x,
+            crate::settings::get().dock_zoom,
+        );
         let d = &mut self.shell.dock;
         let mut busy = false;
         for (s, t) in d.sizes.iter_mut().zip(targets) {

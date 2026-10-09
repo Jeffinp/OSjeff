@@ -274,7 +274,7 @@ impl Desktop {
         alloc::vec![
             Entry::item("Sobre o OSjeff", "", Cmd::About),
             Entry::sep(),
-            Entry::item("Configurações do sistema…", "", Cmd::Settings),
+            Entry::item("Ajustes do sistema…", "", Cmd::Settings),
             Entry::item("Componentes", "Ctrl+Alt+G", Cmd::Gallery),
             Entry::sep(),
             Entry::item("Reiniciar…", "", Cmd::Reboot),

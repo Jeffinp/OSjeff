@@ -1,4 +1,4 @@
-//! The "live" behaviour shared by the system apps (Tarefas, Registro and Calculadora):
+//! The "live" behaviour shared by the system apps (Tarefas, Registro, Calculadora and Ajustes):
 //! hover tracking that repaints a window only when what the pointer is over changes, and the
 //! animation clock for their glides. The apps own the details; this file is the one place the
 //! compositor talks to.
@@ -11,7 +11,8 @@ impl Desktop {
         let a = self.tarefas_hover(cx, cy, down);
         let b = self.log_hover(cx, cy, down);
         let c = self.calc_hover(cx, cy, down);
-        a | b | c
+        let d = self.settings_hover(cx, cy, down);
+        a | b | c | d
     }
 
     /// Advance the system apps' animations by `dt` seconds.
@@ -21,19 +22,25 @@ impl Desktop {
         self.tarefas_step(ms);
         self.log_step(ms);
         self.calc_step(ms);
+        self.settings_step(ms);
     }
 
     /// Does any system app still animate (so the compositor keeps rendering frames)?
     pub(crate) fn live_busy(&self) -> bool {
-        self.wm
-            .windows()
-            .iter()
-            .any(|w| self.tarefas_busy_one(w) || self.log_busy_one(w) || self.calc_busy_one(w))
+        self.wm.windows().iter().any(|w| {
+            self.tarefas_busy_one(w)
+                || self.log_busy_one(w)
+                || self.calc_busy_one(w)
+                || self.settings_busy_one(w)
+        })
     }
 
     /// Is `w` kept out of the cached static layer because it animates by itself?
     pub(crate) fn live_dynamic(&self, w: &Win) -> bool {
-        self.tarefas_busy_one(w) || self.log_busy_one(w) || self.calc_busy_one(w)
+        self.tarefas_busy_one(w)
+            || self.log_busy_one(w)
+            || self.calc_busy_one(w)
+            || self.settings_busy_one(w)
     }
 
     /// The part of `w` that changes while it animates, when that is all that changes (no
@@ -47,5 +54,19 @@ impl Desktop {
             && !self.drag.as_ref().is_some_and(|d| d.win == w.id)
             && !self.focus_busy(w.id);
         own.then(|| self.tarefas_live_rect(w))
+    }
+
+    /// A drag of a control ended: store what it changed.
+    pub(crate) fn live_drop(&mut self, win: WindowId) {
+        if self.kind_of(win) == Some(Kind::Settings) {
+            self.settings_persist();
+        }
+    }
+
+    /// A control of a system app is being dragged to `(cx, cy)`.
+    pub(crate) fn live_drag(&mut self, win: WindowId, cx: i32, cy: i32) {
+        if self.kind_of(win) == Some(Kind::Settings) {
+            self.settings_drag(win, cx, cy);
+        }
     }
 }

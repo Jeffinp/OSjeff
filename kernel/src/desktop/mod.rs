@@ -70,6 +70,8 @@ pub(crate) enum DragMode {
     },
     /// Selecting text on a browser page (the anchor lives in the window's browser state).
     PageSelect,
+    /// A control of a system app being dragged (a slider of Ajustes).
+    Ui,
 }
 
 pub(crate) struct Drag {

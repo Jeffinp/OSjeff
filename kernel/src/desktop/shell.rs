@@ -487,7 +487,7 @@ impl Desktop {
         let ctrl = |c: char| KeyEvent::new(KeyCode::Char(c), Mods::CTRL);
         match cmd {
             Cmd::Sep => {}
-            Cmd::About => self.open_settings(6),
+            Cmd::About => self.open_settings(super::settings_ui::ABOUT),
             Cmd::Settings => self.open_settings(0),
             Cmd::Reboot => self.ask_power(false),
             Cmd::Shutdown => self.ask_power(true),
@@ -597,7 +597,7 @@ impl Desktop {
     }
 
     /// Ask before restarting / shutting down.
-    fn ask_power(&mut self, shutdown: bool) {
+    pub(crate) fn ask_power(&mut self, shutdown: bool) {
         self.close_transients();
         self.shell.dialog = Some(Dialog {
             title: String::from(if shutdown {
