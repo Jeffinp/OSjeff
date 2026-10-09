@@ -13,7 +13,7 @@ use osjeff_core::search;
 use osjeff_core::style::PANEL_H;
 
 /// Corner radius of the Busca panel and of the confirmation sheet.
-const R_PANEL: i32 = 16;
+const R_PANEL: i32 = 12;
 /// Most files Busca indexes when it opens, and how deep it looks.
 const INDEX_MAX: usize = 600;
 const INDEX_DEPTH: usize = 5;

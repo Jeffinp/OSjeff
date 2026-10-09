@@ -55,6 +55,14 @@ tem releases versionadas; as seções são marcos na `master`.
   mola) e o botão direito lista as janelas do app com *Fixar* e *Fechar*. Geometria e regras
   puras em `osjeff_core::taskbar` (layout, hit test, indicador, clique, reordenação).
 
+- **Linguagem visual própria.** Ícones de tile quadrado arredondado (22 %), cor chapada com uma
+  faceta de destaque e bisel de 1 px, sem gradiente nem brilho; ponteiro novo (seta fina com cauda
+  arredondada e contorno índigo); **seis papéis de parede originais** (Crepúsculo com facetas
+  geométricas, Aurora, Mono, Papel, Turquesa com colinas, Pôr do sol em faixas), com polígonos
+  translúcidos no `osjeff_core::wallpaper`; janelas com raio de 8 px, borda de 1 px com realce
+  interno e sombras menores. A galeria (`Ctrl+Alt+G`) ganhou a aba *Shell* com botões de janela,
+  blocos, indicadores, encaixe e ponteiros.
+
 ## 2026-10 — Nova interface (W22)
 
 - **Visual novo, claro e escuro.** Barra de menus com menu do sistema, nome e menus do app em

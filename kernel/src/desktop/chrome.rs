@@ -202,6 +202,15 @@ impl Desktop {
         let (ec, ea) = theme::tint(edge);
         if radius > 0 {
             c.stroke_rrect(r, radius, Corner::Circle, ec, ea.min(96));
+            // A clear inner highlight just inside the crisp 1 px border.
+            let inner = if theme::dark() { 26u16 } else { 170 };
+            c.stroke_rrect(
+                r.inflated(-1),
+                (radius - 1).max(0),
+                Corner::Circle,
+                theme::WHITE,
+                inner,
+            );
         }
     }
 
@@ -235,57 +244,7 @@ impl Desktop {
             .title_hover
             .filter(|(id, _)| *id == win.id)
             .map(|(_, b)| b);
-        let ink = theme::solid(p.title_inactive).lerp(theme::solid(p.text_secondary), a);
-        let cell = |c: &mut Canvas, rect: Rect, btn: TitleBtn| -> Color {
-            let over = hover == Some(btn);
-            if over {
-                let pill = Rect::new(rect.x + 2, rect.y + 3, rect.w - 4, rect.h - 6);
-                if btn == TitleBtn::Close {
-                    c.fill_rrect(pill, R_CONTROL, Corner::Circle, CLOSE_HOVER, 256);
-                } else {
-                    let (hc, ha) = theme::tint(p.hover);
-                    c.fill_rrect(pill, R_CONTROL, Corner::Circle, hc, (ha * 2).min(256));
-                }
-            }
-            match (over, btn) {
-                (true, TitleBtn::Close) => theme::WHITE,
-                (true, _) => theme::solid(p.text),
-                _ => ink,
-            }
-        };
-        if let Some(m) = lay.menu {
-            let col = cell(c, m, TitleBtn::Menu);
-            let (cx, cy) = (m.x + m.w / 2, m.y + m.h / 2);
-            for dy in [-4, 0, 4] {
-                c.blend_rect(Rect::new(cx - 6, cy + dy, 12, 1), col, 256);
-            }
-        }
-        let col = cell(c, lay.min, TitleBtn::Minimize);
-        let (cx, cy) = (lay.min.x + lay.min.w / 2, lay.min.y + lay.min.h / 2);
-        c.blend_rect(Rect::new(cx - 5, cy + 3, 10, 1), col, 256);
-        if let Some(m) = lay.max {
-            let col = cell(c, m, TitleBtn::Maximize);
-            let (cx, cy) = (m.x + m.w / 2, m.y + m.h / 2);
-            if win.maximized || win.snap.is_some() {
-                // Restore: a square in front of the corner of a second one.
-                let front = Rect::new(cx - 5, cy - 3, 8, 8);
-                outline(c, front, col);
-                c.blend_rect(Rect::new(cx - 3, cy - 5, 8, 1), col, 256);
-                c.blend_rect(Rect::new(cx + 4, cy - 5, 1, 8), col, 256);
-            } else {
-                outline(c, Rect::new(cx - 5, cy - 5, 10, 10), col);
-            }
-        }
-        let col = cell(c, lay.close, TitleBtn::Close);
-        let (cx, cy) = (lay.close.x + lay.close.w / 2, lay.close.y + lay.close.h / 2);
-        ui::draw_glyph(
-            c,
-            iconart::Glyph::Close,
-            cx - 8,
-            cy - 8,
-            16,
-            0xFF00_0000 | pack(col),
-        );
+        draw_title_buttons(c, &lay, hover, win.maximized || win.snap.is_some(), a, p);
     }
 
     /// The pointer of a window drag is at `(cx, cy)`: show, move or hide the snap preview.
@@ -344,6 +303,70 @@ impl Desktop {
             (a * 120 / 256) as u16,
         );
     }
+}
+
+/// The menu button and the minimise, maximise / restore and close buttons of a title bar laid
+/// out as `lay`: flat glyphs, a rounded fill under the pointer (red for close), dimmed by `a`
+/// (0..=255) when the window is not focused. Shared with the component gallery.
+pub(super) fn draw_title_buttons(
+    c: &mut Canvas,
+    lay: &osjeff_core::window::TitleLayout,
+    hover: Option<TitleBtn>,
+    restore_glyph: bool,
+    a: u16,
+    p: &osjeff_core::style::Palette,
+) {
+    let ink = theme::solid(p.title_inactive).lerp(theme::solid(p.text_secondary), a);
+    let cell = |c: &mut Canvas, rect: Rect, btn: TitleBtn| -> Color {
+        let over = hover == Some(btn);
+        if over {
+            let pill = Rect::new(rect.x + 2, rect.y + 3, rect.w - 4, rect.h - 6);
+            if btn == TitleBtn::Close {
+                c.fill_rrect(pill, R_CONTROL, Corner::Circle, CLOSE_HOVER, 256);
+            } else {
+                let (hc, ha) = theme::tint(p.hover);
+                c.fill_rrect(pill, R_CONTROL, Corner::Circle, hc, (ha * 2).min(256));
+            }
+        }
+        match (over, btn) {
+            (true, TitleBtn::Close) => theme::WHITE,
+            (true, _) => theme::solid(p.text),
+            _ => ink,
+        }
+    };
+    if let Some(m) = lay.menu {
+        let col = cell(c, m, TitleBtn::Menu);
+        let (cx, cy) = (m.x + m.w / 2, m.y + m.h / 2);
+        for dy in [-4, 0, 4] {
+            c.blend_rect(Rect::new(cx - 6, cy + dy, 12, 1), col, 256);
+        }
+    }
+    let col = cell(c, lay.min, TitleBtn::Minimize);
+    let (cx, cy) = (lay.min.x + lay.min.w / 2, lay.min.y + lay.min.h / 2);
+    c.blend_rect(Rect::new(cx - 5, cy + 3, 10, 1), col, 256);
+    if let Some(m) = lay.max {
+        let col = cell(c, m, TitleBtn::Maximize);
+        let (cx, cy) = (m.x + m.w / 2, m.y + m.h / 2);
+        if restore_glyph {
+            // Restore: a square in front of the corner of a second one.
+            let front = Rect::new(cx - 5, cy - 3, 8, 8);
+            outline(c, front, col);
+            c.blend_rect(Rect::new(cx - 3, cy - 5, 8, 1), col, 256);
+            c.blend_rect(Rect::new(cx + 4, cy - 5, 1, 8), col, 256);
+        } else {
+            outline(c, Rect::new(cx - 5, cy - 5, 10, 10), col);
+        }
+    }
+    let col = cell(c, lay.close, TitleBtn::Close);
+    let (cx, cy) = (lay.close.x + lay.close.w / 2, lay.close.y + lay.close.h / 2);
+    ui::draw_glyph(
+        c,
+        iconart::Glyph::Close,
+        cx - 8,
+        cy - 8,
+        16,
+        0xFF00_0000 | pack(col),
+    );
 }
 
 /// A crisp 1 px square outline.

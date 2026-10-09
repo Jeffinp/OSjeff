@@ -126,7 +126,7 @@ impl Kind {
             Kind::Settings => Icon::Settings,
             Kind::LogViewer => Icon::Log,
             Kind::Viewer => Icon::Viewer,
-            Kind::Gallery => Icon::Settings,
+            Kind::Gallery => Icon::WasmApp,
         }
     }
 

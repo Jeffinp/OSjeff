@@ -21,6 +21,53 @@ pub enum Style {
     Gradient,
     /// One flat colour (`top`).
     Solid,
+    /// Vertical gradient, soft glows and the preset's [`Shape`]s (geometric facets, hills, bands).
+    Shapes,
+}
+
+/// A flat translucent polygon of a wallpaper: up to four corners in per-mille of the screen
+/// (a triangle repeats its last corner), and the colour and opacity it has in the light and in
+/// the dark appearance (a preset that does not change with the appearance repeats them).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Shape {
+    pub pts: [(i16, i16); 4],
+    /// `(0xRRGGBB, opacity 0..=255)` in the light appearance and in the dark one.
+    pub light: (u32, u8),
+    pub dark: (u32, u8),
+}
+
+impl Shape {
+    /// The colour and opacity to paint for the given appearance.
+    pub fn look(&self, dark: bool) -> (u32, u8) {
+        if dark { self.dark } else { self.light }
+    }
+}
+
+const fn tri(
+    a: (i16, i16),
+    b: (i16, i16),
+    c: (i16, i16),
+    light: (u32, u8),
+    dark: (u32, u8),
+) -> Shape {
+    Shape {
+        pts: [a, b, c, c],
+        light,
+        dark,
+    }
+}
+
+const fn quad(pts: [(i16, i16); 4], light: (u32, u8), dark: (u32, u8)) -> Shape {
+    Shape { pts, light, dark }
+}
+
+/// A horizontal band between two heights (per-mille), the same in both appearances.
+const fn band(y0: i16, y1: i16, c: (u32, u8)) -> Shape {
+    Shape {
+        pts: [(0, y0), (1000, y0), (1000, y1), (0, y1)],
+        light: c,
+        dark: c,
+    }
 }
 
 /// A soft round glow on the wallpaper. Positions and sizes are per-mille of the
@@ -62,6 +109,8 @@ pub struct Preset {
     pub bottom: u32,
     pub blobs: [Blob; 3],
     pub dark: Option<Scheme>,
+    /// Painted over the gradient and the glows when `style` is [`Style::Shapes`].
+    pub shapes: &'static [Shape],
 }
 
 impl Preset {
@@ -88,52 +137,132 @@ const fn blob(x: i16, y: i16, r: i16, color: u32, alpha: u8) -> Blob {
     }
 }
 
-/// Preset 0 is the default and follows the appearance (pale by day, deep indigo at
-/// night); the others keep one look.
-pub const PRESETS: [Preset; 5] = [
+/// Soft geometric facets of *Crepúsculo*, drawn bottom to top.
+const DUSK_SHAPES: [Shape; 5] = [
+    tri(
+        (0, 1000),
+        (520, 430),
+        (1000, 1000),
+        (0xFFFFFF, 46),
+        (0x6D6EF8, 34),
+    ),
+    quad(
+        [(300, 1000), (760, 520), (1000, 700), (1000, 1000)],
+        (0xC4C9FF, 70),
+        (0x8B3FD9, 40),
+    ),
+    tri((0, 0), (380, 0), (0, 330), (0xFFFFFF, 56), (0xFFFFFF, 12)),
+    tri(
+        (620, 0),
+        (1000, 0),
+        (1000, 260),
+        (0x9BE8DE, 56),
+        (0x14B8C4, 24),
+    ),
+    tri(
+        (0, 700),
+        (260, 1000),
+        (0, 1000),
+        (0xFFD3C2, 70),
+        (0x4338CA, 46),
+    ),
+];
+
+const MONO_SHAPES: [Shape; 3] = [
+    quad(
+        [(0, 0), (600, 0), (250, 1000), (0, 1000)],
+        (0xFFFFFF, 7),
+        (0xFFFFFF, 7),
+    ),
+    quad(
+        [(600, 0), (1000, 0), (1000, 1000), (520, 1000)],
+        (0xFFFFFF, 4),
+        (0xFFFFFF, 4),
+    ),
+    tri(
+        (1000, 0),
+        (1000, 520),
+        (560, 0),
+        (0xFFFFFF, 6),
+        (0xFFFFFF, 6),
+    ),
+];
+
+const PAPER_SHAPES: [Shape; 3] = [
+    quad(
+        [(0, 0), (520, 0), (180, 1000), (0, 1000)],
+        (0x8A6D3B, 9),
+        (0x8A6D3B, 9),
+    ),
+    tri(
+        (1000, 380),
+        (1000, 1000),
+        (420, 1000),
+        (0xFFFFFF, 90),
+        (0xFFFFFF, 90),
+    ),
+    tri(
+        (0, 640),
+        (300, 1000),
+        (0, 1000),
+        (0x8A6D3B, 12),
+        (0x8A6D3B, 12),
+    ),
+];
+
+/// Rolling hills of *Turquesa*, far to near.
+const FIELD_SHAPES: [Shape; 3] = [
+    quad(
+        [(0, 700), (250, 610), (520, 690), (1000, 600)],
+        (0x2DD4BF, 54),
+        (0x2DD4BF, 54),
+    ),
+    quad(
+        [(0, 840), (330, 760), (640, 830), (1000, 740)],
+        (0x0F766E, 130),
+        (0x0F766E, 130),
+    ),
+    quad(
+        [(0, 940), (420, 880), (1000, 950), (1000, 1000)],
+        (0x064E4F, 190),
+        (0x064E4F, 190),
+    ),
+];
+
+/// The bands (and the base of the sun) of *Pôr do sol*, thicker toward the horizon.
+const SUNSET_SHAPES: [Shape; 5] = [
+    band(430, 480, (0xFF5C8A, 150)),
+    band(530, 600, (0xFF7A59, 170)),
+    band(650, 740, (0xFFA05C, 190)),
+    band(790, 900, (0xFFC36B, 205)),
+    band(950, 1000, (0xFFE08A, 225)),
+];
+
+const NO_SHAPES: [Shape; 0] = [];
+
+/// Preset 0 is the default and follows the appearance (a dusk gradient with soft geometric
+/// facets, pale by day and deep indigo at night); the others keep one look.
+pub const PRESETS: [Preset; 6] = [
     Preset {
-        name: "Dinâmico",
-        style: Style::Glow,
-        top: 0xDCE6FF,
-        bottom: 0xF3E8FF,
+        name: "Crepúsculo",
+        style: Style::Shapes,
+        top: 0xE3E6FF,
+        bottom: 0xFCE4D8,
         blobs: [
-            blob(200, 250, 600, 0x7C83FF, 120),
-            blob(820, 200, 420, 0x5EEAD4, 100),
-            blob(650, 900, 700, 0xF5A3D7, 90),
+            blob(250, 200, 600, 0x8C93FF, 70),
+            blob(850, 150, 420, 0x7FE3D8, 60),
+            blob(700, 900, 700, 0xFFB9A0, 80),
         ],
         dark: Some(Scheme {
-            top: 0x0F1230,
-            bottom: 0x1B1448,
+            top: 0x10122E,
+            bottom: 0x2B1650,
             blobs: [
-                blob(180, 250, 650, 0x5B5CF6, 120),
-                blob(850, 150, 420, 0x14B8C4, 80),
-                blob(700, 950, 700, 0x8B3FD9, 100),
+                blob(200, 200, 600, 0x5B5CF6, 90),
+                blob(880, 120, 400, 0x14B8C4, 60),
+                blob(650, 950, 700, 0xA23FB5, 80),
             ],
         }),
-    },
-    Preset {
-        name: "Céu",
-        style: Style::Glow,
-        top: 0x8EC9FF,
-        bottom: 0xE6F4FF,
-        blobs: [
-            blob(300, 200, 600, 0xFFFFFF, 120),
-            blob(800, 700, 600, 0xFFFFFF, 90),
-            blob(500, 1000, 500, 0xBFE3FF, 100),
-        ],
-        dark: None,
-    },
-    Preset {
-        name: "Ocaso",
-        style: Style::Glow,
-        top: 0x2B1B5A,
-        bottom: 0xFF7A59,
-        blobs: [
-            blob(800, 900, 700, 0xFFB36B, 130),
-            blob(200, 100, 500, 0x8B5CF6, 100),
-            blob(500, 550, 400, 0xFF5C8A, 70),
-        ],
-        dark: None,
+        shapes: &DUSK_SHAPES,
     },
     Preset {
         name: "Aurora",
@@ -146,18 +275,43 @@ pub const PRESETS: [Preset; 5] = [
             blob(600, 100, 400, 0x5B5CF6, 80),
         ],
         dark: None,
+        shapes: &NO_SHAPES,
     },
     Preset {
-        name: "Grafite",
-        style: Style::Glow,
-        top: 0x2A2C35,
-        bottom: 0x14151A,
-        blobs: [
-            blob(300, 200, 500, 0xFFFFFF, 22),
-            blob(800, 850, 600, 0x8B90A0, 26),
-            NO_BLOB,
-        ],
+        name: "Mono",
+        style: Style::Shapes,
+        top: 0x1E1F24,
+        bottom: 0x0C0D10,
+        blobs: [blob(300, 200, 500, 0xFFFFFF, 10), NO_BLOB, NO_BLOB],
         dark: None,
+        shapes: &MONO_SHAPES,
+    },
+    Preset {
+        name: "Papel",
+        style: Style::Shapes,
+        top: 0xF6F2EA,
+        bottom: 0xE8E1D3,
+        blobs: [NO_BLOB, NO_BLOB, NO_BLOB],
+        dark: None,
+        shapes: &PAPER_SHAPES,
+    },
+    Preset {
+        name: "Turquesa",
+        style: Style::Shapes,
+        top: 0x0C5F66,
+        bottom: 0x083742,
+        blobs: [blob(800, 150, 500, 0x5FE0D0, 60), NO_BLOB, NO_BLOB],
+        dark: None,
+        shapes: &FIELD_SHAPES,
+    },
+    Preset {
+        name: "Pôr do sol",
+        style: Style::Shapes,
+        top: 0x24184F,
+        bottom: 0xFF8A5C,
+        blobs: [blob(500, 640, 500, 0xFFD27A, 150), NO_BLOB, NO_BLOB],
+        dark: None,
+        shapes: &SUNSET_SHAPES,
     },
 ];
 
@@ -348,6 +502,7 @@ mod tests {
         assert!(luma(light.bottom) > luma(dark.bottom) + 300);
         // A fixed preset shows the same scheme in both appearances.
         assert_eq!(PRESETS[2].scheme(true), PRESETS[2].scheme(false));
+        assert_eq!(PRESETS.len(), 6);
         // Includes a light preset and a dark one.
         assert!(PRESETS.iter().any(|p| luma(p.top) + luma(p.bottom) > 900));
         assert!(PRESETS.iter().any(|p| luma(p.top) + luma(p.bottom) < 200));
@@ -358,6 +513,42 @@ mod tests {
                 assert!(b.color <= 0xFFFFFF);
             }
         }
+    }
+
+    #[test]
+    fn shapes_stay_on_the_screen_and_only_shape_presets_have_them() {
+        for p in PRESETS {
+            assert_eq!(p.style == Style::Shapes, !p.shapes.is_empty(), "{}", p.name);
+            for sh in p.shapes {
+                for (x, y) in sh.pts {
+                    assert!(
+                        (0..=1000).contains(&x) && (0..=1000).contains(&y),
+                        "{}",
+                        p.name
+                    );
+                }
+                for dark in [false, true] {
+                    let (c, a) = sh.look(dark);
+                    assert!(c <= 0xFFFFFF && a > 0, "{}", p.name);
+                }
+                // A polygon, not a line: the corners are not all collinear.
+                let [a, b, c, _] = sh.pts;
+                let cross = (b.0 - a.0) as i32 * (c.1 - a.1) as i32
+                    - (b.1 - a.1) as i32 * (c.0 - a.0) as i32;
+                assert_ne!(cross, 0, "{}", p.name);
+            }
+        }
+        // The default and the sunset change nothing between appearances only where meant.
+        assert_ne!(
+            PRESETS[0].shapes[0].look(true),
+            PRESETS[0].shapes[0].look(false)
+        );
+        assert_eq!(
+            PRESETS[5].shapes[0].look(true),
+            PRESETS[5].shapes[0].look(false)
+        );
+        // Names are short enough for the Settings thumbnails.
+        assert!(PRESETS.iter().all(|p| p.name.chars().count() <= 11));
     }
 
     #[test]

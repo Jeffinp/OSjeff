@@ -63,14 +63,14 @@ fn paint_preset(c: &mut Canvas, p: &osjeff_core::wallpaper::Preset) {
     let sc = p.scheme(theme::dark());
     match p.style {
         Style::Solid => c.fill_rect(0, 0, w, h, rgb24(sc.top)),
-        Style::Gradient | Style::Glow => {
+        Style::Gradient | Style::Glow | Style::Shapes => {
             for yy in 0..h {
                 let t = ((yy * 255) / h.max(1)) as u32;
                 c.fill_rect(0, yy, w, 1, rgb24(lerp_rgb(sc.top, sc.bottom, t)));
             }
         }
     }
-    if p.style == Style::Glow {
+    if matches!(p.style, Style::Glow | Style::Shapes) {
         let lut = osjeff_core::raster::glow_lut();
         for b in sc.blobs.iter().filter(|b| b.alpha > 0 && b.r > 0) {
             let cx = (w as i64 * b.x as i64 / 1000) as i32;
@@ -78,6 +78,30 @@ fn paint_preset(c: &mut Canvas, p: &osjeff_core::wallpaper::Preset) {
             let rad = (w as i64 * b.r as i64 / 1000) as i32;
             c.glow(cx, cy, rad, rgb24(b.color), b.alpha as u32, &lut);
         }
+    }
+    if p.style == Style::Shapes && !p.shapes.is_empty() {
+        // The facets / hills / bands: anti-aliased polygons on a transparent layer of the
+        // screen's size (freed right after), laid over the gradient and the glows.
+        use osjeff_core::glyph::Path;
+        use osjeff_core::raster::{Paint, Surface, rgba};
+        let mut layer = Surface::new(w, h);
+        for sh in p.shapes {
+            let (col, a) = sh.look(theme::dark());
+            let pts: Vec<(i32, i32)> = sh
+                .pts
+                .iter()
+                .map(|&(x, y)| {
+                    (
+                        (w as i64 * x as i64 * 256 / 1000) as i32,
+                        (h as i64 * y as i64 * 256 / 1000) as i32,
+                    )
+                })
+                .collect();
+            let mut path = Path::new();
+            path.polygon(&pts);
+            layer.fill_path(&path, Paint::Solid(rgba(col, a)));
+        }
+        c.blit_surface(&layer, 0, 0, 256);
     }
 }
 
@@ -114,12 +138,12 @@ fn paint_image(c: &mut Canvas, path: &[u8]) -> bool {
 /// The two shadow layers of a window (ambient + key), stronger when focused, scaled
 /// by `alpha256` (0..=256) while the window fades.
 pub(crate) fn window_shadow(focused: bool, alpha256: u32) -> [Shadow; 2] {
-    let (a1, a2) = if focused { (74, 62) } else { (44, 38) };
+    let (a1, a2) = if focused { (62, 54) } else { (36, 32) };
     let s = |v: u32| v * alpha256.min(256) / 256;
     [
         Shadow {
-            blur: if focused { 20 } else { 14 },
-            dy: if focused { 14 } else { 8 },
+            blur: if focused { 16 } else { 10 },
+            dy: if focused { 10 } else { 6 },
             alpha: s(a1),
         },
         Shadow {

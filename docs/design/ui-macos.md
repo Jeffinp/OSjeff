@@ -22,11 +22,12 @@ geometry, soft shadows, springy motion, generous spacing) and has its own identi
 |---|---|
 | Mark | a bold prompt chevron `>` (white) on an indigo squircle; the menu-bar version is the bare chevron. No fruit, no wordmark borrowed from anyone |
 | Names | **Apps** (the grid, replaces the start panel), **Busca** (one field for apps, files and sums), **Barra de apps** (the floating bar), **Controles** (network, appearance, switches), **Arquivos**, **Tarefas** (the activity monitor: CPU, Memória, Disco, Rede, Processos), **Registro** (the log), **Ajustes** (preferences), **Calculadora**, **Imagens**, **Componentes** (the widget gallery) |
+| Mark | a bold prompt chevron `>` (white) on a flat indigo rounded square; the panel version is the bare chevron. No fruit, no wordmark borrowed from anyone |
 | Names | **Apps** (the grid, replaces the start panel), **Busca** (one field for apps, files and sums), **Barra de tarefas** (the floating bar), **Configurações rápidas** (network, appearance, switches), **Arquivos**, **Tarefas**, **Monitor**, **Registro**, **Imagens**, **Componentes** (the widget gallery) |
 | Accent | indigo `5B5CF6` by default; eight choices (Indigo, Turquesa, Violeta, Rosa, Coral, Âmbar, Verde, Grafite) |
-| Icon language | a thick white glyph on a saturated vertical-gradient squircle with a faint top gloss; every glyph is drawn from our own vector paths (`osjeff_core::iconart`), none is a traced system icon |
-| Wallpaper | "Dinâmico": pale lilac and sky by day, deep indigo by night, with soft colour glows; four more presets or an image |
-| Motion | short and springy: windows pop in from 92 %, icons in the bar swell like a bump (spring per icon), launches hop twice; everything eases out and is interruptible |
+| Icon language | a thick white glyph on a flat saturated rounded-square tile (22 % radius) with one highlight facet across the top-left corner and a 1 px bevel, no gradient and no gloss; every glyph is drawn from our own vector paths (`osjeff_core::iconart`), none is a traced system icon |
+| Wallpaper | six original presets (*Crepúsculo*: a dusk gradient with soft geometric facets, pale by day and deep indigo at night; *Aurora*, *Mono*, *Papel*, *Turquesa* with rolling hills, *Pôr do sol* with bands) or an image; none is a wave |
+| Motion | short and springy: windows pop in from 92 %, taskbar icons lift and slide on a spring each, launches hop twice; everything eases out and is interruptible |
 | Language | Portuguese, plain: nothing in the UI talks about how the system is built; apps need no explanation |
 
 ## 1. Constraints that shape every decision
@@ -66,8 +67,8 @@ applied live from Controles or Ajustes. Contrast on `window_bg`: body text 15.6:
 
 ### 2.2 Radii
 
-`window` 12 (0 when zoomed) · `popover` 12 · `menu` 8 · `control` 6 · `taskbar` 12 · `tooltip` 6 ·
-icon tile 22.5 % of its side (superellipse, n = 4). Corners are anti-aliased from cached
+`window` 8 (0 when maximised) · `popover` 10 · `menu` 8 · `control` 6 · `taskbar` 12 · `tooltip` 6 ·
+icon tile 22 % of its side (circular corners). Corners are anti-aliased from cached
 coverage masks (`osjeff_core::raster::CornerMasks`), identical for fills, strokes and the
 window-corner repair.
 
@@ -115,7 +116,7 @@ its end in the next frame).
 | zoom | spring on the rectangle, content clipped live (never a squeezed bitmap) | ~280 ms |
 | focus change | title bar and shadow cross-fade | 120 ms |
 | taskbar icon lift and reorder slide | one spring per icon (stiffness 420, damping 30) | ~200 ms |
-| launch | two damped hops, 18 px | 640 ms |
+| launch | two damped hops, 12 px | 640 ms |
 | menu, popover, sheet, Busca | fade + 6 px slide | 140 ms |
 | Apps | fade, icons rise 14 px | 220 ms |
 | banners | slide from the right edge, ease-out in, ease-in out | 260 / 220 ms |
@@ -190,8 +191,8 @@ the real font.
   *Não perturbe* switch that mutes the banners) at the left, the month at the right.
 * **Windows**: a flat title bar with the app icon and a left-aligned Medium title; the menu button and
   the minimise, maximise / restore and close buttons at the **right** (40x32 cells, a 36x26 rounded
-  hover fill, red close, dimmed when unfocused), a 2 px accent line on the focused bar, 12 px
-  corners, hairline, two-layer shadow, focus cross-fade, double click on the title zooms, resize
+  hover fill, red close, dimmed when unfocused), a 2 px accent line on the focused bar, 8 px
+  corners, a 1 px border with a clear inner highlight, two-layer shadow, focus cross-fade, double click on the title zooms, resize
   edges and minimum sizes as before. Dragging a title to an edge snaps (see `ui-identity.md`);
   zoom fills the work area between the panel and the bar.
 * **Barra de tarefas**: a floating rounded bar (radius 12) centred at the bottom: the Apps

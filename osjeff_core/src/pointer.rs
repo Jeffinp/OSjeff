@@ -1,5 +1,5 @@
 //! Pointer sprites: arrow, pointing hand and text I-beam, drawn as anti-aliased
-//! vector shapes with a thin dark outline and a soft shadow.
+//! vector shapes with a thin indigo-tinted outline and a soft shadow.
 //!
 //! All sprites share one box ([`W`] x [`H`]) so the compositor can restore a fixed
 //! rectangle around the pointer; [`hotspot`] says which pixel of the box is the
@@ -35,21 +35,29 @@ const fn h(v: i32) -> i32 {
     v * 128
 }
 
-fn arrow() -> Path {
-    let mut p = Path::new();
-    p.polygon(&[
-        (h(8), h(6)),
-        (h(8), h(41)),
-        (h(15), h(34)),
-        (h(20), h(45)),
-        (h(25), h(43)),
-        (h(20), h(32)),
-        (h(30), h(32)),
-    ]);
-    p
+/// Pixels to 24.8.
+const fn px(v: i32) -> i32 {
+    v * 256 / 10
 }
 
-fn hand() -> Path {
+/// Our own arrow: a slim dart with a long right wing, a notch, and a round-capped tail that
+/// leans away (not a copy of any system's silhouette). Coordinates in tenths of a pixel; the tip
+/// is at (4, 3).
+fn arrow() -> Vec<Path> {
+    let mut p = Path::new();
+    p.polygon(&[
+        (px(40), px(30)),
+        (px(142), px(136)),
+        (px(90), px(144)),
+        (px(40), px(192)),
+    ]);
+    // The tail: a capsule from the notch down and to the right.
+    let tail = crate::iconart::stroke_path(&[(px(74), px(160)), (px(116), px(222))], px(30), true);
+    // Two fills over the same surface: the outline ring wraps their union.
+    alloc::vec![p, tail]
+}
+
+fn hand() -> Vec<Path> {
     let mut p = Path::new();
     // Index finger, palm, two folded fingers and the thumb.
     p.rrect(h(18), h(6), h(8), h(28), h(4));
@@ -57,15 +65,15 @@ fn hand() -> Path {
     p.rrect(h(24), h(24), h(8), h(12), h(4));
     p.rrect(h(30), h(26), h(8), h(12), h(4));
     p.rrect(h(8), h(30), h(10), h(12), h(5));
-    p
+    alloc::vec![p]
 }
 
-fn ibeam() -> Path {
+fn ibeam() -> Vec<Path> {
     let mut p = Path::new();
     p.rect(h(22), h(10), h(4), h(36));
     p.rect(h(16), h(8), h(16), h(4));
     p.rect(h(16), h(44), h(16), h(4));
-    p
+    alloc::vec![p]
 }
 
 /// 1-pixel dilation of the alpha channel (the outline ring around a shape).
@@ -90,21 +98,24 @@ fn dilate(src: &Surface) -> Surface {
 
 /// Render pointer `s` into a [`W`] x [`H`] premultiplied surface.
 pub fn render(s: Shape) -> Surface {
-    let path = match s {
+    let paths = match s {
         Shape::Arrow => arrow(),
         Shape::Hand => hand(),
         Shape::IBeam => ibeam(),
     };
     // The shape in white, then an outline ring around it, then the soft shadow.
     let mut fill = Surface::new(W, H);
-    fill.fill_path(&path, Paint::Solid(0xFFFF_FFFF));
+    for path in &paths {
+        fill.fill_path(path, Paint::Solid(0xFFFF_FFFF));
+    }
     let ring = dilate(&fill);
     let mut body = Surface::new(W, H);
     let mut dark = ring.clone();
     for px in dark.px.iter_mut() {
         // A near-black ring with the ring's own coverage.
         let a = *px >> 24;
-        *px = (a << 24) | ((0x14 * a / 255) << 16) | ((0x14 * a / 255) << 8) | (0x1A * a / 255);
+        // A deep indigo, so the outline belongs to the accent family.
+        *px = (a << 24) | ((0x16 * a / 255) << 16) | ((0x14 * a / 255) << 8) | (0x3C * a / 255);
     }
     body.blit(&dark, 0, 0, 256);
     body.blit(&fill, 0, 0, 256);
@@ -178,6 +189,40 @@ mod tests {
                 assert!((s.get(0, y) >> 24) < 12 && (s.get(W - 1, y) >> 24) < 12);
             }
         }
+    }
+
+    #[test]
+    #[ignore]
+    fn dump_pointers() {
+        // POINTER_SHEET=/tmp/p.ppm: the three sprites at 8x on light and dark.
+        let Ok(path) = std::env::var("POINTER_SHEET") else {
+            return;
+        };
+        let z = 8usize;
+        let (w, h) = (3 * (W * z + 8), 2 * (H * z + 8));
+        let mut img = std::vec![0u8; w * h * 3];
+        for (row, bg) in [0xE8u32, 0x22].into_iter().enumerate() {
+            for (i, shape) in [Shape::Arrow, Shape::Hand, Shape::IBeam]
+                .into_iter()
+                .enumerate()
+            {
+                let s = render(shape);
+                for y in 0..H * z {
+                    for x in 0..W * z {
+                        let p = s.px[(y / z) * W + x / z];
+                        let a = p >> 24;
+                        let o = ((row * (H * z + 8) + y) * w + i * (W * z + 8) + x) * 3;
+                        for (k, sh) in [16, 8, 0].iter().enumerate() {
+                            let c = (p >> sh) & 0xFF;
+                            img[o + k] = (c + bg * (255 - a) / 255).min(255) as u8;
+                        }
+                    }
+                }
+            }
+        }
+        let mut out = std::format!("P6\n{w} {h}\n255\n").into_bytes();
+        out.extend_from_slice(&img);
+        std::fs::write(path, out).unwrap();
     }
 
     #[test]

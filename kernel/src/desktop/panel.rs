@@ -785,7 +785,7 @@ impl Desktop {
 
     /// One Quick Settings tile: a disc with a glyph, a label and a status line; accent when on.
     #[allow(clippy::too_many_arguments)]
-    fn draw_tile(
+    pub(super) fn draw_tile(
         &self,
         c: &mut Canvas,
         r: Rect,

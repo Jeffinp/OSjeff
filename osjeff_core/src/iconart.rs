@@ -1,9 +1,9 @@
 //! Procedural app icons and UI glyphs.
 //!
-//! Every built-in app icon is drawn here, at 128 px on a squircle tile with a
-//! gradient and a clear glyph (macOS style), from anti-aliased paths: no bitmap
-//! assets. The kernel caches the 128 px sources and the scaled copies it needs
-//! (dock, Launchpad, menus). Small monochrome UI glyphs (search, network,
+//! Every built-in app icon is drawn here, at 128 px on a flat rounded-square tile (22 % radius,
+//! one flat colour and a single highlight facet, a 1 px bevel) with a bold glyph, from
+//! anti-aliased paths: no bitmap assets. The kernel caches the 128 px sources and the scaled
+//! copies it needs (taskbar, Apps, menus). Small monochrome UI glyphs (search, network,
 //! chevrons, ...) are drawn at the size asked, in the colour asked.
 //!
 //! Pure and host tested; `cargo test -p osjeff_core -- --ignored dump_icons` with
@@ -15,8 +15,8 @@ use alloc::vec::Vec;
 
 /// Side of the icon sources.
 pub const SRC: usize = 128;
-/// Squircle radius of a tile of side [`SRC`].
-pub const TILE_R: usize = 29;
+/// Corner radius of a tile of side [`SRC`]: 22 %.
+pub const TILE_R: usize = 28;
 
 /// The built-in icons.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -190,7 +190,9 @@ fn line(s: &mut Surface, a: (i32, i32), b: (i32, i32), w: i32, c: u32) {
     );
 }
 
-/// The squircle tile with its vertical gradient and a soft top highlight.
+/// The tile: one flat colour (the middle of the old gradient pair `top` / `bottom`) and one
+/// highlight facet, a lighter triangle across the top-left corner. Everything drawn afterwards
+/// is clipped to the rounded square by [`finish`].
 fn tile(s: &mut Surface, top: u32, bottom: u32, m: &CornerMasks) {
     s.fill_rrect(
         0,
@@ -198,25 +200,39 @@ fn tile(s: &mut Surface, top: u32, bottom: u32, m: &CornerMasks) {
         SRC,
         SRC,
         TILE_R,
-        Corner::Squircle,
-        Paint::Vertical(rgb(top), rgb(bottom)),
+        Corner::Circle,
+        Paint::Solid(rgb(crate::wallpaper::lerp_rgb(top, bottom, 100))),
         m,
     );
+    let mut facet = Path::new();
+    facet.polygon(&[(q(0), q(0)), (q(86), q(0)), (q(0), q(86))]);
+    fill(s, &facet, rgba(0xFFFFFF, 34));
 }
 
-fn gloss(s: &mut Surface, m: &CornerMasks) {
-    s.stroke_rrect(
+/// Clip the finished icon to the tile's rounded square and add a crisp 1 px bevel: light along
+/// the top edge, a shade along the bottom one.
+fn finish(s: &mut Surface, m: &CornerMasks) {
+    let mut cov = Surface::new(SRC, SRC);
+    cov.fill_rrect(
         0,
         0,
         SRC,
         SRC,
         TILE_R,
-        2,
-        Corner::Squircle,
-        Paint::Vertical(rgba(0xFFFFFF, 90), rgba(0xFFFFFF, 0)),
+        Corner::Circle,
+        Paint::Solid(0xFFFF_FFFF),
         m,
     );
-    // A hairline of shade at the very bottom edge anchors the tile on any backdrop.
+    for (px, c) in s.px.iter_mut().zip(&cov.px) {
+        let a = c >> 24;
+        if a < 255 {
+            let sc = |v: u32| v * a / 255;
+            *px = (sc(*px >> 24) << 24)
+                | (sc((*px >> 16) & 0xFF) << 16)
+                | (sc((*px >> 8) & 0xFF) << 8)
+                | sc(*px & 0xFF);
+        }
+    }
     s.stroke_rrect(
         0,
         0,
@@ -224,8 +240,8 @@ fn gloss(s: &mut Surface, m: &CornerMasks) {
         SRC,
         TILE_R,
         1,
-        Corner::Squircle,
-        Paint::Vertical(rgba(0x000000, 0), rgba(0x000000, 60)),
+        Corner::Circle,
+        Paint::Vertical(rgba(0xFFFFFF, 80), rgba(0x000000, 70)),
         m,
     );
 }
@@ -248,12 +264,12 @@ pub fn render(id: IconId, m: &CornerMasks) -> Surface {
         IconId::Apps => generic(&mut s, m),
         IconId::Brand => brand(&mut s, m),
     }
-    gloss(&mut s, m);
+    finish(&mut s, m);
     s
 }
 
-/// The icon language: one bold white glyph on a saturated gradient squircle, with a
-/// single accent detail where it helps.
+/// The icon language: one bold white glyph on a flat saturated tile, with a single accent
+/// detail where it helps.
 const WHITE: u32 = 0xFFFF_FFFF;
 
 fn ring(s: &mut Surface, cx: i32, cy: i32, r: i32, t: i32, c: u32) {
@@ -449,28 +465,19 @@ fn generic(s: &mut Surface, m: &CornerMasks) {
 }
 
 fn brand(s: &mut Surface, m: &CornerMasks) {
-    s.fill_rrect(
-        0,
-        0,
-        SRC,
-        SRC,
-        TILE_R,
-        Corner::Squircle,
-        Paint::Diagonal(rgb(0x00C2D6), rgb(0x4B32F5)),
-        m,
-    );
+    tile(s, 0x6366F8, 0x4F46E5, m);
     let chev = [(q(46), q(34)), (q(80), q(64)), (q(46), q(94))];
     fill(s, &stroke_path(&chev, q(15), true), rgb(0xFFFFFF));
 }
 
 /// An installed app's own icon (`w x h` RGBA bytes, straight alpha) centred on a
-/// light squircle tile. Falls back to the generic apps icon for bad input.
+/// light rounded tile. Falls back to the generic apps icon for bad input.
 pub fn wrap_app_icon(rgba_px: &[u8], w: usize, h: usize, m: &CornerMasks) -> Surface {
     if w == 0 || h == 0 || rgba_px.len() < w * h * 4 {
         return render(IconId::Apps, m);
     }
     let mut s = Surface::new(SRC, SRC);
-    tile(&mut s, 0xFFFFFF, 0xE3E3E8, m);
+    tile(&mut s, 0xF4F4F8, 0xE6E6EC, m);
     let mut icon = Surface::new(w, h);
     for i in 0..w * h {
         let p = &rgba_px[i * 4..i * 4 + 4];
@@ -484,7 +491,7 @@ pub fn wrap_app_icon(rgba_px: &[u8], w: usize, h: usize, m: &CornerMasks) -> Sur
         ((SRC - side) / 2) as i32,
         256,
     );
-    gloss(&mut s, m);
+    finish(&mut s, m);
     s
 }
 

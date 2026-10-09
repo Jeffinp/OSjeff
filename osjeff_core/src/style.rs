@@ -176,15 +176,15 @@ pub const LIGHT_ZOOM: u32 = 0xFF3F_D07C;
 pub const PANEL_H: i32 = 30;
 pub const MENUBAR_H: i32 = PANEL_H;
 /// Corner radii.
-pub const R_WINDOW: i32 = 12;
-pub const R_POPOVER: i32 = 12;
+pub const R_WINDOW: i32 = 8;
+pub const R_POPOVER: i32 = 10;
 pub const R_MENU: i32 = 8;
 pub const R_CONTROL: i32 = 6;
 pub const R_TASKBAR: i32 = 12;
 pub const R_TOOLTIP: i32 = 6;
-/// Tile radius of an app icon of side `s`: 22.5 %.
+/// Tile radius of an app icon of side `s`: 22 %.
 pub const fn tile_radius(s: i32) -> i32 {
-    s * 225 / 1000
+    s * 22 / 100
 }
 
 /// `0xRRGGBB` of an ARGB colour.
@@ -264,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn tile_radius_is_22_5_percent() {
+    fn tile_radius_is_22_percent() {
         assert_eq!(tile_radius(128), 28);
         assert_eq!(tile_radius(48), 10);
         assert_eq!(rgb_of(0xFF12_3456), 0x12_3456);

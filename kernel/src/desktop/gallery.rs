@@ -9,7 +9,7 @@ use crate::text::{self, BODY, CALLOUT, CAPTION, FOOTNOTE, TITLE1, TITLE2, TITLE3
 use osjeff_core::iconart::Glyph;
 use osjeff_core::style::{LIGHT, Palette};
 
-const TABS: [&str; 4] = ["Controles", "Tipografia", "Cores", "Ícones"];
+const TABS: [&str; 5] = ["Controles", "Tipografia", "Cores", "Ícones", "Shell"];
 
 /// State of the gallery window: the widgets it shows are real and interactive.
 pub(crate) struct GalleryState {
@@ -56,7 +56,7 @@ fn layout(body: Rect) -> Layout {
     let x = body.x + 24;
     let col2 = body.x + 556;
     let mut y = body.y + 60;
-    let tabs = Rect::new(body.x + 24, body.y + 16, 400, 28);
+    let tabs = Rect::new(body.x + 24, body.y + 16, 480, 28);
     let _ = y;
     // Row 1 is the buttons (drawn, not interactive here).
     y += 40;
@@ -105,7 +105,8 @@ impl Desktop {
             0 => self.gallery_controls(c, body, g, &l, p),
             1 => gallery_type(c, body, pad, p),
             2 => gallery_colors(c, body, pad, p),
-            _ => gallery_icons(c, body, pad, p),
+            3 => gallery_icons(c, body, pad, p),
+            _ => self.gallery_shell(c, body, pad, p),
         }
     }
 
@@ -288,6 +289,116 @@ impl Desktop {
                 };
             }
             _ => {}
+        }
+    }
+}
+
+impl Desktop {
+    /// The shell's own parts: window buttons (rest, hover, close hover, restore), Quick Settings
+    /// tiles, the taskbar indicators, the snap preview and the pointers.
+    fn gallery_shell(&self, c: &mut Canvas, body: Rect, pad: i32, p: &Palette) {
+        use osjeff_core::window::TitleBtn;
+        let label = |c: &mut Canvas, x: i32, y: i32, t: &str| {
+            text::draw(
+                c,
+                x,
+                y,
+                t,
+                FOOTNOTE,
+                Weight::Medium,
+                theme::solid(p.text_secondary),
+            );
+        };
+        let x = body.x + pad;
+        let mut y = body.y + 60;
+        label(
+            c,
+            x,
+            y,
+            "Botões da janela: normal, ao passar, fechar ao passar, restaurar",
+        );
+        y += 22;
+        for (i, (hover, restore)) in [
+            (None, false),
+            (Some(TitleBtn::Maximize), false),
+            (Some(TitleBtn::Close), false),
+            (None, true),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let bar = Rect::new(x + i as i32 * 210, y, 200, 32);
+            ui::fill_token(c, bar, 6, p.content_bg);
+            ui::stroke_token(c, bar, 6, p.separator);
+            let lay = bar.title_layout(true, true);
+            super::chrome::draw_title_buttons(c, &lay, hover, restore, 255, p);
+        }
+        y += 54;
+        label(c, x, y, "Configurações rápidas: desligado e ligado");
+        y += 22;
+        self.draw_tile(
+            c,
+            Rect::new(x, y, 152, 56),
+            Glyph::Bell,
+            "Não perturbe",
+            "Desligado",
+            false,
+            false,
+        );
+        self.draw_tile(
+            c,
+            Rect::new(x + 160, y, 152, 56),
+            Glyph::Wave,
+            "Movimento",
+            "Reduzido",
+            true,
+            false,
+        );
+        // The taskbar's indicators: the pill (focused) and the dot (running).
+        let ix = x + 360;
+        label(c, ix, y - 22, "Indicadores da barra de tarefas");
+        for (k, kind) in [Icon::Files, Icon::Terminal, Icon::Editor]
+            .into_iter()
+            .enumerate()
+        {
+            let r = Rect::new(ix + k as i32 * 56, y, 40, 40);
+            icons::blit(c, kind, r.x, r.y, r.w, 256);
+            match k {
+                0 => c.fill_rrect(
+                    Rect::new(r.x + 12, r.bottom() + 6, 16, 3),
+                    1,
+                    Corner::Circle,
+                    theme::accent(),
+                    256,
+                ),
+                1 => c.fill_rrect(
+                    Rect::new(r.x + 18, r.bottom() + 5, 4, 4),
+                    2,
+                    Corner::Circle,
+                    theme::solid(p.text_secondary),
+                    256,
+                ),
+                _ => {}
+            }
+        }
+        y += 84;
+        label(c, x, y, "Pré-visualização do encaixe");
+        let prev = Rect::new(x, y + 22, 150, 90);
+        let acc = theme::accent();
+        c.fill_rrect(prev, osjeff_core::style::R_WINDOW, Corner::Circle, acc, 46);
+        c.stroke_rrect(prev, osjeff_core::style::R_WINDOW, Corner::Circle, acc, 230);
+        let px = x + 220;
+        label(c, px, y, "Ponteiros");
+        for (i, sh) in [
+            osjeff_core::pointer::Shape::Arrow,
+            osjeff_core::pointer::Shape::Hand,
+            osjeff_core::pointer::Shape::IBeam,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let s = osjeff_core::pointer::render(sh);
+            c.blit_surface(&s, px + i as i32 * 56, y + 26, 256);
         }
     }
 }
