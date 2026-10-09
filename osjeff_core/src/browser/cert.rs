@@ -2,6 +2,7 @@
 //! issued it, and for how long it is valid. Read from the leaf certificate the TLS client
 //! already verified (or that the user chose to accept); showing it adds no trust of its own.
 
+use crate::i18n::{Civil, DateFmt, DateStyle, Lang};
 use crate::unixtime::DateTime;
 use crate::x509;
 use alloc::string::String;
@@ -64,10 +65,33 @@ impl CertInfo {
     }
 }
 
-/// `dd/mm/aaaa` for Unix seconds.
+/// A date for Unix seconds in the order of the language in effect (`14/11/2023`,
+/// `11/14/2023`).
 pub fn format_date(unix: u64) -> String {
+    format_date_in(crate::i18n::lang(), unix)
+}
+
+/// [`format_date`] in `lang`.
+pub fn format_date_in(lang: Lang, unix: u64) -> String {
     let d = DateTime::from_unix(unix);
-    alloc::format!("{:02}/{:02}/{:04}", d.day, d.month, d.year.clamp(0, 9999))
+    let civil = Civil {
+        year: d.year.clamp(0, 9999),
+        month: d.month,
+        day: d.day,
+        weekday: 0,
+        hour: d.hour,
+        minute: d.minute,
+        second: d.second,
+    };
+    alloc::format!(
+        "{}",
+        DateFmt {
+            lang,
+            civil,
+            style: DateStyle::Short,
+            clock24: true,
+        }
+    )
 }
 
 #[cfg(test)]
@@ -75,9 +99,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dates_are_day_month_year() {
-        assert_eq!(format_date(0), "01/01/1970");
-        assert_eq!(format_date(1_700_000_000), "14/11/2023");
+    fn dates_follow_the_order_of_the_language() {
+        assert_eq!(format_date_in(Lang::Pt, 0), "01/01/1970");
+        assert_eq!(format_date_in(Lang::Pt, 1_700_000_000), "14/11/2023");
+        assert_eq!(format_date_in(Lang::En, 1_700_000_000), "11/14/2023");
+        let _ = format_date_in(Lang::En, u64::MAX);
         let _ = format_date(u64::MAX);
     }
 

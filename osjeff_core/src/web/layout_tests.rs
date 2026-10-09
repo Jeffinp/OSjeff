@@ -1129,11 +1129,11 @@ fn collapsed_borders_share_an_edge() {
 #[test]
 fn caption_comes_first_and_centred() {
     let p = lay(
-        &body0("<table><caption>Titulo</caption><tr><td>a</td></tr></table>"),
+        &body0("<table><caption>Título</caption><tr><td>a</td></tr></table>"),
         600,
     );
-    assert!(y_of(&p, "Titulo") < y_of(&p, "a"));
-    assert!(font_of(&p, "Titulo").bold);
+    assert!(y_of(&p, "Título") < y_of(&p, "a"));
+    assert!(font_of(&p, "Título").bold);
 }
 
 #[test]

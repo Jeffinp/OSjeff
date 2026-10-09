@@ -12,6 +12,7 @@
 //! `<textarea>` are not drawn.
 
 use crate::Key;
+use crate::tk;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -100,13 +101,18 @@ pub enum FormError {
 }
 
 impl FormError {
-    /// The message shown to the user.
-    pub fn message(self) -> &'static str {
+    /// Catalog key of the message shown to the user.
+    pub fn message_key(self) -> &'static str {
         match self {
-            FormError::Post => "Formulários POST não são suportados.",
-            FormError::TooLong => "Formulário grande demais para enviar.",
-            FormError::NoForm => "Formulário inválido.",
+            FormError::Post => tk!("web.form.post"),
+            FormError::TooLong => tk!("web.form.too_long"),
+            FormError::NoForm => tk!("web.form.invalid"),
         }
+    }
+
+    /// The message in the language in effect.
+    pub fn message(self) -> &'static str {
+        crate::i18n::tr(self.message_key())
     }
 }
 

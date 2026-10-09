@@ -673,31 +673,10 @@ impl Net {
     }
 }
 
-/// Build an HTTP/1.1 GET request (`Connection: close`: one request per connection) (shared by the plain and TLS paths).
+/// Build an HTTP/1.1 GET request asking for the language of the interface (the request itself
+/// is `osjeff_core::browser::build_get_request`; shared by the plain and TLS paths).
 fn build_request(req: &mut Vec<u8>, host: &str, path: &str, port: u16, tls: bool) {
-    req.extend_from_slice(b"GET ");
-    req.extend_from_slice(path.as_bytes());
-    req.extend_from_slice(b" HTTP/1.1\r\nHost: ");
-    req.extend_from_slice(host.as_bytes());
-    let default_port = if tls { 443 } else { 80 };
-    if port != default_port {
-        req.push(b':');
-        let mut digits = [0u8; 5];
-        let mut n = port;
-        let mut i = digits.len();
-        loop {
-            i -= 1;
-            digits[i] = b'0' + (n % 10) as u8;
-            n /= 10;
-            if n == 0 {
-                break;
-            }
-        }
-        req.extend_from_slice(&digits[i..]);
-    }
-    req.extend_from_slice(
-        b"\r\nUser-Agent: OSjeff/1.0\r\nAccept: text/html, image/png, image/bmp, */*;q=0.1\r\nAccept-Encoding: gzip, deflate\r\nConnection: close\r\n\r\n",
-    );
+    osjeff_core::browser::build_get_request(req, osjeff_core::i18n::lang(), host, path, port, tls);
 }
 
 // ---- TLS plumbing: an embedded-io stream over the smoltcp socket + an RNG ----

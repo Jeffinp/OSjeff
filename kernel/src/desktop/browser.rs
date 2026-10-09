@@ -17,6 +17,7 @@ use super::*;
 use crate::text;
 use osjeff_core::anim::{Tween, curves};
 use osjeff_core::browser::tabs;
+use osjeff_core::t;
 use osjeff_core::web::imgcache::{ImageCache, PageImages, image_key};
 use osjeff_core::web::{Cmd as WebCmd, Layout};
 
@@ -52,10 +53,12 @@ impl BrowserState {
             return None;
         }
         match b.security() {
-            Security::HttpsVerified => Some(("Conexão segura", Glyph::Lock, SecurityTone::Good)),
-            Security::Http => Some(("Não seguro", Glyph::Warning, SecurityTone::Warn)),
+            Security::HttpsVerified => {
+                Some((t!("web.sec.secure"), Glyph::Lock, SecurityTone::Good))
+            }
+            Security::Http => Some((t!("web.sec.insecure"), Glyph::Warning, SecurityTone::Warn)),
             Security::HttpsInvalid => {
-                Some(("Certificado inválido", Glyph::Warning, SecurityTone::Bad))
+                Some((t!("web.sec.invalid"), Glyph::Warning, SecurityTone::Bad))
             }
             Security::None => None,
         }
@@ -376,7 +379,7 @@ impl Desktop {
     /// A new page is on screen in tab `tid`: remember its title, reset selection and find, set
     /// the window title when the tab is the active one.
     fn browser_page_changed(&mut self, id: WindowId, tid: u32) {
-        let mut title = String::from("Navegador");
+        let mut title = String::from(t!("app.browser"));
         let mut active = false;
         if let Some(b) = self.browser_state_mut(id) {
             b.touch();
@@ -435,8 +438,52 @@ impl Desktop {
             }
         }
         if set_title {
-            self.browser_set_title(id, String::from("Navegador"));
+            self.browser_set_title(id, String::from(t!("app.browser")));
         }
+    }
+
+    /// The language changed: the browser's own pages are built again, the active page is
+    /// laid out again (a few words are baked into a layout, like the line under a picture
+    /// that failed to load) and an open context menu closes. Error pages and the chrome
+    /// ask the catalog at every frame and need nothing.
+    pub(crate) fn browser_language_changed(&mut self) {
+        let Some(id) = self.browser_id() else {
+            return;
+        };
+        let Some(rect) = self.browser_win_rect(id) else {
+            return;
+        };
+        let Some(b) = self.browser_state_mut(id) else {
+            return;
+        };
+        b.ctx = None;
+        b.glass[3].clear();
+        let content = b.chrome(rect).content;
+        let active_id = b.tabs.active().id;
+        let BrowserState { tabs, images, .. } = &mut *b;
+        let mut rebuilt: Vec<u32> = Vec::new();
+        for t in tabs.iter_mut() {
+            if let Some(html) = t.browser.internal_html() {
+                t.doc = Some(osjeff_core::web::Doc::parse(&html));
+                t.page = None;
+                t.find.close();
+                if t.id == active_id {
+                    layout_browser(t, images, content.w, true);
+                    let max = t.page.as_ref().map_or(0, |p| (p.height - content.h).max(0));
+                    clamp_scroll(t, max);
+                } else {
+                    t.layout_w = 0;
+                }
+                rebuilt.push(t.id);
+            } else if t.id == active_id && t.page.is_some() {
+                layout_browser(t, images, content.w, false);
+            }
+        }
+        b.touch();
+        for tid in rebuilt {
+            self.browser_page_changed(id, tid);
+        }
+        self.client_dirty = Some(id);
     }
 
     // ---- scrolling ----
@@ -597,7 +644,7 @@ impl Desktop {
             return false;
         };
         if !b.tabs.can_open() {
-            b.say("Limite de 8 abas");
+            b.say(&t!("web.tab.limit", n = tabs::MAX_TABS));
             return false;
         }
         let tid = b.next_id;
@@ -744,7 +791,7 @@ impl Desktop {
         let title = {
             let tt = t.browser.page_title();
             if tt.is_empty() {
-                String::from("Navegador")
+                String::from(t!("app.browser"))
             } else {
                 String::from(tt)
             }
@@ -925,7 +972,7 @@ pub(crate) fn start_items(b: &BrowserState) -> (Vec<(String, String)>, Vec<Strin
     if tiles.is_empty() {
         tiles = osjeff_core::browser::QUICK_LINKS
             .iter()
-            .map(|(l, u)| (String::from(*l), String::from(*u)))
+            .map(|(l, u)| (String::from(osjeff_core::i18n::tr(l)), String::from(*u)))
             .collect();
     }
     // Recents belong to the window: every tab's history, the shown tab's first.

@@ -49,9 +49,9 @@ fn ctrl_d_toggles_the_current_page() {
 #[test]
 fn bookmark_uses_the_page_title_or_the_url() {
     let mut b = browser_with_history(&["http://a.test/x"]);
-    b.set_page_title("Pagina A");
+    b.set_page_title("Página A");
     b.toggle_bookmark();
-    assert_eq!(b.bookmarks()[0].title, "Pagina A");
+    assert_eq!(b.bookmarks()[0].title, "Página A");
     b.toggle_bookmark();
     b.set_page_title("");
     b.toggle_bookmark();
@@ -597,4 +597,73 @@ fn reload_refetches_the_navigated_address_not_the_typed_text() {
     type_str(&mut b, "typed junk");
     b.reload();
     assert_eq!(b.take_request(), Some(&b"https://example.com/a"[..]));
+}
+
+#[test]
+fn the_request_asks_for_the_language_of_the_interface() {
+    let ask = |l: Lang, host: &str, port: u16, tls: bool| {
+        let mut r = Vec::new();
+        build_get_request(&mut r, l, host, "/a?b=1", port, tls);
+        String::from_utf8(r).unwrap()
+    };
+    let pt = ask(Lang::Pt, "example.com", 443, true);
+    assert!(pt.starts_with("GET /a?b=1 HTTP/1.1\r\nHost: example.com\r\n"));
+    assert!(pt.contains("\r\nAccept-Language: pt-BR,pt;q=0.9,en;q=0.8\r\n"));
+    assert!(pt.ends_with("Connection: close\r\n\r\n"));
+    let en = ask(Lang::En, "example.com", 80, false);
+    assert!(en.contains("\r\nAccept-Language: en;q=1\r\n"));
+    assert!(!en.contains("pt-BR"));
+    // The port shows only when it is not the default of the scheme.
+    assert!(ask(Lang::En, "h.test", 8080, false).contains("Host: h.test:8080\r\n"));
+    assert!(ask(Lang::En, "h.test", 8080, true).contains("Host: h.test:8080\r\n"));
+    assert!(ask(Lang::En, "h.test", 443, false).contains("Host: h.test:443\r\n"));
+    assert!(ask(Lang::En, "h.test", 443, true).contains("Host: h.test\r\n"));
+    // One header line each, in a fixed place.
+    for l in Lang::ALL {
+        let r = ask(l, "x.test", 80, false);
+        assert_eq!(r.matches("Accept-Language:").count(), 1);
+        assert_eq!(r.matches("\r\n").count(), 8);
+    }
+}
+
+#[test]
+fn labels_and_banners_have_both_languages() {
+    for s in [
+        Security::Http,
+        Security::HttpsVerified,
+        Security::HttpsInvalid,
+    ] {
+        let k = s.label_key().unwrap();
+        assert_ne!(i18n::tr_in(Lang::Pt, k), i18n::tr_in(Lang::En, k));
+    }
+    for n in [
+        PageNote::Truncated,
+        PageNote::Incomplete,
+        PageNote::Damaged,
+        PageNote::BadChecksum,
+    ] {
+        for l in Lang::ALL {
+            let t = i18n::tr_in(l, n.label_key());
+            assert!(!t.is_empty() && !t.starts_with("web."), "{l:?} {n:?}");
+        }
+    }
+    for (k, _) in QUICK_LINKS {
+        assert!(!i18n::tr_in(Lang::En, k).starts_with("web."), "{k}");
+    }
+    assert_eq!(i18n::tr_in(Lang::Pt, QUICK_LINKS[3].0), "Exemplo");
+    assert_eq!(i18n::tr_in(Lang::En, QUICK_LINKS[3].0), "Example");
+}
+
+#[test]
+fn an_internal_page_can_be_built_again_in_another_language() {
+    let mut b = Browser::new();
+    assert!(b.internal_html_in(Lang::En).is_none());
+    b.open(b"osjeff://sobre");
+    let first = b.take_internal().unwrap();
+    assert!(b.take_internal().is_none(), "delivered once");
+    let en = String::from_utf8(b.internal_html_in(Lang::En).unwrap()).unwrap();
+    let pt = String::from_utf8(b.internal_html_in(Lang::Pt).unwrap()).unwrap();
+    assert!(en.contains("<html lang=\"en\">") && en.contains("Shortcuts"));
+    assert!(pt.contains("<html lang=\"pt-BR\">") && pt.contains("Atalhos"));
+    assert_eq!(first, pt.into_bytes(), "the default language is Portuguese");
 }

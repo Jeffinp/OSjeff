@@ -25,6 +25,7 @@
 
 use crate::base64;
 use crate::image::{self, Filter, Format, Image};
+use crate::tk;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::Cell;
@@ -64,16 +65,22 @@ pub enum ImgState {
 }
 
 impl ImgState {
-    /// The line shown under the alt text of a box that has no picture
+    /// Catalog key of the line shown under the alt text of a box that has no picture;
     /// `None` for pending / ready.
-    pub fn message(self) -> Option<&'static str> {
+    pub fn message_key(self) -> Option<&'static str> {
         match self {
             ImgState::Pending | ImgState::Ready { .. } => None,
-            ImgState::Unsupported => Some("formato não suportado"),
-            ImgState::Failed => Some("falha ao carregar"),
-            ImgState::TooBig => Some("imagem grande demais"),
-            ImgState::TooMany => Some("limite de imagens"),
+            ImgState::Unsupported => Some(tk!("web.img.unsupported")),
+            ImgState::Failed => Some(tk!("web.img.failed")),
+            ImgState::TooBig => Some(tk!("web.img.too_big")),
+            ImgState::TooMany => Some(tk!("web.img.too_many")),
         }
+    }
+
+    /// The line in the language in effect (the layout bakes it into the page, so the kernel
+    /// lays a page out again when the language changes).
+    pub fn message(self) -> Option<&'static str> {
+        self.message_key().map(crate::i18n::tr)
     }
 }
 
@@ -775,8 +782,8 @@ mod tests {
         assert_eq!(ImgState::Pending.message(), None);
         assert_eq!(ImgState::Ready { w: 1, h: 1 }.message(), None);
         assert_eq!(
-            ImgState::Unsupported.message(),
-            Some("formato não suportado")
+            ImgState::Unsupported.message_key(),
+            Some("web.img.unsupported")
         );
         for s in [
             ImgState::Unsupported,
@@ -784,8 +791,19 @@ mod tests {
             ImgState::TooBig,
             ImgState::TooMany,
         ] {
-            assert!(!s.message().unwrap().is_empty());
+            for l in crate::i18n::Lang::ALL {
+                let t = crate::i18n::tr_in(l, s.message_key().unwrap());
+                assert!(!t.is_empty() && !t.starts_with("web."), "{l:?}");
+            }
         }
+        assert_eq!(
+            crate::i18n::tr_in(crate::i18n::Lang::En, "web.img.unsupported"),
+            "unsupported format"
+        );
+        assert_eq!(
+            crate::i18n::tr_in(crate::i18n::Lang::Pt, "web.img.unsupported"),
+            "formato não suportado"
+        );
     }
 
     #[test]

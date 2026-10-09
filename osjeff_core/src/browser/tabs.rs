@@ -2,6 +2,8 @@
 //! and the words and letter a tab shows. Pure: the kernel keeps the page state of each
 //! tab in the `T` it stores here.
 
+use crate::i18n::{self, Lang};
+use crate::tk;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -169,8 +171,14 @@ pub fn host_range(url: &str) -> (usize, usize) {
     (start, end)
 }
 
-/// What a tab says: the page title, else the address's host, else "Nova aba".
+/// What a tab says: the page title, else the address's host, else "Nova aba" (in the language
+/// in effect: ask again at every frame).
 pub fn tab_title(title: &str, url: &str) -> String {
+    tab_title_in(i18n::lang(), title, url)
+}
+
+/// [`tab_title`] in `lang`.
+pub fn tab_title_in(lang: Lang, title: &str, url: &str) -> String {
     let t = title.trim();
     if !t.is_empty() {
         return String::from(t);
@@ -178,15 +186,15 @@ pub fn tab_title(title: &str, url: &str) -> String {
     let u = url.trim();
     if u.starts_with("osjeff://") {
         return match u.trim_start_matches("osjeff://").trim_end_matches('/') {
-            "favoritos" => String::from("Favoritos"),
-            "historico" => String::from("Histórico"),
-            "sobre" => String::from("Sobre o Navegador"),
-            _ => String::from("Nova aba"),
+            "favoritos" => String::from(i18n::tr_in(lang, tk!("web.tab.bookmarks"))),
+            "historico" => String::from(i18n::tr_in(lang, tk!("web.tab.history"))),
+            "sobre" => String::from(i18n::tr_in(lang, tk!("web.tab.about"))),
+            _ => String::from(i18n::tr_in(lang, tk!("web.tab.new"))),
         };
     }
     let h = host_of(u);
     if h.is_empty() {
-        String::from("Nova aba")
+        String::from(i18n::tr_in(lang, tk!("web.tab.new")))
     } else {
         String::from(h)
     }
@@ -316,16 +324,24 @@ mod tests {
 
     #[test]
     fn titles_fall_back_to_the_host_and_then_to_new_tab() {
-        assert_eq!(tab_title("  Olá  ", "http://a.test/x"), "Olá");
-        assert_eq!(
-            tab_title("", "https://www.exemplo.com.br/a?b#c"),
-            "exemplo.com.br"
-        );
-        assert_eq!(tab_title("", "203.0.113.5:8079/x"), "203.0.113.5:8079");
-        assert_eq!(tab_title("", ""), "Nova aba");
-        assert_eq!(tab_title("", "osjeff://favoritos"), "Favoritos");
-        assert_eq!(tab_title("", "osjeff://historico/"), "Histórico");
-        assert_eq!(tab_title("", "osjeff://inicio"), "Nova aba");
+        let pt = |t: &str, u: &str| tab_title_in(Lang::Pt, t, u);
+        let en = |t: &str, u: &str| tab_title_in(Lang::En, t, u);
+        assert_eq!(pt("  Olá  ", "http://a.test/x"), "Olá");
+        assert_eq!(pt("", "https://www.exemplo.com.br/a?b#c"), "exemplo.com.br");
+        assert_eq!(pt("", "203.0.113.5:8079/x"), "203.0.113.5:8079");
+        assert_eq!(pt("", ""), "Nova aba");
+        assert_eq!(pt("", "osjeff://favoritos"), "Favoritos");
+        assert_eq!(pt("", "osjeff://historico/"), "Histórico");
+        assert_eq!(pt("", "osjeff://sobre"), "Sobre o Navegador");
+        assert_eq!(pt("", "osjeff://inicio"), "Nova aba");
+        // The same tabs in English; a page's own title and a host never change.
+        assert_eq!(en("", ""), "New tab");
+        assert_eq!(en("", "osjeff://favoritos"), "Bookmarks");
+        assert_eq!(en("", "osjeff://historico/"), "History");
+        assert_eq!(en("", "osjeff://sobre"), "About the Browser");
+        assert_eq!(en("", "osjeff://inicio"), "New tab");
+        assert_eq!(en("  Olá  ", "http://a.test/x"), "Olá");
+        assert_eq!(en("", "https://www.exemplo.com.br/a"), "exemplo.com.br");
     }
 
     #[test]
@@ -371,6 +387,7 @@ mod tests {
             assert!(a <= b && b <= u.len() && u.is_char_boundary(a) && u.is_char_boundary(b));
             let _ = host_of(u);
             let _ = tab_title("", u);
+            let _ = tab_title_in(Lang::En, "", u);
             let _ = tab_badge("", u);
         }
     }

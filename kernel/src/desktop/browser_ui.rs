@@ -16,6 +16,7 @@ use osjeff_core::browser::{Status, tabs as tabs_model};
 use osjeff_core::iconart::Glyph;
 use osjeff_core::layout as geo;
 use osjeff_core::style::{R_MENU, R_POPOVER};
+use osjeff_core::t;
 
 /// Amber of a favourite.
 const AMBER: Color = Color::rgb(0xF5, 0xA6, 0x23);
@@ -153,7 +154,7 @@ impl Desktop {
                 text::draw_centered(
                     c,
                     Rect::new(content.x, content.y + content.h / 3, content.w, 24),
-                    "Carregando…",
+                    t!("web.loading"),
                     CALLOUT,
                     Weight::Regular,
                     theme::solid(p.text_tertiary),
@@ -335,7 +336,7 @@ impl Desktop {
                 c,
                 tx,
                 ty,
-                "Pesquisar ou digitar um endereço",
+                t!("web.omnibox"),
                 BODY,
                 Weight::Regular,
                 theme::solid(p.text_tertiary),
@@ -486,7 +487,7 @@ impl Desktop {
                 }
                 None => (e.title.clone(), e.badge, String::new()),
             };
-            let fresh = badge == '\u{2022}' || title == "Nova aba";
+            let fresh = badge == '\u{2022}' || title == t!("web.tab.new");
             let bx = Rect::new(r.x + 8, r.y + (r.h - 16) / 2, 16, 16);
             if fresh {
                 ui::draw_glyph(
@@ -592,7 +593,7 @@ impl Desktop {
                 tx,
                 ty,
                 room,
-                "Pesquisar ou digitar um endereço",
+                t!("web.omnibox"),
                 CALLOUT,
                 Weight::Regular,
                 theme::solid(p.text_tertiary),
@@ -636,7 +637,11 @@ impl Desktop {
                     FOOTNOTE,
                     Weight::Semibold,
                 ),
-                if has_bm { "Favoritos" } else { "Sugestões" },
+                if has_bm {
+                    t!("web.start.bookmarks")
+                } else {
+                    t!("web.start.suggestions")
+                },
                 FOOTNOTE,
                 Weight::Semibold,
                 theme::solid(p.text_secondary),
@@ -682,7 +687,7 @@ impl Desktop {
                     FOOTNOTE,
                     Weight::Semibold,
                 ),
-                "Visitados recentemente",
+                t!("web.start.recent"),
                 FOOTNOTE,
                 Weight::Semibold,
                 theme::solid(p.text_secondary),
@@ -803,7 +808,7 @@ impl Desktop {
         ui::push_button(
             c,
             l.retry,
-            "Tentar novamente",
+            t!("web.err.retry"),
             ui::ButtonKind::Primary,
             if retry_hot {
                 ui::Control::Hover
@@ -819,7 +824,7 @@ impl Desktop {
                 text::draw_centered(
                     c,
                     Rect::new(l.cause.x, l.cause.bottom() + 2, l.cause.w, 20),
-                    "A hora do sistema não foi confirmada: confira o relógio.",
+                    t!("web.err.clock_hint"),
                     FOOTNOTE,
                     Weight::Regular,
                     amber,
@@ -828,7 +833,7 @@ impl Desktop {
             ui::push_button(
                 c,
                 l.proceed,
-                "Continuar mesmo assim (inseguro)",
+                t!("web.err.proceed"),
                 ui::ButtonKind::Destructive,
                 if bs.hover == H::Proceed {
                     ui::Control::Hover
@@ -839,7 +844,7 @@ impl Desktop {
             text::draw_centered(
                 c,
                 l.note,
-                "Vale só para este site, nesta sessão.",
+                t!("web.err.proceed_note"),
                 FOOTNOTE,
                 Weight::Regular,
                 theme::solid(p.text_tertiary),
@@ -954,7 +959,7 @@ impl Desktop {
                 c,
                 f.field.x + 10,
                 ty,
-                "Buscar na página",
+                t!("web.find.placeholder"),
                 BODY,
                 Weight::Regular,
                 theme::solid(p.text_tertiary),
@@ -982,9 +987,13 @@ impl Desktop {
         }
         if !q.is_empty() {
             let label = if t.find.count() == 0 {
-                String::from("Nenhum")
+                String::from(t!("web.find.none"))
             } else {
-                alloc::format!("{} de {}", t.find.position(), t.find.count())
+                t!(
+                    "web.find.count",
+                    n = t.find.position(),
+                    total = t.find.count()
+                )
             };
             let col = if t.find.count() == 0 {
                 theme::danger()
@@ -1157,33 +1166,24 @@ impl Desktop {
         let mut rows: Vec<(&str, String)> = Vec::new();
         if let Some(ci) = &t.cert {
             if !ci.issuer.is_empty() {
-                rows.push(("Emissor", ci.issuer.clone()));
+                rows.push((t!("web.sec.issuer"), ci.issuer.clone()));
             }
             rows.push((
-                "Válido de",
+                t!("web.sec.valid_from"),
                 osjeff_core::browser::cert::format_date(ci.not_before),
             ));
             rows.push((
-                "Válido até",
+                t!("web.sec.valid_to"),
                 osjeff_core::browser::cert::format_date(ci.not_after),
             ));
         }
         let (verify, para): (&str, &str) = match sec {
-            Security::HttpsVerified => (
-                "Cadeia, nome e assinatura conferidos",
-                "A conexão é criptografada e a identidade do site foi comprovada.",
-            ),
-            Security::HttpsInvalid => (
-                "Não verificado",
-                "Você escolheu continuar com este site nesta sessão. Não digite senhas nem dados pessoais.",
-            ),
-            _ => (
-                "",
-                "Esta conexão não é criptografada: outras pessoas na rede podem ver o que você envia e recebe.",
-            ),
+            Security::HttpsVerified => (t!("web.sec.verified_how"), t!("web.sec.verified_note")),
+            Security::HttpsInvalid => (t!("web.sec.unverified"), t!("web.sec.unverified_note")),
+            _ => ("", t!("web.sec.http_note")),
         };
         if !verify.is_empty() {
-            rows.push(("Verificação", String::from(verify)));
+            rows.push((t!("web.sec.verification"), String::from(verify)));
         }
         let inner_w = geo::browser_popover(ch.bar, win, 0).w - 32;
         let lines = text::wrap(para, FOOTNOTE, Weight::Regular, inner_w, 4).len() as i32;
@@ -1225,9 +1225,9 @@ impl Desktop {
         c.fill_rrect(icon, 18, Corner::Circle, col, 44);
         ui::draw_glyph(c, glyph, icon.x + 10, icon.y + 10, 16, argb(col, 255));
         let heading = match sec {
-            Security::HttpsVerified => "Conexão segura",
-            Security::HttpsInvalid => "Certificado inválido",
-            _ => "Conexão não segura",
+            Security::HttpsVerified => t!("web.sec.secure"),
+            Security::HttpsInvalid => t!("web.sec.invalid"),
+            _ => t!("web.sec.not_encrypted"),
         };
         text::draw(
             c,

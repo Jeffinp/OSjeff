@@ -15,6 +15,8 @@ pub mod tabs;
 pub use cert::CertInfo;
 
 use crate::Key;
+use crate::i18n::{self, Lang};
+use crate::tk;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -69,15 +71,20 @@ pub enum Security {
 }
 
 impl Security {
-    /// Short label for the address bar, `None` when there is nothing to say.
-    /// ASCII only (the bitmap font has no accents).
-    pub fn label(self) -> Option<&'static str> {
+    /// Catalog key of the short label for the address bar, `None` when there is nothing to
+    /// say.
+    pub fn label_key(self) -> Option<&'static str> {
         match self {
             Security::None => None,
-            Security::Http => Some("Não seguro"),
-            Security::HttpsVerified => Some("Conexão segura"),
-            Security::HttpsInvalid => Some("Certificado inválido"),
+            Security::Http => Some(tk!("web.sec.insecure")),
+            Security::HttpsVerified => Some(tk!("web.sec.secure")),
+            Security::HttpsInvalid => Some(tk!("web.sec.invalid")),
         }
+    }
+
+    /// The label in the language in effect.
+    pub fn label(self) -> Option<&'static str> {
+        self.label_key().map(crate::i18n::tr)
     }
 }
 
@@ -120,23 +127,6 @@ pub enum FailReason {
 }
 
 impl FailReason {
-    /// One-line message for the page area.
-    pub fn message(self) -> &'static str {
-        match self {
-            FailReason::Network => "Falha ao carregar a página.",
-            FailReason::Dns => "Nome não encontrado: confira o endereço (DNS).",
-            FailReason::Refused => "Conexão recusada pelo servidor.",
-            FailReason::Timeout => "Tempo esgotado: o servidor não respondeu.",
-            FailReason::Tls => "Falha na negociação TLS (conexão segura).",
-            FailReason::Cert(e) => e.page_message(),
-            FailReason::RedirectDowngrade => "Bloqueado: redirecionamento de HTTPS para HTTP.",
-            FailReason::RedirectInvalid => "Redirecionamento inválido.",
-            FailReason::RedirectLoop => "Redirecionamento em ciclo.",
-            FailReason::TooManyRedirects => "Redirecionamentos demais.",
-            FailReason::WorkerDied => "O carregador de páginas falhou (thread encerrada).",
-        }
-    }
-
     /// Map a refused redirect onto the reason shown to the user.
     pub fn from_redirect(e: crate::redirect::RedirectError) -> Self {
         use crate::redirect::RedirectError as E;
@@ -452,14 +442,19 @@ pub enum PageNote {
 }
 
 impl PageNote {
-    /// Banner text.
-    pub fn label(self) -> &'static str {
+    /// Catalog key of the banner text.
+    pub fn label_key(self) -> &'static str {
         match self {
-            PageNote::Truncated => "Página cortada no limite de tamanho",
-            PageNote::Incomplete => "Página incompleta: a conexão foi interrompida",
-            PageNote::Damaged => "Página parcial: os dados recebidos estão corrompidos",
-            PageNote::BadChecksum => "A verificação da página falhou",
+            PageNote::Truncated => tk!("web.note.truncated"),
+            PageNote::Incomplete => tk!("web.note.incomplete"),
+            PageNote::Damaged => tk!("web.note.damaged"),
+            PageNote::BadChecksum => tk!("web.note.checksum"),
         }
+    }
+
+    /// Banner text in the language in effect.
+    pub fn label(self) -> &'static str {
+        i18n::tr(self.label_key())
     }
 }
 
@@ -522,18 +517,15 @@ pub fn page_body_partial(resp: &[u8], cut: bool) -> PageBody {
     match body_partial(resp, cut) {
         Ok(p) => p,
         Err(e) => {
-            let msg: &[u8] = match e {
-                crate::gzip::EncodingError::TooLarge => {
-                    "<p>Página descompactada grande demais.</p>".as_bytes()
-                }
+            let key = match e {
+                crate::gzip::EncodingError::TooLarge => tk!("web.body.too_big"),
                 _ if content_encodings(resp).contains(&crate::gzip::Encoding::Unsupported) => {
-                    "<p>Codificação de conteúdo não suportada.</p>".as_bytes()
+                    tk!("web.body.encoding")
                 }
-                _ => "<p>Falha ao descompactar a página (dados corrompidos ou cortados).</p>"
-                    .as_bytes(),
+                _ => tk!("web.body.damaged"),
             };
             PageBody {
-                body: msg.to_vec(),
+                body: alloc::format!("<p>{}</p>", html_escape(i18n::tr(key))).into_bytes(),
                 note: cut.then_some(PageNote::Truncated),
             }
         }
@@ -1064,13 +1056,60 @@ impl InsecureHosts {
     }
 }
 
-/// Quick-link shortcuts shown on the start page (label, URL). All chosen to
+/// The `Accept-Language` value the browser sends: the language of the interface first, then
+/// English (`pt-BR,pt;q=0.9,en;q=0.8` or `en;q=1`). It is a catalog entry, so a new language
+/// brings its own.
+pub fn accept_language(lang: Lang) -> &'static str {
+    i18n::tr_in(lang, tk!("web.accept_language"))
+}
+
+/// Append an HTTP/1.1 `GET` request to `req` (`Connection: close`: one request per
+/// connection; shared by the plain and the TLS paths), asking for the page in `lang`.
+pub fn build_get_request(
+    req: &mut Vec<u8>,
+    lang: Lang,
+    host: &str,
+    path: &str,
+    port: u16,
+    tls: bool,
+) {
+    req.extend_from_slice(b"GET ");
+    req.extend_from_slice(path.as_bytes());
+    req.extend_from_slice(b" HTTP/1.1\r\nHost: ");
+    req.extend_from_slice(host.as_bytes());
+    let default_port = if tls { 443 } else { 80 };
+    if port != default_port {
+        req.push(b':');
+        let mut digits = [0u8; 5];
+        let mut n = port;
+        let mut i = digits.len();
+        loop {
+            i -= 1;
+            digits[i] = b'0' + (n % 10) as u8;
+            n /= 10;
+            if n == 0 {
+                break;
+            }
+        }
+        req.extend_from_slice(&digits[i..]);
+    }
+    req.extend_from_slice(
+        b"\r\nUser-Agent: OSjeff/1.0\r\nAccept: text/html, image/png, image/bmp, */*;q=0.1\r\nAccept-Language: ",
+    );
+    req.extend_from_slice(accept_language(lang).as_bytes());
+    req.extend_from_slice(b"\r\nAccept-Encoding: gzip, deflate\r\nConnection: close\r\n\r\n");
+}
+
+/// Quick-link shortcuts shown on the start page (label key, URL). All chosen to
 /// accept our P-256 TLS 1.3 handshake.
 pub const QUICK_LINKS: [(&str, &str); 4] = [
-    ("Bing", "www.bing.com"),
-    ("Wikipedia", "en.wikipedia.org/wiki/Operating_system"),
-    ("Cloudflare", "www.cloudflare.com"),
-    ("Exemplo", "example.com"),
+    (tk!("web.quick.bing"), "www.bing.com"),
+    (
+        tk!("web.quick.wikipedia"),
+        "en.wikipedia.org/wiki/Operating_system",
+    ),
+    (tk!("web.quick.cloudflare"), "www.cloudflare.com"),
+    (tk!("web.quick.example"), "example.com"),
 ];
 
 impl Default for Browser {
@@ -1548,25 +1587,30 @@ impl Browser {
         if !core::mem::take(&mut self.internal_ready) {
             return None;
         }
+        self.internal_html()
+    }
+
+    /// The HTML of the internal page on screen, built again in the language in effect (the
+    /// kernel calls it when the language changes); `None` when no internal page is shown.
+    pub fn internal_html(&self) -> Option<Vec<u8>> {
+        if !self.internal {
+            return None;
+        }
+        self.internal_html_in(i18n::lang())
+    }
+
+    /// [`Self::internal_html`] in `lang`.
+    pub fn internal_html_in(&self, lang: Lang) -> Option<Vec<u8>> {
+        if !self.internal {
+            return None;
+        }
         let name = String::from_utf8_lossy(self.nav_url()).to_ascii_lowercase();
         let name = name.trim_start_matches("osjeff://");
         Some(match name {
-            "favoritos" => self.page_bookmarks(),
-            "historico" => self.page_history(),
-            _ => self.page_about(),
+            "favoritos" => pages::bookmarks_in(lang, &self.bookmarks.borrow().all()),
+            "historico" => pages::history_in(lang, &self.history.urls),
+            _ => pages::about_in(lang),
         })
-    }
-
-    fn page_bookmarks(&self) -> Vec<u8> {
-        pages::bookmarks(&self.bookmarks.borrow().all())
-    }
-
-    fn page_history(&self) -> Vec<u8> {
-        pages::history(&self.history.urls)
-    }
-
-    fn page_about(&self) -> Vec<u8> {
-        pages::about()
     }
 
     /// Remember the `<title>` of the page on screen (for favourites and the window title).
@@ -2058,6 +2102,7 @@ mod tests {
         let _ = b.take_request();
         b.loaded_with(Conn::Verified, false);
         assert_eq!(b.security(), Security::HttpsVerified);
+        assert_eq!(b.security().label_key(), Some("web.sec.secure"));
         assert_eq!(b.security().label(), Some("Conexão segura"));
         assert!(!b.truncated());
         // A bare host is normalised to https: a new load drops the padlock at once.
@@ -2066,6 +2111,7 @@ mod tests {
         // Plain http says so.
         b.open(b"http://example.com");
         assert_eq!(b.security(), Security::Http);
+        assert_eq!(b.security().label_key(), Some("web.sec.insecure"));
         assert_eq!(b.security().label(), Some("Não seguro"));
     }
 
@@ -2083,6 +2129,7 @@ mod tests {
         let _ = b.take_request();
         b.loaded_with(Conn::Insecure, false);
         assert_eq!(b.security(), Security::HttpsInvalid);
+        assert_eq!(b.security().label_key(), Some("web.sec.invalid"));
         assert_eq!(b.security().label(), Some("Certificado inválido"));
         // The page-load entry points that do not carry a connection state never
         // produce a padlock.
@@ -2112,7 +2159,10 @@ mod tests {
         assert_eq!(b.insecure_host(), None);
         b.fail_with(FailReason::Cert(CertError::Expired));
         assert!(b.can_continue_insecure());
-        assert_eq!(b.fail_reason().message(), "Certificado inválido: expirado");
+        assert_eq!(
+            errors::describe_in(Lang::Pt, b.fail_reason()).cause,
+            "O certificado do site expirou."
+        );
         b.continue_insecure();
         assert_eq!(b.status(), Status::Loading);
         assert_eq!(
@@ -2190,16 +2240,19 @@ mod tests {
             FailReason::Cert(CertError::Expired),
         ];
         for (i, a) in causes.iter().enumerate() {
-            // Latin-1 at most: the interface font covers Portuguese accents.
-            assert!(a.message().chars().all(|c| (c as u32) < 0x100));
-            for b in &causes[i + 1..] {
-                assert_ne!(a.message(), b.message());
+            for l in Lang::ALL {
+                let (ta, tb) = (errors::describe_in(l, *a), a);
+                // Latin-1 at most: the interface font covers Portuguese accents.
+                assert!(ta.cause.chars().all(|c| (c as u32) < 0x100));
+                assert!(ta.title.chars().all(|c| (c as u32) < 0x100));
+                for b in &causes[i + 1..] {
+                    assert_ne!(ta.cause, errors::describe_in(l, *b).cause, "{tb:?} {b:?}");
+                }
             }
         }
-        assert!(
-            FailReason::Cert(CertError::NameMismatch)
-                .message()
-                .starts_with("Certificado inválido:")
+        assert_eq!(
+            errors::describe_in(Lang::En, FailReason::Cert(CertError::NameMismatch)).art,
+            errors::ErrorArt::Certificate
         );
     }
 
@@ -2218,7 +2271,16 @@ mod tests {
         b.fail_with(FailReason::RedirectDowngrade);
         assert_eq!(b.status(), Status::Error);
         assert_eq!(b.fail_reason(), FailReason::RedirectDowngrade);
-        assert!(b.fail_reason().message().contains("HTTPS"));
+        assert!(
+            errors::describe_in(Lang::Pt, b.fail_reason())
+                .cause
+                .contains("conexão segura")
+        );
+        assert!(
+            errors::describe_in(Lang::En, b.fail_reason())
+                .cause
+                .contains("secure connection")
+        );
         b.fail();
         assert_eq!(b.fail_reason(), FailReason::Network);
         b.go_home();
@@ -2236,7 +2298,12 @@ mod tests {
                 assert_ne!(a, b);
             }
             // Latin-1 at most: the interface font covers Portuguese accents.
-            assert!(a.message().chars().all(|c| (c as u32) < 0x100));
+            assert!(
+                errors::describe_in(Lang::Pt, *a)
+                    .cause
+                    .chars()
+                    .all(|c| (c as u32) < 0x100)
+            );
         }
         assert_eq!(
             FailReason::from_redirect(E::Downgrade),
@@ -2253,7 +2320,6 @@ mod tests {
         assert_eq!(b.status(), Status::Error);
         assert_eq!(b.fail_reason(), FailReason::WorkerDied);
         assert_ne!(FailReason::WorkerDied, FailReason::Network);
-        assert!(!FailReason::WorkerDied.message().is_empty());
         // The next navigation starts clean.
         b.open(b"example.org");
         assert_eq!(b.status(), Status::Loading);
@@ -2323,7 +2389,7 @@ mod tests {
         b.back();
         assert_eq!(b.take_request(), Some(&b"https://b.example/"[..]));
         b.loaded_with(Conn::Verified, false);
-        assert_eq!(b.history_len(), 3, "back does not add an entry");
+        assert_eq!(b.history_len(), 3, "going back adds no entry");
         assert!(b.can_back() && b.can_forward());
         b.back();
         assert_eq!(b.take_request(), Some(&b"https://a.example/"[..]));

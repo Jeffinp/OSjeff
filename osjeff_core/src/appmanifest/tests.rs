@@ -256,7 +256,7 @@ fn hostile_ids_in_manifest() {
 
 #[test]
 fn names() {
-    assert!(parse("id=a\nname=Relogio 2\nversion=1.0.0").is_ok());
+    assert!(parse("id=a\nname=Clock 2\nversion=1.0.0").is_ok());
     for n in [
         "",
         " lead",

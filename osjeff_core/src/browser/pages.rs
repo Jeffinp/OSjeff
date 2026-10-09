@@ -1,12 +1,18 @@
 //! The browser's own pages (`osjeff://favoritos`, `historico`, `sobre`) as HTML + CSS that goes
 //! through the same engine as any site. They are always light: the page area is never
 //! dark-inverted, only the chrome follows the system appearance.
+//!
+//! Their words come from the catalog (`web.page.*`, `web.key.*`) in the language asked for
+//! (`*_in`) and `<html lang>` says which; the kernel builds them again when the language
+//! changes.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::tabs::{host_of, tab_badge, tab_title};
+use super::tabs::{host_of, tab_badge, tab_title_in};
 use super::{Bookmark, html_escape};
+use crate::i18n::{self, Lang, tr_in};
+use crate::tk;
 
 /// How many history rows the page shows.
 const HISTORY_ROWS: usize = 200;
@@ -35,21 +41,25 @@ code{background:#f0f0f5;border-radius:5px;padding:1px 6px;font-size:13px}\
 .note{background:#f5f5fa;border-radius:12px;padding:12px 16px;margin:20px 0 0 0;color:#3a3a3f}";
 
 /// Header and the row of links to the other pages; `on` marks the one shown.
-fn open(title: &str, on: &str, heading: &str, sub: &str) -> String {
-    let mut h = String::from("<html><head><meta charset=\"utf-8\"><title>");
+fn open(lang: Lang, title: &str, on: &str, heading: &str, sub: &str) -> String {
+    let mut h = alloc::format!(
+        "<html lang=\"{}\"><head><meta charset=\"utf-8\"><title>",
+        lang.code()
+    );
     h.push_str(&html_escape(title));
     h.push_str("</title><style>");
     h.push_str(CSS);
     h.push_str("</style></head><body><div class=\"w\"><div class=\"nav\">");
-    for (name, label) in [
-        ("inicio", "Início"),
-        ("favoritos", "Favoritos"),
-        ("historico", "Histórico"),
-        ("sobre", "Sobre"),
+    for (name, key) in [
+        ("inicio", tk!("web.page.home")),
+        ("favoritos", tk!("web.page.bookmarks")),
+        ("historico", tk!("web.page.history")),
+        ("sobre", tk!("web.page.about")),
     ] {
         let cls = if name == on { " class=\"on\"" } else { "" };
         h.push_str(&alloc::format!(
-            "<a{cls} href=\"osjeff://{name}\">{label}</a>"
+            "<a{cls} href=\"osjeff://{name}\">{}</a>",
+            html_escape(tr_in(lang, key))
         ));
     }
     h.push_str("</div><h1>");
@@ -70,23 +80,32 @@ fn close(mut h: String) -> Vec<u8> {
 
 /// `osjeff://favoritos`: every favourite with a letter tile and a remove link.
 pub fn bookmarks(all: &[Bookmark]) -> Vec<u8> {
-    let sub = match all.len() {
-        0 => "",
-        1 => "1 favorito",
-        n => &alloc::format!("{n} favoritos"),
+    bookmarks_in(i18n::lang(), all)
+}
+
+/// [`bookmarks`] in `lang`.
+pub fn bookmarks_in(lang: Lang, all: &[Bookmark]) -> Vec<u8> {
+    let sub = if all.is_empty() {
+        String::new()
+    } else {
+        i18n::plural_fmt_in(lang, "web.page.bookmarks_count", all.len() as u64, &[])
     };
-    let mut h = open("Favoritos", "favoritos", "Favoritos", sub);
+    let title = tr_in(lang, tk!("web.page.bookmarks"));
+    let mut h = open(lang, title, "favoritos", title, &sub);
     if all.is_empty() {
-        h.push_str("<p class=\"empty\">Nenhum favorito ainda. Em uma página, use Ctrl+D ou a estrela da barra.</p>");
+        h.push_str("<p class=\"empty\">");
+        h.push_str(&html_escape(tr_in(lang, tk!("web.page.bookmarks_empty"))));
+        h.push_str("</p>");
         return close(h);
     }
     h.push_str("<table class=\"rows\">");
     for (i, b) in all.iter().enumerate() {
-        let title = tab_title(&b.title, &b.url);
+        let title = tab_title_in(lang, &b.title, &b.url);
         h.push_str(&alloc::format!(
             "<tr><td class=\"ti\"><div class=\"tile\">{badge}</div></td>\
              <td><a class=\"t\" href=\"{u}\">{t}</a><br><span class=\"u\">{u}</span></td>\
-             <td align=\"right\"><a class=\"rm\" href=\"osjeff://favoritos?rm={i}\">Remover</a></td></tr>",
+             <td align=\"right\"><a class=\"rm\" href=\"osjeff://favoritos?rm={i}\">{rm}</a></td></tr>",
+            rm = html_escape(tr_in(lang, tk!("web.page.remove"))),
             badge = tab_badge(&b.title, &b.url),
             u = html_escape(&b.url),
             t = html_escape(&title),
@@ -99,6 +118,11 @@ pub fn bookmarks(all: &[Bookmark]) -> Vec<u8> {
 /// `osjeff://historico`: addresses visited, newest first, each once, without the browser's
 /// own pages. `urls` is in visiting order.
 pub fn history(urls: &[Vec<u8>]) -> Vec<u8> {
+    history_in(i18n::lang(), urls)
+}
+
+/// [`history`] in `lang`.
+pub fn history_in(lang: Lang, urls: &[Vec<u8>]) -> Vec<u8> {
     let mut seen: Vec<String> = Vec::new();
     for u in urls.iter().rev() {
         let u = String::from_utf8_lossy(u).into_owned();
@@ -110,14 +134,17 @@ pub fn history(urls: &[Vec<u8>]) -> Vec<u8> {
             break;
         }
     }
-    let sub = match seen.len() {
-        0 => String::new(),
-        1 => String::from("1 página"),
-        n => alloc::format!("{n} páginas"),
+    let sub = if seen.is_empty() {
+        String::new()
+    } else {
+        i18n::plural_fmt_in(lang, "web.page.history_count", seen.len() as u64, &[])
     };
-    let mut h = open("Histórico", "historico", "Histórico", &sub);
+    let title = tr_in(lang, tk!("web.page.history"));
+    let mut h = open(lang, title, "historico", title, &sub);
     if seen.is_empty() {
-        h.push_str("<p class=\"empty\">Nada visitado ainda.</p>");
+        h.push_str("<p class=\"empty\">");
+        h.push_str(&html_escape(tr_in(lang, tk!("web.page.history_empty"))));
+        h.push_str("</p>");
         return close(h);
     }
     h.push_str("<table class=\"rows\">");
@@ -134,42 +161,53 @@ pub fn history(urls: &[Vec<u8>]) -> Vec<u8> {
 
 /// `osjeff://sobre`: what the browser does and the shortcuts it answers to.
 pub fn about() -> Vec<u8> {
+    about_in(i18n::lang())
+}
+
+/// [`about`] in `lang`.
+pub fn about_in(lang: Lang) -> Vec<u8> {
     let mut h = open(
-        "Sobre o Navegador",
+        lang,
+        tr_in(lang, tk!("web.tab.about")),
         "sobre",
-        "Navegador",
-        "O navegador do OSjeff.",
+        tr_in(lang, tk!("app.browser")),
+        tr_in(lang, tk!("web.page.about_sub")),
     );
-    h.push_str(
-        "<p>Páginas HTML e CSS com tabelas, listas, imagens e formulários. Sem scripts. \
-         HTTPS com TLS 1.3: o cadeado só aparece quando o certificado foi verificado.</p>",
-    );
-    h.push_str("<h2>Atalhos</h2><table class=\"rows keys\">");
+    h.push_str("<p>");
+    h.push_str(&html_escape(tr_in(lang, tk!("web.page.about_body"))));
+    h.push_str("</p><h2>");
+    h.push_str(&html_escape(tr_in(lang, tk!("web.page.shortcuts"))));
+    h.push_str("</h2><table class=\"rows keys\">");
     for (k, what) in [
-        ("Ctrl+T", "Nova aba"),
-        ("Ctrl+W", "Fechar aba"),
-        ("Ctrl+Tab", "Próxima aba"),
-        ("Ctrl+1 a 9", "Ir para a aba (9 é a última)"),
-        ("Ctrl+L", "Endereço"),
-        ("Ctrl+D", "Adicionar aos favoritos"),
-        ("Ctrl+F", "Buscar na página"),
-        ("Ctrl++ / Ctrl+- / Ctrl+0", "Zoom"),
-        ("Alt+← / Alt+→", "Voltar e avançar"),
-        ("Ctrl+R", "Recarregar"),
-        ("Esc", "Parar o carregamento"),
-        ("Espaço, PgDn, Home, End", "Rolar"),
+        ("Ctrl+T", tk!("web.key.new_tab")),
+        ("Ctrl+W", tk!("web.key.close_tab")),
+        ("Ctrl+Tab", tk!("web.key.next_tab")),
+        (tk!("web.key.goto_tab_keys"), tk!("web.key.goto_tab")),
+        ("Ctrl+L", tk!("web.key.address")),
+        ("Ctrl+D", tk!("web.key.bookmark")),
+        ("Ctrl+F", tk!("web.key.find")),
+        ("Ctrl++ / Ctrl+- / Ctrl+0", tk!("web.key.zoom")),
+        ("Alt+\u{2190} / Alt+\u{2192}", tk!("web.key.history")),
+        ("Ctrl+R", tk!("web.key.reload")),
+        ("Esc", tk!("web.key.stop")),
+        (tk!("web.key.scroll_keys"), tk!("web.key.scroll")),
     ] {
+        // A key that is itself a catalog key (`web.key.*`) is a phrase; the rest are keystrokes.
+        let k = if k.starts_with("web.") {
+            tr_in(lang, k)
+        } else {
+            k
+        };
         h.push_str(&alloc::format!(
             "<tr><td class=\"k\"><code>{}</code></td><td>{}</td></tr>",
             html_escape(k),
-            html_escape(what)
+            html_escape(tr_in(lang, what))
         ));
     }
     h.push_str("</table>");
-    h.push_str(
-        "<p class=\"note\">Fontes de outros alfabetos, emojis e escrita da direita para a \
-         esquerda aparecem como quadros vazios.</p>",
-    );
+    h.push_str("<p class=\"note\">");
+    h.push_str(&html_escape(tr_in(lang, tk!("web.page.note"))));
+    h.push_str("</p>");
     close(h)
 }
 
@@ -183,11 +221,64 @@ mod tests {
 
     #[test]
     fn about_names_neither_language_nor_toolchain() {
-        let h = text(about()).to_lowercase();
-        for w in ["rust", "cargo", "llvm", "nightly", "crate", "no_std"] {
-            assert!(!h.contains(w), "{w}");
+        for l in Lang::ALL {
+            let h = text(about_in(l)).to_lowercase();
+            for w in ["rust", "cargo", "llvm", "nightly", "crate", "no_std"] {
+                assert!(!h.contains(w), "{w}");
+            }
         }
-        assert!(h.contains("atalhos"));
+        assert!(text(about_in(Lang::Pt)).contains("Atalhos"));
+        assert!(text(about_in(Lang::En)).contains("Shortcuts"));
+    }
+
+    #[test]
+    fn pages_say_their_language_and_use_it_everywhere() {
+        let pt = text(about_in(Lang::Pt));
+        let en = text(about_in(Lang::En));
+        assert!(pt.starts_with("<html lang=\"pt-BR\">"), "{pt}");
+        assert!(en.starts_with("<html lang=\"en\">"), "{en}");
+        // Portuguese has its accents, English has no Portuguese in it.
+        for w in ["Início", "Histórico", "Próxima aba", "Endereço"] {
+            assert!(pt.contains(w), "{w}");
+        }
+        assert!(en.contains("Next tab") && en.contains("Ctrl+1 to 9"));
+        assert!(!en.contains("Próxima") && !en.contains("Atalhos"));
+        assert!(pt.contains("Ctrl+1 a 9") && pt.contains("Espaço, PgDn"));
+        // No missing key shows up as raw text.
+        assert!(!pt.contains("web.") && !en.contains("web."));
+    }
+
+    #[test]
+    fn bookmark_and_history_pages_count_with_the_plural_of_the_language() {
+        let one = [Bookmark {
+            url: String::from("http://a.test/"),
+            title: String::new(),
+        }];
+        let two = [
+            one[0].clone(),
+            Bookmark {
+                url: String::from("http://b.test/"),
+                title: String::from("B"),
+            },
+        ];
+        assert!(text(bookmarks_in(Lang::Pt, &one)).contains("1 favorito<"));
+        assert!(text(bookmarks_in(Lang::Pt, &two)).contains("2 favoritos<"));
+        assert!(text(bookmarks_in(Lang::En, &one)).contains("1 bookmark<"));
+        assert!(text(bookmarks_in(Lang::En, &two)).contains("2 bookmarks<"));
+        assert!(text(bookmarks_in(Lang::En, &[])).contains("No bookmarks yet"));
+        assert!(text(bookmarks_in(Lang::Pt, &[])).contains("Nenhum favorito ainda"));
+        assert!(text(bookmarks_in(Lang::En, &one)).contains(">Remove<"));
+        assert!(text(bookmarks_in(Lang::Pt, &one)).contains(">Remover<"));
+        let urls: Vec<Vec<u8>> = ["http://one.test/", "http://two.test/"]
+            .iter()
+            .map(|s| s.as_bytes().to_vec())
+            .collect();
+        assert!(text(history_in(Lang::En, &urls)).contains("2 pages<"));
+        assert!(text(history_in(Lang::Pt, &urls)).contains("2 páginas<"));
+        assert!(text(history_in(Lang::En, &[])).contains("Nothing visited yet."));
+        assert!(text(history_in(Lang::Pt, &[])).contains("Nada visitado ainda."));
+        assert!(text(history_in(Lang::En, &urls)).contains("<title>History</title>"));
+        assert!(text(history_in(Lang::Pt, &urls)).contains("<title>Histórico</title>"));
     }
 
     #[test]

@@ -1,7 +1,11 @@
 //! What the browser tells the user when a page could not be opened: a short title, one line
-//! about the cause and which picture to show. Plain Portuguese: no protocol or library talk.
+//! about the cause and which picture to show. Plain words: no protocol or library talk. The
+//! texts come from the catalog (`web.err.*`), so an error page already on screen follows the
+//! language.
 
 use super::FailReason;
+use crate::i18n::{self, Lang};
+use crate::tk;
 use crate::tlsverify::CertError;
 
 /// Which illustration an error page shows.
@@ -28,85 +32,105 @@ pub struct ErrorInfo {
     pub cause: &'static str,
 }
 
-/// One line about why the certificate was refused.
-pub fn cert_cause(e: CertError) -> &'static str {
+/// Catalog key of the line about why the certificate was refused.
+pub fn cert_cause_key(e: CertError) -> &'static str {
     match e {
-        CertError::Expired => "O certificado do site expirou.",
-        CertError::NotYetValid => "O certificado do site ainda não é válido.",
-        CertError::NameMismatch => "O certificado não vale para este endereço.",
-        CertError::SelfSigned => "O certificado foi emitido pelo próprio site.",
-        CertError::UnknownIssuer => "Quem emitiu o certificado não é confiável.",
-        CertError::BadSignature => "A assinatura do certificado não confere.",
-        CertError::ClockUnset => "A hora do sistema ainda não foi confirmada.",
-        CertError::BadEncoding | CertError::TooLarge => "O certificado do site está malformado.",
+        CertError::Expired => tk!("web.err.cert.expired"),
+        CertError::NotYetValid => tk!("web.err.cert.not_yet_valid"),
+        CertError::NameMismatch => tk!("web.err.cert.name_mismatch"),
+        CertError::SelfSigned => tk!("web.err.cert.self_signed"),
+        CertError::UnknownIssuer => tk!("web.err.cert.unknown_issuer"),
+        CertError::BadSignature => tk!("web.err.cert.bad_signature"),
+        CertError::ClockUnset => tk!("web.err.cert.clock_unset"),
+        CertError::BadEncoding | CertError::TooLarge => tk!("web.err.cert.malformed"),
         CertError::ChainTooLong | CertError::NotCa | CertError::Constraint => {
-            "A cadeia de certificados do site não é aceitável."
+            tk!("web.err.cert.chain")
         }
-        CertError::Unsupported => "O certificado usa um recurso que não é suportado.",
-        CertError::Other => "Não foi possível verificar o certificado do site.",
+        CertError::Unsupported => tk!("web.err.cert.unsupported"),
+        CertError::Other => tk!("web.err.cert.other"),
     }
 }
 
-/// The error page for a failed navigation.
-pub fn describe(reason: FailReason) -> ErrorInfo {
-    let (art, title, cause) = match reason {
+/// One line about why the certificate was refused, in the language in effect.
+pub fn cert_cause(e: CertError) -> &'static str {
+    i18n::tr(cert_cause_key(e))
+}
+
+/// The art and the catalog keys (title, cause) of a failed navigation.
+fn keys(reason: FailReason) -> (ErrorArt, &'static str, &'static str) {
+    match reason {
         FailReason::Network => (
             ErrorArt::Offline,
-            "Sem conexão",
-            "Confira a rede e tente de novo.",
+            tk!("web.err.network.title"),
+            tk!("web.err.network.cause"),
         ),
         FailReason::Dns => (
             ErrorArt::NotFound,
-            "Site não encontrado",
-            "Não achamos o servidor. Confira o endereço digitado.",
+            tk!("web.err.dns.title"),
+            tk!("web.err.dns.cause"),
         ),
         FailReason::Refused => (
             ErrorArt::Unreachable,
-            "Conexão recusada",
-            "O servidor não aceitou a conexão.",
+            tk!("web.err.refused.title"),
+            tk!("web.err.refused.cause"),
         ),
         FailReason::Timeout => (
             ErrorArt::Unreachable,
-            "Tempo esgotado",
-            "O servidor demorou demais para responder.",
+            tk!("web.err.timeout.title"),
+            tk!("web.err.timeout.cause"),
         ),
         FailReason::Tls => (
             ErrorArt::Blocked,
-            "Conexão segura recusada",
-            "Não foi possível abrir uma conexão segura com o site.",
+            tk!("web.err.tls.title"),
+            tk!("web.err.tls.cause"),
         ),
         FailReason::Cert(e) => (
             ErrorArt::Certificate,
-            "Esta conexão não é segura",
-            cert_cause(e),
+            tk!("web.err.cert.title"),
+            cert_cause_key(e),
         ),
         FailReason::RedirectDowngrade => (
             ErrorArt::Blocked,
-            "Redirecionamento bloqueado",
-            "O site tentou sair de uma conexão segura para uma sem proteção.",
+            tk!("web.err.downgrade.title"),
+            tk!("web.err.downgrade.cause"),
         ),
         FailReason::RedirectInvalid => (
             ErrorArt::Blocked,
-            "Redirecionamento inválido",
-            "O endereço para onde o site envia você não é válido.",
+            tk!("web.err.redirect_bad.title"),
+            tk!("web.err.redirect_bad.cause"),
         ),
         FailReason::RedirectLoop => (
             ErrorArt::Blocked,
-            "Redirecionamento em ciclo",
-            "O site volta sempre para um endereço já visitado.",
+            tk!("web.err.redirect_loop.title"),
+            tk!("web.err.redirect_loop.cause"),
         ),
         FailReason::TooManyRedirects => (
             ErrorArt::Blocked,
-            "Redirecionamentos demais",
-            "O site redirecionou mais vezes do que o permitido.",
+            tk!("web.err.too_many.title"),
+            tk!("web.err.too_many.cause"),
         ),
         FailReason::WorkerDied => (
             ErrorArt::Offline,
-            "Carregador parado",
-            "O carregador de páginas parou de responder.",
+            tk!("web.err.worker.title"),
+            tk!("web.err.worker.cause"),
         ),
-    };
-    ErrorInfo { art, title, cause }
+    }
+}
+
+/// The error page for a failed navigation, in `lang`.
+pub fn describe_in(lang: Lang, reason: FailReason) -> ErrorInfo {
+    let (art, title, cause) = keys(reason);
+    ErrorInfo {
+        art,
+        title: i18n::tr_in(lang, title),
+        cause: i18n::tr_in(lang, cause),
+    }
+}
+
+/// The error page for a failed navigation, in the language in effect (ask again at every
+/// frame: a page already on screen follows a language change).
+pub fn describe(reason: FailReason) -> ErrorInfo {
+    describe_in(i18n::lang(), reason)
 }
 
 #[cfg(test)]
@@ -151,34 +175,67 @@ mod tests {
     }
 
     #[test]
-    fn every_failure_has_a_short_plain_text() {
-        for r in all_reasons() {
-            let i = describe(r);
-            assert!(
-                !i.title.is_empty() && i.title.chars().count() <= 32,
-                "{r:?}"
-            );
-            assert!(
-                i.cause.ends_with('.') && i.cause.chars().count() <= 70,
-                "{r:?}"
-            );
-            // User-facing text never talks about how the system is built.
-            for word in ["TLS", "DNS", "Rust", "kernel", "thread", "x509", "SNTP"] {
+    fn every_failure_has_a_short_plain_text_in_both_languages() {
+        for l in Lang::ALL {
+            for r in all_reasons() {
+                let i = describe_in(l, r);
                 assert!(
-                    !i.title.contains(word) && !i.cause.contains(word),
-                    "{r:?}: {word}"
+                    !i.title.is_empty() && i.title.chars().count() <= 32,
+                    "{l:?} {r:?}"
                 );
+                assert!(
+                    i.cause.ends_with('.') && i.cause.chars().count() <= 70,
+                    "{l:?} {r:?}: {}",
+                    i.cause
+                );
+                // A missing key would show up as the key itself.
+                assert!(!i.title.starts_with("web.") && !i.cause.starts_with("web."));
+                // User-facing text never talks about how the system is built.
+                for word in ["TLS", "DNS", "Rust", "kernel", "thread", "x509", "SNTP"] {
+                    assert!(
+                        !i.title.contains(word) && !i.cause.contains(word),
+                        "{r:?}: {word}"
+                    );
+                }
             }
         }
     }
 
     #[test]
+    fn the_two_languages_say_different_things_with_their_accents() {
+        let pt = describe_in(Lang::Pt, FailReason::Dns);
+        let en = describe_in(Lang::En, FailReason::Dns);
+        assert_eq!(pt.title, "Site não encontrado");
+        assert_eq!(en.title, "Site not found");
+        assert_ne!(pt.cause, en.cause);
+        assert_eq!(
+            describe_in(Lang::Pt, FailReason::Network).title,
+            "Sem conexão"
+        );
+        assert_eq!(
+            describe_in(Lang::En, FailReason::Network).title,
+            "No connection"
+        );
+    }
+
+    #[test]
     fn certificate_errors_get_the_certificate_picture_and_their_own_cause() {
-        let a = describe(FailReason::Cert(CertError::Expired));
-        let b = describe(FailReason::Cert(CertError::NameMismatch));
-        assert_eq!(a.art, ErrorArt::Certificate);
-        assert_ne!(a.cause, b.cause);
-        assert!(a.cause.contains("expirou"));
+        for l in Lang::ALL {
+            let a = describe_in(l, FailReason::Cert(CertError::Expired));
+            let b = describe_in(l, FailReason::Cert(CertError::NameMismatch));
+            assert_eq!(a.art, ErrorArt::Certificate);
+            assert_ne!(a.cause, b.cause);
+        }
+        assert!(
+            describe_in(Lang::Pt, FailReason::Cert(CertError::Expired))
+                .cause
+                .contains("expirou")
+        );
+        assert!(
+            describe_in(Lang::En, FailReason::Cert(CertError::Expired))
+                .cause
+                .contains("expired")
+        );
     }
 
     #[test]

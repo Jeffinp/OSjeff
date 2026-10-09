@@ -36,6 +36,10 @@ impl Desktop {
         self.editor_language_changed_all();
         // Tarefas keeps its rows (friendly names) and a footer message.
         self.tarefas_language_changed();
+        // The browser's own pages and the words baked into a laid-out page follow the language.
+        self.browser_language_changed();
+        // App names come from the manifests: ask them again in the new language.
+        self.refresh_catalog();
         // Transient layers hold strings: drop them (they are cheap to open again).
         let sh = &mut self.shell;
         sh.menu = None;

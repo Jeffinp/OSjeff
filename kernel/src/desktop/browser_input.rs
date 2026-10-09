@@ -10,6 +10,7 @@ use super::browser::{layout_browser, page_menu_row_at, start_items};
 use super::*;
 use osjeff_core::browser::Status;
 use osjeff_core::layout as geo;
+use osjeff_core::t;
 use osjeff_core::web::form::{FieldKind, FormOutcome};
 use osjeff_core::web::textops::Selection;
 
@@ -286,9 +287,9 @@ impl Desktop {
         let t = b.tabs.active_mut();
         let state = t.browser.toggle_bookmark();
         let msg = match state {
-            Some(true) => "Favorito adicionado",
-            Some(false) => "Favorito removido",
-            None => "Nada para guardar aqui",
+            Some(true) => t!("web.notice.bookmark_added"),
+            Some(false) => t!("web.notice.bookmark_removed"),
+            None => t!("web.notice.bookmark_none"),
         };
         t.star.retarget(
             f32::from(state == Some(true)),
@@ -325,7 +326,7 @@ impl Desktop {
                 t.forms.blur();
                 t.browser.set_bar_focus(false);
                 if !t.browser.open_link(href.as_bytes()) {
-                    b.say("O endereço do formulário não é válido");
+                    b.say(t!("web.form.bad_action"));
                 }
             }
             Err(e) => b.say(e.message()),
@@ -518,7 +519,7 @@ impl Desktop {
             // A click on link text: resolve it against the page and navigate.
             let href = href.as_bytes().to_vec();
             if !t.browser.open_link(&href) {
-                b.say("Esse link não pode ser aberto");
+                b.say(t!("web.notice.link_bad"));
             }
             false
         } else {
@@ -572,17 +573,17 @@ impl Desktop {
         let fav = t.browser.is_bookmarked();
         let can_mark = !t.browser.is_home();
         let items = alloc::vec![
-            (PageCmd::Copy, "Copiar", has_sel),
-            (PageCmd::OpenLink, "Abrir link", link.is_some()),
-            (PageCmd::CopyLink, "Copiar endereço do link", link.is_some()),
-            (PageCmd::Back, "Voltar", t.browser.can_back()),
-            (PageCmd::Reload, "Recarregar", !t.browser.is_home()),
+            (PageCmd::Copy, t!("menu.edit.copy"), has_sel),
+            (PageCmd::OpenLink, t!("web.menu.open_link"), link.is_some()),
+            (PageCmd::CopyLink, t!("web.menu.copy_link"), link.is_some()),
+            (PageCmd::Back, t!("web.menu.back"), t.browser.can_back()),
+            (PageCmd::Reload, t!("web.menu.reload"), !t.browser.is_home()),
             (
                 PageCmd::Bookmark,
                 if fav {
-                    "Remover dos favoritos"
+                    t!("web.menu.bookmark_remove")
                 } else {
-                    "Adicionar aos favoritos"
+                    t!("web.menu.bookmark_add")
                 },
                 can_mark,
             ),
@@ -611,7 +612,7 @@ impl Desktop {
                     let n = href.len().min(clipboard::CAP);
                     self.clipboard.set(&href.as_bytes()[..n]);
                     if let Some(b) = self.browser_state_mut(id) {
-                        b.say("Endereço copiado");
+                        b.say(t!("web.notice.copied"));
                     }
                 }
             }

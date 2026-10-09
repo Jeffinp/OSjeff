@@ -808,6 +808,10 @@ fn unaccented_literals(file: &str, src: &str, a: &Accents) -> Vec<String> {
             if !s.contains(' ') && !s.chars().next().is_some_and(char::is_uppercase) {
                 continue;
             }
+            // Style sheets are code: their selectors (`area`) are tag names, not words.
+            if s.contains('{') && s.contains('}') && s.contains(':') && s.contains(';') {
+                continue;
+            }
             for (w, r) in unaccented_words(a, &s) {
                 out.push(std::format!("{file}:{line}: {w:?} should be {r} in {s:?}"));
             }
