@@ -18,7 +18,7 @@ depois o que limita o que ele consegue fazer, depois polimento.
 | Plataforma de apps | Manifesto, ABI v2, sandbox de arquivos (`/data/<id>`), instalação em `/apps`, cotas de *fuel* e memória, `net_http_get` pela rede real com lista de hosts por app, dados persistentes no disco, vista "Apps" no gerenciador de arquivos |
 | Sistema | Configurações persistentes (cor, papel de parede, teclado ABNT2, fuso, relógio), log em anel + `/var/log`, monitor de recursos, notificações |
 | Desktop | Gerenciador de arquivos v2 (copiar/mover com progresso, lixeira), visualizador de imagens, terminal com shell completo e rede, editor com Abrir/Salvar e confirmação ao fechar, roda do mouse |
-| Qualidade | 2790 testes (de 189), cobertura de linhas 96,6% no `osjeff_core`, 15 alvos de fuzz; `unsafe` 100% documentado e imposto pelo lint; CI, `cargo deny`, `cargo audit`, harness de boot em QEMU, cenários de interface em `tools/perf/scen` |
+| Qualidade | 2846 testes (de 189), cobertura de linhas 96,6% no `osjeff_core`, 16 alvos de fuzz; `unsafe` 100% documentado e imposto pelo lint; CI, `cargo deny`, `cargo audit`, harness de boot em QEMU, cenários de interface em `tools/perf/scen` |
 
 ## Próximos passos, em ordem
 
