@@ -46,7 +46,7 @@ impl Desktop {
         }
         match &win.app.app {
             App::Editor(_) => self.editor_text_at(w, cx, cy),
-            App::Terminal(_) => win.rect.body().contains(cx, cy),
+            App::Terminal(_) => self.term_text_at(w, cx, cy),
             App::Browser(_) => BrowserChrome::of(win.rect).bar.contains(cx, cy),
             _ => false,
         }

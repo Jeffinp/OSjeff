@@ -74,6 +74,7 @@ pub mod style;
 pub mod sysif;
 pub mod sysmon;
 pub mod taskbar;
+pub mod termui;
 #[cfg(test)]
 pub(crate) mod testutil;
 pub mod textlayout;

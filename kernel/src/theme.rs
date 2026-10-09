@@ -103,9 +103,6 @@ pub const CLOSE: Color = Color::rgb(0xFF, 0x6B, 0x63);
 pub const SHADOW: Color = Color::rgb(0, 0, 0);
 pub const WHITE: Color = Color::rgb(0xFF, 0xFF, 0xFF);
 
-// Terminal palette.
-pub const TERM_PROMPT: Color = Color::rgb(0x18, 0xB8, 0x9A);
-
 // ---- semantic colours of the app interiors (they follow the appearance) ----
 
 /// Toolbars and headers inside a window: the unified window colour.
@@ -135,6 +132,7 @@ pub fn zebra() -> Color {
 }
 /// Hairlines and the outline of controls.
 #[inline]
+#[allow(dead_code)]
 pub fn line() -> Color {
     if dark() {
         Color::rgb(0x3E, 0x3E, 0x42)

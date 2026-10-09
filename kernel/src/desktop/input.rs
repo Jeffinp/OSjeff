@@ -668,7 +668,8 @@ impl Desktop {
         if let Some(w) = self.wm.get(top) {
             let text: &[u8] = match &w.app.app {
                 App::Terminal(t) => {
-                    typed = t.input().into_bytes();
+                    // The selected text, else the typed line.
+                    typed = t.selection_text().unwrap_or_else(|| t.input()).into_bytes();
                     &typed
                 }
                 App::Calculator(c) => c.display(),
@@ -1010,7 +1011,7 @@ impl Desktop {
             Kind::Gallery => self.gallery_click(w, rect, cx, cy),
             Kind::LogViewer => self.log_click(w, rect, cx, cy),
             Kind::Editor => self.editor_click(w, rect, cx, cy),
-            Kind::Terminal => {}
+            Kind::Terminal => self.term_click(w, rect, cx, cy),
         }
     }
 
@@ -1128,7 +1129,13 @@ impl Desktop {
                             },
                         });
                     }
-                    DragMode::Select => self.editor_drag(w, cx, cy),
+                    DragMode::Select => {
+                        if self.kind_of(w) == Some(Kind::Terminal) {
+                            self.term_drag(w, cx, cy);
+                        } else {
+                            self.editor_drag(w, cx, cy);
+                        }
+                    }
                     DragMode::Move { grab_dx, grab_dy } => {
                         self.wm.move_to(w, cx - grab_dx, cy - grab_dy, sw, sh);
                         self.update_snap_preview(w, cx, cy);

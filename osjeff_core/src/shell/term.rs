@@ -236,6 +236,11 @@ impl Term {
         self.screen.view(cols, rows, &text, cur)
     }
 
+    /// The prompt text of the live line (the window's tab shows its directory).
+    pub fn prompt(&self) -> &str {
+        self.line.prompt()
+    }
+
     /// Characters of the prompt on the live line (to colour them).
     pub fn prompt_chars(&self) -> usize {
         self.line.prompt().chars().count()
@@ -536,5 +541,13 @@ mod tests {
         r.run("echo done");
         assert!(!r.term.screen.is_scrolled());
         assert_eq!(r.rows()[r.rows().len() - 2], "done");
+    }
+
+    #[test]
+    fn the_prompt_can_be_read_back() {
+        let mut t = Term::new("/home $ ");
+        assert_eq!(t.prompt(), "/home $ ");
+        t.set_prompt("/ $ ");
+        assert_eq!(t.prompt(), "/ $ ");
     }
 }

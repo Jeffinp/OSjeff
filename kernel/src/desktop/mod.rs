@@ -527,7 +527,8 @@ impl Desktop {
             || (w.shown() && matches!(&w.app.app, App::Viewer(v) if v.animating()))
             || (w.shown()
                 && matches!(&w.app.app, App::Editor(e) if e.animating(self.focused() == Some(w.id))))
-            || (w.shown() && matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
+            || (w.shown()
+                && matches!(&w.app.app, App::Terminal(t) if t.term.is_running() || t.animating(self.focused() == Some(w.id))))
             || self.live_dynamic(w)
             || self.focus_busy(w.id)
     }
@@ -549,7 +550,7 @@ impl Desktop {
                         || matches!(&w.app.app, App::Files(f) if f.animating())
                         || matches!(&w.app.app, App::Viewer(v) if v.animating())
                         || matches!(&w.app.app, App::Editor(e) if e.animating(self.focused() == Some(w.id)))
-                        || matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
+                        || matches!(&w.app.app, App::Terminal(t) if t.term.is_running() || t.animating(self.focused() == Some(w.id))))
             })
     }
 
