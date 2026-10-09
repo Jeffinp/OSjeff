@@ -532,7 +532,7 @@ Agora há um caminho só, e a corretude é **testada contra um redesenho complet
 | Host, casos dirigidos | idem | sombra sob a vizinha, janela acima de uma animada, sombra cortada pela borda do dano, janela saindo da tela pelos quatro lados, maximizada, translúcida, dano de 1 pixel, áreas de trabalho, overlays, e os dois bugs reportados (Tarefas + Snake; Editor sobre Tarefas, com a sombra afirmada presente) |
 | Host, **testes de mutação** | idem (`tests/mutants.rs`) | quebra-se de propósito cada regra e exige-se que o teste diferencial falhe: esquecer o footprint antigo, as trocas de z-order, a camada removida, o `look`, o `dirty`; omitir a sombra do footprint; declarar os cantos arredondados como opacos; esquecer o `dirty`, o `look`, a invalidação do relógio. 11 mutantes, todos pegos |
 | Fuzz | `cd fuzz && cargo fuzz run compositor_ops -- -max_total_time=300 -print_final_stats=1` | o mesmo simulador dirigido pela entrada: incremental == completo, nenhuma escrita fora do footprint, quadro ocioso não planeja nada |
-| QEMU, oráculo | `tools/perf/scen/w27-oracle.sh` + `tools/perf/w27-oracle-check.sh <out>` | muitas janelas (Terminal, Editor, Calculadora, Arquivos, Ajustes, Snake, Tarefas): mover, redimensionar, focar, minimizar, restaurar, encaixar, maximizar, áreas de trabalho, popovers, menus, Alt+Tab. Depois de cada passo, `rest<N>.png` (o que o compositor incremental deixou) contra `clean<N>.png` (o mesmo estado em modo referência, Ctrl+Alt+R: todo quadro recomposto do zero). Conjunto A (janelas estáticas): 0 pixels. Conjunto B (`W27_SET=b`: Snake, um terminal executando `sleep`, Tarefas): duas fotos de verdade a mais dizem quais pixels mudam sozinhos e o verificador os ignora, e tolera 6000 pixels dos números das Tarefas (`W27_TOL`) |
+| QEMU, oráculo | `tools/perf/scen/w27-oracle.sh` + `tools/perf/w27-oracle-check.sh <out>` | muitas janelas (Terminal, Editor, Calculadora, Arquivos, Ajustes, Snake, Tarefas): mover, redimensionar, focar, minimizar, restaurar, encaixar, maximizar, áreas de trabalho, popovers, menus, Alt+Tab. Depois de cada passo, `rest<N>.png` (o que o compositor incremental deixou) contra `clean<N>.png` (o mesmo estado em modo referência, Ctrl+Alt+R: todo quadro recomposto do zero). Conjunto A (janelas estáticas): 0 pixels (até 200, o cursor de texto que pisca; `W27_TOL_CARET`). Conjunto C (`W27_SET=c`): o navegador com uma página longa (`osjeff://sobre`) rolada por teclas ao lado de um Editor, de um Terminal à frente e de Arquivos (faixa de seleção) e Ajustes (controle deslizante), mais uma rajada. Conjunto B (`W27_SET=b`: Snake, um terminal executando `sleep`, Tarefas): duas fotos de verdade a mais dizem quais pixels mudam sozinhos e o verificador os ignora, e tolera 6000 pixels dos números das Tarefas (`W27_TOL`) |
 | QEMU, piscadas | `tools/perf/w27-burst-check.sh <out> b2_ 0` | rajada de 12 fotos a cada 0,2 s: sem Tarefas, quadros consecutivos idênticos (0 pixels); com Tarefas visíveis, só os números dela mudam (até ~3800 px por passo) |
 | QEMU, modo verify | `W27_VERIFY=1 ...` / Ctrl+Alt+V | cada quadro é comparado com o redesenho completo (que não confia em footprint nenhum); divergências saem na serial como `compositor-verify: MISMATCH` (o conteúdo de apps WASM, de terminais executando e das Tarefas é ignorado: lê o relógio) |
 
@@ -546,6 +546,8 @@ Resultado (BIOS e UEFI, mesmas máquina e cenas; o "antes" é o commit `57b9121`
 | `w20-cursor` + `w20-cursor-check` | 0 | 0 |
 | `w27-flicker-check` | estável | estável |
 
+Depois do merge com o W23-W28 (conjuntos A, B e C no BIOS, B e C no UEFI): 0 pares fora da tolerância, `w20-cursor` 0 pixels, `w27-flicker` estável, rajadas sem Tarefas e a do navegador com 0 pixels entre quadros.
+
 Custo de quadro (QEMU/TCG sem KVM, 1280x720, `perf-trace`, `tools/perf/summ.py`; mesma imagem de teste
 por cenário; o hospedeiro é compartilhado, então repetições variam uns 5-8 %):
 
@@ -556,6 +558,8 @@ por cenário; o hospedeiro é compartilhado, então repetições variam uns 5-8 
 | abrir e fechar a Calculadora, quadro de animação | 3,5 ms + 25 reconstruções de 28 ms + 12 "settle" de 12 ms; CPU 19,7 % | 5,0 a 5,5 ms, sem reconstrução; quadros de entrada de 9 a 13 ms; CPU 22,9 % |
 | Tarefas visíveis (CPU), quadro do gráfico | ~2,8 ms por quadro real; CPU 20,6 % | ~3,5 ms; CPU 19,6 % |
 | Snake + Tarefas visíveis, quadro estável | 13 ms (55 quadros/s); CPU 58 % | 5,2 ms (140 quadros/s); CPU 41 % |
+
+Depois do merge, na árvore com o shell atual (Arquivos, Editor, Terminal, Navegador, i18n): arrastar uma janela 4,8 a 5,5 ms por quadro de dano; Snake + Tarefas 5,0 a 5,5 ms; rolar `osjeff://sobre` no navegador 6,4 a 8,6 ms por quadro (antes do merge, o caminho só-cliente do W24: 5 a 6 ms; o que resta é a página em si, cerca de 6 ms, mais a faixa de 8 px dos cantos de baixo, que vem do papel de parede, e o retângulo do cliente repintado por inteiro).
 
 O arrasto ficou mais barato porque o dano é um retângulo só do tamanho das duas posições e as camadas
 opacas escondem o que está embaixo; a regressão de 10 % que o commit das Tarefas trouxe (6,3 para 6,9 ms, sem causa achada)

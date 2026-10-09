@@ -39,10 +39,10 @@ for f in $(ls "$out"/rest[1-9]*.png | sort -V); do
   ae=$(compare -metric AE "$out/.m0.png" "$out/.m1.png" "$out/.d.png" 2>&1 || true)
   ae=${ae%% *}
   total=$((total + 1))
-  # Live content (Tarefas' numbers and chart) differs a little between the shots whatever the
+  # A text caret blinks with the clock (up to 200 px between two shots); live content (Tarefas' numbers and chart) differs a little between the shots whatever the
   # compositor does: pairs with a volatile mask tolerate W27_TOL pixels (default 6000; the bugs
   # this oracle was written for differ by 6 000 to 62 000, see TESTING.md).
-  tol=0; [ -f "$out/clean2_$n.png" ] && tol=${W27_TOL:-6000}
+  tol=${W27_TOL_CARET:-200}; [ -f "$out/clean2_$n.png" ] && tol=${W27_TOL:-6000}
   if [ "$ae" -le "$tol" ]; then
     echo "pair $n: differing_pixels=$ae"
     rm -f "$out/diff$n.png"

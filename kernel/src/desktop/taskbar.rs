@@ -155,9 +155,25 @@ impl Desktop {
         self.focused().and_then(|id| self.kind_of(id)) == Some(kind)
     }
 
-    /// Region the bar can paint in (lifted icons, hops and the tooltip included).
+    /// Region the bar can paint in. While it is at rest (nothing hovered, dragged, lifted,
+    /// hopping or showing a tooltip) that is the bar and its shadow; otherwise the whole zone
+    /// above it that lifted icons, hops and the tooltip can reach.
     pub(crate) fn dock_paint_zone(&self) -> Rect {
-        tb::paint_zone(&self.task_layout(), self.sw, self.sh)
+        let l = self.task_layout();
+        let d = &self.shell.task;
+        let at_rest = d.hover.is_none()
+            && d.drag.is_none()
+            && d.press.is_none()
+            && d.bounce.is_empty()
+            && d.tip.finished()
+            && d.tip.value() <= 0.0
+            && d.lift.iter().all(|(_, s)| s.at_rest())
+            && d.xs.iter().all(|(_, s)| s.at_rest());
+        if at_rest {
+            l.panel.inflated(24).clamped_to(self.sw, self.sh)
+        } else {
+            tb::paint_zone(&l, self.sw, self.sh)
+        }
     }
 
     /// Does the bar need frames (something slides, a tooltip is pending, an icon is dragged)?

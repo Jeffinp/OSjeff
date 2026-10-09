@@ -134,7 +134,8 @@ impl Desktop {
         if self.live_dynamic(w) {
             // The chart lies inside the window's opaque body: clipped to it, nothing under the
             // window (not even behind its rounded corners) has to be painted again.
-            let body = self.window_box(w).inflated(-R_WINDOW);
+            let b = self.window_box(w);
+            let body = Rect::new(b.x, b.y + R_WINDOW, b.w, (b.h - 2 * R_WINDOW).max(0));
             return match self.live_rect(w).and_then(|r| r.intersection(&body)) {
                 Some(r) => Some((r, true)),
                 None => Some((self.window_box(w), false)),
@@ -151,7 +152,14 @@ impl Desktop {
         } else if w.maximized {
             rect
         } else {
-            rect.inflated(-R_WINDOW)
+            // Only the rows of the rounded corners are not opaque: the band between them is,
+            // all the way to the left and right edges.
+            Rect::new(
+                rect.x,
+                rect.y + R_WINDOW,
+                rect.w,
+                (rect.h - 2 * R_WINDOW).max(0),
+            )
         };
         let focused = self.focused() == Some(w.id);
         let hover_btn = self

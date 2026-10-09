@@ -11,8 +11,8 @@
 #   QEMU_MEM=256M tools/perf/run.sh <img> bios <out> 600 tools/perf/scen/w27-oracle.sh
 #   tools/perf/w27-oracle-check.sh <out>
 #
-# Env: W27_SET = a (default: windows only), b (adds Tarefas and the Snake game, whose windows change
-# by themselves: their client areas are masked), all (a then b).
+# Env: W27_SET = a (default: windows only), b (Snake, a running terminal and Tarefas, which change
+# by themselves), c (the browser and drags inside windows), all.
 source "$(dirname "$0")/../lib.sh"
 SET=${W27_SET:-a}
 # W27_VERIFY=1 switches the kernel's verify mode on (Ctrl+Alt+V: every frame is compared with a
@@ -132,9 +132,43 @@ set_b() {
   mon "sendkey alt-tab"; sleep 1.6; pair         # 23
   burst b3_ 12
 }
+# Set C: the browser (W24) next to other windows. Its page area repaints on its own while it
+# scrolls, hovers or types (a dirty rectangle of its layer); a window that overlaps it, its shadow
+# and the title bar around the page must come out exactly as in a full redraw. `osjeff://sobre`
+# is a long internal page, so no network is needed. Also drags inside Arquivos (a rubber band) and
+# Ajustes (a slider), which do not move their windows.
+set_c() {
+  wait_first_frame
+  sleep 8
+  maybe_verify
+  dock_icon editor; click; sleep 1.8              # editor (610,110,560,350)
+  dock_icon browser; click; sleep 3               # browser (150,60,916,560) over it
+  goto 600 100; click; sleep 0.4                  # the address bar
+  key ctrl-a; typestr "osjeff://sobre"; key ret; sleep 3
+  pair                                            # 1: the page
+  goto 500 300; click; sleep 0.4
+  for i in 1 2 3; do key pgdn; sleep 0.5; done
+  pair                                            # 2: scrolled
+  for i in 1 2 3 4 5 6 7 8; do key down; sleep 0.15; done; pair   # 3
+  drag 700 76 -400 200; pair                      # 4: the browser moved over the terminal's place
+  dock_icon terminal; click; sleep 1.5            # a terminal in front: it overlaps the page
+  goto 1000 500; click; sleep 0.3
+  for i in 1 2 3; do key pgup; sleep 0.5; done
+  pair                                            # 5: scrolling under a window's shadow
+  key end; sleep 0.8; pair                        # 6
+  mon "sendkey ctrl-t"; sleep 1.2; pair           # 7: a second tab (the strip changes)
+  mon "sendkey ctrl-w"; sleep 1.2; pair           # 8
+  dock_icon files; click; sleep 2.2; pair         # 9: Arquivos
+  drag 400 260 250 150; pair                      # 10: a rubber band in the list
+  dock_icon settings; click; sleep 2.2; pair      # 11: Ajustes
+  goto 500 300; click; sleep 0.5
+  drag 450 300 120 0; pair                        # 12: a drag that starts on a control
+  burst c1_ 12
+}
 case "$SET" in
   a) set_a ;;
   b) set_b ;;
-  all) set_a; set_b ;;
+  c) set_c ;;
+  all) set_a; set_b; set_c ;;
 esac
 finish

@@ -473,7 +473,12 @@ impl World {
             } else if faults.opaque_whole_rect || v.maximized {
                 v.rect
             } else {
-                v.rect.inflated(-RADIUS)
+                Rect::new(
+                    v.rect.x,
+                    v.rect.y + RADIUS,
+                    v.rect.w,
+                    (v.rect.h - 2 * RADIUS).max(0),
+                )
             };
             let look = if faults.forget_look {
                 0

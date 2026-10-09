@@ -123,8 +123,8 @@ O laço de `main.rs` só junta as entradas do quadro (`FrameIn`) e chama `Compos
 
 | Camada | Footprint | Opaca | Repintada quando |
 |---|---|---|---|
-| Janela | retângulo + sombra (`shadow_box`) | o retângulo menos os cantos (R=8); vazia se anima ou dá zoom | `look` (foco, hover, arrasto...), ou `dirty`: animando, arrastada, WASM, terminal rodando, cópia, ou o gráfico de uma janela viva |
-| Barra de apps | `dock_paint_zone` | não | `look` (época do chrome), e todo quadro enquanto `dock_animating` |
+| Janela | retângulo + sombra (`shadow_box`) | a faixa de linhas entre os cantos arredondados (da esquerda à direita); vazia se anima ou dá zoom | `look` (foco, hover, arrasto...), ou `dirty`: o footprint se a forma muda (anima, zoom, mover, redimensionar, foco); o retângulo se só o conteúdo anima (editor, terminal, cópia, visualizador, arrasto interno de Arquivos/Ajustes); a área de conteúdo de um jogo; a área do cliente de um navegador; o gráfico de uma janela viva |
+| Barra de apps | a barra e a sombra em repouso; a zona acima dela (ícones levantados, dica) quando algo se move ou está sobre ela | não | `look` (época do chrome), e todo quadro enquanto `dock_animating` |
 | Painel | `panel_rect` | sim (a faixa de vidro vem do papel de parede) | época do chrome; o relógio, por `invalidate(clock_rect)` |
 | Encaixe | o retângulo + 3 | não | o próprio retângulo e a opacidade |
 | Apps, Busca, menu, popover, Alt+Tab, folha | o retângulo + 40 (Apps e folha: a tela) | não | época dos overlays (entrada, hover, animação); o Apps só no retângulo `dirty` do hover |
@@ -133,6 +133,8 @@ A **época do chrome** sobe quando houve entrada (`scene_dirty`/`force_full`), q
 animação assentou ou enquanto um overlay anima; a **época dos overlays** também sobe com o hover
 do ponteiro. Um quadro de arrasto não sobe nenhuma das duas, então arrastar uma janela só repinta
 o que o dano dela toca.
+
+**Navegador (W24).** O repaint só da área do cliente (rolagem, hover num link, tecla na barra) é o `dirty` da camada da janela: `FrameIn::client` invalida o retângulo do cliente e uma janela de navegador ocupada declara a área do cliente como o que muda; o título e a sombra não são tocados. Não há caminho próprio para isso.
 
 Entradas que o motor não pode ver (um handler mudou a janela focada sem dizer como): em quadros
 de entrada invalidam-se as caixas da janela focada, da que perdeu o foco e da sob o ponteiro; o
