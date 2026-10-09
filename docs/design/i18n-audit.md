@@ -18,17 +18,17 @@ de falha ficam em inglês de propósito e não entram na conta.
 | Ajustes | 3 | 129 | 0 | 4 | 0 | 22 |
 | Arquivos | 6 | 39 | 0 | 37 | 2 | 218 |
 | Editor | 1 | 9 | 0 | 9 | 0 | 49 |
-| Terminal | 11 | 203 | 0 | 177 | 5 | 0 |
-| Tarefas | 3 | 89 | 0 | 3 | 1 | 0 |
-| Registro | 1 | 19 | 0 | 0 | 0 | 4 |
-| Calculadora | 2 | 2 | 0 | 0 | 0 | 0 |
+| Terminal | 5 | 12 | 0 | 1 | 0 | 262 |
+| Tarefas | 1 | 4 | 0 | 0 | 1 | 136 |
+| Registro | 0 | 0 | 0 | 0 | 0 | 26 |
+| Calculadora | 0 | 0 | 0 | 0 | 0 | 2 |
 | Imagens | 5 | 46 | 0 | 33 | 9 | 46 |
 | Navegador | 14 | 134 | 17 | 14 | 3 | 0 |
 | Apps de terceiros (WASM) | 11 | 77 | 16 | 40 | 1 | 0 |
 | Kit de componentes | 1 | 32 | 0 | 0 | 0 | 12 |
 | Sistema (logs e tela de falha: ficam em inglês) | 9 | 75 | 0 | 25 | 1 | 0 |
 | Outros | 5 | 13 | 0 | 6 | 1 | 63 |
-| **Total** | 75 | 873 | 33 | 348 | 23 | 520 |
+| **Total** | 64 | 576 | 33 | 169 | 18 | 942 |
 
 Cada app só mexe nos arquivos da sua linha; os arquivos de `Kit de componentes` e do `Shell` já
 foram tratados (Shell) ou só mudam se um app precisar de uma chave nova (use o prefixo do próprio app).
@@ -351,7 +351,7 @@ núcleo sem dono claro.
 | `osjeff_core/src/fs3/ops.rs:121` | `directory entry points at a free inode` | en |
 | `osjeff_core/src/fs3/ops.rs:190` | `inode missing from its parent` | en |
 | `osjeff_core/src/fs3/ops.rs:321` | `directory entry changed under us` | en |
-| `osjeff_core/src/i18n/audit.rs:795` | `{file}:{line}: {w:?} should be {r} in {s:?}` | en |
+| `osjeff_core/src/i18n/audit.rs:812` | `{file}:{line}: {w:?} should be {r} in {s:?}` | en |
 | `osjeff_core/src/icmp.rs:247` | `destination unreachable (code {c})` | en |
 | `osjeff_core/src/icmp.rs:248` | `time exceeded` | en |
 | `osjeff_core/src/icmp.rs:249` | `no route to host` | misto |
@@ -1326,7 +1326,7 @@ decida caso a caso se vão para o catálogo.
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 795 | `{file}:{line}: {w:?} should be {r} in {s:?}` | en | `misc.file_line_w_should` |
+| 812 | `{file}:{line}: {w:?} should be {r} in {s:?}` | en | `misc.file_line_w_should` |
 
 **`osjeff_core/src/i18n/template.rs`** (6)
 
