@@ -10,7 +10,7 @@
 //! no offloads, no MSI-X, polled. Because `VIRTIO_F_VERSION_1` is negotiated, every
 //! packet carries the 12-byte header (with `num_buffers`) in front of the frame.
 
-use crate::net::Mac;
+use crate::network::net::Mac;
 
 /// Feature bits in the low 32-bit feature word.
 pub const F_MAC: u32 = 1 << 5;

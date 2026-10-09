@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the certificate chains used by kitsune_core's TLS verifier tests.
 
-    python3 tools/gen-test-certs.py > kitsune_core/src/tlsverify/testcerts.rs
+    python3 tools/gen-test-certs.py > kitsune_core/src/network/tlsverify/testcerts.rs
 
 Needs the `cryptography` package. Every certificate is emitted as a hex string
 constant; the tests decode them. Keys are throw-away (generated per run), so the

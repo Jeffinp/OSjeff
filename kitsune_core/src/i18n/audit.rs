@@ -768,32 +768,32 @@ const ACCENT_STRICT: &[&str] = &[
     // An entry ending in `/` is a whole folder: every file under it is strict.
     "kernel/src/desktop/shell/",
     "kernel/src/desktop/windows/chrome.rs",
-    "kitsune_core/src/launcher.rs",
+    "kitsune_core/src/windowing/launcher.rs",
     // w30: Arquivos, Imagens, Editor.
     "kernel/src/desktop/apps/files/",
     "kernel/src/desktop/services/sysstore.rs",
     "kernel/src/desktop/services/vfs.rs",
-    "kitsune_core/src/fileman.rs",
-    "kitsune_core/src/fileman/apps.rs",
-    "kitsune_core/src/fileman/ui.rs",
-    "kitsune_core/src/vfs.rs",
+    "kitsune_core/src/apps/fileman.rs",
+    "kitsune_core/src/apps/fileman/apps.rs",
+    "kitsune_core/src/apps/fileman/ui.rs",
+    "kitsune_core/src/storage/vfs.rs",
     // w31: Terminal, Tarefas, Registro, Calculadora
     "kernel/src/desktop/apps/terminal/",
     "kernel/src/desktop/services/shellhost/",
     "kernel/src/desktop/apps/tarefas/",
     "kernel/src/desktop/apps/registro/",
     "kernel/src/desktop/apps/calculadora/",
-    "kitsune_core/src/activity.rs",
-    "kitsune_core/src/calc.rs",
-    "kitsune_core/src/shell/builtins.rs",
-    "kitsune_core/src/shell/exec.rs",
-    "kitsune_core/src/shell/fs.rs",
-    "kitsune_core/src/shell/glob.rs",
-    "kitsune_core/src/shell/line.rs",
-    "kitsune_core/src/shell/netcmds.rs",
-    "kitsune_core/src/shell/parse.rs",
-    "kitsune_core/src/shell/regex.rs",
-    "kitsune_core/src/shell/sys.rs",
+    "kitsune_core/src/apps/activity.rs",
+    "kitsune_core/src/apps/calc.rs",
+    "kitsune_core/src/apps/shell/builtins.rs",
+    "kitsune_core/src/apps/shell/exec.rs",
+    "kitsune_core/src/apps/shell/fs.rs",
+    "kitsune_core/src/apps/shell/glob.rs",
+    "kitsune_core/src/apps/shell/line.rs",
+    "kitsune_core/src/apps/shell/netcmds.rs",
+    "kitsune_core/src/apps/shell/parse.rs",
+    "kitsune_core/src/apps/shell/regex.rs",
+    "kitsune_core/src/apps/shell/sys.rs",
 ];
 
 /// Files migrated in W32 (Navegador, Ajustes, apps WASM, Kit de componentes): same rule.
@@ -806,20 +806,20 @@ const ACCENT_STRICT_W32: &[&str] = &[
     "kernel/src/wasm/manager.rs",
     "kernel/src/wasm/manager/runtime.rs",
     "kernel/src/wasm/mod.rs",
-    "kitsune_core/src/appfs/mod.rs",
-    "kitsune_core/src/appinstall.rs",
-    "kitsune_core/src/appmanifest.rs",
-    "kitsune_core/src/browser.rs",
-    "kitsune_core/src/browser/cert.rs",
-    "kitsune_core/src/browser/errors.rs",
-    "kitsune_core/src/browser/pages.rs",
-    "kitsune_core/src/browser/tabs.rs",
-    "kitsune_core/src/settings.rs",
-    "kitsune_core/src/tlsverify.rs",
-    "kitsune_core/src/wallpaper.rs",
-    "kitsune_core/src/wasmsec.rs",
-    "kitsune_core/src/web/form.rs",
-    "kitsune_core/src/web/imgcache.rs",
+    "kitsune_core/src/platform/appfs/mod.rs",
+    "kitsune_core/src/platform/appinstall.rs",
+    "kitsune_core/src/platform/appmanifest.rs",
+    "kitsune_core/src/browsing/browser.rs",
+    "kitsune_core/src/browsing/browser/cert.rs",
+    "kitsune_core/src/browsing/browser/errors.rs",
+    "kitsune_core/src/browsing/browser/pages.rs",
+    "kitsune_core/src/browsing/browser/tabs.rs",
+    "kitsune_core/src/system/settings.rs",
+    "kitsune_core/src/network/tlsverify.rs",
+    "kitsune_core/src/ui/wallpaper.rs",
+    "kitsune_core/src/platform/wasmsec.rs",
+    "kitsune_core/src/browsing/web/form.rs",
+    "kitsune_core/src/browsing/web/imgcache.rs",
 ];
 
 fn unaccented_literals(file: &str, src: &str, a: &Accents) -> Vec<String> {
@@ -891,7 +891,7 @@ fn i18n_report() {
 
 // ---------------------------------------------------------------------------- fonts
 
-fn font_has(font: &crate::ttf::Font<'_>, c: char) -> bool {
+fn font_has(font: &crate::ui::ttf::Font<'_>, c: char) -> bool {
     font.glyph_index(c) != 0
 }
 
@@ -928,7 +928,7 @@ fn fonts_cover_both_catalogs_and_the_portuguese_alphabet() {
     }
     let mut missing = Vec::new();
     for (name, data) in FONTS {
-        let font = crate::ttf::Font::parse(data).unwrap_or_else(|| panic!("{name}: no parse"));
+        let font = crate::ui::ttf::Font::parse(data).unwrap_or_else(|| panic!("{name}: no parse"));
         for c in required.chars() {
             // The mono face is the terminal and the editor; it only needs letters and
             // punctuation, not the arrows.
@@ -953,6 +953,6 @@ fn fonts_cover_both_catalogs_and_the_portuguese_alphabet() {
         missing.join("\n")
     );
     // The check itself can fail: a snowman is in none of the subsets.
-    let inter = crate::ttf::Font::parse(FONTS[0].1).unwrap();
+    let inter = crate::ui::ttf::Font::parse(FONTS[0].1).unwrap();
     assert!(!font_has(&inter, '\u{2603}'));
 }

@@ -463,7 +463,7 @@ mod tests {
         ] {
             let mut o = String::new();
             write_size(&mut o, Lang::Pt, b).unwrap();
-            assert_eq!(o, crate::fileman::format_size(b), "{b}");
+            assert_eq!(o, crate::apps::fileman::format_size(b), "{b}");
         }
     }
 

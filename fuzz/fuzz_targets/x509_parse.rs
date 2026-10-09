@@ -29,7 +29,7 @@ const NOW: u64 = 1_791_374_400;
 mod testcerts {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../kitsune_core/src/tlsverify/testcerts.rs"
+        "/../kitsune_core/src/network/tlsverify/testcerts.rs"
     ));
 }
 

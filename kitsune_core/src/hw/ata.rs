@@ -4,7 +4,7 @@
 //! the 256-word IDENTIFY block, validates and slices transfers, or computes
 //! register values lives here.
 
-use crate::blockdev::IoError;
+use crate::storage::blockdev::IoError;
 
 /// Bytes per ATA sector.
 pub const SECTOR: usize = 512;
