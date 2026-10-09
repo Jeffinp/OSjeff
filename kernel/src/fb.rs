@@ -2,12 +2,12 @@
 
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 
-pub use osjeff_core::gfx::Color;
+pub use kitsune_core::gfx::Color;
 
 mod scale;
 mod shapes;
 // The shape / shadow / surface toolkit (`Canvas` methods live in `shapes.rs`).
-use osjeff_core::gfx::{
+use kitsune_core::gfx::{
     alpha255_to_256, blend_lut, corner_inset, luma, mix256, split_span_around_hole,
 };
 #[allow(unused_imports)]
@@ -47,7 +47,7 @@ impl<'a> Canvas<'a> {
     /// Limit all further drawing to `r` (intersected with the canvas). Returns the
     /// previous clip so callers can restore it with [`Canvas::restore_clip`].
     #[allow(dead_code)]
-    pub fn set_clip(&mut self, r: osjeff_core::Rect) -> ClipState {
+    pub fn set_clip(&mut self, r: kitsune_core::Rect) -> ClipState {
         let old = ClipState([self.cx0, self.cy0, self.cx1, self.cy1]);
         self.cx0 = (r.x.max(0) as usize).min(self.info.width);
         self.cy0 = (r.y.max(0) as usize).min(self.info.height);
@@ -66,8 +66,8 @@ impl<'a> Canvas<'a> {
     }
 
     /// The current clip rectangle.
-    pub fn clip_rect(&self) -> osjeff_core::Rect {
-        osjeff_core::Rect::new(
+    pub fn clip_rect(&self) -> kitsune_core::Rect {
+        kitsune_core::Rect::new(
             self.cx0 as i32,
             self.cy0 as i32,
             (self.cx1 - self.cx0) as i32,

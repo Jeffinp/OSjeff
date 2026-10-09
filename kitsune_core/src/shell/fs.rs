@@ -3,7 +3,7 @@
 //!
 //! The kernel implements [`ShellFs`] on top of OJFS v3 (absolute and relative
 //! `/a/b/c` paths with `.` and `..`). The shell never touches
-//! `osjeff_core::fs` directly, so the format can change without touching it.
+//! `kitsune_core::fs` directly, so the format can change without touching it.
 
 use crate::tk;
 use alloc::collections::BTreeMap;

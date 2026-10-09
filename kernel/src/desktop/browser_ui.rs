@@ -3,7 +3,7 @@
 //! the find bar, the context menu, notices). The page itself is `browser_paint.rs`.
 //!
 //! The chrome follows the system appearance; the page area keeps the page's own colours.
-//! Geometry comes from `osjeff_core::layout` (the same functions hit-test clicks), colours
+//! Geometry comes from `kitsune_core::layout` (the same functions hit-test clicks), colours
 //! from the palette, type from `text::*`, widgets and glyphs from the toolkit.
 
 use super::BrowserHover as H;
@@ -11,12 +11,12 @@ use super::browser::{SecurityTone, page_menu_geom, start_items};
 use super::glass::panel;
 use super::*;
 use crate::text::{self, BODY, CALLOUT, CAPTION, FOOTNOTE, TITLE2, TITLE3, Weight};
-use osjeff_core::browser::errors::{self, ErrorArt};
-use osjeff_core::browser::{Status, tabs as tabs_model};
-use osjeff_core::iconart::Glyph;
-use osjeff_core::layout as geo;
-use osjeff_core::style::{R_MENU, R_POPOVER};
-use osjeff_core::t;
+use kitsune_core::browser::errors::{self, ErrorArt};
+use kitsune_core::browser::{Status, tabs as tabs_model};
+use kitsune_core::iconart::Glyph;
+use kitsune_core::layout as geo;
+use kitsune_core::style::{R_MENU, R_POPOVER};
+use kitsune_core::t;
 
 /// Amber of a favourite.
 const AMBER: Color = Color::rgb(0xF5, 0xA6, 0x23);
@@ -817,7 +817,7 @@ impl Desktop {
             },
         );
         if cert {
-            if let osjeff_core::browser::FailReason::Cert(e) = reason
+            if let kitsune_core::browser::FailReason::Cert(e) = reason
                 && e.clock_may_be_to_blame()
                 && !crate::clock::confirmed()
             {
@@ -900,7 +900,7 @@ impl Desktop {
         &self,
         c: &mut Canvas,
         content: Rect,
-        page: &osjeff_core::web::Page,
+        page: &kitsune_core::web::Page,
         t: &TabData,
     ) {
         let alpha = t.scroll_bar.alpha(super::toasts_ui::now_ms());
@@ -1158,7 +1158,7 @@ impl Desktop {
         let Some((_, glyph, tone)) = bs.security_badge() else {
             return;
         };
-        use osjeff_core::browser::Security;
+        use kitsune_core::browser::Security;
         let sec = t.browser.security();
         let url = String::from_utf8_lossy(t.browser.nav_url()).into_owned();
         let host = String::from(tabs_model::host_of(&url));
@@ -1170,11 +1170,11 @@ impl Desktop {
             }
             rows.push((
                 t!("web.sec.valid_from"),
-                osjeff_core::browser::cert::format_date(ci.not_before),
+                kitsune_core::browser::cert::format_date(ci.not_before),
             ));
             rows.push((
                 t!("web.sec.valid_to"),
-                osjeff_core::browser::cert::format_date(ci.not_after),
+                kitsune_core::browser::cert::format_date(ci.not_after),
             ));
         }
         let (verify, para): (&str, &str) = match sec {

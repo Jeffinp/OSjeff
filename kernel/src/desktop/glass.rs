@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use super::*;
-use osjeff_core::raster::Surface;
+use kitsune_core::raster::Surface;
 
 /// A blurred snapshot of a screen region.
 pub(crate) struct Backdrop {

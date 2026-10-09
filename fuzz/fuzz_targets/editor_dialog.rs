@@ -1,4 +1,4 @@
-//! Fuzz target: the editor's dialogs (`osjeff_core::editor2::dialog`).
+//! Fuzz target: the editor's dialogs (`kitsune_core::editor2::dialog`).
 //!
 //! An arbitrary folder listing (any names, including `..`, `/`, control
 //! characters and huge sizes) and arbitrary keys, clicks, wheel steps, window
@@ -12,8 +12,8 @@
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::editor2::{CloseAsk, MAX_FIELD, PickEvent, PickMode, PickRow, Picker};
-use osjeff_core::input::{KeyCode, KeyEvent, Mods};
+use kitsune_core::editor2::{CloseAsk, MAX_FIELD, PickEvent, PickMode, PickRow, Picker};
+use kitsune_core::input::{KeyCode, KeyEvent, Mods};
 
 const MAX_ROWS: usize = 300;
 const MAX_OPS: usize = 600;
@@ -114,7 +114,7 @@ fuzz_target!(|input: (bool, String, String, Vec<Row>, Vec<Op>)| {
             }
             Op::Ask(path) => {
                 // The kernel only asks about paths it was given (absolute, normalized).
-                p.confirm_overwrite(&osjeff_core::shell::fs::normalize("/", &path));
+                p.confirm_overwrite(&kitsune_core::shell::fs::normalize("/", &path));
                 PickEvent::None
             }
             Op::AskKey { code, ch } => {

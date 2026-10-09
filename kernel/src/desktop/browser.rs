@@ -4,7 +4,7 @@
 //!
 //! # Tabs and the single fetcher
 //!
-//! One window holds up to [`MAX_TABS`](osjeff_core::browser::tabs::MAX_TABS) tabs, each
+//! One window holds up to [`MAX_TABS`](kitsune_core::browser::tabs::MAX_TABS) tabs, each
 //! with its own history, page, scroll, forms and find state ([`TabData`]). There is one
 //! fetcher thread and it serves one request at a time, so tabs share it by queueing: the
 //! main loop asks for a request, the active tab is asked first and the others after it in
@@ -15,11 +15,11 @@
 
 use super::*;
 use crate::text;
-use osjeff_core::anim::{Tween, curves};
-use osjeff_core::browser::tabs;
-use osjeff_core::t;
-use osjeff_core::web::imgcache::{ImageCache, PageImages, image_key};
-use osjeff_core::web::{Cmd as WebCmd, Layout};
+use kitsune_core::anim::{Tween, curves};
+use kitsune_core::browser::tabs;
+use kitsune_core::t;
+use kitsune_core::web::imgcache::{ImageCache, PageImages, image_key};
+use kitsune_core::web::{Cmd as WebCmd, Layout};
 
 /// Wheel step: three lines of body text.
 const WHEEL_PX: i32 = 3 * 24;
@@ -45,9 +45,9 @@ impl BrowserState {
     /// the browser's own pages and a load that has not finished.
     pub(crate) fn security_badge(
         &self,
-    ) -> Option<(&'static str, osjeff_core::iconart::Glyph, SecurityTone)> {
-        use osjeff_core::browser::Security;
-        use osjeff_core::iconart::Glyph;
+    ) -> Option<(&'static str, kitsune_core::iconart::Glyph, SecurityTone)> {
+        use kitsune_core::browser::Security;
+        use kitsune_core::iconart::Glyph;
         let b = &self.tabs.active().browser;
         if b.is_home() || b.is_internal() {
             return None;
@@ -277,9 +277,9 @@ impl Desktop {
     pub fn browser_load(
         &mut self,
         resp: &[u8],
-        conn: osjeff_core::browser::Conn,
+        conn: kitsune_core::browser::Conn,
         truncated: bool,
-        cert: Option<osjeff_core::browser::CertInfo>,
+        cert: Option<kitsune_core::browser::CertInfo>,
     ) {
         let Some(id) = self.browser_id() else {
             return;
@@ -287,7 +287,7 @@ impl Desktop {
         let Some(rect) = self.browser_win_rect(id) else {
             return;
         };
-        let page = osjeff_core::browser::page_body_partial(resp, truncated);
+        let page = kitsune_core::browser::page_body_partial(resp, truncated);
         let body = page.body;
         let Some(b) = self.browser_state_mut(id) else {
             return;
@@ -305,14 +305,14 @@ impl Desktop {
             return;
         }
         let t0 = crate::trace::t();
-        t.doc = Some(osjeff_core::web::Doc::parse(&body));
+        t.doc = Some(kitsune_core::web::Doc::parse(&body));
         crate::trace::note("parse", t0, body.len() as u64);
         t.trace_t0.set(t0);
         t.page = None;
         t.cert = cert;
         t.sel = None;
         t.sel_anchor = None;
-        t.forms = osjeff_core::web::form::FormState::default();
+        t.forms = kitsune_core::web::form::FormState::default();
         t.find.close();
         t.browser.loaded_with_note(conn, page.note);
         t.load.finish();
@@ -349,12 +349,12 @@ impl Desktop {
             let Some(html) = t.browser.take_internal() else {
                 continue;
             };
-            t.doc = Some(osjeff_core::web::Doc::parse(&html));
+            t.doc = Some(kitsune_core::web::Doc::parse(&html));
             t.page = None;
             t.cert = None;
             t.sel = None;
             t.sel_anchor = None;
-            t.forms = osjeff_core::web::form::FormState::default();
+            t.forms = kitsune_core::web::form::FormState::default();
             t.find.close();
             t.load.finish();
             jump_scroll(t, 0);
@@ -413,7 +413,7 @@ impl Desktop {
     }
 
     /// Mark the in-flight browser fetch as failed.
-    pub fn browser_fail(&mut self, reason: osjeff_core::browser::FailReason) {
+    pub fn browser_fail(&mut self, reason: kitsune_core::browser::FailReason) {
         let Some(id) = self.browser_id() else {
             return;
         };
@@ -464,7 +464,7 @@ impl Desktop {
         let mut rebuilt: Vec<u32> = Vec::new();
         for t in tabs.iter_mut() {
             if let Some(html) = t.browser.internal_html() {
-                t.doc = Some(osjeff_core::web::Doc::parse(&html));
+                t.doc = Some(kitsune_core::web::Doc::parse(&html));
                 t.page = None;
                 t.find.close();
                 if t.id == active_id {
@@ -588,7 +588,7 @@ impl Desktop {
         let mut result = None;
         while let Some((key, data)) = images.next_pending() {
             if let Some(uri) = data {
-                let r = osjeff_core::web::imgcache::decode_data_uri(&uri, fit_w);
+                let r = kitsune_core::web::imgcache::decode_data_uri(&uri, fit_w);
                 images.finish(&key, r);
                 inline_done = true;
                 continue;
@@ -609,7 +609,7 @@ impl Desktop {
     /// A picture request finished: store it and lay the page out again (images change sizes).
     pub fn browser_image_done(
         &mut self,
-        res: Result<osjeff_core::web::imgcache::Loaded, osjeff_core::web::imgcache::ImgFail>,
+        res: Result<kitsune_core::web::imgcache::Loaded, kitsune_core::web::imgcache::ImgFail>,
     ) {
         let Some(id) = self.browser_id() else {
             return;
@@ -865,7 +865,8 @@ pub(crate) fn browser_hover_at(
         return (BrowserHover::None, None);
     }
     let n = t.browser.suggestions().len();
-    if let Some(i) = osjeff_core::layout::browser_suggestion_at(ch.bar, n, cx, cy).filter(|_| n > 0)
+    if let Some(i) =
+        kitsune_core::layout::browser_suggestion_at(ch.bar, n, cx, cy).filter(|_| n > 0)
     {
         return (BrowserHover::Suggestion(i), None);
     }
@@ -891,8 +892,8 @@ pub(crate) fn browser_hover_at(
         return (BrowserHover::Bar, None);
     }
     if ch.strip.h > 0 && ch.strip.contains(cx, cy) {
-        let rects = osjeff_core::layout::browser_tab_rects(ch.strip, &b.strip_weights());
-        let hit = osjeff_core::layout::browser_tab_at(&rects, cx, cy).and_then(|ei| {
+        let rects = kitsune_core::layout::browser_tab_rects(ch.strip, &b.strip_weights());
+        let hit = kitsune_core::layout::browser_tab_at(&rects, cx, cy).and_then(|ei| {
             let slots = b.strip_tab_slots();
             slots
                 .iter()
@@ -900,7 +901,7 @@ pub(crate) fn browser_hover_at(
                 .map(|&(_, ti)| (ei, ti))
         });
         if let Some((ei, ti)) = hit {
-            if osjeff_core::layout::browser_tab_close(rects[ei]).contains(cx, cy) {
+            if kitsune_core::layout::browser_tab_close(rects[ei]).contains(cx, cy) {
                 return (BrowserHover::TabClose(ti), None);
             }
             return (BrowserHover::Tab(ti), None);
@@ -909,7 +910,7 @@ pub(crate) fn browser_hover_at(
     }
     if ch.content.contains(cx, cy) {
         if t.find.is_open() {
-            let f = osjeff_core::layout::browser_find_layout(ch.content);
+            let f = kitsune_core::layout::browser_find_layout(ch.content);
             if f.prev.contains(cx, cy) {
                 return (BrowserHover::FindPrev, None);
             }
@@ -926,8 +927,8 @@ pub(crate) fn browser_hover_at(
         if t.browser.is_home() {
             return (start_hover_at(b, ch.content, cx, cy), None);
         }
-        if t.page.is_none() && t.browser.status() == osjeff_core::browser::Status::Error {
-            let e = osjeff_core::layout::browser_error_layout(
+        if t.page.is_none() && t.browser.status() == kitsune_core::browser::Status::Error {
+            let e = kitsune_core::layout::browser_error_layout(
                 ch.content,
                 t.browser.can_continue_insecure(),
             );
@@ -950,7 +951,7 @@ pub(crate) fn browser_hover_at(
 /// The tile or row of the start page under the pointer.
 fn start_hover_at(b: &BrowserState, content: Rect, cx: i32, cy: i32) -> BrowserHover {
     let (tiles, recents) = start_items(b);
-    let l = osjeff_core::layout::browser_start_layout(content, tiles.len(), recents.len());
+    let l = kitsune_core::layout::browser_start_layout(content, tiles.len(), recents.len());
     if let Some(i) = l.tiles.iter().position(|r| r.contains(cx, cy)) {
         return BrowserHover::Tile(i);
     }
@@ -970,9 +971,9 @@ pub(crate) fn start_items(b: &BrowserState) -> (Vec<(String, String)>, Vec<Strin
         .map(|k| (tabs::tab_title(&k.title, &k.url), k.url.clone()))
         .collect();
     if tiles.is_empty() {
-        tiles = osjeff_core::browser::QUICK_LINKS
+        tiles = kitsune_core::browser::QUICK_LINKS
             .iter()
-            .map(|(l, u)| (String::from(osjeff_core::i18n::tr(l)), String::from(*u)))
+            .map(|(l, u)| (String::from(kitsune_core::i18n::tr(l)), String::from(*u)))
             .collect();
     }
     // Recents belong to the window: every tab's history, the shown tab's first.
@@ -997,16 +998,16 @@ pub(crate) fn page_menu_row_at(m: &PageMenu, r: Rect, cx: i32, cy: i32) -> Optio
 }
 
 /// Placement of the context menu, kept inside window `r`.
-pub(crate) fn page_menu_geom(m: &PageMenu, r: Rect) -> osjeff_core::chrome::MenuGeom {
-    let rows: Vec<osjeff_core::chrome::MenuRow> = m
+pub(crate) fn page_menu_geom(m: &PageMenu, r: Rect) -> kitsune_core::chrome::MenuGeom {
+    let rows: Vec<kitsune_core::chrome::MenuRow> = m
         .items
         .iter()
-        .map(|(_, label, _)| osjeff_core::chrome::MenuRow::Item {
+        .map(|(_, label, _)| kitsune_core::chrome::MenuRow::Item {
             label_w: text::measure(label, text::BODY, text::Weight::Regular),
             shortcut_w: 0,
         })
         .collect();
-    let mut g = osjeff_core::chrome::menu_geom(&rows, (m.x, m.y), r.right() + 4, r.bottom() + 4);
+    let mut g = kitsune_core::chrome::menu_geom(&rows, (m.x, m.y), r.right() + 4, r.bottom() + 4);
     // The menu must not leave the window: shift it back inside if it was clamped to the screen.
     let dx = (r.right() - 8 - g.rect.right()).min(0);
     let dy = (r.bottom() - 8 - g.rect.bottom()).min(0);
@@ -1059,7 +1060,7 @@ pub(crate) fn layout_browser(t: &mut TabData, images: &mut ImageCache, width: i3
     let mut page = lay(images);
     crate::trace::note("layout", t0, page.cmds.len() as u64);
     if register {
-        t.forms = osjeff_core::web::form::FormState::new(&page.forms);
+        t.forms = kitsune_core::web::form::FormState::new(&page.forms);
         t.img_keys.clear();
         for r in &page.images {
             let key = image_key(&base, &r.src);
@@ -1069,7 +1070,7 @@ pub(crate) fn layout_browser(t: &mut TabData, images: &mut ImageCache, width: i3
             }
             t.img_keys.push(key);
         }
-        if page.images.len() > osjeff_core::web::imgcache::MAX_PAGE_IMAGES {
+        if page.images.len() > kitsune_core::web::imgcache::MAX_PAGE_IMAGES {
             page = lay(images);
         }
     }

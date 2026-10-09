@@ -1,4 +1,4 @@
-//! The live system settings (`osjeff_core::settings::Settings`) and how they
+//! The live system settings (`kitsune_core::settings::Settings`) and how they
 //! reach the parts of the kernel that read them.
 //!
 //! The compositor owns the settings: it loads them at boot (before the
@@ -8,7 +8,7 @@
 
 use crate::sync::RacyCell;
 use core::sync::atomic::{AtomicBool, Ordering};
-use osjeff_core::settings::Settings;
+use kitsune_core::settings::Settings;
 
 static CURRENT: RacyCell<Settings> = RacyCell::new(Settings::new());
 static CLOCK24: AtomicBool = AtomicBool::new(true);
@@ -31,8 +31,8 @@ pub fn set(s: Settings) {
     crate::rtc::set_tz_minutes(s.tz_minutes as i32);
     CLOCK24.store(s.clock24, Ordering::Relaxed);
     TOASTS.store(s.toasts, Ordering::Relaxed);
-    osjeff_core::anim::set_reduce_motion(s.reduce_motion);
-    osjeff_core::i18n::set_lang(s.lang);
+    kitsune_core::anim::set_reduce_motion(s.reduce_motion);
+    kitsune_core::i18n::set_lang(s.lang);
 }
 
 /// 24-hour clock (otherwise 12-hour with AM/PM).

@@ -7,7 +7,7 @@ use crate::io::{inl, outl};
 const CONFIG_ADDRESS: u16 = 0xCF8;
 const CONFIG_DATA: u16 = 0xCFC;
 
-use osjeff_core::hw::pci::{
+use kitsune_core::hw::pci::{
     VIRTIO_GPU_LEGACY, VIRTIO_GPU_MODERN, VIRTIO_NET_LEGACY, VIRTIO_NET_MODERN, VIRTIO_RNG_LEGACY,
     VIRTIO_RNG_MODERN, VIRTIO_VENDOR, bar_offset, cap_list_start, config_address, extract_u16,
 };
@@ -73,7 +73,7 @@ impl PciDevice {
 /// Visit every present function on bus 0, calling `f` for each. QEMU places its
 /// virtio devices on bus 0, so a single-bus scan suffices here.
 pub fn for_each<F: FnMut(PciDevice)>(mut f: F) {
-    osjeff_core::hw::pci::enumerate(
+    kitsune_core::hw::pci::enumerate(
         |slot, func, off| read16(0, slot, func, off),
         |slot, func, vendor, device| {
             f(PciDevice {

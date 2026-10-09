@@ -26,5 +26,5 @@ avisos de copyright de cada biblioteca ficam no código-fonte dela, distribuído
 
 ## Ferramentas e dados
 
-- Lojas de certificados raiz embutidas (`osjeff_core/data/trust-store.bin`): derivadas da lista
+- Lojas de certificados raiz embutidas (`kitsune_core/data/trust-store.bin`): derivadas da lista
   pública de autoridades certificadoras da Mozilla (MPL-2.0); veja `tools/gen-trust-store.sh`.

@@ -2,7 +2,7 @@
 #   convert -size 128x72 gradient:'#1b2a6b-#f4a259' -fill '#fff3c4' \
 #     -draw 'circle 88,42 88,54' -colors 16 PNG8:papel.png
 #   truncate -s 64M fs.img
-#   cargo run --release -p osjeff_core --example fs3_inject -- fs.img papel.png /papel.png
+#   cargo run --release -p kitsune_core --example fs3_inject -- fs.img papel.png /papel.png
 #   FS_IMG=fs.img tools/perf/run.sh <img> bios <out1> 120 tools/perf/scen/w18-settings-1.sh
 # It sets the image wallpaper (/papel.png), the violet accent, the 12 h clock, a time
 # zone change and the ABNT2 keyboard, then saves the system log ("Salvar", which writes

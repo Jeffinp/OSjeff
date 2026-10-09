@@ -9,7 +9,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::i18n::{self, Arg, Civil, DateFmt, DateStyle, Lang, TimeFmt, locale, render};
+use kitsune_core::i18n::{self, Arg, Civil, DateFmt, DateStyle, Lang, TimeFmt, locale, render};
 
 fuzz_target!(|data: &[u8]| {
     let [mode, l, rest @ ..] = data else { return };

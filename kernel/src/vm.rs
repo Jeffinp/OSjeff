@@ -11,11 +11,11 @@
 //! more than the page asked for.
 //!
 //! Which entry to read at each level, and whether it can be descended into, is
-//! decided by `osjeff_core::paging` (tested on the host); this file only does the
+//! decided by `kitsune_core::paging` (tested on the host); this file only does the
 //! unsafe memory access.
 
 use core::sync::atomic::{AtomicU64, Ordering};
-use osjeff_core::paging::{self, PAGE_SIZE, Step};
+use kitsune_core::paging::{self, PAGE_SIZE, Step};
 use x86_64::VirtAddr;
 use x86_64::registers::control::Cr3;
 

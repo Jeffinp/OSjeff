@@ -18,9 +18,9 @@ como hardware real); **[A]** medido ou provado pela auditoria e **não repetido*
 OSjeff é um SO x86_64 `no_std` em Rust que sobe direto de um bootloader (BIOS ou UEFI)
 e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espaço de
 endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
-o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
+o `#![forbid(unsafe_code)]` do crate `kitsune_core`, não hardware.
 
-- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2927 testes
+- **Dois crates de código.** `kitsune_core` (dezenas de milhares de linhas com testes, 2927 testes
   passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
 - **Multitarefa preemptiva** a 250 Hz, com bloqueio. Cinco threads: `compositor`,
@@ -48,9 +48,9 @@ o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
 
 | Crate | Tipo | Tamanho | Papel |
 |---|---|---|---|
-| `osjeff_core` | lib, `no_std` fora de testes, `forbid(unsafe_code)` | 11,7 mil linhas, 423 testes [M] | lógica pura, testável no host |
+| `kitsune_core` | lib, `no_std` fora de testes, `forbid(unsafe_code)` | 11,7 mil linhas, 423 testes [M] | lógica pura, testável no host |
 | `kernel` | bin `x86_64-unknown-none`, `test = false` | 11,0 mil linhas + `switch.s` (85) | hardware, scheduler, compositor, drivers, rede, WASM |
-| `os` | builder | ~70 linhas | `build.rs` gera `osjeff-bios.img` e `osjeff-uefi.img`; `main.rs` lança o QEMU |
+| `os` | builder | ~70 linhas | `build.rs` gera `kitsune-bios.img` e `kitsune-uefi.img`; `main.rs` lança o QEMU |
 
 Fora do workspace, cada um com seu `Cargo.lock`: `fuzz/` (3 alvos), `bench/` (criterion,
 host) e `wasm-apps/*` (guests). O kernel é *artifact dependency* do `os` (`-Z bindeps`):
@@ -67,7 +67,7 @@ host) e `wasm-apps/*` (guests). O kernel é *artifact dependency* do `os` (`-Z b
 
 Quem fica de cada lado:
 
-| `osjeff_core` (testado no host) | `kernel` (ring 0) |
+| `kitsune_core` (testado no host) | `kernel` (ring 0) |
 |---|---|
 | `shell` (motor de comandos, linha, histórico rolável, sessão), `editor2` (editor e diálogos), `calc`, `clipboard`, `keymap`, `process`, `anim` | `main.rs` (boot e laço do compositor), `gdt`, `interrupts`, `switch.s`, `sched`, `crash`, `vm` |
 | `fs` (OJFS), `net`, `lease`, `dns`, `icmp`, `netstats`, `redirect`, `rng`, `entropy` (pool, DRBG ChaCha20, qualidade) | `allocator`, `sync`, `io`, `serial`, `rng` (fontes, anel de amostras, política) |
@@ -77,7 +77,7 @@ Quem fica de cada lado:
 
 
 Regra do projeto: **decisão vai para o core com teste; o kernel liga o hardware a ela.**
-O kernel faz a porta de E/S ou o MMIO e entrega bytes a `osjeff_core::hw::*`, que
+O kernel faz a porta de E/S ou o MMIO e entrega bytes a `kitsune_core::hw::*`, que
 decodifica (PS/2, BCD/12h/fuso do RTC, `IDENTIFY` e LBA do ATA, varredura PCI, capabilities
 virtio, estatísticas do HUD, a conta de páginas das guard pages em `paging`, a escolha
 da próxima thread em `schedule`), ou a `gfx`, `layout`, `wm`, `redirect`. A regra **ainda
@@ -215,7 +215,7 @@ TLS são os usuários mais fundos.
   e **edita um único tipo de entrada**: limpa `PRESENT` na PTE de nível 1 de cada guard
   page de pilha (`vm::unmap_page`, com `invlpg`). Não cria tabelas nem mapeia nada, e
   recusa páginas de 2 MiB ou 1 GiB. A matemática (índices por nível, entrada presente ou
-  huge, página canônica) é de `osjeff_core::paging`, testada no host.
+  huge, página canônica) é de `kitsune_core::paging`, testada no host.
 - **Toda a RAM física está mapeada RW+NX**, inclusive as page tables: qualquer código do
   kernel, ou um guest WASM que escape do interpretador, alcança tudo.
 - **W^X e NX** valem para o que o bootloader mapeia (texto `R-X`, `.rodata` `R--`,
@@ -277,7 +277,7 @@ que decide entre **matar só a thread** e **parar a máquina** com `crash::die`.
 
 **Caminho contido.** `sched::kill_current(motivo)` (IF=0): loga na COM1
 `thread '<nome>' died: <motivo>`, marca `DEAD[slot]`, escolhe a próxima thread com
-`osjeff_core::schedule::next_runnable` (que nunca devolve uma thread morta), faz `fxrstor`
+`kitsune_core::schedule::next_runnable` (que nunca devolve uma thread morta), faz `fxrstor`
 da próxima e salta para o contexto salvo dela com `resume_context` (`switch.s`),
 **abandonando a pilha atual** (que pode ser a esgotada, ou a IST do #PF). Efeitos
 visíveis: o Gerenciador de tarefas mostra `DEAD` no lugar dos ticks; o navegador mostra
@@ -341,7 +341,7 @@ slot morto continua contando em `thread_count`. O HUD mostra `thr 4` (3 sem NIC)
 
 Round-robin de quantum fixo (1 tick, 4 ms), sem prioridades. Uma thread é **executável**
 se não está morta **e** `WAKE[i] <= agora`: `0` é "pronta" e `FOREVER` (`u64::MAX`) é
-"estacionada até `wake`". A escolha é `osjeff_core::schedule::next_runnable(cur, n, pred)`
+"estacionada até `wake`". A escolha é `kitsune_core::schedule::next_runnable(cur, n, pred)`
 (testada no host): tenta `cur+1, cur+2, ..., cur`, então a thread atual é a **última**
 candidata e só continua se ainda for executável; devolve `None` se nenhuma é (o kernel
 então para, mas o compositor nunca morre). O estado compartilhado entre ISR e threads
@@ -434,12 +434,12 @@ sequenceDiagram
 
 ## 5. Allocator e concorrência
 
-### 5.1 Allocator (`allocator.rs`, `osjeff_core::heap`)
+### 5.1 Allocator (`allocator.rs`, `kitsune_core::heap`)
 
 - Free-list **ordenada por endereço**, *first-fit*, com **coalescência** a cada `dealloc`
   (funde com o seguinte e com o anterior); alocar e liberar são O(n); `realloc` e
   `alloc_zeroed` são os padrões de `GlobalAlloc`.
-- **Matemática em `osjeff_core::heap`** (testada no host): `adjust_request` leva o pedido
+- **Matemática em `kitsune_core::heap`** (testada no host): `adjust_request` leva o pedido
   a pelo menos um nó (16 B) e ao alinhamento do nó; `fit_region_split` devolve
   `front + tamanho + excess` somando exatamente a região, com `checked_add`. Região cuja
   sobra final ficaria entre 1 e 15 B é rejeitada (o first-fit segue); vão frontal pequeno
@@ -495,7 +495,7 @@ portas corromperia a leitura.
 
 ### 5.3 Política de `unsafe`
 
-`osjeff_core` proíbe. No kernel, `main.rs` liga `#![warn(clippy::undocumented_unsafe_blocks)]`
+`kitsune_core` proíbe. No kernel, `main.rs` liga `#![warn(clippy::undocumented_unsafe_blocks)]`
 e o lint roda com `-D warnings` (`cargo lint-kernel`, e no CI): **todo bloco ou `impl`
 `unsafe` precisa de `// SAFETY:` com a invariante**; passa limpo neste checkout [M], então
 não há `unsafe` sem justificativa. Quando a garantia é convenção e não o tipo, o comentário
@@ -514,7 +514,7 @@ verify (Ctrl+Alt+V, §6.2); uma textura de 3,5 MiB (`TEXTURE`) guarda a janela q
 minimiza ou restaura enquanto ela é reamostrada; o framebuffer só recebe retângulos (o dano) ou,
 quando o dano é a maior parte da tela, um blit completo. Tamanhos em §2.3.
 
-### 6.2 O compositor (`kernel/src/desktop/compositor/`, `osjeff_core::compositor`)
+### 6.2 O compositor (`kernel/src/desktop/compositor/`, `kitsune_core::compositor`)
 
 Projeto, invariantes e guia para estender: [`design/compositor.md`](design/compositor.md).
 
@@ -558,21 +558,21 @@ flowchart LR
   que a textura (1280x720) animam sem o efeito de escala. **Zoom** (maximizar/restaurar) não
   usa textura: desenha a janela real no retângulo em voo com o conteúdo recortado. As animações
   andam por tempo real (`dt = ticks / 250`), são interrompíveis e obedecem a *reduzir
-  movimento* (`osjeff_core::anim`). Uma janela animada não declara área opaca.
+  movimento* (`kitsune_core::anim`). Uma janela animada não declara área opaca.
 - **Janelas vivas:** o app WASM visível, o terminal executando, uma cópia de arquivos, o
   arrasto e a troca de foco repintam a janela a cada quadro (`dirty` = o footprint); as
   Tarefas e outras janelas que animam só o próprio conteúdo declaram o retângulo que muda (o
   gráfico) e, sozinhas, rodam a 50 quadros por segundo em vez de a cada tick. Uma janela que
   deixa de ser dinâmica é repintada uma última vez.
 - **O cursor não está em `BACK`**: é desenhado direto no framebuffer, e vale uma invariante
-  (`osjeff_core::cursor::CursorTrack`, testada no host com um framebuffer simulado):
+  (`kitsune_core::cursor::CursorTrack`, testada no host com um framebuffer simulado):
   **todo quadro que renderiza algo começa apagando o sprite** (restaura de `BACK` o retângulo
   onde ele foi pintado, recortado na tela) **e termina pintando-o de novo**, depois dos
   uploads, dos toasts e do HUD. Nenhum caminho restaura ou desenha o cursor por conta própria.
   O HUD e os toasts também vivem só no framebuffer: se um upload ou o retângulo apagado os
   toca, eles são redesenhados antes do cursor. **Ao portar o desenho para outra estrutura,
   mantenha só isto:** `erase` antes de qualquer escrita no framebuffer do quadro, `paint`
-  depois da última, e `CURSOR_W/H` (= `osjeff_core::pointer::{W, H}`) cobrindo todo sprite.
+  depois da última, e `CURSOR_W/H` (= `kitsune_core::pointer::{W, H}`) cobrindo todo sprite.
   Prova no QEMU: `tools/perf/scen/w20-cursor.sh` + `tools/perf/w20-cursor-check.sh` (0 pixels
   diferentes entre a tela em repouso e a mesma depois de um repaint completo forçado).
   **Relógio:** o tique de 1 s invalida só o retângulo do relógio (e as janelas "vivas": Tarefas,
@@ -583,9 +583,9 @@ flowchart LR
   redesenho completo e as divergências saem na serial como `compositor-verify: MISMATCH`);
   Ctrl+Alt+H, o HUD.
 
-### 6.3 Primitivas (`fb.rs`, `osjeff_core::gfx`)
+### 6.3 Primitivas (`fb.rs`, `kitsune_core::gfx`)
 
-A interface usa as primitivas anti-aliased de `osjeff_core::raster` e `fb/shapes.rs` (§6.5);
+A interface usa as primitivas anti-aliased de `kitsune_core::raster` e `fb/shapes.rs` (§6.5);
 as de baixo nível seguem aqui. `fill_rect` escreve por linha: em 32 bpp com `align_to_mut::<u32>` (um store por pixel);
 em 24 bpp (BIOS) em blocos de 4 pixels (12 B) de um padrão pronto. **Tabela de blend:**
 para áreas ≥ 4096 px, `gfx::blend_lut(cor, alfa)` constrói uma vez três tabelas
@@ -606,7 +606,7 @@ ganchos somem); saem como linhas `[trace]` na serial, lidas por `tools/perf/`.
 ### 6.5 A interface: texto, primitivas, movimento e o shell
 
 O desenho da interface (`docs/design/ui-macos.md` tem os tokens e a API de widgets) se apoia
-em quatro peças puras no `osjeff_core`, testadas no host, e em cola fina no kernel. O `f32`
+em quatro peças puras no `kitsune_core`, testadas no host, e em cola fina no kernel. O `f32`
 do kernel é emulado em software (o alvo não tem SSE): todo trabalho por pixel é inteiro ou
 ponto fixo (24.8 na cobertura, Q16/Q8 nas contas); `f32` só guarda o estado de animação por
 quadro (algumas dezenas de valores).
@@ -638,9 +638,9 @@ apps) e executa os comandos (`Cmd`), `panel.rs`, `taskbar.rs`, `overlays.rs`, `c
 `cursor.rs` desenham e tratam entrada, `glass.rs` captura o fundo borrado **uma vez** quando uma
 superfície abre, e `ui.rs`/`gallery.rs` são o toolkit e sua vitrine. A janela do Alt+Tab, os
 banners e o HUD usam o mesmo vidro. Aparência (automática pelo relógio, clara, escura), cor de
-destaque e *reduzir movimento* vêm de `osjeff_core::settings` e valem na hora.
+destaque e *reduzir movimento* vêm de `kitsune_core::settings` e valem na hora.
 
-**Idiomas (`osjeff_core::i18n`).** Todo texto do shell sai de catálogos `chave = valor`
+**Idiomas (`kitsune_core::i18n`).** Todo texto do shell sai de catálogos `chave = valor`
 (`assets/i18n/pt.txt` e `en.txt`) compilados em tabelas ordenadas por uma `const fn`; a consulta
 (`t!`, `tp!`) cai do idioma atual para o inglês e depois para a própria chave, sem alocar. O idioma
 é `Settings::lang`; `Desktop::language_changed` (`desktop/lang.rs`) refaz títulos de janela e
@@ -653,7 +653,7 @@ um idioma: [`docs/design/i18n.md`](design/i18n.md); o que falta migrar:
 
 ### 7.1 Janelas e instâncias
 
-O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_core::winman`
+O desktop é um **window manager dinâmico**. A lógica pura vive em `kitsune_core::winman`
 (testada no host); o kernel só guarda uma instância de app por janela e desenha.
 
 - **`WindowManager<A>`** é uma tabela `Vec` de janelas em z-order (a última é a do topo),
@@ -678,7 +678,7 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
   lançá-los de novo foca a janela existente, mas passam pelo mesmo mecanismo. **Apps WASM são
   multi-instância** (cada janela é uma instância do `AppManager`, §10.4), com tamanho, mínimo e
   `resizable` vindos do manifesto; minimizar suspende o app (sem `render`), fechar o encerra.
-- **Geometria** (`osjeff_core::window`, `snap`, `layout`): barra de título plana de 32 px com o
+- **Geometria** (`kitsune_core::window`, `snap`, `layout`): barra de título plana de 32 px com o
   ícone do app e o título à esquerda e, à direita, o botão de menu (32 px) e minimizar,
   maximizar/restaurar e fechar (células de 40x32; o pixel do canto é o fechar; sem botão de
   maximizar numa janela fixa), `Rect::title_layout`/`title_button_at`, faixa de
@@ -704,7 +704,7 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
 - **Mouse.** Botões de glifo plano (desbotados na janela sem foco, preenchimento suave ao passar,
   vermelho no fechar); duplo clique na barra de título alterna o zoom (`ClickTracker`, 500 ms);
   arrastar a barra move, e arrastar uma janela maximizada ou encaixada a solta sob o ponteiro
-  (`WindowManager::restore_for_drag`). **Encaixe** (`osjeff_core::snap`): levar o ponteiro à borda de
+  (`WindowManager::restore_for_drag`). **Encaixe** (`kitsune_core::snap`): levar o ponteiro à borda de
   cima maximiza, às laterais encaixa a metade, aos cantos o quarto, com um contorno
   translúcido animado (`SnapPreview`) até soltar; `Window::snap` guarda o estado e o retângulo
   livre fica em `restore`. Arrastar qualquer borda ou canto redimensiona.
@@ -716,7 +716,7 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
 - **Reiniciar/Desligar** (`power.rs`): 8042 (`0x64 <- 0xFE`) e `0xCF9`; desligar usa as
   portas `0x604`, `0xB004` e `0x4004` (QEMU, Bochs, cloud-hypervisor). Sem ACPI: em
   hardware real pode acabar em `hlt` **[NV]**.
-- **Clipboard** (`osjeff_core::clipboard`, 256 B): Ctrl+C copia o visor da calculadora ou a URL
+- **Clipboard** (`kitsune_core::clipboard`, 256 B): Ctrl+C copia o visor da calculadora ou a URL
   (no terminal, Ctrl+Shift+C copia a linha digitada: Ctrl+C sozinho interrompe); Ctrl+V cola
   na janela focada. O Editor trata Ctrl+C/X/V/S ele mesmo (`editor2`).
 
@@ -738,7 +738,7 @@ instalados, Terminal (execução) interrompe os comandos em andamento.
 Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da janela.
 
 - **Terminal** (`desktop/term.rs`, `shellhost.rs`; veja `docs/design/editor-shell.md`, "Integração no
-  desktop"): `osjeff_core::shell::Term` (histórico rolável de até 5000 linhas, linha editável com
+  desktop"): `kitsune_core::shell::Term` (histórico rolável de até 5000 linhas, linha editável com
   histórico, Ctrl+R, Tab, Ctrl+C/L/D) sobre um `Shell` de 52 comandos cujo sistema de arquivos é o VFS
   (`VfsFs`, diretório corrente por terminal, `rm` vai para a lixeira) e cujas informações do sistema
   (`KSys`) são relógio (SNTP/RTC), uptime, heap, processos e threads, discos, `ping` (`netd`),
@@ -746,11 +746,11 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   `terminal_font`; maximizar mostra mais texto). A faixa sob o título mostra a aba com a pasta, o prompt
   tem o caminho em destaque e o símbolo discreto, o mouse seleciona (duplo clique a palavra, triplo a
   linha) e Ctrl+Shift+C copia; cursor em bloco no fim da linha e em barra entre caracteres, barra de
-  rolagem sobreposta. Geometria, seleção e extração são `osjeff_core::termui` (testado no host). Sem
+  rolagem sobreposta. Geometria, seleção e extração são `kitsune_core::termui` (testado no host). Sem
   cores ANSI. As linhas rodam em duas threads `shelld` (fila única, resultado
   recolhido em `step_shell_jobs` a cada tick), então um comando que espera nunca congela o desktop; Ctrl+C
   cancela. `edit`, `files`, `tasks`, `calc`, `reboot` e `shutdown` pedem ao compositor por uma fila.
-- **Editor** (`desktop/edit.rs`): `osjeff_core::editor2` (UTF-8, desfazer/refazer, buscar/substituir,
+- **Editor** (`desktop/edit.rs`): `kitsune_core::editor2` (UTF-8, desfazer/refazer, buscar/substituir,
   números de linha, mouse, roda, arquivos de até 16 MiB inteiros) com abrir/salvar como pelo VFS
   (`Picker`, Ctrl+O, Ctrl+S, Ctrl+Shift+S) e a pergunta **Salvar / Descartar / Cancelar** em toda forma de
   fechar uma janela com alterações (`request_close`: botão, Ctrl+Q, Tarefas, `kill`, Reiniciar/
@@ -758,13 +758,13 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   lateral de lugares, ícones de arquivo, barra de rolagem). Cada janela tem seu buffer e seu caminho
   (`EditorState::path`, `None` = sem nome); o título é `Editor — nome`, com ` •` enquanto há alterações. A
   grade acompanha a janela (`sync_editor`) e nada é desenhado fora dela. A janela é descrita por
-  `osjeff_core::editor2::ui` (margem de números, linha atual, guias de indentação, barra de buscar fina e
+  `kitsune_core::editor2::ui` (margem de números, linha atual, guias de indentação, barra de buscar fina e
   clicável, barra de estado, folhas) e desenhada em `desktop/edit_ui.rs`; o cursor desliza na linha e
   pisca suave por 12 s depois da última tecla, Ctrl +/−/0 mudam o tamanho (`editor_font`).
 - **Calculadora:** quatro operações, entrada de até 16 caracteres, formatador decimal sem
   intrínsecos de `f64` do `std`. As teclas se esticam com a janela (`calc_layout`).
 - **Gerenciador de arquivos (v2):** navegação por **caminho** sobre o OJFS v3, uma
-  janela independente por instância (`FilesState`, que embrulha o `osjeff_core::fileman::FileView`).
+  janela independente por instância (`FilesState`, que embrulha o `kitsune_core::fileman::FileView`).
   Barra de endereço com migalhas clicáveis, voltar/avançar/subir (botões, Ctrl+←/→/↑,
   Backspace), barra lateral (Raiz, Documentos, Lixeira, disco com barra de uso por `statfs`),
   colunas Nome/Tamanho/Modificado (clique no cabeçalho ordena; pastas sempre primeiro; ordem
@@ -790,7 +790,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   usa a imagem como papel de parede (`Desktop::set_wallpaper_path`, que grava `/etc/osjeff.conf`). Transparência sobre fundo xadrez. Abaixo
   de 100 % a imagem é reduzida uma vez por mudança de zoom (filtro de caixa, em cache); a 100 %
   ou mais a amostragem é por vizinho mais próximo direto da origem. Lógica pura em
-  `osjeff_core::viewer` (zoom, pan, caixa de ajuste, lista da pasta, texto de informações).
+  `kitsune_core::viewer` (zoom, pan, caixa de ajuste, lista da pasta, texto de informações).
   Está no overlay Apps e na Busca. Capturas: `docs/img/w23-files-*.png`, `w23-viewer-*.png`.
   **Interface (W23):** o Arquivos tem barra lateral translúcida (Favoritos, Locais, disco), barra de
   ferramentas com caminho clicável, vistas em lista e em ícones, busca que filtra, ordenação pelo
@@ -869,7 +869,7 @@ Cenários em `tools/perf/scen/w8-*.sh` (QEMU BIOS e UEFI), saída em `docs/img/w
 
 ### 8.1 Formato em disco
 
-`osjeff_core::fs` é puro (sem alocação, sem hardware): toda função recebe a fatia da
+`kitsune_core::fs` é puro (sem alocação, sem hardware): toda função recebe a fatia da
 imagem. Formato [L, `fs.rs`]:
 
 ```text
@@ -905,7 +905,7 @@ O kernel mantém a imagem em RAM e a sincroniza via `ata.rs`: **ATA PIO**, LBA d
 DMA. Toda espera é limitada (`SPIN = 1_000_000` leituras de status; `0xFF` é barramento
 flutuante): disco ausente ou travado devolve `false`. A imagem inteira (99 setores, um
 comando de ≤ 255) é lida no boot e **regravada inteira** a cada `SAVE`, `RM`, exclusão,
-restauração ou nova pasta, seguida de `FLUSH CACHE`. O runner cria `osjeff-fs.img`
+restauração ou nova pasta, seguida de `FLUSH CACHE`. O runner cria `kitsune-fs.img`
 (64 KiB) na primeira execução.
 
 O que **não** existe: escrita atômica (cair a energia no meio de 99 setores deixa uma
@@ -916,7 +916,7 @@ bloqueia o compositor (PIO síncrono, ~45 ms no TCG [A]); o disco de boot não �
 (só `IDENTIFY`).
 
 **Camada de armazenamento do kernel (OJFS v3).** `ata.rs` também expõe `AtaDisk`, uma
-implementação de `osjeff_core::blockdev::BlockDevice` sobre o mesmo canal: LBA28
+implementação de `kitsune_core::blockdev::BlockDevice` sobre o mesmo canal: LBA28
 arbitrário fatiado em comandos de ≤ 255 setores (`hw::ata::chunks`, testado no core),
 `FLUSH CACHE` em `flush`, capacidade pelo `IDENTIFY`, ERR/DF/timeout viram `IoError`
 (com *soft reset* do canal e falha imediata após 3 falhas seguidas, para um disco travado
@@ -931,11 +931,11 @@ conteúdo desconhecido → **não escreve nada**. API: `storage::with_fs(|fs| ..
 RTC). **O desktop não usa mais o v2** (`disk()`, `PERSIST`, `ata::read_image/write_image`
 foram removidos): tudo passa pela camada VFS abaixo.
 
-### 8.3 A camada VFS do desktop (`desktop/vfs.rs`, `osjeff_core::vfs`)
+### 8.3 A camada VFS do desktop (`desktop/vfs.rs`, `kitsune_core::vfs`)
 
 Um único caminho para arquivos: gerenciador, visualizador, editor e comandos do terminal.
 A lógica (caminhos, validação de nomes, `unique_name`, `move_to`, `CopyJob`, `tree_size`,
-erros tipados com mensagem em português) é `osjeff_core::vfs` sobre o trait `Backend`
+erros tipados com mensagem em português) é `kitsune_core::vfs` sobre o trait `Backend`
 (implementado para qualquer `Fs3<D>`), testada no host com `RamDisk`. O kernel só decide
 **qual volume**: `storage::state() == V3` → o disco ATA montado; qualquer outro estado
 (disco de 64 KiB, sem disco, desconhecido, falha) → um `Fs3<RamDisk>` de 4 MiB criado no
@@ -956,7 +956,7 @@ arquivo mandam o antigo para a lixeira. O editor lê e grava só com `vfs::read_
 `/etc/osjeff.conf` (configurações, `VfsStore`), `/var/log/syslog.txt` ("Salvar" do visualizador de
 log) e `/var/log/boot.log` (a thread `logd`, uma vez por boot, `klog::dump_bounded`), e a
 **plataforma de apps**: `/apps/<id>.wasm` (+ `/apps/.seeded`), `/data/<id>` e `/home`. Os apps não
-falam com o VFS: `osjeff_core::appfs::VolumeFs` é um adaptador `AppFs` sobre o mesmo `Backend`
+falam com o VFS: `kitsune_core::appfs::VolumeFs` é um adaptador `AppFs` sobre o mesmo `Backend`
 (`kernel/src/wasm/appfs_backend.rs::with` abre uma seção crítica do volume por chamada, sem
 mascarar interrupções e sem atravessar código do guest), e só enxerga essas três árvores. Cada
 escrita de app sobe `vfs::generation()` e o Arquivos recarrega em até 100 ms. Ordem de boot: o
@@ -967,7 +967,7 @@ volume existe antes de qualquer um desses leitores (`storage::init` < `Desktop::
 
 ### 9.1 Pilha
 
-Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → thread `fetcher`
+Fluxo: navegador (`Desktop`, `kitsune_core::browser`) → `fetch::try_post` → thread `fetcher`
 (que é também o **`netd`**) → `redirect` → `netstack` (`smoltcp`: TCP, UDP; DNS próprio) →
 `nic::Port` → `virtio_net` ou `ne2000`. O compositor **não toca a NIC**: só posta pedidos
 (página, ping) e lê estatísticas.
@@ -979,7 +979,7 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
   `net: no network interface found`; `fetch::init_offline` faz toda navegação falhar na hora
   em vez de ficar em "Carregando"). O NE2000 deixou de aceitar um barramento ISA flutuante
   (`0xFF`) como placa.
-- **virtio-net (`virtio_net.rs`, matemática em `osjeff_core::hw::virtio_net`).** PCI
+- **virtio-net (`virtio_net.rs`, matemática em `kitsune_core::hw::virtio_net`).** PCI
   `1af4:1000` (transitório, o padrão do QEMU) ou `1af4:1041`, pelas capabilities modernas
   (um dispositivo só-legado, sem capabilities, é recusado com log). Negocia `VERSION_1`,
   `MAC` e `STATUS` e mais nada (sem offloads, sem *mergeable buffers*, sem multiqueue): cada
@@ -991,7 +991,7 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
   64 bits acima do que o bootloader mapeou não é tocado), índice `used` impossível
   ressincroniza em vez de girar. Registrado [M] no QEMU (BIOS e UEFI): `virtio-net: up,
   features 0x10020, rx/tx queue 16/16, link up`.
-- **`osjeff_core::net` (puro, fuzzado):** checksum RFC 1071, parse e montagem de
+- **`kitsune_core::net` (puro, fuzzado):** checksum RFC 1071, parse e montagem de
   Ethernet, ARP, IPv4, ICMP, UDP, BOOTP/DHCP. `respond(frame, mac, ip, out)` devolve a
   resposta (ARP reply e ICMP echo reply: o SO é "pingável"). No boot sai um ARP gratuito.
 - **Dono único: `netd` (`netd.rs`).** `Netd` guarda `Net` (e dentro dele o `Port`), o cliente
@@ -1004,7 +1004,7 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
   `respond`), dispara os temporizadores do lease e avança o ping. Não há corrida porque só
   essa thread tem o `Port`: a exclusão que antes era `fetch::is_idle()` e um comentário agora
   é o sistema de tipos. Custo assumido: se o `fetcher` morre, a máquina fica muda na rede.
-- **DHCP completo (`osjeff_core::lease`, puro, relógio injetado).** Estados INIT, SELECTING,
+- **DHCP completo (`kitsune_core::lease`, puro, relógio injetado).** Estados INIT, SELECTING,
   REQUESTING, BOUND, RENEWING, REBINDING. T1 = 50% e T2 = 87,5% do lease, contados do envio do
   REQUEST que foi confirmado. Em T1 um REQUEST **unicast** (RENEW, `ciaddr` = nosso IP, MAC do
   servidor aprendido do ACK, sem ARP) vai ao servidor que deu o lease; em T2 o REQUEST vira
@@ -1024,7 +1024,7 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
   um servidor que aparece depois configura a interface (`Bound`). O ACK é interpretado de
   forma total (máscara não contígua, endereço inválido e lease 0 são recusados); a opção 6
   inteira é mantida (até 3 servidores, sem duplicatas nem endereços inúteis).
-- **DNS (`osjeff_core::dns`, `netstack::Net::resolve`).** Não usa o socket DNS do `smoltcp`
+- **DNS (`kitsune_core::dns`, `netstack::Net::resolve`).** Não usa o socket DNS do `smoltcp`
   (um servidor só): consulta A por um socket UDP, com **todos** os servidores do lease. A
   tentativa *k* vai ao servidor `(preferido + k) mod n`, espera 1,5 s; SERVFAIL, REFUSED ou
   mensagem inválida passam ao próximo na hora; NXDOMAIN e NODATA são finais; cada servidor é
@@ -1036,7 +1036,7 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
   socket é fechado e reaberto a cada tentativa: o `smoltcp` envia os datagramas de um socket em
   ordem e um que espera ARP de um servidor morto travaria a consulta ao seguinte (visto num
   pcap, corrigido). Literais IPv4 em URLs não consultam o DNS (`parse_ipv4`).
-- **Ping (`osjeff_core::icmp`, `netd::ping*`).** `netd::ping_start(ip, timeout_ms)` +
+- **Ping (`kitsune_core::icmp`, `netd::ping*`).** `netd::ping_start(ip, timeout_ms)` +
   `netd::ping_poll()` (não bloqueantes, para o compositor e o terminal) e
   `netd::ping(ip, timeout_ms) -> Result<u32 /*ms*/, PingError>` / `ping_us` (bloqueiam só a
   thread que chama). O `netd` escolhe o próximo salto (`next_hop`), resolve o MAC por ARP (3
@@ -1045,7 +1045,7 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
   Erros: `Timeout`, `Unreachable(código)`, `TimeExceeded`, `NoRoute`, `ArpFailed`, `BadTarget`,
   `NoNetwork`, `Busy` (página em carga ou outro ping). Como não há IRQ da NIC, a resposta espera
   o próximo tick (4 ms): o RTT medido inclui até um tick.
-- **Estatísticas (`osjeff_core::netstats`, `netd::stats()`).** `Snapshot` com pacotes e bytes
+- **Estatísticas (`kitsune_core::netstats`, `netd::stats()`).** `Snapshot` com pacotes e bytes
   tx/rx, erros e descartes, link, driver, a `NetConfig` em vigor (IP, prefixo, gateway, DNS),
   tempo de lease restante, estado do DHCP, contadores de RENEW/REBIND/perda, de DNS (consultas,
   acertos de cache, failovers, falhas) e de ping. Com `perf-trace`, uma linha `[trace] net: ...`
@@ -1057,13 +1057,13 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
 - **TLS:** `embedded-tls` 0.19, TLS 1.3, `Aes128GcmSha256`, SNI, cripto por software
   (o handshake é lento no TCG: o motivo da thread própria). **Com verificação de
   certificado**: `kernel/src/tlsv.rs` liga um `Verifier` ao `embedded-tls` (cadeia, nome e
-  `CertificateVerify`, lógica em `osjeff_core::tlsverify` sobre `rustls-webpki`, trust store
-  de 46 raízes em `osjeff_core/data/`), na hora de `kernel/src/clock.rs` (RTC + SNTP). Ver
+  `CertificateVerify`, lógica em `kitsune_core::tlsverify` sobre `rustls-webpki`, trust store
+  de 46 raízes em `kitsune_core/data/`), na hora de `kernel/src/clock.rs` (RTC + SNTP). Ver
   [`design/tls-browser.md`](design/tls-browser.md).
 - **Aleatoriedade** (W21, [`design/entropy.md`](design/entropy.md)): um só gerador, `rng::fill`
   (`kernel/src/rng.rs`), para o TLS (*client random*, chave efêmera), ISN do TCP (semente do
   `smoltcp`), DHCP, DNS, SNTP, portas locais e `random_get` dos apps. É um DRBG ChaCha20 de
-  apagamento rápido de chave (`osjeff_core::entropy`) sobre um pool SHA-256 alimentado por
+  apagamento rápido de chave (`kitsune_core::entropy`) sobre um pool SHA-256 alimentado por
   `RDSEED`/`RDRAND` (CPUID, tentativas, valores sabidamente ruins rejeitados), pelo driver virtio-rng
   (`virtio_rng.rs`, `-device virtio-rng-pci`) e por timestamps de timer, teclado, mouse e chegada de
   quadros (anel sem trava preenchido pelas ISRs; só `rng::sample`, sem alocação nem lock) e, enquanto
@@ -1072,7 +1072,7 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
   espera até 5 s por 128 bits e depois recusa; Mixed só registra uma linha INFO. **Provado no QEMU**
   [M] com `-device virtio-rng-pci` (`RNG: strong`) e sem ele (jitter chega a 128 bits em ~1,1 s).
 - **`fetch.rs`:** `STATE` (IDLE, REQUESTED, RUNNING, DONE) com caixas estáticas. Segue até
-  `MAX_REDIRECTS = 5` redirects via `osjeff_core::redirect`: mantém o esquema, **bloqueia
+  `MAX_REDIRECTS = 5` redirects via `kitsune_core::redirect`: mantém o esquema, **bloqueia
   https para http**, rejeita controles, espaços e valores grandes, detecta ciclos. Devolve
   `Loaded { data, https, truncated }` ou um `FailReason` distinto, incluindo `WorkerDied`:
   se a thread `fetcher` morre (§3.4), `take_result` responde ao pedido em andamento com
@@ -1098,7 +1098,7 @@ Fluxo: navegador (`Desktop`, `osjeff_core::browser`) → `fetch::try_post` → t
 
 ### 9.2 Navegador e motor web
 
-`osjeff_core::browser` guarda a barra de endereço, o estado de carga e o rótulo de
+`kitsune_core::browser` guarda a barra de endereço, o estado de carga e o rótulo de
 segurança; texto sem cara de URL vira busca no Bing (`build_search_url`) e URL sem esquema
 ganha `https://`. A tela inicial
 tem 4 atalhos (Bing, Wikipedia, Cloudflare, Exemplo), escolhidos por aceitarem o
@@ -1110,7 +1110,7 @@ handshake P-256 do cliente.
 `Browser::loaded_with(Conn::Verified, ..)`: o `fetcher` devolve `Conn::Verified` apenas
 depois da cadeia e da assinatura do handshake verificadas.
 
-`osjeff_core::web` é um motor de caixas no estilo "robinson": HTML para DOM, CSS (agente
+`kitsune_core::web` é um motor de caixas no estilo "robinson": HTML para DOM, CSS (agente
 de usuário mais `<style>`), árvore estilizada, layout de blocos com fluxo inline, lista
 de comandos de desenho que o kernel rasteriza. **Não é um navegador de padrões**: sem
 flexbox, grid, float nem JavaScript; do seletor complexo só vale o composto mais
@@ -1156,16 +1156,16 @@ do que existe no código.
 
 Um app é **um arquivo `.wasm`** com a seção customizada `osjeff.manifest` (texto `chave=valor`)
 e, opcionalmente, `osjeff.icon` (PNG até 64x64). O leitor de seções
-(`osjeff_core::wasmsec`, sem alocar, nunca entra em pânico) e o manifesto
-(`osjeff_core::appmanifest`: `id`, `name`, `version`, `abi`, `fs`, `net`, `clipboard`,
+(`kitsune_core::wasmsec`, sem alocar, nunca entra em pânico) e o manifesto
+(`kitsune_core::appmanifest`: `id`, `name`, `version`, `abi`, `fs`, `net`, `clipboard`,
 `mem_mib`, `fuel_frame`, `disk_kib`, `max_fds`, `tick_ms`, janela) são puros e **fuzzados**
 (`app_manifest`, `app_sandbox`). Chave repetida/desconhecida, permissão inexistente e pedido
 acima do teto do sistema (24 MiB, 20 M de combustível, 4 MiB de disco, 32 descritores) são
-**recusados**. `osjeff_core::appinstall` instala em `/apps/<id>.wasm` (valida antes, recusa id
+**recusados**. `kitsune_core::appinstall` instala em `/apps/<id>.wasm` (valida antes, recusa id
 duplicado, grava em nome temporário e renomeia), remove, lista (catálogo com ícone 24x24) e
 semeia os apps embutidos **uma vez** (`seed_once`, com o marcador `/apps/.seeded`: um app
 removido não volta no boot seguinte) sem sobrescrever os do usuário. O Arquivos tem o lugar
-**Apps** (instalar, remover, abrir, manifesto em Propriedades; `osjeff_core::fileman::apps`) e abre
+**Apps** (instalar, remover, abrir, manifesto em Propriedades; `kitsune_core::fileman::apps`) e abre
 um `.wasm` instalando-o e executando-o. O manifesto aceita `net_hosts` (lista de destinos de rede).
 
 `kernel/build.rs` compila `wasm-apps/{hello,clock,notes,paint,snake,plasma}` (Rust,
@@ -1181,7 +1181,7 @@ abre o `snake` empacotado. DOOM continua sem ser reproduzível do checkout puro 
 |---|---|---|
 | `host` (v1) | `log`, `fill_rect`, `draw_text`, `blit`, `time_ms` | como antes (snake, plasma, DOOM): desenham na superfície do app com translação e recorte; `blit` limita a 2^20 px e cobra combustível |
 | `wasi_snapshot_preview1` (25) | subconjunto para um guest C como o DOOM | `fd_*`/`path_*` servem só o WAD; `path_create_directory` etc. **fingem sucesso**; não é um WASI conforme |
-| `osj` (v2) | janela (`set_title`, `get_size`, `request_redraw`), desenho (`fill_rect`, `draw_text`, `blit_rgba`, `draw_image_png`), tempo (`now_ms`, `monotonic_ms`), `random`, `log`, `exit`, clipboard (`clip_get/set`), **arquivos** (`fs_open/read/write/seek/close/stat/readdir/mkdir/unlink/rename`), **rede** (`net_http_get`) | `kernel/src/wasm/abi2.rs`; erros são códigos negativos (`osjeff_core::appabi`); ponteiro fora da memória do guest = trap que mata **só** o app |
+| `osj` (v2) | janela (`set_title`, `get_size`, `request_redraw`), desenho (`fill_rect`, `draw_text`, `blit_rgba`, `draw_image_png`), tempo (`now_ms`, `monotonic_ms`), `random`, `log`, `exit`, clipboard (`clip_get/set`), **arquivos** (`fs_open/read/write/seek/close/stat/readdir/mkdir/unlink/rename`), **rede** (`net_http_get`) | `kernel/src/wasm/abi2.rs`; erros são códigos negativos (`kitsune_core::appabi`); ponteiro fora da memória do guest = trap que mata **só** o app |
 | `env` | `system` | devolve -1 |
 
 Entrada por exports do guest: `on_key(code, mods)`, `on_text`, `on_pointer(x, y, buttons)`,
@@ -1191,7 +1191,7 @@ driver PS/2 não decodifica a roda). Os acessos do host à memória do guest pas
 que o combustível não vê (preenchimentos, decodificação de PNG, E/S de arquivo) é **cobrado**
 do combustível do app. Um app v1 não precisa mudar nada.
 
-**Arquivos.** `osjeff_core::appfs`: o caminho do guest nunca é concatenado como texto
+**Arquivos.** `kitsune_core::appfs`: o caminho do guest nunca é concatenado como texto
 (`normalize` resolve `.`/`..`/`//` lexicalmente e **recusa** subir acima da raiz; nomes de 1 a 48
 bytes ASCII imprimíveis, sem `\ : * ? " < > |`; <= 256 B, <= 8 níveis). `Sandbox`: raiz por app
 (`/data/<id>/` com `fs=own`, `/home` com `fs=home`, tudo negado com `fs=none`), tabela de
@@ -1201,7 +1201,7 @@ o limite) e teto de 64 KiB por chamada. O backend é o trait `AppFs`; **o do ker
 do desktop, então `/apps`, `/data/<id>` e `/home` **sobrevivem ao reboot** (provado em QEMU); sem
 disco v3 são o volume em RAM do desktop. O `VolumeFs` só alcança `/apps`, `/data` e `/home`.
 
-**Rede.** `osjeff_core::appnet` decide (esquemas `http(s)`, URL <= 512 B, destinos locais,
+**Rede.** `kitsune_core::appnet` decide (esquemas `http(s)`, URL <= 512 B, destinos locais,
 privados, IPv6 e IPs disfarçados recusados, `net_hosts` do manifesto, 1 requisição por segundo,
 256 KiB, 8 s em http e 20 s em https) e `net_http_get` **transporta de verdade**: a vaga única de
 requisição do `fetcher` é dividida com o navegador por um `compare_exchange`
@@ -1253,13 +1253,13 @@ automático: é a mesma TCB de antes.
 **Fronteira de confiança:** o isolamento é o do interpretador mais as host functions, no mesmo
 ring 0. A TCB inclui o `wasmi` (~135 `unsafe` nas crates `wasmi*` [A]) e as funções do host
 (`osj.*`, `host.*`, WASI): a parte de decisão (caminhos, cotas, URL, manifesto, ponteiros) é
-código seguro em `osjeff_core`, testado e fuzzado, mas a cola em `abi2.rs` e `manager.rs` não é.
+código seguro em `kitsune_core`, testado e fuzzado, mas a cola em `abi2.rs` e `manager.rs` não é.
 
 ## 11. Decisões de engenharia
 
 | Decisão | Motivo | Consequência e dívida |
 |---|---|---|
-| Lógica pura em `osjeff_core` com `forbid(unsafe_code)` | um binário `no_std`/`no_main` não roda `cargo test` | o kernel tem 0 testes; a fronteira ainda é imperfeita (§1) |
+| Lógica pura em `kitsune_core` com `forbid(unsafe_code)` | um binário `no_std`/`no_main` não roda `cargo test` | o kernel tem 0 testes; a fronteira ainda é imperfeita (§1) |
 | Tudo em ring 0, espaço único, CR3 do bootloader | sem alocador de frames, page tables nem syscalls: o caminho curto até um desktop | **zero isolamento**: um bug em qualquer parte é um bug no kernel; o ADR segue "Proposto" |
 | Heap estático de 64 MiB no BSS, free-list *first-fit* | não exige alocador de frames; simples | O(n); o BSS de 91 MiB eleva a RAM mínima do UEFI; resto da RAM ocioso; heap único sem quota por consumidor |
 | `SpinLock` com IF=0; `RacyCell` no lugar de `static mut` | evitar deadlock sob preempção; a edição 2024 proíbe `&mut` a `static mut` | lock não reentrante, só vale porque nenhuma ISR aloca; soundness por convenção, 5 `fn` seguras devolvem `&'static mut` |
@@ -1319,7 +1319,7 @@ O que vem a seguir, com critério de aceite, está em [`ROADMAP.md`](ROADMAP.md)
 
 **Verificação**, sem duplicar os guias: [`TESTING.md`](TESTING.md) cobre os testes do core
 (`cargo test-core`, 423 [M]; cobertura de linhas bruta 96,52% medida com `cargo llvm-cov -p
-osjeff_core` [M], incluindo os próprios módulos de teste; o CI exige ≥ 90%), o **fuzzing** (`fuzz/`:
+kitsune_core` [M], incluindo os próprios módulos de teste; o CI exige ≥ 90%), o **fuzzing** (`fuzz/`:
 `net_parse`, `ojfs_parse`, `web_parse`, com regressões versionadas), o harness de boot em
 QEMU (`tools/qemu-headless.sh`, `tools/verify-boot.sh`: BIOS e UEFI, detecta `KERNEL
 PANIC`/`FATAL`, compara o desktop com uma baseline), desempenho (`perf-trace`,

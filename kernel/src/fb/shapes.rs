@@ -1,6 +1,6 @@
 //! Anti-aliased shapes, shadows, gradients and surface blits for [`Canvas`].
 //!
-//! Corner shapes come from the shared coverage masks of `osjeff_core::raster`, so
+//! Corner shapes come from the shared coverage masks of `kitsune_core::raster`, so
 //! what is drawn live matches what is baked into cached surfaces. Everything is
 //! integer arithmetic and honours the canvas clip.
 //!
@@ -12,9 +12,9 @@ use super::Canvas;
 use crate::fb::Color;
 use crate::sync::RacyCell;
 use bootloader_api::info::PixelFormat;
-use osjeff_core::Rect;
-pub use osjeff_core::raster::Corner;
-use osjeff_core::raster::{self, CornerMasks, Surface};
+use kitsune_core::Rect;
+pub use kitsune_core::raster::Corner;
+use kitsune_core::raster::{self, CornerMasks, Surface};
 
 /// Largest radius with a live mask (icon tiles are baked into surfaces, so the live
 /// shapes never need more).

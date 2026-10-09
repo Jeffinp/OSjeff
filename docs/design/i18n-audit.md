@@ -1,7 +1,7 @@
 # Auditoria de textos do OSjeff (i18n)
 
 Gerado por `python3 -I tools/i18n-audit.py` (não edite à mão; `--check` confere se está em dia).
-Lista os literais de texto visíveis ao usuário em `kernel/src` e `osjeff_core/src`, por app, para que a
+Lista os literais de texto visíveis ao usuário em `kernel/src` e `kitsune_core/src`, por app, para que a
 migração para o catálogo (`docs/design/i18n.md`) seja dividida **sem sobreposição de arquivos**.
 
 Como ler: *sem acento* = palavra em português que precisa de acento (lista em `tools/i18n/accents.txt`);
@@ -52,8 +52,8 @@ janela de Ajustes e o modelo de configurações.
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
 | `kernel/src/desktop/settings_ui.rs` | 1 | 0 | 0 | 0 |
-| `osjeff_core/src/settings.rs` | 1 | 0 | 0 | 0 |
-| `osjeff_core/src/wallpaper.rs` | 3 | 0 | 3 | 0 |
+| `kitsune_core/src/settings.rs` | 1 | 0 | 0 | 0 |
+| `kitsune_core/src/wallpaper.rs` | 3 | 0 | 3 | 0 |
 
 ### Arquivos
 
@@ -61,12 +61,12 @@ gerenciador de arquivos, lixeira, VFS.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `osjeff_core/src/fileman.rs` | 1 | 0 | 1 | 0 |
-| `osjeff_core/src/fs3/dir.rs` | 1 | 0 | 1 | 0 |
-| `osjeff_core/src/fs3/extent.rs` | 2 | 0 | 2 | 0 |
-| `osjeff_core/src/fs3/fsck.rs` | 21 | 0 | 21 | 0 |
-| `osjeff_core/src/fs3/mod.rs` | 11 | 0 | 9 | 2 |
-| `osjeff_core/src/fs3/ops.rs` | 3 | 0 | 3 | 0 |
+| `kitsune_core/src/fileman.rs` | 1 | 0 | 1 | 0 |
+| `kitsune_core/src/fs3/dir.rs` | 1 | 0 | 1 | 0 |
+| `kitsune_core/src/fs3/extent.rs` | 2 | 0 | 2 | 0 |
+| `kitsune_core/src/fs3/fsck.rs` | 21 | 0 | 21 | 0 |
+| `kitsune_core/src/fs3/mod.rs` | 11 | 0 | 9 | 2 |
+| `kitsune_core/src/fs3/ops.rs` | 3 | 0 | 3 | 0 |
 
 ### Editor
 
@@ -74,7 +74,7 @@ editor de texto e diálogos.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `osjeff_core/src/editor2/mod.rs` | 9 | 0 | 9 | 0 |
+| `kitsune_core/src/editor2/mod.rs` | 9 | 0 | 9 | 0 |
 
 ### Terminal
 
@@ -84,9 +84,9 @@ terminal, interpretador e comandos.
 |---|---:|---:|---:|---:|
 | `kernel/src/desktop/shellhost.rs` | 2 | 0 | 0 | 0 |
 | `kernel/src/desktop/term.rs` | 2 | 0 | 0 | 0 |
-| `osjeff_core/src/shell/builtins.rs` | 3 | 0 | 0 | 0 |
-| `osjeff_core/src/shell/exec.rs` | 3 | 0 | 1 | 0 |
-| `osjeff_core/src/shell/netcmds.rs` | 2 | 0 | 0 | 0 |
+| `kitsune_core/src/shell/builtins.rs` | 3 | 0 | 0 | 0 |
+| `kitsune_core/src/shell/exec.rs` | 3 | 0 | 1 | 0 |
+| `kitsune_core/src/shell/netcmds.rs` | 2 | 0 | 0 | 0 |
 
 ### Tarefas
 
@@ -94,7 +94,7 @@ monitor de atividade.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `osjeff_core/src/netstats.rs` | 4 | 0 | 0 | 1 |
+| `kitsune_core/src/netstats.rs` | 4 | 0 | 0 | 1 |
 
 ### Imagens
 
@@ -102,11 +102,11 @@ visualizador de imagens e decodificadores.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `osjeff_core/src/bmp.rs` | 6 | 0 | 5 | 1 |
-| `osjeff_core/src/image.rs` | 10 | 0 | 7 | 0 |
-| `osjeff_core/src/inflate.rs` | 10 | 0 | 7 | 3 |
-| `osjeff_core/src/png.rs` | 15 | 0 | 10 | 4 |
-| `osjeff_core/src/ppm.rs` | 5 | 0 | 4 | 1 |
+| `kitsune_core/src/bmp.rs` | 6 | 0 | 5 | 1 |
+| `kitsune_core/src/image.rs` | 10 | 0 | 7 | 0 |
+| `kitsune_core/src/inflate.rs` | 10 | 0 | 7 | 3 |
+| `kitsune_core/src/png.rs` | 15 | 0 | 10 | 4 |
+| `kitsune_core/src/ppm.rs` | 5 | 0 | 4 | 1 |
 
 ### Navegador
 
@@ -116,15 +116,15 @@ navegador, páginas internas, erros de rede e TLS (outro agente está editando).
 |---|---:|---:|---:|---:|
 | `kernel/src/netd.rs` | 2 | 0 | 0 | 0 |
 | `kernel/src/netstack.rs` | 1 | 0 | 1 | 0 |
-| `osjeff_core/src/browser.rs` | 4 | 0 | 0 | 0 |
-| `osjeff_core/src/browser/body_tests.rs` | 1 | 0 | 0 | 0 |
-| `osjeff_core/src/icmp.rs` | 7 | 0 | 6 | 1 |
-| `osjeff_core/src/net.rs` | 2 | 0 | 0 | 0 |
-| `osjeff_core/src/sntp.rs` | 4 | 0 | 4 | 0 |
-| `osjeff_core/src/tlsverify.rs` | 7 | 0 | 7 | 0 |
-| `osjeff_core/src/web/form.rs` | 5 | 0 | 0 | 0 |
-| `osjeff_core/src/web/imgcache.rs` | 1 | 0 | 0 | 0 |
-| `osjeff_core/src/web/style.rs` | 2 | 0 | 2 | 0 |
+| `kitsune_core/src/browser.rs` | 4 | 0 | 0 | 0 |
+| `kitsune_core/src/browser/body_tests.rs` | 1 | 0 | 0 | 0 |
+| `kitsune_core/src/icmp.rs` | 7 | 0 | 6 | 1 |
+| `kitsune_core/src/net.rs` | 2 | 0 | 0 | 0 |
+| `kitsune_core/src/sntp.rs` | 4 | 0 | 4 | 0 |
+| `kitsune_core/src/tlsverify.rs` | 7 | 0 | 7 | 0 |
+| `kitsune_core/src/web/form.rs` | 5 | 0 | 0 | 0 |
+| `kitsune_core/src/web/imgcache.rs` | 1 | 0 | 0 | 0 |
+| `kitsune_core/src/web/style.rs` | 2 | 0 | 2 | 0 |
 
 ### Apps de terceiros (WASM)
 
@@ -135,11 +135,11 @@ janela de app, manifesto, instalação, SDK.
 | `kernel/src/desktop/wasmwin.rs` | 1 | 0 | 0 | 0 |
 | `kernel/src/wasm/mod.rs` | 4 | 0 | 3 | 0 |
 | `kernel/src/wasm/wasi.rs` | 1 | 0 | 1 | 0 |
-| `osjeff_core/src/appfs/mod.rs` | 11 | 0 | 10 | 0 |
-| `osjeff_core/src/appfs/volume_tests.rs` | 2 | 0 | 1 | 0 |
-| `osjeff_core/src/appinstall.rs` | 6 | 0 | 6 | 0 |
-| `osjeff_core/src/appmanifest.rs` | 16 | 0 | 14 | 1 |
-| `osjeff_core/src/wasmsec.rs` | 5 | 0 | 5 | 0 |
+| `kitsune_core/src/appfs/mod.rs` | 11 | 0 | 10 | 0 |
+| `kitsune_core/src/appfs/volume_tests.rs` | 2 | 0 | 1 | 0 |
+| `kitsune_core/src/appinstall.rs` | 6 | 0 | 6 | 0 |
+| `kitsune_core/src/appmanifest.rs` | 16 | 0 | 14 | 1 |
+| `kitsune_core/src/wasmsec.rs` | 5 | 0 | 5 | 0 |
 
 ### Sistema (logs e tela de falha: ficam em inglês)
 
@@ -161,10 +161,10 @@ núcleo sem dono claro.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `osjeff_core/src/base64.rs` | 4 | 0 | 3 | 1 |
-| `osjeff_core/src/compositor/sim/paint.rs` | 1 | 0 | 1 | 0 |
-| `osjeff_core/src/i18n/audit.rs` | 1 | 0 | 1 | 0 |
-| `osjeff_core/src/i18n/template.rs` | 6 | 0 | 0 | 0 |
+| `kitsune_core/src/base64.rs` | 4 | 0 | 3 | 1 |
+| `kitsune_core/src/compositor/sim/paint.rs` | 1 | 0 | 1 | 0 |
+| `kitsune_core/src/i18n/audit.rs` | 1 | 0 | 1 | 0 |
+| `kitsune_core/src/i18n/template.rs` | 6 | 0 | 0 | 0 |
 
 ## Textos sem acento (a corrigir ao migrar)
 
@@ -207,164 +207,164 @@ núcleo sem dono claro.
 | `kernel/src/wasm/mod.rs:417` | `link host.time_ms` | en |
 | `kernel/src/wasm/mod.rs:453` | `trap in entry` | en |
 | `kernel/src/wasm/wasi.rs:381` | `link env.system` | en |
-| `osjeff_core/src/appfs/mod.rs:94` | `not found` | en |
-| `osjeff_core/src/appfs/mod.rs:95` | `already exists` | en |
-| `osjeff_core/src/appfs/mod.rs:96` | `not a directory` | en |
-| `osjeff_core/src/appfs/mod.rs:97` | `is a directory` | en |
-| `osjeff_core/src/appfs/mod.rs:98` | `directory not empty` | en |
-| `osjeff_core/src/appfs/mod.rs:100` | `invalid argument` | en |
-| `osjeff_core/src/appfs/mod.rs:101` | `permission denied` | en |
-| `osjeff_core/src/appfs/mod.rs:102` | `bad file descriptor` | en |
-| `osjeff_core/src/appfs/mod.rs:103` | `too many open files` | en |
-| `osjeff_core/src/appfs/mod.rs:104` | `i/o error` | en |
-| `osjeff_core/src/appfs/volume_tests.rs:347` | `id={id}\nname={id}\nversion=1.0.0\n{extra}` | en |
-| `osjeff_core/src/appinstall.rs:78` | `package is larger than 4 MiB` | en |
-| `osjeff_core/src/appinstall.rs:80` | `an app with this id is already installed` | en |
-| `osjeff_core/src/appinstall.rs:81` | `app is not installed` | en |
-| `osjeff_core/src/appinstall.rs:82` | `invalid app id` | en |
-| `osjeff_core/src/appinstall.rs:83` | `too many installed apps` | en |
-| `osjeff_core/src/appinstall.rs:84` | `file system: {e}` | en |
-| `osjeff_core/src/appmanifest.rs:168` | `manifest is too large` | en |
-| `osjeff_core/src/appmanifest.rs:169` | `manifest is not valid UTF-8` | en |
-| `osjeff_core/src/appmanifest.rs:170` | `manifest has too many lines` | en |
-| `osjeff_core/src/appmanifest.rs:171` | `manifest syntax error` | en |
-| `osjeff_core/src/appmanifest.rs:173` | `unknown manifest key` | en |
-| `osjeff_core/src/appmanifest.rs:174` | `manifest key '{k}' is required` | en |
-| `osjeff_core/src/appmanifest.rs:175` | `invalid value for '{k}'` | en |
-| `osjeff_core/src/appmanifest.rs:176` | `'{k}' is above the system limit` | en |
-| `osjeff_core/src/appmanifest.rs:686` | `icon is larger than 64 KiB` | en |
-| `osjeff_core/src/appmanifest.rs:687` | `icon is not a PNG` | en |
-| `osjeff_core/src/appmanifest.rs:688` | `icon is larger than 64x64` | en |
-| `osjeff_core/src/appmanifest.rs:689` | `icon PNG is corrupt` | en |
-| `osjeff_core/src/appmanifest.rs:742` | `package has no osjeff.manifest section` | misto |
-| `osjeff_core/src/appmanifest.rs:743` | `package has two manifests` | en |
-| `osjeff_core/src/appmanifest.rs:744` | `package has two icons` | en |
-| `osjeff_core/src/base64.rs:29` | `invalid base64 character` | en |
-| `osjeff_core/src/base64.rs:30` | `invalid base64 length` | en |
-| `osjeff_core/src/base64.rs:31` | `base64 padding before the end` | en |
-| `osjeff_core/src/base64.rs:32` | `base64 data too large` | misto |
-| `osjeff_core/src/bmp.rs:72` | `bmp data is truncated` | misto |
-| `osjeff_core/src/bmp.rs:73` | `not a bmp (missing BM)` | en |
-| `osjeff_core/src/bmp.rs:74` | `unsupported bmp header size` | en |
-| `osjeff_core/src/bmp.rs:76` | `invalid bmp dimensions` | en |
-| `osjeff_core/src/bmp.rs:79` | `invalid bmp colour masks` | en |
-| `osjeff_core/src/bmp.rs:80` | `bmp image: {e}` | en |
-| `osjeff_core/src/compositor/sim/paint.rs:77` | `layer {:?} wrote ({x},{y}) outside its footprint {:?}` | en |
-| `osjeff_core/src/editor2/mod.rs:353` | `line index out of sync with the text` | en |
-| `osjeff_core/src/editor2/mod.rs:356` | `cursor past the end` | en |
-| `osjeff_core/src/editor2/mod.rs:359` | `cursor not at a valid position` | en |
-| `osjeff_core/src/editor2/mod.rs:362` | `selection anchor past the end` | en |
-| `osjeff_core/src/editor2/mod.rs:365` | `scroll position past the last line` | en |
-| `osjeff_core/src/editor2/mod.rs:368` | `empty viewport` | en |
-| `osjeff_core/src/editor2/mod.rs:374` | `row wider than the window` | en |
-| `osjeff_core/src/editor2/mod.rs:378` | `more rows than the window holds` | en |
-| `osjeff_core/src/editor2/mod.rs:383` | `cursor drawn outside the window` | en |
-| `osjeff_core/src/fileman.rs:940` | `Enter` | en |
-| `osjeff_core/src/fs3/dir.rs:56` | `hole in a directory` | en |
-| `osjeff_core/src/fs3/extent.rs:117` | `extent chain too long or cyclic` | en |
-| `osjeff_core/src/fs3/extent.rs:166` | `invalid extent` | en |
-| `osjeff_core/src/fs3/fsck.rs:118` | `in-memory bitmaps differ from the medium` | en |
-| `osjeff_core/src/fs3/fsck.rs:121` | `free block counter` | en |
-| `osjeff_core/src/fs3/fsck.rs:124` | `free inode counter` | en |
-| `osjeff_core/src/fs3/fsck.rs:157` | `directory size != blocks` | en |
-| `osjeff_core/src/fs3/fsck.rs:175` | `invalid name in directory` | en |
-| `osjeff_core/src/fs3/fsck.rs:178` | `duplicate name in directory` | en |
-| `osjeff_core/src/fs3/fsck.rs:182` | `entry points at an unallocated inode` | en |
-| `osjeff_core/src/fs3/fsck.rs:205` | `entry kind differs from inode kind` | en |
-| `osjeff_core/src/fs3/fsck.rs:216` | `trash flag disagrees with the location` | en |
-| `osjeff_core/src/fs3/fsck.rs:219` | `trashed entry lacks its original name` | en |
-| `osjeff_core/src/fs3/fsck.rs:230` | `root must hold exactly one .trash entry` | en |
-| `osjeff_core/src/fs3/fsck.rs:245` | `extent list invalid` | en |
-| `osjeff_core/src/fs3/fsck.rs:253` | `extent chain invalid` | en |
-| `osjeff_core/src/fs3/fsck.rs:263` | `block owned by two structures` | en |
-| `osjeff_core/src/fs3/fsck.rs:272` | `block owned by two structures` | en |
-| `osjeff_core/src/fs3/fsck.rs:279` | `nblocks != sum of extent lengths` | en |
-| `osjeff_core/src/fs3/fsck.rs:293` | `extent beyond end of file` | en |
-| `osjeff_core/src/fs3/fsck.rs:303` | `non-zero bytes past end of file` | en |
-| `osjeff_core/src/fs3/fsck.rs:314` | `allocated inode is unreachable` | en |
-| `osjeff_core/src/fs3/fsck.rs:326` | `block in use but marked free` | en |
-| `osjeff_core/src/fs3/fsck.rs:328` | `block marked used but unowned (leak)` | en |
-| `osjeff_core/src/fs3/mod.rs:500` | `fsck found problems` | en |
-| `osjeff_core/src/fs3/mod.rs:535` | `bitmap leaves the metadata uncovered` | en |
-| `osjeff_core/src/fs3/mod.rs:538` | `root/trash inode not allocated` | en |
-| `osjeff_core/src/fs3/mod.rs:581` | `journal target out of range` | en |
-| `osjeff_core/src/fs3/mod.rs:599` | `bad root inode` | en |
-| `osjeff_core/src/fs3/mod.rs:603` | `bad trash inode` | en |
-| `osjeff_core/src/fs3/mod.rs:607` | `root has no .trash entry` | misto |
-| `osjeff_core/src/fs3/mod.rs:728` | `metadata block out of range` | en |
-| `osjeff_core/src/fs3/mod.rs:803` | `double free of an inode` | en |
-| `osjeff_core/src/fs3/mod.rs:827` | `block range outside the data region` | misto |
-| `osjeff_core/src/fs3/mod.rs:831` | `block allocated or freed twice` | en |
-| `osjeff_core/src/fs3/ops.rs:121` | `directory entry points at a free inode` | en |
-| `osjeff_core/src/fs3/ops.rs:190` | `inode missing from its parent` | en |
-| `osjeff_core/src/fs3/ops.rs:321` | `directory entry changed under us` | en |
-| `osjeff_core/src/i18n/audit.rs:845` | `{file}:{line}: {w:?} should be {r} in {s:?}` | en |
-| `osjeff_core/src/icmp.rs:247` | `destination unreachable (code {c})` | en |
-| `osjeff_core/src/icmp.rs:248` | `time exceeded` | en |
-| `osjeff_core/src/icmp.rs:249` | `no route to host` | misto |
-| `osjeff_core/src/icmp.rs:250` | `host did not answer ARP` | en |
-| `osjeff_core/src/icmp.rs:251` | `invalid target address` | en |
-| `osjeff_core/src/icmp.rs:252` | `network unavailable` | en |
-| `osjeff_core/src/icmp.rs:253` | `network busy` | en |
-| `osjeff_core/src/image.rs:56` | `image has a zero dimension` | en |
-| `osjeff_core/src/image.rs:57` | `image is larger than the pixel limit` | en |
-| `osjeff_core/src/image.rs:58` | `buffer length is wrong for the dimensions` | en |
-| `osjeff_core/src/image.rs:59` | `rectangle is outside the image` | en |
-| `osjeff_core/src/image.rs:60` | `out of memory` | en |
-| `osjeff_core/src/image.rs:172` | `Image({}x{})` | en |
-| `osjeff_core/src/image.rs:799` | `unknown image format` | en |
-| `osjeff_core/src/inflate.rs:62` | `compressed data is truncated` | misto |
-| `osjeff_core/src/inflate.rs:63` | `reserved deflate block type` | en |
-| `osjeff_core/src/inflate.rs:64` | `stored block length check failed` | en |
-| `osjeff_core/src/inflate.rs:65` | `invalid huffman code lengths` | en |
-| `osjeff_core/src/inflate.rs:66` | `block has no end-of-block code` | misto |
-| `osjeff_core/src/inflate.rs:68` | `invalid huffman code` | en |
-| `osjeff_core/src/inflate.rs:69` | `back-reference too far` | en |
-| `osjeff_core/src/inflate.rs:70` | `decompressed data exceeds the limit` | misto |
-| `osjeff_core/src/inflate.rs:71` | `bad zlib header` | en |
-| `osjeff_core/src/inflate.rs:74` | `out of memory` | en |
-| `osjeff_core/src/netstats.rs:353` | `no address` | misto |
-| `osjeff_core/src/png.rs:145` | `not a png (bad signature)` | en |
-| `osjeff_core/src/png.rs:146` | `png is truncated` | en |
-| `osjeff_core/src/png.rs:149` | `png has no IHDR first` | misto |
-| `osjeff_core/src/png.rs:150` | `invalid png IHDR` | en |
-| `osjeff_core/src/png.rs:151` | `invalid png dimensions` | en |
-| `osjeff_core/src/png.rs:152` | `invalid png palette or transparency` | en |
-| `osjeff_core/src/png.rs:154` | `png has no IDAT` | misto |
-| `osjeff_core/src/png.rs:155` | `png chunks out of order` | en |
-| `osjeff_core/src/png.rs:156` | `unknown critical png chunk` | en |
-| `osjeff_core/src/png.rs:158` | `png image data too short` | misto |
-| `osjeff_core/src/png.rs:159` | `png image data too long` | misto |
-| `osjeff_core/src/png.rs:160` | `invalid png filter type` | en |
-| `osjeff_core/src/png.rs:161` | `png palette index out of range` | en |
-| `osjeff_core/src/png.rs:162` | `png image: {e}` | en |
-| `osjeff_core/src/ppm.rs:43` | `not a P3/P6 ppm` | en |
-| `osjeff_core/src/ppm.rs:44` | `ppm data is truncated` | misto |
-| `osjeff_core/src/ppm.rs:45` | `invalid ppm header` | en |
-| `osjeff_core/src/ppm.rs:46` | `invalid ppm sample` | en |
-| `osjeff_core/src/ppm.rs:47` | `ppm image: {e}` | en |
-| `osjeff_core/src/shell/exec.rs:984` | `{name}.sh` | en |
-| `osjeff_core/src/sntp.rs:145` | `not a server reply` | en |
-| `osjeff_core/src/sntp.rs:148` | `bad stratum` | en |
-| `osjeff_core/src/sntp.rs:150` | `bad server timestamps` | en |
-| `osjeff_core/src/sntp.rs:152` | `implausible date` | en |
-| `osjeff_core/src/tlsverify.rs:83` | `certificate too large` | en |
-| `osjeff_core/src/tlsverify.rs:84` | `chain too long` | en |
-| `osjeff_core/src/tlsverify.rs:86` | `not yet valid` | en |
-| `osjeff_core/src/tlsverify.rs:87` | `name mismatch` | en |
-| `osjeff_core/src/tlsverify.rs:90` | `bad signature` | en |
-| `osjeff_core/src/tlsverify.rs:91` | `invalid CA in chain` | en |
-| `osjeff_core/src/tlsverify.rs:94` | `system clock wrong` | en |
-| `osjeff_core/src/wallpaper.rs:384` | `file too big` | en |
-| `osjeff_core/src/wallpaper.rs:385` | `not PNG/BMP/PPM` | en |
-| `osjeff_core/src/wallpaper.rs:386` | `image too big` | en |
-| `osjeff_core/src/wasmsec.rs:64` | `not a wasm module (too short)` | en |
-| `osjeff_core/src/wasmsec.rs:65` | `not a wasm module (bad magic)` | en |
-| `osjeff_core/src/wasmsec.rs:68` | `section extends past the end of the file` | en |
-| `osjeff_core/src/wasmsec.rs:69` | `unknown section id` | en |
-| `osjeff_core/src/wasmsec.rs:70` | `too many sections` | en |
-| `osjeff_core/src/web/style.rs:460` | `courier new` | en |
-| `osjeff_core/src/web/style.rs:468` | `source code pro` | en |
+| `kitsune_core/src/appfs/mod.rs:94` | `not found` | en |
+| `kitsune_core/src/appfs/mod.rs:95` | `already exists` | en |
+| `kitsune_core/src/appfs/mod.rs:96` | `not a directory` | en |
+| `kitsune_core/src/appfs/mod.rs:97` | `is a directory` | en |
+| `kitsune_core/src/appfs/mod.rs:98` | `directory not empty` | en |
+| `kitsune_core/src/appfs/mod.rs:100` | `invalid argument` | en |
+| `kitsune_core/src/appfs/mod.rs:101` | `permission denied` | en |
+| `kitsune_core/src/appfs/mod.rs:102` | `bad file descriptor` | en |
+| `kitsune_core/src/appfs/mod.rs:103` | `too many open files` | en |
+| `kitsune_core/src/appfs/mod.rs:104` | `i/o error` | en |
+| `kitsune_core/src/appfs/volume_tests.rs:347` | `id={id}\nname={id}\nversion=1.0.0\n{extra}` | en |
+| `kitsune_core/src/appinstall.rs:78` | `package is larger than 4 MiB` | en |
+| `kitsune_core/src/appinstall.rs:80` | `an app with this id is already installed` | en |
+| `kitsune_core/src/appinstall.rs:81` | `app is not installed` | en |
+| `kitsune_core/src/appinstall.rs:82` | `invalid app id` | en |
+| `kitsune_core/src/appinstall.rs:83` | `too many installed apps` | en |
+| `kitsune_core/src/appinstall.rs:84` | `file system: {e}` | en |
+| `kitsune_core/src/appmanifest.rs:168` | `manifest is too large` | en |
+| `kitsune_core/src/appmanifest.rs:169` | `manifest is not valid UTF-8` | en |
+| `kitsune_core/src/appmanifest.rs:170` | `manifest has too many lines` | en |
+| `kitsune_core/src/appmanifest.rs:171` | `manifest syntax error` | en |
+| `kitsune_core/src/appmanifest.rs:173` | `unknown manifest key` | en |
+| `kitsune_core/src/appmanifest.rs:174` | `manifest key '{k}' is required` | en |
+| `kitsune_core/src/appmanifest.rs:175` | `invalid value for '{k}'` | en |
+| `kitsune_core/src/appmanifest.rs:176` | `'{k}' is above the system limit` | en |
+| `kitsune_core/src/appmanifest.rs:686` | `icon is larger than 64 KiB` | en |
+| `kitsune_core/src/appmanifest.rs:687` | `icon is not a PNG` | en |
+| `kitsune_core/src/appmanifest.rs:688` | `icon is larger than 64x64` | en |
+| `kitsune_core/src/appmanifest.rs:689` | `icon PNG is corrupt` | en |
+| `kitsune_core/src/appmanifest.rs:742` | `package has no osjeff.manifest section` | misto |
+| `kitsune_core/src/appmanifest.rs:743` | `package has two manifests` | en |
+| `kitsune_core/src/appmanifest.rs:744` | `package has two icons` | en |
+| `kitsune_core/src/base64.rs:29` | `invalid base64 character` | en |
+| `kitsune_core/src/base64.rs:30` | `invalid base64 length` | en |
+| `kitsune_core/src/base64.rs:31` | `base64 padding before the end` | en |
+| `kitsune_core/src/base64.rs:32` | `base64 data too large` | misto |
+| `kitsune_core/src/bmp.rs:72` | `bmp data is truncated` | misto |
+| `kitsune_core/src/bmp.rs:73` | `not a bmp (missing BM)` | en |
+| `kitsune_core/src/bmp.rs:74` | `unsupported bmp header size` | en |
+| `kitsune_core/src/bmp.rs:76` | `invalid bmp dimensions` | en |
+| `kitsune_core/src/bmp.rs:79` | `invalid bmp colour masks` | en |
+| `kitsune_core/src/bmp.rs:80` | `bmp image: {e}` | en |
+| `kitsune_core/src/compositor/sim/paint.rs:77` | `layer {:?} wrote ({x},{y}) outside its footprint {:?}` | en |
+| `kitsune_core/src/editor2/mod.rs:353` | `line index out of sync with the text` | en |
+| `kitsune_core/src/editor2/mod.rs:356` | `cursor past the end` | en |
+| `kitsune_core/src/editor2/mod.rs:359` | `cursor not at a valid position` | en |
+| `kitsune_core/src/editor2/mod.rs:362` | `selection anchor past the end` | en |
+| `kitsune_core/src/editor2/mod.rs:365` | `scroll position past the last line` | en |
+| `kitsune_core/src/editor2/mod.rs:368` | `empty viewport` | en |
+| `kitsune_core/src/editor2/mod.rs:374` | `row wider than the window` | en |
+| `kitsune_core/src/editor2/mod.rs:378` | `more rows than the window holds` | en |
+| `kitsune_core/src/editor2/mod.rs:383` | `cursor drawn outside the window` | en |
+| `kitsune_core/src/fileman.rs:940` | `Enter` | en |
+| `kitsune_core/src/fs3/dir.rs:56` | `hole in a directory` | en |
+| `kitsune_core/src/fs3/extent.rs:117` | `extent chain too long or cyclic` | en |
+| `kitsune_core/src/fs3/extent.rs:166` | `invalid extent` | en |
+| `kitsune_core/src/fs3/fsck.rs:118` | `in-memory bitmaps differ from the medium` | en |
+| `kitsune_core/src/fs3/fsck.rs:121` | `free block counter` | en |
+| `kitsune_core/src/fs3/fsck.rs:124` | `free inode counter` | en |
+| `kitsune_core/src/fs3/fsck.rs:157` | `directory size != blocks` | en |
+| `kitsune_core/src/fs3/fsck.rs:175` | `invalid name in directory` | en |
+| `kitsune_core/src/fs3/fsck.rs:178` | `duplicate name in directory` | en |
+| `kitsune_core/src/fs3/fsck.rs:182` | `entry points at an unallocated inode` | en |
+| `kitsune_core/src/fs3/fsck.rs:205` | `entry kind differs from inode kind` | en |
+| `kitsune_core/src/fs3/fsck.rs:216` | `trash flag disagrees with the location` | en |
+| `kitsune_core/src/fs3/fsck.rs:219` | `trashed entry lacks its original name` | en |
+| `kitsune_core/src/fs3/fsck.rs:230` | `root must hold exactly one .trash entry` | en |
+| `kitsune_core/src/fs3/fsck.rs:245` | `extent list invalid` | en |
+| `kitsune_core/src/fs3/fsck.rs:253` | `extent chain invalid` | en |
+| `kitsune_core/src/fs3/fsck.rs:263` | `block owned by two structures` | en |
+| `kitsune_core/src/fs3/fsck.rs:272` | `block owned by two structures` | en |
+| `kitsune_core/src/fs3/fsck.rs:279` | `nblocks != sum of extent lengths` | en |
+| `kitsune_core/src/fs3/fsck.rs:293` | `extent beyond end of file` | en |
+| `kitsune_core/src/fs3/fsck.rs:303` | `non-zero bytes past end of file` | en |
+| `kitsune_core/src/fs3/fsck.rs:314` | `allocated inode is unreachable` | en |
+| `kitsune_core/src/fs3/fsck.rs:326` | `block in use but marked free` | en |
+| `kitsune_core/src/fs3/fsck.rs:328` | `block marked used but unowned (leak)` | en |
+| `kitsune_core/src/fs3/mod.rs:500` | `fsck found problems` | en |
+| `kitsune_core/src/fs3/mod.rs:535` | `bitmap leaves the metadata uncovered` | en |
+| `kitsune_core/src/fs3/mod.rs:538` | `root/trash inode not allocated` | en |
+| `kitsune_core/src/fs3/mod.rs:581` | `journal target out of range` | en |
+| `kitsune_core/src/fs3/mod.rs:599` | `bad root inode` | en |
+| `kitsune_core/src/fs3/mod.rs:603` | `bad trash inode` | en |
+| `kitsune_core/src/fs3/mod.rs:607` | `root has no .trash entry` | misto |
+| `kitsune_core/src/fs3/mod.rs:728` | `metadata block out of range` | en |
+| `kitsune_core/src/fs3/mod.rs:803` | `double free of an inode` | en |
+| `kitsune_core/src/fs3/mod.rs:827` | `block range outside the data region` | misto |
+| `kitsune_core/src/fs3/mod.rs:831` | `block allocated or freed twice` | en |
+| `kitsune_core/src/fs3/ops.rs:121` | `directory entry points at a free inode` | en |
+| `kitsune_core/src/fs3/ops.rs:190` | `inode missing from its parent` | en |
+| `kitsune_core/src/fs3/ops.rs:321` | `directory entry changed under us` | en |
+| `kitsune_core/src/i18n/audit.rs:845` | `{file}:{line}: {w:?} should be {r} in {s:?}` | en |
+| `kitsune_core/src/icmp.rs:247` | `destination unreachable (code {c})` | en |
+| `kitsune_core/src/icmp.rs:248` | `time exceeded` | en |
+| `kitsune_core/src/icmp.rs:249` | `no route to host` | misto |
+| `kitsune_core/src/icmp.rs:250` | `host did not answer ARP` | en |
+| `kitsune_core/src/icmp.rs:251` | `invalid target address` | en |
+| `kitsune_core/src/icmp.rs:252` | `network unavailable` | en |
+| `kitsune_core/src/icmp.rs:253` | `network busy` | en |
+| `kitsune_core/src/image.rs:56` | `image has a zero dimension` | en |
+| `kitsune_core/src/image.rs:57` | `image is larger than the pixel limit` | en |
+| `kitsune_core/src/image.rs:58` | `buffer length is wrong for the dimensions` | en |
+| `kitsune_core/src/image.rs:59` | `rectangle is outside the image` | en |
+| `kitsune_core/src/image.rs:60` | `out of memory` | en |
+| `kitsune_core/src/image.rs:172` | `Image({}x{})` | en |
+| `kitsune_core/src/image.rs:799` | `unknown image format` | en |
+| `kitsune_core/src/inflate.rs:62` | `compressed data is truncated` | misto |
+| `kitsune_core/src/inflate.rs:63` | `reserved deflate block type` | en |
+| `kitsune_core/src/inflate.rs:64` | `stored block length check failed` | en |
+| `kitsune_core/src/inflate.rs:65` | `invalid huffman code lengths` | en |
+| `kitsune_core/src/inflate.rs:66` | `block has no end-of-block code` | misto |
+| `kitsune_core/src/inflate.rs:68` | `invalid huffman code` | en |
+| `kitsune_core/src/inflate.rs:69` | `back-reference too far` | en |
+| `kitsune_core/src/inflate.rs:70` | `decompressed data exceeds the limit` | misto |
+| `kitsune_core/src/inflate.rs:71` | `bad zlib header` | en |
+| `kitsune_core/src/inflate.rs:74` | `out of memory` | en |
+| `kitsune_core/src/netstats.rs:353` | `no address` | misto |
+| `kitsune_core/src/png.rs:145` | `not a png (bad signature)` | en |
+| `kitsune_core/src/png.rs:146` | `png is truncated` | en |
+| `kitsune_core/src/png.rs:149` | `png has no IHDR first` | misto |
+| `kitsune_core/src/png.rs:150` | `invalid png IHDR` | en |
+| `kitsune_core/src/png.rs:151` | `invalid png dimensions` | en |
+| `kitsune_core/src/png.rs:152` | `invalid png palette or transparency` | en |
+| `kitsune_core/src/png.rs:154` | `png has no IDAT` | misto |
+| `kitsune_core/src/png.rs:155` | `png chunks out of order` | en |
+| `kitsune_core/src/png.rs:156` | `unknown critical png chunk` | en |
+| `kitsune_core/src/png.rs:158` | `png image data too short` | misto |
+| `kitsune_core/src/png.rs:159` | `png image data too long` | misto |
+| `kitsune_core/src/png.rs:160` | `invalid png filter type` | en |
+| `kitsune_core/src/png.rs:161` | `png palette index out of range` | en |
+| `kitsune_core/src/png.rs:162` | `png image: {e}` | en |
+| `kitsune_core/src/ppm.rs:43` | `not a P3/P6 ppm` | en |
+| `kitsune_core/src/ppm.rs:44` | `ppm data is truncated` | misto |
+| `kitsune_core/src/ppm.rs:45` | `invalid ppm header` | en |
+| `kitsune_core/src/ppm.rs:46` | `invalid ppm sample` | en |
+| `kitsune_core/src/ppm.rs:47` | `ppm image: {e}` | en |
+| `kitsune_core/src/shell/exec.rs:984` | `{name}.sh` | en |
+| `kitsune_core/src/sntp.rs:145` | `not a server reply` | en |
+| `kitsune_core/src/sntp.rs:148` | `bad stratum` | en |
+| `kitsune_core/src/sntp.rs:150` | `bad server timestamps` | en |
+| `kitsune_core/src/sntp.rs:152` | `implausible date` | en |
+| `kitsune_core/src/tlsverify.rs:83` | `certificate too large` | en |
+| `kitsune_core/src/tlsverify.rs:84` | `chain too long` | en |
+| `kitsune_core/src/tlsverify.rs:86` | `not yet valid` | en |
+| `kitsune_core/src/tlsverify.rs:87` | `name mismatch` | en |
+| `kitsune_core/src/tlsverify.rs:90` | `bad signature` | en |
+| `kitsune_core/src/tlsverify.rs:91` | `invalid CA in chain` | en |
+| `kitsune_core/src/tlsverify.rs:94` | `system clock wrong` | en |
+| `kitsune_core/src/wallpaper.rs:384` | `file too big` | en |
+| `kitsune_core/src/wallpaper.rs:385` | `not PNG/BMP/PPM` | en |
+| `kitsune_core/src/wallpaper.rs:386` | `image too big` | en |
+| `kitsune_core/src/wasmsec.rs:64` | `not a wasm module (too short)` | en |
+| `kitsune_core/src/wasmsec.rs:65` | `not a wasm module (bad magic)` | en |
+| `kitsune_core/src/wasmsec.rs:68` | `section extends past the end of the file` | en |
+| `kitsune_core/src/wasmsec.rs:69` | `unknown section id` | en |
+| `kitsune_core/src/wasmsec.rs:70` | `too many sections` | en |
+| `kitsune_core/src/web/style.rs:460` | `courier new` | en |
+| `kitsune_core/src/web/style.rs:468` | `source code pro` | en |
 
 ## Todos os textos, por arquivo, com a chave proposta
 
@@ -403,13 +403,13 @@ decida caso a caso se vão para o catálogo.
 |---:|---|---|---|
 | 814 | `UTC {:02}:{:02}:{:02}` | neutro | `settings.utc_02_02_02` |
 
-**`osjeff_core/src/settings.rs`** (1)
+**`kitsune_core/src/settings.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 139 | `UTC{}{:02}:{:02}` | neutro | `settings.utc_02_02` |
 
-**`osjeff_core/src/wallpaper.rs`** (3)
+**`kitsune_core/src/wallpaper.rs`** (3)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -419,26 +419,26 @@ decida caso a caso se vão para o catálogo.
 
 ### Arquivos
 
-**`osjeff_core/src/fileman.rs`** (1)
+**`kitsune_core/src/fileman.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 940 | `Enter` | en | `files.enter` |
 
-**`osjeff_core/src/fs3/dir.rs`** (1)
+**`kitsune_core/src/fs3/dir.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 56 | `hole in a directory` | en | `files.hole_in_directory` |
 
-**`osjeff_core/src/fs3/extent.rs`** (2)
+**`kitsune_core/src/fs3/extent.rs`** (2)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 117 | `extent chain too long or cyclic` | en | `files.extent_chain_too_long` |
 | 166 | `invalid extent` | en | `files.invalid_extent` |
 
-**`osjeff_core/src/fs3/fsck.rs`** (21)
+**`kitsune_core/src/fs3/fsck.rs`** (21)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -464,7 +464,7 @@ decida caso a caso se vão para o catálogo.
 | 326 | `block in use but marked free` | en | `files.block_in_use_but` |
 | 328 | `block marked used but unowned (leak)` | en | `files.block_marked_used_but` |
 
-**`osjeff_core/src/fs3/mod.rs`** (11)
+**`kitsune_core/src/fs3/mod.rs`** (11)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -480,7 +480,7 @@ decida caso a caso se vão para o catálogo.
 | 827 | `block range outside the data region` | misto | `files.block_range_outside_data` |
 | 831 | `block allocated or freed twice` | en | `files.block_allocated_or_freed` |
 
-**`osjeff_core/src/fs3/ops.rs`** (3)
+**`kitsune_core/src/fs3/ops.rs`** (3)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -490,7 +490,7 @@ decida caso a caso se vão para o catálogo.
 
 ### Editor
 
-**`osjeff_core/src/editor2/mod.rs`** (9)
+**`kitsune_core/src/editor2/mod.rs`** (9)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -520,7 +520,7 @@ decida caso a caso se vão para o catálogo.
 | 268 | `sh: {problem}\n` | neutro | `term.sh_problem` |
 | 396 | `sh: {}\n` | neutro | `term.sh` |
 
-**`osjeff_core/src/shell/builtins.rs`** (3)
+**`kitsune_core/src/shell/builtins.rs`** (3)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -528,7 +528,7 @@ decida caso a caso se vão para o catálogo.
 | 1109 | `alias {k}='{v}'\n` | neutro | `term.alias_k_v` |
 | 1183 | `{n}.sh` | neutro | `term.n_sh` |
 
-**`osjeff_core/src/shell/exec.rs`** (3)
+**`kitsune_core/src/shell/exec.rs`** (3)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -536,7 +536,7 @@ decida caso a caso se vão para o catálogo.
 | 477 | `sh: {}\n` | neutro | `term.sh_2` |
 | 984 | `{name}.sh` | en | `term.name_sh` |
 
-**`osjeff_core/src/shell/netcmds.rs`** (2)
+**`kitsune_core/src/shell/netcmds.rs`** (2)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -545,7 +545,7 @@ decida caso a caso se vão para o catálogo.
 
 ### Tarefas
 
-**`osjeff_core/src/netstats.rs`** (4)
+**`kitsune_core/src/netstats.rs`** (4)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -556,7 +556,7 @@ decida caso a caso se vão para o catálogo.
 
 ### Imagens
 
-**`osjeff_core/src/bmp.rs`** (6)
+**`kitsune_core/src/bmp.rs`** (6)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -567,7 +567,7 @@ decida caso a caso se vão para o catálogo.
 | 79 | `invalid bmp colour masks` | en | `viewer.invalid_bmp_colour_masks` |
 | 80 | `bmp image: {e}` | en | `viewer.bmp_image` |
 
-**`osjeff_core/src/image.rs`** (10)
+**`kitsune_core/src/image.rs`** (10)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -582,7 +582,7 @@ decida caso a caso se vão para o catálogo.
 | 801 | `bmp: {e}` | neutro | `viewer.bmp` |
 | 802 | `ppm: {e}` | neutro | `viewer.ppm` |
 
-**`osjeff_core/src/inflate.rs`** (10)
+**`kitsune_core/src/inflate.rs`** (10)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -597,7 +597,7 @@ decida caso a caso se vão para o catálogo.
 | 71 | `bad zlib header` | en | `viewer.bad_zlib_header` |
 | 74 | `out of memory` | en | `viewer.out_memory` |
 
-**`osjeff_core/src/png.rs`** (15)
+**`kitsune_core/src/png.rs`** (15)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -617,7 +617,7 @@ decida caso a caso se vão para o catálogo.
 | 161 | `png palette index out of range` | en | `viewer.png_palette_index_out` |
 | 162 | `png image: {e}` | en | `viewer.png_image` |
 
-**`osjeff_core/src/ppm.rs`** (5)
+**`kitsune_core/src/ppm.rs`** (5)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -642,7 +642,7 @@ decida caso a caso se vão para o catálogo.
 |---:|---|---|---|
 | 700 | `tcp stream error` | en | `web.tcp_stream_error` |
 
-**`osjeff_core/src/browser.rs`** (4)
+**`kitsune_core/src/browser.rs`** (4)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -651,13 +651,13 @@ decida caso a caso se vão para o catálogo.
 | 933 | `&gt;` | neutro | `web.gt` |
 | 934 | `&quot;` | neutro | `web.quot` |
 
-**`osjeff_core/src/browser/body_tests.rs`** (1)
+**`kitsune_core/src/browser/body_tests.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 39 | `HTTP/1.1 200 OKr\n{headers}r\n` | neutro | `web.http_1_1_200` |
 
-**`osjeff_core/src/icmp.rs`** (7)
+**`kitsune_core/src/icmp.rs`** (7)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -669,14 +669,14 @@ decida caso a caso se vão para o catálogo.
 | 252 | `network unavailable` | en | `web.network_unavailable` |
 | 253 | `network busy` | en | `web.network_busy` |
 
-**`osjeff_core/src/net.rs`** (2)
+**`kitsune_core/src/net.rs`** (2)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 788 | `{}/{} gw ` | neutro | `web.gw` |
 | 793 | ` dns {}` | neutro | `web.dns` |
 
-**`osjeff_core/src/sntp.rs`** (4)
+**`kitsune_core/src/sntp.rs`** (4)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -685,7 +685,7 @@ decida caso a caso se vão para o catálogo.
 | 150 | `bad server timestamps` | en | `web.bad_server_timestamps` |
 | 152 | `implausible date` | en | `web.implausible_date` |
 
-**`osjeff_core/src/tlsverify.rs`** (7)
+**`kitsune_core/src/tlsverify.rs`** (7)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -697,7 +697,7 @@ decida caso a caso se vão para o catálogo.
 | 91 | `invalid CA in chain` | en | `web.invalid_ca_in_chain` |
 | 94 | `system clock wrong` | en | `web.system_clock_wrong` |
 
-**`osjeff_core/src/web/form.rs`** (5)
+**`kitsune_core/src/web/form.rs`** (5)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -707,13 +707,13 @@ decida caso a caso se vão para o catálogo.
 | 195 | `AÂEÊIÎOÔUÛ` | pt | `web.aaeeiioouu_2` |
 | 199 | `AÄEËIÏOÖUÜ` | pt | `web.aaeeiioouu_3` |
 
-**`osjeff_core/src/web/imgcache.rs`** (1)
+**`kitsune_core/src/web/imgcache.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 248 | `data:#{:016x}-{}` | pt | `web.data_016x` |
 
-**`osjeff_core/src/web/style.rs`** (2)
+**`kitsune_core/src/web/style.rs`** (2)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -743,7 +743,7 @@ decida caso a caso se vão para o catálogo.
 |---:|---|---|---|
 | 381 | `link env.system` | en | `apps.link_env_system` |
 
-**`osjeff_core/src/appfs/mod.rs`** (11)
+**`kitsune_core/src/appfs/mod.rs`** (11)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -759,14 +759,14 @@ decida caso a caso se vão para o catálogo.
 | 103 | `too many open files` | en | `apps.too_many_open_files` |
 | 104 | `i/o error` | en | `apps.i_error` |
 
-**`osjeff_core/src/appfs/volume_tests.rs`** (2)
+**`kitsune_core/src/appfs/volume_tests.rs`** (2)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 113 | `readdir {i} => {:?}` | neutro | `apps.readdir_i` |
 | 347 | `id={id}\nname={id}\nversion=1.0.0\n{extra}` | en | `apps.id_id_name_id` |
 
-**`osjeff_core/src/appinstall.rs`** (6)
+**`kitsune_core/src/appinstall.rs`** (6)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -777,7 +777,7 @@ decida caso a caso se vão para o catálogo.
 | 83 | `too many installed apps` | en | `apps.too_many_installed_apps` |
 | 84 | `file system: {e}` | en | `apps.file_system` |
 
-**`osjeff_core/src/appmanifest.rs`** (16)
+**`kitsune_core/src/appmanifest.rs`** (16)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -798,7 +798,7 @@ decida caso a caso se vão para o catálogo.
 | 743 | `package has two manifests` | en | `apps.package_has_two_manifests` |
 | 744 | `package has two icons` | en | `apps.package_has_two_icons` |
 
-**`osjeff_core/src/wasmsec.rs`** (5)
+**`kitsune_core/src/wasmsec.rs`** (5)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -879,7 +879,7 @@ decida caso a caso se vão para o catálogo.
 
 ### Outros
 
-**`osjeff_core/src/base64.rs`** (4)
+**`kitsune_core/src/base64.rs`** (4)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
@@ -888,19 +888,19 @@ decida caso a caso se vão para o catálogo.
 | 31 | `base64 padding before the end` | en | `misc.base64_padding_before_end` |
 | 32 | `base64 data too large` | misto | `misc.base64_data_too_large` |
 
-**`osjeff_core/src/compositor/sim/paint.rs`** (1)
+**`kitsune_core/src/compositor/sim/paint.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 77 | `layer {:?} wrote ({x},{y}) outside its footprint {:?}` | en | `misc.layer_wrote_x_y` |
 
-**`osjeff_core/src/i18n/audit.rs`** (1)
+**`kitsune_core/src/i18n/audit.rs`** (1)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 845 | `{file}:{line}: {w:?} should be {r} in {s:?}` | en | `misc.file_line_w_should` |
 
-**`osjeff_core/src/i18n/template.rs`** (6)
+**`kitsune_core/src/i18n/template.rs`** (6)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|

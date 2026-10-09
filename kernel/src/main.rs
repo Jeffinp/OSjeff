@@ -55,7 +55,7 @@ use bootloader_api::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use desktop::{Compositor, Desktop, FrameIn, Screen};
 use fb::Canvas;
-use osjeff_core::Time;
+use kitsune_core::Time;
 use ps2::Event;
 
 // Ask the bootloader to map all physical memory at a fixed offset. This gives
@@ -581,7 +581,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             } else if let Some((len, fit_w)) = desk.browser_next_image(&mut url) {
                 // Nothing else is waiting: fetch the next picture of the page.
                 if !fetch::try_post_image(&url[..len], &[], fit_w) {
-                    desk.browser_image_done(Err(osjeff_core::web::imgcache::ImgFail::Failed));
+                    desk.browser_image_done(Err(kitsune_core::web::imgcache::ImgFail::Failed));
                     browser_redraw = true;
                 }
             }
@@ -590,7 +590,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             // browser on "Carregando" forever.
             let mut url = [0u8; 512];
             if desk.browser_take_request(&mut url).is_some() {
-                desk.browser_fail(osjeff_core::browser::FailReason::WorkerDied);
+                desk.browser_fail(kitsune_core::browser::FailReason::WorkerDied);
                 browser_redraw = true;
             }
         }

@@ -1,7 +1,7 @@
 //! Proof that the log write path never touches the heap.
 //!
 //! The kernel pushes log records from interrupt handlers, where taking the heap
-//! lock could deadlock against the interrupted code. `osjeff_core::klog`'s
+//! lock could deadlock against the interrupted code. `kitsune_core::klog`'s
 //! write path (formatting into `FixedBuf`, `LogRing::push`, the serial line
 //! assembler and its classifier, reading a snapshot out) must therefore allocate
 //! nothing. This test installs a counting global allocator (per thread, so the
@@ -9,7 +9,7 @@
 //! kind perform zero allocations.
 
 use core::fmt::Write as _;
-use osjeff_core::klog::{
+use kitsune_core::klog::{
     Filter, FixedBuf, Level, LineAsm, LogRing, RING_BYTES, classify, ticks_to_ms,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -79,7 +79,7 @@ fn the_write_path_does_not_allocate() {
             // And a viewer snapshot into its own pre-allocated buffer.
             sink += ring.copy_out(&mut out);
         }
-        sink += filter.matches(&osjeff_core::klog::Entry {
+        sink += filter.matches(&kitsune_core::klog::Entry {
             seq: 0,
             ts_ms: 0,
             level: Level::Info,

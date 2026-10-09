@@ -18,14 +18,14 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::Key;
-use osjeff_core::browser::{self, Browser, Conn};
-use osjeff_core::base64;
-use osjeff_core::web::form::{FormState, MAX_QUERY, MAX_VALUE};
-use osjeff_core::web::imgcache::{
+use kitsune_core::Key;
+use kitsune_core::browser::{self, Browser, Conn};
+use kitsune_core::base64;
+use kitsune_core::web::form::{FormState, MAX_QUERY, MAX_VALUE};
+use kitsune_core::web::imgcache::{
     self, ImageCache, ImageLookup, ImgFail, ImgState, Loaded, NoImages, PageImages,
 };
-use osjeff_core::web::{Cmd, Doc, FixedAdvance, Font, Layout, Page, TextMetrics};
+use kitsune_core::web::{Cmd, Doc, FixedAdvance, Font, Layout, Page, TextMetrics};
 
 const STACK: usize = 512 * 1024;
 
@@ -246,7 +246,7 @@ fn exercise(data: &[u8]) {
                         Ok(Loaded {
                             orig_w: 10,
                             orig_h: 10,
-                            img: osjeff_core::image::Image::new(
+                            img: kitsune_core::image::Image::new(
                                 (b as usize % 200) + 1,
                                 (i % 150) + 1,
                                 0xFF00_0000,
@@ -279,7 +279,7 @@ fn exercise(data: &[u8]) {
 
     // ---- tabs, tab text and the browser's own pages ----
     {
-        use osjeff_core::browser::{Bookmark, pages, tabs};
+        use kitsune_core::browser::{Bookmark, pages, tabs};
         let (hs, he) = tabs::host_range(&text);
         assert!(hs <= he && he <= text.len() && text.is_char_boundary(hs) && text.is_char_boundary(he));
         let _ = tabs::host_of(&text);

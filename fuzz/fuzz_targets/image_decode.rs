@@ -26,9 +26,9 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::image::{self, Filter, Format, Image};
-use osjeff_core::inflate::{self, Crc32, Inflater};
-use osjeff_core::{bmp, png};
+use kitsune_core::image::{self, Filter, Format, Image};
+use kitsune_core::inflate::{self, Crc32, Inflater};
+use kitsune_core::{bmp, png};
 
 const SIG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
 
@@ -112,7 +112,7 @@ fn synth_png(p: [u8; 3], scan: &[u8]) -> Vec<u8> {
             sanitize_filters(&hdr, &mut raw);
         }
     }
-    let z = osjeff_core::deflate::zlib_compress(&raw);
+    let z = kitsune_core::deflate::zlib_compress(&raw);
     chunk(&mut out, b"IDAT", &z);
     chunk(&mut out, b"IEND", &[]);
     out

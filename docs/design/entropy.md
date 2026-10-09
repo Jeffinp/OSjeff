@@ -1,7 +1,7 @@
 # Entropia e números aleatórios (W21)
 
 Estado: **gerador real no kernel** (`kernel/src/rng.rs`) sobre um módulo puro e testado no host
-(`osjeff_core::entropy`). Substitui o `WeakMixer` (um hash de 64 bits de TSC e ticks) que o TLS
+(`kitsune_core::entropy`). Substitui o `WeakMixer` (um hash de 64 bits de TSC e ticks) que o TLS
 usava quando a CPU não tinha `RDRAND`, o caso do QEMU com WHPX no Windows.
 
 ## 1. O problema

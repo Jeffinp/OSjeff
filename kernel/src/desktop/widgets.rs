@@ -2,9 +2,9 @@
 //! functions shared across the app/input/render modules).
 
 use super::*;
-use osjeff_core::style::PANEL_H;
+use kitsune_core::style::PANEL_H;
 
-pub(crate) use osjeff_core::layout::BrowserChrome;
+pub(crate) use kitsune_core::layout::BrowserChrome;
 
 /// Alt+Tab panel geometry.
 pub(crate) const SWITCH_W: i32 = 380;
@@ -42,9 +42,9 @@ fn rgb24(v: u32) -> Color {
 /// Paint the wallpaper `s` selects: a preset (in the scheme of the current
 /// appearance) or the user's image, falling back to the default preset when the
 /// image cannot be used.
-fn paint_wallpaper(c: &mut Canvas, s: &osjeff_core::settings::Settings) {
-    use osjeff_core::settings::WallpaperChoice;
-    use osjeff_core::wallpaper::PRESETS;
+fn paint_wallpaper(c: &mut Canvas, s: &kitsune_core::settings::Settings) {
+    use kitsune_core::settings::WallpaperChoice;
+    use kitsune_core::wallpaper::PRESETS;
     match s.wallpaper {
         WallpaperChoice::Image => {
             if !paint_image(c, s.image_path()) {
@@ -57,8 +57,8 @@ fn paint_wallpaper(c: &mut Canvas, s: &osjeff_core::settings::Settings) {
     }
 }
 
-fn paint_preset(c: &mut Canvas, p: &osjeff_core::wallpaper::Preset) {
-    use osjeff_core::wallpaper::{Style, lerp_rgb};
+fn paint_preset(c: &mut Canvas, p: &kitsune_core::wallpaper::Preset) {
+    use kitsune_core::wallpaper::{Style, lerp_rgb};
     let (w, h) = (c.width(), c.height());
     let sc = p.scheme(theme::dark());
     match p.style {
@@ -71,7 +71,7 @@ fn paint_preset(c: &mut Canvas, p: &osjeff_core::wallpaper::Preset) {
         }
     }
     if matches!(p.style, Style::Glow | Style::Shapes) {
-        let lut = osjeff_core::raster::glow_lut();
+        let lut = kitsune_core::raster::glow_lut();
         for b in sc.blobs.iter().filter(|b| b.alpha > 0 && b.r > 0) {
             let cx = (w as i64 * b.x as i64 / 1000) as i32;
             let cy = (h as i64 * b.y as i64 / 1000) as i32;
@@ -82,8 +82,8 @@ fn paint_preset(c: &mut Canvas, p: &osjeff_core::wallpaper::Preset) {
     if p.style == Style::Shapes && !p.shapes.is_empty() {
         // The facets / hills / bands: anti-aliased polygons on a transparent layer of the
         // screen's size (freed right after), laid over the gradient and the glows.
-        use osjeff_core::glyph::Path;
-        use osjeff_core::raster::{Paint, Surface, rgba};
+        use kitsune_core::glyph::Path;
+        use kitsune_core::raster::{Paint, Surface, rgba};
         let mut layer = Surface::new(w, h);
         for sh in p.shapes {
             let (col, a) = sh.look(theme::dark());
@@ -112,24 +112,24 @@ fn paint_image(c: &mut Canvas, path: &[u8]) -> bool {
     let Some(bytes) = read_path(path) else {
         crate::notify::notify_key(
             crate::klog::Level::Warn,
-            osjeff_core::tk!("notify.wallpaper_missing"),
+            kitsune_core::tk!("notify.wallpaper_missing"),
             &[],
         );
         return false;
     };
-    let mut img = match osjeff_core::wallpaper::load(&bytes, w, h) {
+    let mut img = match kitsune_core::wallpaper::load(&bytes, w, h) {
         Ok(img) => img,
         Err(e) => {
             crate::notify::notify_why(
                 crate::klog::Level::Warn,
-                osjeff_core::tk!("notify.wallpaper_refused"),
-                |l| alloc::string::String::from(osjeff_core::i18n::tr_in(l, e.why_key())),
+                kitsune_core::tk!("notify.wallpaper_refused"),
+                |l| alloc::string::String::from(kitsune_core::i18n::tr_in(l, e.why_key())),
             );
             return false;
         }
     };
     // Transparent pixels show the default backdrop colour.
-    img.flatten(0xFF00_0000 | osjeff_core::wallpaper::PRESETS[0].top);
+    img.flatten(0xFF00_0000 | kitsune_core::wallpaper::PRESETS[0].top);
     for y in 0..h {
         for (x, &p) in img.row(y).iter().enumerate() {
             c.put(x, y, rgb24(p));

@@ -47,7 +47,9 @@ impl Desktop {
             self.tex_key.set(Some(key));
         }
         if alpha > 0 {
-            let rr = osjeff_core::style::R_WINDOW.min(dest.w / 2).min(dest.h / 2);
+            let rr = kitsune_core::style::R_WINDOW
+                .min(dest.w / 2)
+                .min(dest.h / 2);
             let hole = Rect::new(dest.x, dest.y + rr, dest.w, (dest.h - 2 * rr).max(0));
             for sh in window_shadow(focused, alpha) {
                 c.draw_shadow(dest, sh, hole);
@@ -59,7 +61,7 @@ impl Desktop {
             r.h as usize,
             dest,
             alpha,
-            osjeff_core::style::R_WINDOW,
+            kitsune_core::style::R_WINDOW,
         );
     }
 }

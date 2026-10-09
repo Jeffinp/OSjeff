@@ -1,4 +1,4 @@
-//! System log: the kernel end of `osjeff_core::klog`.
+//! System log: the kernel end of `kitsune_core::klog`.
 //!
 //! One static ring of [`RING_BYTES`] (64 KiB, BSS) holds the last messages with
 //! level, millisecond timestamp and the scheduler slot of the thread that logged
@@ -16,7 +16,7 @@
 //! single core, so that is mutual exclusion: no lock to spin on, and an ISR
 //! that logs cannot deadlock against the thread it interrupted). The slow part,
 //! the UART, runs *outside* the critical section. The ring write itself is a few
-//! `memcpy`s of at most 212 bytes (`osjeff_core::klog::LogRing::push`, tested
+//! `memcpy`s of at most 212 bytes (`kitsune_core::klog::LogRing::push`, tested
 //! with 100 000 messages over a 64 KiB ring).
 //!
 //! The panic / fatal-exception path does not depend on any of this: `crash`
@@ -26,8 +26,8 @@ use crate::sync::RacyCell;
 use alloc::vec::Vec;
 use core::fmt::{self, Write as _};
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-pub use osjeff_core::klog::Level;
-use osjeff_core::klog::{FixedBuf, LineAsm, LogRing, MAX_MSG, RING_BYTES, classify, ticks_to_ms};
+pub use kitsune_core::klog::Level;
+use kitsune_core::klog::{FixedBuf, LineAsm, LogRing, MAX_MSG, RING_BYTES, classify, ticks_to_ms};
 
 static RING: RacyCell<LogRing<RING_BYTES>> = RacyCell::new(LogRing::new());
 static LINE: RacyCell<LineAsm> = RacyCell::new(LineAsm::new());
@@ -145,7 +145,7 @@ macro_rules! klog {
 
 /// Mirror serial output into the ring (called by `serial::write_str` for every
 /// piece written through `serial_println!` / `serial_print!`). Lines are
-/// reassembled and classified by `osjeff_core::klog::classify`.
+/// reassembled and classified by `kitsune_core::klog::classify`.
 pub fn capture(s: &str) {
     if !CAPTURE.load(Ordering::Relaxed) {
         return;

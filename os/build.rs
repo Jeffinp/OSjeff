@@ -5,12 +5,12 @@ fn main() {
     let kernel = PathBuf::from(std::env::var_os("CARGO_BIN_FILE_KERNEL_kernel").unwrap());
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
 
-    let uefi_path = out_dir.join("osjeff-uefi.img");
+    let uefi_path = out_dir.join("kitsune-uefi.img");
     bootloader::UefiBoot::new(&kernel)
         .create_disk_image(&uefi_path)
         .expect("failed to build UEFI image");
 
-    let bios_path = out_dir.join("osjeff-bios.img");
+    let bios_path = out_dir.join("kitsune-bios.img");
     bootloader::BiosBoot::new(&kernel)
         .create_disk_image(&bios_path)
         .expect("failed to build BIOS image");

@@ -30,7 +30,7 @@
 //! `appd` must not touch the CMOS ports the compositor reads.
 
 use crate::desktop::vfs;
-use osjeff_core::appfs::{AppFs, FsError, VolumeFs};
+use kitsune_core::appfs::{AppFs, FsError, VolumeFs};
 
 /// Unix seconds for new files (0 when the RTC was unreadable at boot).
 fn now() -> u64 {

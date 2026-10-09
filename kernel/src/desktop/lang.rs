@@ -1,13 +1,13 @@
 //! Changing the interface language while the desktop runs.
 //!
-//! `crate::settings::set` already switches the catalog (`osjeff_core::i18n::set_lang`). What is
+//! `crate::settings::set` already switches the catalog (`kitsune_core::i18n::set_lang`). What is
 //! left for the desktop is everything that holds text built with the old language: window titles
 //! (stored per window), the Apps and Busca overlays (their tiles and results are built when
 //! they open) and open menus and popovers. Text drawn each frame from the catalog needs
 //! nothing: the full repaint requested here redraws it.
 
 use super::*;
-use osjeff_core::i18n::Lang;
+use kitsune_core::i18n::Lang;
 
 impl Desktop {
     /// The language changed from `old` to the one in effect: refresh what was built with `old`

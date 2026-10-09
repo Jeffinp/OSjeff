@@ -9,8 +9,8 @@ mkdir -p "runs/$label"
 for n in $(seq 1 "$reps"); do
   for mode in $modes; do
     for sc in "$@"; do
-      ./run.sh "$A/osjeff-$mode.img" "$mode" "runs/$label/A_${mode}_${sc}_$n" 150 "scen/$sc.sh"
-      ./run.sh "$B/osjeff-$mode.img" "$mode" "runs/$label/B_${mode}_${sc}_$n" 150 "scen/$sc.sh"
+      ./run.sh "$A/kitsune-$mode.img" "$mode" "runs/$label/A_${mode}_${sc}_$n" 150 "scen/$sc.sh"
+      ./run.sh "$B/kitsune-$mode.img" "$mode" "runs/$label/B_${mode}_${sc}_$n" 150 "scen/$sc.sh"
       echo "done rep $n $mode $sc"
     done
   done

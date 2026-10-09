@@ -42,9 +42,9 @@ use crate::{netstack, serial_println};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use osjeff_core::appmanifest::NetPerm;
-use osjeff_core::browser::{Conn, FailReason, MAX_RESPONSE_BYTES};
-use osjeff_core::web::imgcache::{self, ImgFail, Loaded as ImgLoaded};
+use kitsune_core::appmanifest::NetPerm;
+use kitsune_core::browser::{Conn, FailReason, MAX_RESPONSE_BYTES};
+use kitsune_core::web::imgcache::{self, ImgFail, Loaded as ImgLoaded};
 
 const IDLE: u8 = 0;
 const REQUESTED: u8 = 1;
@@ -109,7 +109,7 @@ pub struct Loaded {
     /// The response was cut at the size cap.
     pub truncated: bool,
     /// Summary of the server certificate (HTTPS only), for the security popover.
-    pub cert: Option<osjeff_core::browser::CertInfo>,
+    pub cert: Option<kitsune_core::browser::CertInfo>,
 }
 
 /// Outcome of one navigation: the page, or why it failed.
@@ -586,9 +586,9 @@ fn resync_clock_if_needed(net: &mut netstack::Net) {
 }
 
 /// Resolve a URL and fetch it (HTTP or HTTPS), following up to
-/// [`osjeff_core::redirect::MAX_REDIRECTS`] redirects. Returns the final page,
+/// [`kitsune_core::redirect::MAX_REDIRECTS`] redirects. Returns the final page,
 /// or why the navigation failed. Redirect policy (scheme kept, https -> http
-/// refused, loops, bad `Location` values) lives in `osjeff_core::redirect`.
+/// refused, loops, bad `Location` values) lives in `kitsune_core::redirect`.
 fn fetch_url(
     net: &mut netstack::Net,
     url: &[u8],
@@ -596,16 +596,16 @@ fn fetch_url(
     cap: usize,
     app: Option<&AppPolicy>,
 ) -> FetchResult {
-    use osjeff_core::browser::{header_value, parse_url, status_code};
-    use osjeff_core::redirect::Redirects;
+    use kitsune_core::browser::{header_value, parse_url, status_code};
+    use kitsune_core::redirect::Redirects;
     let mut cur: Vec<u8> = url.to_vec();
     let mut chain: Option<Redirects> = None;
 
     loop {
         // An app's request, and each redirect hop it is sent on to, passes the same gate:
-        // permission, destination filter and allow-list (`osjeff_core::appnet`).
+        // permission, destination filter and allow-list (`kitsune_core::appnet`).
         if let Some(p) = app
-            && let Err(code) = osjeff_core::appnet::authorize(p.perm, &p.hosts, &cur)
+            && let Err(code) = kitsune_core::appnet::authorize(p.perm, &p.hosts, &cur)
         {
             serial_println!("fetch: app request refused ({})", code);
             return Err(FailReason::Network);
@@ -689,7 +689,7 @@ fn fetch_image(
         Ok(r) => r,
         Err(_) => return Err(ImgFail::Failed),
     };
-    let code = osjeff_core::browser::status_code(&r.data).unwrap_or(0);
+    let code = kitsune_core::browser::status_code(&r.data).unwrap_or(0);
     let name = core::str::from_utf8(url).unwrap_or("?");
     if code != 200 {
         serial_println!("img: status {} for {}", code, name);
@@ -698,7 +698,7 @@ fn fetch_image(
     if r.truncated {
         return Err(ImgFail::TooBig);
     }
-    let body = osjeff_core::browser::page_body(&r.data);
+    let body = kitsune_core::browser::page_body(&r.data);
     drop(r);
     let out = imgcache::decode_for_page(&body, fit_w);
     match &out {

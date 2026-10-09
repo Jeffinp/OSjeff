@@ -42,9 +42,9 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bootloader_api::info::FrameBufferInfo;
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use osjeff_core::appfs::Sandbox;
-use osjeff_core::appmanifest::{Manifest, Quotas};
-use osjeff_core::{t, tk};
+use kitsune_core::appfs::Sandbox;
+use kitsune_core::appmanifest::{Manifest, Quotas};
+use kitsune_core::{t, tk};
 use wasmi::{Instance, Linker, Memory, Module, Store, Val};
 
 /// Handle of a running app (never reused).

@@ -11,9 +11,9 @@
 use super::ui::{self, ButtonKind, Control};
 use super::*;
 use crate::text::{self, BODY, CALLOUT, FOOTNOTE, Weight};
-use osjeff_core::anim::{self, Tween};
-use osjeff_core::appart::{FileKind, Tool};
-use osjeff_core::style::R_CONTROL;
+use kitsune_core::anim::{self, Tween};
+use kitsune_core::appart::{FileKind, Tool};
+use kitsune_core::style::R_CONTROL;
 
 /// `0xRRGGBB` of a colour.
 pub(crate) fn rgb_of(c: Color) -> u32 {
@@ -38,7 +38,7 @@ fn since_input(last_input: u64) -> Option<u64> {
 }
 
 /// Opacity (0..=256) of a caret whose owner last saw input at tick `last_input` (0 = never): the
-/// eased blink of `osjeff_core::anim::caret_alpha`.
+/// eased blink of `kitsune_core::anim::caret_alpha`.
 pub(crate) fn caret_alpha(last_input: u64) -> u32 {
     anim::caret_alpha(since_input(last_input))
 }
@@ -105,7 +105,7 @@ pub(crate) fn tool_segmented(c: &mut Canvas, r: Rect, tools: &[Tool], selected: 
             0x1400_0000
         },
     );
-    let segs = osjeff_core::widgets::segmented_rects(r, tools.len());
+    let segs = kitsune_core::widgets::segmented_rects(r, tools.len());
     for (i, (s, t)) in segs.iter().zip(tools).enumerate() {
         let on = i == selected;
         if on {

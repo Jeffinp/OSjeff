@@ -5,14 +5,14 @@
     python3 -I tools/i18n-audit.py --check    # fail if the file on disk is out of date
     python3 -I tools/i18n-audit.py --summary  # print the per-area table only
 
-It reads the Rust sources of `kernel/src` and `osjeff_core/src` (comments and `#[cfg(test)]`
+It reads the Rust sources of `kernel/src` and `kitsune_core/src` (comments and `#[cfg(test)]`
 modules skipped), finds the string literals that reach the screen (arguments of the drawing and
 widget calls, menu entries, notifications, error messages, `String::from("...")` in UI code,
 match arms that name things) and classifies them:
 
   * language   pt, en, mixed (both) or neutral (a name, a symbol, a unit);
   * no accent  a Portuguese word that needs one (the list in tools/i18n/accents.txt, shared
-               with the host test `cargo test -p osjeff_core i18n`);
+               with the host test `cargo test -p kitsune_core i18n`);
   * english    English text in a place where the UI speaks Portuguese;
   * migrated   already goes through the catalog (`t!`, `tk!`, ...), listed only as a count.
 
@@ -33,7 +33,7 @@ from collections import defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "docs", "design", "i18n-audit.md")
-SRC_DIRS = ["kernel/src", "osjeff_core/src"]
+SRC_DIRS = ["kernel/src", "kitsune_core/src"]
 
 # ---------------------------------------------------------------------------- tokenizer
 
@@ -416,29 +416,29 @@ def scan_file(rel):
 AREAS = [
     # (area id, display name, owner note, regex over the path)
     ("shell", "Shell (migrado nesta onda)", "painel, barra de apps, Apps/Busca, diálogo de energia, banners",
-     r"^kernel/src/desktop/(panel|taskbar|overlays|shell|chrome|toasts_ui|lang|glass)\.rs$|^osjeff_core/src/(launcher|chrome|taskbar|notify|sysif|snap|search)\.rs$"),
+     r"^kernel/src/desktop/(panel|taskbar|overlays|shell|chrome|toasts_ui|lang|glass)\.rs$|^kitsune_core/src/(launcher|chrome|taskbar|notify|sysif|snap|search)\.rs$"),
     ("settings", "Ajustes", "janela de Ajustes e o modelo de configurações",
-     r"^kernel/src/desktop/settings_ui\.rs$|^osjeff_core/src/(settings|wallpaper|keymap)\.rs$|^kernel/src/settings\.rs$"),
+     r"^kernel/src/desktop/settings_ui\.rs$|^kitsune_core/src/(settings|wallpaper|keymap)\.rs$|^kernel/src/settings\.rs$"),
     ("files", "Arquivos", "gerenciador de arquivos, lixeira, VFS",
-     r"^kernel/src/desktop/(files|files_ui|vfs|sysstore)\.rs$|^osjeff_core/src/(fileman|vfs|fs)(\.rs|/)|^osjeff_core/src/fs3/|^kernel/src/storage\.rs$"),
+     r"^kernel/src/desktop/(files|files_ui|vfs|sysstore)\.rs$|^kitsune_core/src/(fileman|vfs|fs)(\.rs|/)|^kitsune_core/src/fs3/|^kernel/src/storage\.rs$"),
     ("editor", "Editor", "editor de texto e diálogos",
-     r"^kernel/src/desktop/(edit|edit_ui)\.rs$|^osjeff_core/src/editor2/"),
+     r"^kernel/src/desktop/(edit|edit_ui)\.rs$|^kitsune_core/src/editor2/"),
     ("terminal", "Terminal", "terminal, interpretador e comandos",
-     r"^kernel/src/desktop/(term|shellhost)\.rs$|^osjeff_core/src/(shell|termui)(\.rs|/)"),
+     r"^kernel/src/desktop/(term|shellhost)\.rs$|^kitsune_core/src/(shell|termui)(\.rs|/)"),
     ("tasks", "Tarefas", "monitor de atividade",
-     r"^kernel/src/desktop/tarefas\.rs$|^osjeff_core/src/(activity|sysmon|netstats|process)\.rs$"),
+     r"^kernel/src/desktop/tarefas\.rs$|^kitsune_core/src/(activity|sysmon|netstats|process)\.rs$"),
     ("log", "Registro", "visualizador do registro",
-     r"^kernel/src/desktop/logview\.rs$|^osjeff_core/src/klog\.rs$"),
+     r"^kernel/src/desktop/logview\.rs$|^kitsune_core/src/klog\.rs$"),
     ("calc", "Calculadora", "calculadora",
-     r"^kernel/src/desktop/calc_ui\.rs$|^osjeff_core/src/calc\.rs$"),
+     r"^kernel/src/desktop/calc_ui\.rs$|^kitsune_core/src/calc\.rs$"),
     ("viewer", "Imagens", "visualizador de imagens e decodificadores",
-     r"^kernel/src/desktop/viewer\.rs$|^osjeff_core/src/(viewer|image|png|bmp|ppm|inflate|deflate|gzip)(\.rs|/)"),
+     r"^kernel/src/desktop/viewer\.rs$|^kitsune_core/src/(viewer|image|png|bmp|ppm|inflate|deflate|gzip)(\.rs|/)"),
     ("browser", "Navegador", "navegador, páginas internas, erros de rede e TLS (outro agente está editando)",
-     r"^kernel/src/desktop/apps\.rs$|^osjeff_core/src/(browser|web|redirect|dns|net|icmp|lease|sntp|tlsverify|x509|appnet)(\.rs|/)|^kernel/src/(fetch|netd|netstack|tlsv)\.rs$"),
+     r"^kernel/src/desktop/apps\.rs$|^kitsune_core/src/(browser|web|redirect|dns|net|icmp|lease|sntp|tlsverify|x509|appnet)(\.rs|/)|^kernel/src/(fetch|netd|netstack|tlsv)\.rs$"),
     ("apps", "Apps de terceiros (WASM)", "janela de app, manifesto, instalação, SDK",
-     r"^kernel/src/desktop/(wasmwin|appart|appui)\.rs$|^kernel/src/wasm/|^osjeff_core/src/(appabi|appart|appfs|appinstall|appmanifest|wasmsec)(\.rs|/)"),
+     r"^kernel/src/desktop/(wasmwin|appart|appui)\.rs$|^kernel/src/wasm/|^kitsune_core/src/(appabi|appart|appfs|appinstall|appmanifest|wasmsec)(\.rs|/)"),
     ("kit", "Kit de componentes", "widgets, galeria e primitivas",
-     r"^kernel/src/desktop/(kit|ui|widgets|gallery|cursor|input|render|live|instance|mod)\.rs$|^osjeff_core/src/(widgets|style|iconart|window|winman|wm)\.rs$"),
+     r"^kernel/src/desktop/(kit|ui|widgets|gallery|cursor|input|render|live|instance|mod)\.rs$|^kitsune_core/src/(widgets|style|iconart|window|winman|wm)\.rs$"),
     ("system", "Sistema (logs e tela de falha: ficam em inglês)", "boot, falha grave, drivers",
      r"^kernel/src/(crash|main|boot|serial|klog|logd|power|rtc|sysinfo|trace|perf|sched|vm|allocator)\.rs$|^kernel/src/"),
 ]
@@ -487,7 +487,7 @@ def render():
     w("# Auditoria de textos do OSjeff (i18n)")
     w("")
     w("Gerado por `python3 -I tools/i18n-audit.py` (não edite à mão; `--check` confere se está em dia).")
-    w("Lista os literais de texto visíveis ao usuário em `kernel/src` e `osjeff_core/src`, por app, para que a")
+    w("Lista os literais de texto visíveis ao usuário em `kernel/src` e `kitsune_core/src`, por app, para que a")
     w("migração para o catálogo (`docs/design/i18n.md`) seja dividida **sem sobreposição de arquivos**.")
     w("")
     w("Como ler: *sem acento* = palavra em português que precisa de acento (lista em `tools/i18n/accents.txt`);")

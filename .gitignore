@@ -16,7 +16,7 @@ wasm-apps/doom/doomgeneric/
 # Screenshots / captures
 *.png
 # ...but keep the brand source icon and documentation images
-!assets/osjeff-icon.png
+!assets/kitsune-icon.png
 !docs/img/*.png
 
 # Editor / OS cruft
@@ -38,5 +38,5 @@ qlog.txt
 
 # Runtime artifacts from tools/run.sh
 *.pcap
-osjeff-ovmf-vars.fd
+kitsune-ovmf-vars.fd
 !wasm-apps/*/icon.png

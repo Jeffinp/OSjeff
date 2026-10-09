@@ -6,7 +6,7 @@
 
 use crate::fb::{Canvas, Color};
 use crate::{interrupts, io, theme};
-use osjeff_core::hw::perf::{LINE_LEN, Perf as CorePerf, heap_line, khz_from_calibration};
+use kitsune_core::hw::perf::{LINE_LEN, Perf as CorePerf, heap_line, khz_from_calibration};
 
 /// Measure the TSC frequency (in kHz = cycles/ms) by counting cycles across a
 /// known number of PIT ticks. Requires the timer to be running.
@@ -21,7 +21,7 @@ pub fn calibrate_khz() -> u64 {
     khz_from_calibration(cycles, 25, interrupts::TIMER_HZ as u64)
 }
 
-/// Rolling compositor metrics (the arithmetic lives in `osjeff_core::hw::perf`).
+/// Rolling compositor metrics (the arithmetic lives in `kitsune_core::hw::perf`).
 pub struct Perf(CorePerf);
 
 impl Perf {
@@ -46,10 +46,10 @@ impl Perf {
     }
 
     /// Screen rect of the HUD panel (top-left, under the menu bar).
-    pub fn rect(_width: i32) -> osjeff_core::Rect {
-        osjeff_core::Rect::new(
+    pub fn rect(_width: i32) -> kitsune_core::Rect {
+        kitsune_core::Rect::new(
             12,
-            osjeff_core::window::MENUBAR_H + 10,
+            kitsune_core::window::MENUBAR_H + 10,
             HUD_W + 16,
             HUD_H + 16,
         )
@@ -59,8 +59,8 @@ impl Perf {
     pub fn draw(&self, c: &mut Canvas, heap_pct: u32, threads: usize) {
         use crate::fb::Corner;
         let r = Self::rect(c.width() as i32);
-        let panel = osjeff_core::Rect::new(r.x + 8, r.y + 4, HUD_W, HUD_H);
-        let hole = osjeff_core::Rect::new(panel.x, panel.y + 10, panel.w, panel.h - 20);
+        let panel = kitsune_core::Rect::new(r.x + 8, r.y + 4, HUD_W, HUD_H);
+        let hole = kitsune_core::Rect::new(panel.x, panel.y + 10, panel.w, panel.h - 20);
         c.draw_shadow(
             panel,
             crate::fb::Shadow {

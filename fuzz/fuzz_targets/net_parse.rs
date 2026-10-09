@@ -1,4 +1,4 @@
-//! Fuzz target: every network parser/responder in `osjeff_core::net`.
+//! Fuzz target: every network parser/responder in `kitsune_core::net`.
 //!
 //! The input is an arbitrary Ethernet frame (so also: truncated frames, bad
 //! IHL, total-length > buffer, ARP with odd hlen/plen, huge ICMP, DHCP options
@@ -6,9 +6,9 @@
 //! `respond` with output buffers of several sizes (including ones too small for
 //! the reply), through `parse_dhcp`, and through the checksum.
 //!
-//! The DHCP lease state machine (`osjeff_core::lease`), the DNS message parser,
-//! cache and resolver (`osjeff_core::dns`), and the ICMP echo parser/ping
-//! (`osjeff_core::icmp`) are driven from the same input: see `fuzz_lease`,
+//! The DHCP lease state machine (`kitsune_core::lease`), the DNS message parser,
+//! cache and resolver (`kitsune_core::dns`), and the ICMP echo parser/ping
+//! (`kitsune_core::icmp`) are driven from the same input: see `fuzz_lease`,
 //! `fuzz_dns` and `fuzz_icmp`.
 //!
 //! A second "shaped" mode (top bit of the first input byte) rewrites the frame
@@ -18,8 +18,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::net::{self, DnsServers, Ipv4, Mac};
-use osjeff_core::{dns, icmp, lease};
+use kitsune_core::net::{self, DnsServers, Ipv4, Mac};
+use kitsune_core::{dns, icmp, lease};
 
 const OUR_MAC: Mac = Mac([0x52, 0x54, 0x00, 0x12, 0x34, 0x56]);
 const OUR_IP: Ipv4 = Ipv4([10, 0, 2, 15]);

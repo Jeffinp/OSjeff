@@ -2,7 +2,7 @@
 //! and a process table surfaced through a Task Manager app.
 //!
 //! All non-trivial logic (terminal, editor, keymap, window geometry, easing,
-//! process table, the dynamic window table) lives in `osjeff_core` and is
+//! process table, the dynamic window table) lives in `kitsune_core` and is
 //! unit-tested. This module is hardware-facing glue: pixels, animation
 //! stepping, dispatch, and one [`instance::App`] state per window.
 
@@ -13,11 +13,11 @@ pub(crate) use crate::sync::RacyCell;
 pub(crate) use crate::theme;
 pub(crate) use alloc::string::String;
 pub(crate) use alloc::vec::Vec;
-pub(crate) use osjeff_core::clipboard::{self, Clipboard};
-pub(crate) use osjeff_core::window::{MENUBAR_H, ResizeEdge, TITLE_H, WindowId};
-pub(crate) use osjeff_core::winman::{ClickTracker, Switcher, WindowManager, WindowSpec};
-pub(crate) use osjeff_core::{Calc, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Time};
-pub(crate) use osjeff_core::{iconart, widgets as wlogic};
+pub(crate) use kitsune_core::clipboard::{self, Clipboard};
+pub(crate) use kitsune_core::window::{MENUBAR_H, ResizeEdge, TITLE_H, WindowId};
+pub(crate) use kitsune_core::winman::{ClickTracker, Switcher, WindowManager, WindowSpec};
+pub(crate) use kitsune_core::{Calc, Key, Keymap, ProcKind, ProcState, ProcessTable, Rect, Time};
+pub(crate) use kitsune_core::{iconart, widgets as wlogic};
 
 /// Longest gap between the two presses of a double click, in timer ticks
 /// (250 Hz): 500 ms.
@@ -38,11 +38,11 @@ pub(crate) fn shadow_box(r: Rect) -> Rect {
     Rect::new(r.x - 22, r.y - 8, r.w + 44, r.h + 44)
 }
 
-/// Cursor sprite bounding box: the area `osjeff_core::cursor::CursorTrack` restores from the back
+/// Cursor sprite bounding box: the area `kitsune_core::cursor::CursorTrack` restores from the back
 /// buffer before every frame. Every pointer sprite is rendered into exactly this box
-/// (`osjeff_core::pointer::{W, H}`), so no sprite can outgrow what gets erased.
-pub const CURSOR_W: i32 = osjeff_core::pointer::W as i32;
-pub const CURSOR_H: i32 = osjeff_core::pointer::H as i32;
+/// (`kitsune_core::pointer::{W, H}`), so no sprite can outgrow what gets erased.
+pub const CURSOR_W: i32 = kitsune_core::pointer::W as i32;
+pub const CURSOR_H: i32 = kitsune_core::pointer::H as i32;
 
 /// What changed after a mouse packet, so the caller can pick the cheap
 /// cursor-only repaint vs a full scene recompose.
@@ -92,7 +92,7 @@ pub struct Desktop {
     sh: i32,
     clipboard: Clipboard,
     /// Paths set aside by the file managers' Copy / Cut (shared by all windows).
-    pathclip: osjeff_core::fileman::PathClip,
+    pathclip: kitsune_core::fileman::PathClip,
     keymap: Keymap,
     procs: ProcessTable,
     /// Sampled system history for the resource monitor.
@@ -100,7 +100,7 @@ pub struct Desktop {
     /// The wallpaper or accent changed: the compositor must repaint the cached background.
     bg_dirty: bool,
     /// The toast overlay (see `toasts_ui`).
-    toasts: osjeff_core::notify::Toasts,
+    toasts: kitsune_core::notify::Toasts,
     /// Log sequence number up to which WARN+ records already became toasts.
     toast_seen: u32,
     /// A toast appeared or was dismissed since the compositor last repainted them.
@@ -121,7 +121,7 @@ pub struct Desktop {
     /// Window under the cursor.
     hover: Option<WindowId>,
     /// The title-bar button under the pointer (hover fill).
-    title_hover: Option<(WindowId, osjeff_core::window::TitleBtn)>,
+    title_hover: Option<(WindowId, kitsune_core::window::TitleBtn)>,
     /// Which window (and size) the offscreen texture currently holds.
     tex_key: core::cell::Cell<Option<(WindowId, i32, i32)>>,
     clicks: ClickTracker,
@@ -169,15 +169,15 @@ impl Desktop {
             sw,
             sh,
             clipboard: Clipboard::new(),
-            pathclip: osjeff_core::fileman::PathClip::new(),
+            pathclip: kitsune_core::fileman::PathClip::new(),
             keymap: Keymap::new(),
             procs,
             sysmon: SysMon::new(),
             bg_dirty: false,
-            toasts: osjeff_core::notify::Toasts::new(),
+            toasts: kitsune_core::notify::Toasts::new(),
             toast_seen: crate::klog::seq(),
             toast_dirty: false,
-            wm: WindowManager::new(osjeff_core::winman::DEFAULT_MAX_WINDOWS),
+            wm: WindowManager::new(kitsune_core::winman::DEFAULT_MAX_WINDOWS),
             drag: None,
             shell: shell::Shell::new(),
             focus_mix: core::cell::RefCell::new(Vec::new()),
@@ -213,9 +213,9 @@ impl Desktop {
     /// Everything that decides the cursor's pixels: the top-left of the sprite box and which
     /// sprite (arrow, hand, I-beam). The compositor repaints the sprite whenever this differs
     /// from what it painted.
-    pub fn pointer(&self) -> osjeff_core::cursor::Pointer {
+    pub fn pointer(&self) -> kitsune_core::cursor::Pointer {
         let (x, y) = self.cursor();
-        osjeff_core::cursor::Pointer {
+        kitsune_core::cursor::Pointer {
             x,
             y,
             shape: self.cursor_shape() as u8,
@@ -224,7 +224,7 @@ impl Desktop {
 
     /// Top-left of the pointer sprite box (the pointer position minus the hotspot).
     pub fn cursor(&self) -> (i32, i32) {
-        let (hx, hy) = osjeff_core::pointer::hotspot(self.cursor_shape());
+        let (hx, hy) = kitsune_core::pointer::hotspot(self.cursor_shape());
         (self.cursor_x - hx, self.cursor_y - hy)
     }
 
@@ -263,7 +263,7 @@ impl Desktop {
         let rect = if index == 1 {
             kind.default_rect()
         } else {
-            osjeff_core::winman::cascade_rect(
+            kitsune_core::winman::cascade_rect(
                 kind.default_rect(),
                 index as usize - 1,
                 self.work_area(),
@@ -344,7 +344,7 @@ impl Desktop {
 
     /// The rectangle windows maximize into.
     pub(crate) fn work_area(&self) -> Rect {
-        osjeff_core::layout::work_area(self.sw, self.sh)
+        kitsune_core::layout::work_area(self.sw, self.sh)
     }
 
     pub(crate) fn app_mut(&mut self, id: WindowId) -> Option<&mut App> {
@@ -471,7 +471,7 @@ impl Desktop {
             self.poll_appearance(hour);
         }
         let local =
-            osjeff_core::hw::rtc::utc_to_local(crate::rtc::read_utc(), crate::rtc::tz_minutes());
+            kitsune_core::hw::rtc::utc_to_local(crate::rtc::read_utc(), crate::rtc::tz_minutes());
         if local.is_valid() {
             self.today
                 .set((local.date.y as i32, local.date.m, local.date.d));

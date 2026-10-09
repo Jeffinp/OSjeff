@@ -1,9 +1,9 @@
 # Imagens no OSjeff: `inflate`, `deflate`, `image`, `bmp`, `png`, `ppm`
 
-Bibliotecas puras em `osjeff_core` (`no_std` + `alloc`, `forbid(unsafe_code)`,
+Bibliotecas puras em `kitsune_core` (`no_std` + `alloc`, `forbid(unsafe_code)`,
 sem dependências novas, testadas no host) que servem de base para o visualizador
 de imagens, ícones e wallpapers. O visualizador de imagens do desktop (`Kind::Viewer`,
-`kernel/src/desktop/viewer.rs`, lógica em `osjeff_core::viewer`) usa `image::decode`/`encode`.
+`kernel/src/desktop/viewer.rs`, lógica em `kitsune_core::viewer`) usa `image::decode`/`encode`.
 
 ```
 inflate (DEFLATE + zlib + CRC-32/Adler-32)     deflate (codificador: stored / LZ77 + Huffman fixo)
@@ -57,7 +57,7 @@ Não existe imagem de tamanho zero.
 ## API resumida
 
 ```rust
-use osjeff_core::image::{self, Filter, Format, Image};
+use kitsune_core::image::{self, Filter, Format, Image};
 
 let img: Image = image::decode(&bytes)?;           // PNG, BMP ou PPM, por assinatura
 let tela = img.fit(largura_janela, altura_janela, false, Filter::Auto)?;
@@ -113,7 +113,7 @@ Detalhes em [`tls-browser.md`](tls-browser.md) §8.1.
 
 ## Desempenho (host, release, melhor de 15; imagem 1024x768 RGBA = 3 MiB)
 
-Medido com `cargo run --release -p osjeff_core --example image_bench`. O host tem
+Medido com `cargo run --release -p kitsune_core --example image_bench`. O host tem
 SSE e vetoriza; o kernel é soft-float/sem SSE, então espere números maiores lá
 (use as **razões**, não os milissegundos absolutos).
 
@@ -138,7 +138,7 @@ checagens de limite.
 
 ## Verificação
 
-* Testes unitários em `osjeff_core` (`cargo test -p osjeff_core image:: png:: bmp::
+* Testes unitários em `kitsune_core` (`cargo test -p kitsune_core image:: png:: bmp::
   ppm:: inflate:: deflate::`). Vetores reais embutidos como hex: fluxos zlib do
   CPython, arquivos BMP/PNG/PPM do ImageMagick/libpng (com os pixels brutos do
   próprio `convert ... rgba:-` como esperado), mais arquivos montados em Python por
@@ -151,4 +151,4 @@ checagens de limite.
   reproduzir o corpus: `bmp` 95%, `png` 94%, `ppm` 89%, `image` 84%, `inflate` 83%,
   `deflate` 82%). Entradas que o fuzzer achar ruins vão para
   `fuzz/regressions/image_decode/`.
-* Medição no host: `cargo run --release -p osjeff_core --example image_bench`.
+* Medição no host: `cargo run --release -p kitsune_core --example image_bench`.

@@ -6,9 +6,9 @@
 use super::ui::{ButtonKind, Control};
 use super::*;
 use crate::text::{self, BODY, CALLOUT, CAPTION, FOOTNOTE, TITLE1, TITLE2, TITLE3, Weight};
-use osjeff_core::iconart::Glyph;
-use osjeff_core::style::{LIGHT, Palette};
-use osjeff_core::{t, tk};
+use kitsune_core::iconart::Glyph;
+use kitsune_core::style::{LIGHT, Palette};
+use kitsune_core::{t, tk};
 
 const TABS: [&str; 5] = [
     tk!("kit.tab.controls"),
@@ -106,7 +106,7 @@ impl Desktop {
             theme::solid(p.window_bg),
         );
         let l = layout(body);
-        let tabs = TABS.map(osjeff_core::i18n::tr);
+        let tabs = TABS.map(kitsune_core::i18n::tr);
         ui::segmented(c, l.tabs, &tabs, g.tab);
         let pad = 24;
         match g.tab {
@@ -251,8 +251,8 @@ impl Desktop {
             },
             Rect::new(menu.x, menu.y + 8, menu.w, menu.h - 16),
         );
-        ui::fill_token(c, menu, osjeff_core::style::R_MENU + 2, p.menu_tint);
-        ui::stroke_token(c, menu, osjeff_core::style::R_MENU + 2, p.separator);
+        ui::fill_token(c, menu, kitsune_core::style::R_MENU + 2, p.menu_tint);
+        ui::stroke_token(c, menu, kitsune_core::style::R_MENU + 2, p.separator);
         ui::menu_item(
             c,
             Rect::new(menu.x + 6, menu.y + 6, menu.w - 12, 24),
@@ -345,7 +345,7 @@ impl Desktop {
     /// The shell's own parts: window buttons (rest, hover, close hover, restore), Quick Settings
     /// tiles, the taskbar indicators, the snap preview and the pointers.
     fn gallery_shell(&self, c: &mut Canvas, body: Rect, pad: i32, p: &Palette) {
-        use osjeff_core::window::TitleBtn;
+        use kitsune_core::window::TitleBtn;
         let label = |c: &mut Canvas, x: i32, y: i32, t: &str| {
             text::draw(
                 c,
@@ -428,19 +428,25 @@ impl Desktop {
         label(c, x, y, t!("kit.shell.snap"));
         let prev = Rect::new(x, y + 22, 150, 90);
         let acc = theme::accent();
-        c.fill_rrect(prev, osjeff_core::style::R_WINDOW, Corner::Circle, acc, 46);
-        c.stroke_rrect(prev, osjeff_core::style::R_WINDOW, Corner::Circle, acc, 230);
+        c.fill_rrect(prev, kitsune_core::style::R_WINDOW, Corner::Circle, acc, 46);
+        c.stroke_rrect(
+            prev,
+            kitsune_core::style::R_WINDOW,
+            Corner::Circle,
+            acc,
+            230,
+        );
         let px = x + 220;
         label(c, px, y, t!("kit.shell.pointers"));
         for (i, sh) in [
-            osjeff_core::pointer::Shape::Arrow,
-            osjeff_core::pointer::Shape::Hand,
-            osjeff_core::pointer::Shape::IBeam,
+            kitsune_core::pointer::Shape::Arrow,
+            kitsune_core::pointer::Shape::Hand,
+            kitsune_core::pointer::Shape::IBeam,
         ]
         .into_iter()
         .enumerate()
         {
-            let s = osjeff_core::pointer::render(sh);
+            let s = kitsune_core::pointer::render(sh);
             c.blit_surface(&s, px + i as i32 * 56, y + 26, 256);
         }
     }
@@ -538,7 +544,7 @@ fn gallery_colors(c: &mut Canvas, body: Rect, pad: i32, p: &Palette) {
         Weight::Medium,
         theme::solid(p.text_secondary),
     );
-    for (i, rgb) in osjeff_core::settings::ACCENTS.iter().enumerate() {
+    for (i, rgb) in kitsune_core::settings::ACCENTS.iter().enumerate() {
         let col = Color::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, *rgb as u8);
         let r = Rect::new(body.x + pad + i as i32 * 40, ay + 22, 28, 28);
         c.fill_rrect(r, 14, Corner::Circle, col, 256);

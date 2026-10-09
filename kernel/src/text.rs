@@ -1,7 +1,7 @@
 //! Proportional, anti-aliased UI text (Inter, SIL OFL) over the framebuffer.
 //!
 //! The engine itself (TrueType reader, rasteriser, glyph cache, measuring) is
-//! pure and lives in `osjeff_core` (`ttf`, `glyph`, `fontcache`, `textlayout`).
+//! pure and lives in `kitsune_core` (`ttf`, `glyph`, `fontcache`, `textlayout`).
 //! This module owns the one global engine, the text gamma tables and the
 //! `Canvas` drawing helpers. Only the compositor thread draws UI text, so the
 //! lazily filled cache needs no lock (see the SAFETY note on [`engine`]).
@@ -16,11 +16,11 @@
 
 use crate::fb::{Canvas, Color};
 use crate::sync::RacyCell;
-use osjeff_core::Rect;
-pub use osjeff_core::fontcache::Weight;
-use osjeff_core::fontcache::{Stats, TextEngine, VMetrics};
-use osjeff_core::gfx::luma;
-use osjeff_core::textlayout;
+use kitsune_core::Rect;
+pub use kitsune_core::fontcache::Weight;
+use kitsune_core::fontcache::{Stats, TextEngine, VMetrics};
+use kitsune_core::gfx::luma;
+use kitsune_core::textlayout;
 
 static REGULAR: &[u8] = include_bytes!("../../assets/fonts/Inter-Regular.subset.ttf");
 static MEDIUM: &[u8] = include_bytes!("../../assets/fonts/Inter-Medium.subset.ttf");

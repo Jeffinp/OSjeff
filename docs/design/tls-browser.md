@@ -24,8 +24,8 @@ Quem faz o quê:
 |---|---|---|
 | Construção/validação de caminho, nomes, datas, restrições | `rustls-webpki 0.103.13` (ISC) | biblioteca revisada, `no_std` + `alloc` |
 | RSA PKCS#1 v1.5 e PSS (SHA-256/384/512, chaves de 2048 a 8192 bits), ECDSA P-256/P-384 | `rsa 0.9`, `p256 0.13`, `p384 0.13`, `sha2` (RustCrypto, Rust puro) | idem |
-| Tabela de algoritmos, limites, mapeamento de erros, trust store | `osjeff_core::tlsverify` | nosso, com 53 testes sobre certificados reais |
-| Leitor DER/X.509 estrito (diagnóstico, limites, casamento de nomes independente) | `osjeff_core::x509` | nosso, sem pânico, fuzzado |
+| Tabela de algoritmos, limites, mapeamento de erros, trust store | `kitsune_core::tlsverify` | nosso, com 53 testes sobre certificados reais |
+| Leitor DER/X.509 estrito (diagnóstico, limites, casamento de nomes independente) | `kitsune_core::x509` | nosso, sem pânico, fuzzado |
 | Adaptador para o `embedded-tls` | `kernel/src/tlsv.rs` | nosso, ~200 linhas |
 
 Por que não a feature `webpki` do `embedded-tls`: ela depende do `ring` (C e assembly,
@@ -51,16 +51,16 @@ Global Root CA **não estão** no bundle atual do Mozilla e por isso não entram
 
 Arquivos:
 
-- `osjeff_core/data/trust-store.bin`: `"OJTS1\0"`, contagem `u16`, depois `(u16 tamanho, DER)`.
+- `kitsune_core/data/trust-store.bin`: `"OJTS1\0"`, contagem `u16`, depois `(u16 tamanho, DER)`.
   Cerca de 45 KiB no kernel.
-- `osjeff_core/data/trust-store.sha256`: o SHA-256 (do DER) e o nome de cada raiz, na ordem
+- `kitsune_core/data/trust-store.sha256`: o SHA-256 (do DER) e o nome de cada raiz, na ordem
   do `.bin`. Um teste refaz o hash de todas as raízes e falha se o dado mudar sem o
   manifesto (e se algum root vencer, deixar de ser CA ou de carregar como âncora).
 - `tools/trust-store.list`: a lista, por nome de arquivo do bundle.
 
 **Como atualizar:** `tools/gen-trust-store.sh [dir]` (padrão
 `/usr/share/ca-certificates/mozilla`, precisa de `openssl` e `python3`). A saída é
-reprodutível (mesma entrada, mesmos bytes). Depois: `cargo test -p osjeff_core`, conferir o
+reprodutível (mesma entrada, mesmos bytes). Depois: `cargo test -p kitsune_core`, conferir o
 diff do manifesto e a versão do `ca-certificates` registrada no cabeçalho dele.
 
 `EXTRA_PEM="a.pem b.pem" tools/gen-trust-store.sh` acrescenta raízes marcadas `(EXTRA)`: é
@@ -73,7 +73,7 @@ Validade de certificado depende de data, e o RTC pode estar errado. `kernel/src/
 lê o RTC (em UTC) **uma vez** no boot, antes de existir outra thread (o par de portas do
 CMOS é compartilhado com o relógio da tela) e o avança pelo timer. O `fetcher`:
 
-1. ao subir, confirma a hora por SNTP (`osjeff_core::sntp`): `time.cloudflare.com`,
+1. ao subir, confirma a hora por SNTP (`kitsune_core::sntp`): `time.cloudflare.com`,
    `pool.ntp.org`, `time.google.com` (DNS próprio), e por último o **gateway**;
 2. antes de uma carga HTTPS, se ainda não confirmou, tenta de novo (no máximo uma vez por
    minuto).
@@ -146,7 +146,7 @@ fica marcada "Certificado inválido". Nada é gravado em disco.
 - **Histórico.** `Browser` guarda até 64 URLs absolutas em memória (nada em disco), com cursor:
   carregar uma página nova apaga o "avançar", recarregar a mesma não duplica, uma falha não
   entra. Alt+← e Alt+→ voltam e avançam na janela do navegador em foco.
-- **gzip/deflate** (`osjeff_core::gzip`): cabeçalho completo do gzip, CRC-32 e tamanho
+- **gzip/deflate** (`kitsune_core::gzip`): cabeçalho completo do gzip, CRC-32 e tamanho
   conferidos, `deflate` com ou sem envoltório zlib, limite de 1 MiB descompactado.
 
 ## 6. Provas (QEMU) da W16
@@ -220,7 +220,7 @@ O fluxo, sem travar a interface:
 2. o desktop pede as imagens uma por vez à thread `fetcher` (`fetch::try_post_image`):
    mesma pilha, mesmas regras de redirect, corpo de **no máximo 512 KiB**; o `fetcher`
    confere as dimensões no cabeçalho (**no máximo 2 Mpx**, antes de reservar memória),
-   decodifica (`osjeff_core::image`), reduz à largura da coluna (`Image::fit`) e achata sobre
+   decodifica (`kitsune_core::image`), reduz à largura da coluna (`Image::fit`) e achata sobre
    o fundo da página, ali mesmo, fora da thread do compositor;
 3. a imagem entra num cache LRU (`web::imgcache::ImageCache`, **6 MiB** de pixels, 24 entradas,
    mantido entre páginas), a página é diagramada de novo (sem reanalisar o HTML: `Doc`

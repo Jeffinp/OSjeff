@@ -2,7 +2,7 @@
 //! everything random in the kernel draws from ([`fill`], [`u64`], ...).
 //!
 //! The pure half (pool, ChaCha20 DRBG, credit accounting, quality rating, reseed
-//! policy) is `osjeff_core::entropy`, host-tested. This file is the glue:
+//! policy) is `kitsune_core::entropy`, host-tested. This file is the glue:
 //!
 //! * **Hardware**: `RDSEED` and `RDRAND` when CPUID says they exist (retried, and the
 //!   output checked against the known-bad all-zero / all-ones values), and the virtio-rng
@@ -34,11 +34,11 @@ use crate::sync::RacyCell;
 use crate::virtio_rng::VirtioRng;
 use crate::{interrupts, io};
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use osjeff_core::entropy::{Entropy, MIN_SEED_BITS, Quality, source};
+use kitsune_core::entropy::{Entropy, MIN_SEED_BITS, Quality, source};
 
-// Source ids for `sample`, so callers do not import `osjeff_core::entropy::source` themselves.
-pub use osjeff_core::entropy::source::{KEYBOARD, MOUSE, NIC, TIMER};
-use osjeff_core::rng as hw;
+// Source ids for `sample`, so callers do not import `kitsune_core::entropy::source` themselves.
+pub use kitsune_core::entropy::source::{KEYBOARD, MOUSE, NIC, TIMER};
+use kitsune_core::rng as hw;
 
 // ---------------------------------------------------------------- IRQ-safe sample ring
 
@@ -199,7 +199,7 @@ impl State {
         while self.fold(64) == 64 {}
         self.drain_virtio();
         let hw_due = now.saturating_sub(self.last_pull_ms)
-            >= osjeff_core::entropy::RESEED_INTERVAL_MS
+            >= kitsune_core::entropy::RESEED_INTERVAL_MS
             && self.ent.quality() != Quality::Weak;
         if hw_due {
             self.pull_hardware(now);
@@ -443,7 +443,7 @@ pub fn quality() -> Quality {
 }
 
 /// A few hundred CPU-timing samples: tiny memory-dependent loops, each followed by a TSC
-/// read. The estimator in `osjeff_core::entropy` credits only samples whose timing
+/// read. The estimator in `kitsune_core::entropy` credits only samples whose timing
 /// differences vary (and 0.1 bit each at most); a deterministic emulator earns nothing.
 fn collect_cpu_jitter(rounds: usize) {
     let mut buf = [0u8; 1024];

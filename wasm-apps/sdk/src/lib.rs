@@ -5,7 +5,7 @@
 //!
 //! ```ignore
 //! #![no_std]
-//! use osjeff_sdk::*;
+//! use kitsune_sdk::*;
 //!
 //! manifest!("id=hello\nname=Hello\nversion=1.0.0\nwin_w=360\nwin_h=220\n");
 //!

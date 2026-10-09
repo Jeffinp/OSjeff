@@ -1,11 +1,11 @@
 //! The pointer: which sprite to show (arrow, hand over links, I-beam over text)
 //! and drawing it. The sprites themselves are vector shapes from
-//! `osjeff_core::pointer`, rendered once and cached here; the box size and hotspots
+//! `kitsune_core::pointer`, rendered once and cached here; the box size and hotspots
 //! live in that module so `main.rs` only needs `CURSOR_W` / `CURSOR_H`.
 
 use super::*;
-use osjeff_core::pointer::{self, Shape};
-use osjeff_core::raster::Surface;
+use kitsune_core::pointer::{self, Shape};
+use kitsune_core::raster::Surface;
 
 static SPRITES: RacyCell<Option<[Surface; 3]>> = RacyCell::new(None);
 
@@ -29,7 +29,7 @@ impl Desktop {
     fn cursor_is_text(&self) -> bool {
         let (cx, cy) = (self.cursor_x, self.cursor_y);
         if let Some(s) = self.shell.search.as_ref().filter(|s| !s.closing) {
-            let g = osjeff_core::chrome::spotlight_geom(self.sw, self.sh, s.hits.len());
+            let g = kitsune_core::chrome::spotlight_geom(self.sw, self.sh, s.hits.len());
             return g.field.contains(cx, cy);
         }
         if self.modal_open() || self.overlay_open() || self.drag.is_some() {

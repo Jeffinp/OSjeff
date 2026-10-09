@@ -3,16 +3,16 @@
 //! Keys go, in this order, to: an open context menu or popover (Esc), Ctrl chords (tabs,
 //! favourites, find, zoom, address), the find bar, a focused form control, then the page
 //! (scrolling) or the omnibox. Clicks are resolved against the same geometry the window is
-//! drawn with (`osjeff_core::layout`).
+//! drawn with (`kitsune_core::layout`).
 
 use super::BrowserHover as H;
 use super::browser::{layout_browser, page_menu_row_at, start_items};
 use super::*;
-use osjeff_core::browser::Status;
-use osjeff_core::layout as geo;
-use osjeff_core::t;
-use osjeff_core::web::form::{FieldKind, FormOutcome};
-use osjeff_core::web::textops::Selection;
+use kitsune_core::browser::Status;
+use kitsune_core::layout as geo;
+use kitsune_core::t;
+use kitsune_core::web::form::{FieldKind, FormOutcome};
+use kitsune_core::web::textops::Selection;
 
 /// A page step with the keyboard (Page Down, Space): a view less a little overlap.
 fn page_step(view_h: i32) -> i32 {
@@ -55,7 +55,7 @@ impl Desktop {
         }
         // The find bar takes the keys while it is open.
         if b.find.is_open() {
-            use osjeff_core::web::find::FindOutcome;
+            use kitsune_core::web::find::FindOutcome;
             let t = b.tabs.active_mut();
             let out = t
                 .find
@@ -242,7 +242,7 @@ impl Desktop {
             }
             Key::Char(b'r' | b'R') => self.browser_reload(id),
             Key::Char(b'=' | b'+' | b'-' | b'_' | b'0') => {
-                use osjeff_core::web::{zoom_in, zoom_out};
+                use kitsune_core::web::{zoom_in, zoom_out};
                 let BrowserState { tabs, images, .. } = &mut *b;
                 let t = tabs.active_mut();
                 t.zoom = match key {
@@ -294,7 +294,7 @@ impl Desktop {
         t.star.retarget(
             f32::from(state == Some(true)),
             if state == Some(true) { 0.38 } else { 0.18 },
-            osjeff_core::anim::curves::ENTER,
+            kitsune_core::anim::curves::ENTER,
         );
         b.say(msg);
     }

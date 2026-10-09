@@ -25,8 +25,8 @@
 
 use super::*;
 use alloc::boxed::Box;
-use osjeff_core::i18n::{Lang, tr, tr_in};
-use osjeff_core::tk;
+use kitsune_core::i18n::{Lang, tr, tr_in};
+use kitsune_core::tk;
 
 /// Which app a window runs. The order is the Apps overlay / menu order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -225,14 +225,14 @@ pub(crate) enum BrowserHover {
 pub(crate) struct TabData {
     /// Never reused within a window: a result from the network finds its tab by this.
     pub id: u32,
-    pub browser: osjeff_core::Browser,
+    pub browser: kitsune_core::Browser,
     /// The parsed document (kept so the page can be laid out again without parsing).
-    pub doc: Option<osjeff_core::web::Doc>,
-    pub page: Option<osjeff_core::web::Page>,
+    pub doc: Option<kitsune_core::web::Doc>,
+    pub page: Option<kitsune_core::web::Page>,
     /// The scroll offset being painted (the spring below eases it to its target).
     pub scroll: i32,
-    pub scroll_spring: osjeff_core::anim::Spring,
-    pub scroll_bar: osjeff_core::widgets::ScrollbarFade,
+    pub scroll_spring: kitsune_core::anim::Spring,
+    pub scroll_bar: kitsune_core::widgets::ScrollbarFade,
     /// Viewport width `page` was laid out for.
     pub layout_w: i32,
     /// Cache key of each `page.images` entry (`None`: not fetchable).
@@ -240,20 +240,20 @@ pub(crate) struct TabData {
     /// Page zoom in percent.
     pub zoom: u16,
     /// What the user typed into the page's form controls.
-    pub forms: osjeff_core::web::form::FormState,
+    pub forms: kitsune_core::web::form::FormState,
     /// Ctrl+F bar and matches.
-    pub find: osjeff_core::web::find::FindBar,
+    pub find: kitsune_core::web::find::FindBar,
     /// Start of a mouse selection (page coordinates) and the selected text.
     pub sel_anchor: Option<(i32, i32)>,
-    pub sel: Option<osjeff_core::web::textops::Selection>,
+    pub sel: Option<kitsune_core::web::textops::Selection>,
     /// The link under the pointer (index into the page's links), for the hover underline.
     pub hover_link: Option<usize>,
     /// The certificate summary of the page on screen (https only).
-    pub cert: Option<osjeff_core::browser::CertInfo>,
+    pub cert: Option<kitsune_core::browser::CertInfo>,
     /// The progress bar under the omnibox.
-    pub load: osjeff_core::browser::motion::LoadBar,
+    pub load: kitsune_core::browser::motion::LoadBar,
     /// Fill of the favourite star, 0 (outline) to 1 (filled).
-    pub star: osjeff_core::anim::Tween,
+    pub star: kitsune_core::anim::Tween,
     /// The load in flight was stopped: its result is dropped when it arrives.
     pub cancelled: bool,
     /// `perf-trace`: when the page was handed over, until its first paint is reported.
@@ -265,7 +265,7 @@ pub(crate) struct TabData {
 pub(crate) struct StripEntry {
     /// The tab's id, or `None` for a ghost.
     pub id: Option<u32>,
-    pub weight: osjeff_core::anim::Tween,
+    pub weight: kitsune_core::anim::Tween,
     /// What a ghost still shows.
     pub title: String,
     pub badge: char,
@@ -275,9 +275,9 @@ pub(crate) struct StripEntry {
 /// cache, the fetcher's single slot) and the chrome's own transient state. `Deref`s to the
 /// active tab so the code that works on "the page on screen" just says `b.page`.
 pub(crate) struct BrowserState {
-    pub tabs: osjeff_core::browser::tabs::TabList<TabData>,
+    pub tabs: kitsune_core::browser::tabs::TabList<TabData>,
     /// Pictures of the page being shown (and a few recent ones), shared by the tabs.
-    pub images: osjeff_core::web::imgcache::ImageCache,
+    pub images: kitsune_core::web::imgcache::ImageCache,
     /// The picture the fetcher is working on, and the tab that asked for it.
     pub img_inflight: Option<(u32, String)>,
     /// The tab whose page request the fetcher has.
@@ -286,7 +286,7 @@ pub(crate) struct BrowserState {
     /// The strip in visual order (ghosts included).
     pub strip: Vec<StripEntry>,
     /// Height of the tab strip while it appears and disappears.
-    pub strip_h: osjeff_core::anim::Tween,
+    pub strip_h: kitsune_core::anim::Tween,
     pub hover: BrowserHover,
     /// The security popover is open.
     pub popover: bool,
@@ -294,9 +294,9 @@ pub(crate) struct BrowserState {
     pub ctx: Option<PageMenu>,
     /// The line over the bottom of the page ("Favorito adicionado") and its fade.
     pub notice: Option<String>,
-    pub notice_flash: osjeff_core::browser::motion::Flash,
+    pub notice_flash: kitsune_core::browser::motion::Flash,
     /// The zoom pill's fade.
-    pub zoom_flash: osjeff_core::browser::motion::Flash,
+    pub zoom_flash: kitsune_core::browser::motion::Flash,
     /// The frame where the omnibox suggestions, the popover, the find bar and the menu take
     /// their blurred backdrop from.
     pub glass: [super::glass::BackdropSlot; 4],
@@ -341,26 +341,26 @@ impl core::ops::DerefMut for BrowserState {
 }
 
 impl TabData {
-    pub(crate) fn new(id: u32, browser: osjeff_core::Browser) -> TabData {
+    pub(crate) fn new(id: u32, browser: kitsune_core::Browser) -> TabData {
         TabData {
             id,
             browser,
             doc: None,
             page: None,
             scroll: 0,
-            scroll_spring: osjeff_core::anim::Spring::pixels(0.0, 260.0, 30.0),
-            scroll_bar: osjeff_core::widgets::ScrollbarFade::new(),
+            scroll_spring: kitsune_core::anim::Spring::pixels(0.0, 260.0, 30.0),
+            scroll_bar: kitsune_core::widgets::ScrollbarFade::new(),
             layout_w: 0,
             img_keys: Vec::new(),
             zoom: 100,
-            forms: osjeff_core::web::form::FormState::default(),
-            find: osjeff_core::web::find::FindBar::new(),
+            forms: kitsune_core::web::form::FormState::default(),
+            find: kitsune_core::web::find::FindBar::new(),
             sel_anchor: None,
             sel: None,
             hover_link: None,
             cert: None,
-            load: osjeff_core::browser::motion::LoadBar::new(),
-            star: osjeff_core::anim::Tween::at(0.0),
+            load: kitsune_core::browser::motion::LoadBar::new(),
+            star: kitsune_core::anim::Tween::at(0.0),
             cancelled: false,
             trace_t0: core::cell::Cell::new(0),
         }
@@ -369,26 +369,26 @@ impl TabData {
 
 impl BrowserState {
     pub(crate) fn new() -> BrowserState {
-        let first = TabData::new(1, osjeff_core::Browser::with_store(new_bookmark_store()));
+        let first = TabData::new(1, kitsune_core::Browser::with_store(new_bookmark_store()));
         BrowserState {
-            tabs: osjeff_core::browser::tabs::TabList::new(first),
-            images: osjeff_core::web::imgcache::ImageCache::new(),
+            tabs: kitsune_core::browser::tabs::TabList::new(first),
+            images: kitsune_core::web::imgcache::ImageCache::new(),
             img_inflight: None,
             req_tab: None,
             next_id: 2,
             strip: alloc::vec![StripEntry {
                 id: Some(1),
-                weight: osjeff_core::anim::Tween::at(1.0),
+                weight: kitsune_core::anim::Tween::at(1.0),
                 title: String::new(),
                 badge: ' ',
             }],
-            strip_h: osjeff_core::anim::Tween::at(0.0),
+            strip_h: kitsune_core::anim::Tween::at(0.0),
             hover: BrowserHover::None,
             popover: false,
             ctx: None,
             notice: None,
-            notice_flash: osjeff_core::browser::motion::Flash::new(),
-            zoom_flash: osjeff_core::browser::motion::Flash::new(),
+            notice_flash: kitsune_core::browser::motion::Flash::new(),
+            zoom_flash: kitsune_core::browser::motion::Flash::new(),
             glass: Default::default(),
             cache: core::cell::RefCell::new(Default::default()),
             rev: 1,
@@ -399,17 +399,17 @@ impl BrowserState {
 /// The single place that decides where the browser's favourites live: the file
 /// `/home/.bookmarks` on the desktop volume (written after every change; a missing or
 /// damaged file starts an empty list).
-pub(crate) fn new_bookmark_store() -> Box<dyn osjeff_core::browser::BookmarkStore> {
+pub(crate) fn new_bookmark_store() -> Box<dyn kitsune_core::browser::BookmarkStore> {
     const PATH: &[u8] = b"/home/.bookmarks";
     let text = super::vfs::read_file(PATH).unwrap_or_default();
-    Box::new(osjeff_core::browser::SavedBookmarks::load(&text, |t| {
+    Box::new(kitsune_core::browser::SavedBookmarks::load(&text, |t| {
         if !super::vfs::exists(b"/home") {
             let _ = super::vfs::mkdir(b"/home");
         }
         if super::vfs::write_file(PATH, t).is_err() {
             crate::notify::notify_key(
                 crate::klog::Level::Warn,
-                osjeff_core::tk!("notify.bookmarks_unsaved"),
+                kitsune_core::tk!("notify.bookmarks_unsaved"),
                 &[],
             );
         }
@@ -424,7 +424,7 @@ pub(crate) enum EditPurpose {
 
 /// The inline name editor (rename, and the first name of a new file or folder).
 pub(crate) struct NameEdit {
-    pub input: osjeff_core::fileman::TextInput,
+    pub input: kitsune_core::fileman::TextInput,
     pub purpose: EditPurpose,
     /// Tick of the last key, for the caret.
     pub last_input: u64,
@@ -450,7 +450,7 @@ pub(crate) struct Job {
 
 /// The search field of a file manager.
 pub(crate) struct SearchField {
-    pub input: osjeff_core::fileman::TextInput,
+    pub input: kitsune_core::fileman::TextInput,
     /// The field has the keyboard.
     pub focused: bool,
     pub last_input: u64,
@@ -462,7 +462,7 @@ pub(crate) enum DropHover {
     None,
     /// A folder row or icon (index into the rows).
     Item(usize),
-    Place(osjeff_core::fileman::Place),
+    Place(kitsune_core::fileman::Place),
     Crumb(usize),
 }
 
@@ -472,10 +472,10 @@ pub(crate) struct DragState {
     /// What the ghost shows: the first name and how many items.
     pub label: String,
     pub count: usize,
-    pub kind: osjeff_core::appart::FileKind,
+    pub kind: kitsune_core::appart::FileKind,
     pub over: DropHover,
     /// The operation a drop here would do (`None`: not a valid target).
-    pub op: Option<osjeff_core::fileman::ui::DropOp>,
+    pub op: Option<kitsune_core::fileman::ui::DropOp>,
     pub pos: (i32, i32),
 }
 
@@ -507,12 +507,12 @@ pub(crate) enum Gesture {
 pub(crate) struct PreviewData {
     pub path: Vec<u8>,
     pub name: String,
-    pub kind: osjeff_core::appart::FileKind,
+    pub kind: kitsune_core::appart::FileKind,
     pub kind_label: String,
     /// Label and value rows under the title.
     pub info: Vec<(String, String)>,
     /// An image, already scaled to the pane.
-    pub image: Option<osjeff_core::raster::Surface>,
+    pub image: Option<kitsune_core::raster::Surface>,
     /// The first lines of a text file.
     pub lines: Vec<String>,
     /// Why there is no picture or text (shown in secondary colour).
@@ -521,8 +521,8 @@ pub(crate) struct PreviewData {
 
 /// A file-manager window.
 pub(crate) struct FilesState {
-    pub view: osjeff_core::fileman::FileView,
-    pub mode: osjeff_core::fileman::ui::ViewMode,
+    pub view: kitsune_core::fileman::FileView,
+    pub mode: kitsune_core::fileman::ui::ViewMode,
     pub preview_open: bool,
     pub preview: Option<Box<PreviewData>>,
     pub search: SearchField,
@@ -535,14 +535,14 @@ pub(crate) struct FilesState {
     pub msg: Option<(String, bool)>,
     pub msg_tick: u64,
     pub usage: vfs::Usage,
-    pub scroller: osjeff_core::fileman::ui::Scroller,
-    pub scroll_fade: osjeff_core::widgets::ScrollbarFade,
-    pub hover: Option<osjeff_core::fileman::ui::Hit>,
-    pub hover_t: osjeff_core::anim::Tween,
+    pub scroller: kitsune_core::fileman::ui::Scroller,
+    pub scroll_fade: kitsune_core::widgets::ScrollbarFade,
+    pub hover: Option<kitsune_core::fileman::ui::Hit>,
+    pub hover_t: kitsune_core::anim::Tween,
     pub gesture: Gesture,
     /// Sheet transition (0 closed .. 1 open), content fade-in after a folder change.
-    pub sheet_t: osjeff_core::anim::Tween,
-    pub enter_t: osjeff_core::anim::Tween,
+    pub sheet_t: kitsune_core::anim::Tween,
+    pub enter_t: kitsune_core::anim::Tween,
     /// `view.nav_gen` the scroll position belongs to.
     pub seen_nav: u32,
 }
@@ -550,12 +550,12 @@ pub(crate) struct FilesState {
 impl FilesState {
     pub(crate) fn new() -> Self {
         FilesState {
-            view: osjeff_core::fileman::FileView::new(),
-            mode: osjeff_core::fileman::ui::ViewMode::List,
+            view: kitsune_core::fileman::FileView::new(),
+            mode: kitsune_core::fileman::ui::ViewMode::List,
             preview_open: false,
             preview: None,
             search: SearchField {
-                input: osjeff_core::fileman::TextInput::new(b"", 64),
+                input: kitsune_core::fileman::TextInput::new(b"", 64),
                 focused: false,
                 last_input: 0,
             },
@@ -566,13 +566,13 @@ impl FilesState {
             msg: None,
             msg_tick: 0,
             usage: vfs::Usage::default(),
-            scroller: osjeff_core::fileman::ui::Scroller::new(),
-            scroll_fade: osjeff_core::widgets::ScrollbarFade::new(),
+            scroller: kitsune_core::fileman::ui::Scroller::new(),
+            scroll_fade: kitsune_core::widgets::ScrollbarFade::new(),
             hover: None,
-            hover_t: osjeff_core::anim::Tween::at(1.0),
+            hover_t: kitsune_core::anim::Tween::at(1.0),
             gesture: Gesture::None,
-            sheet_t: osjeff_core::anim::Tween::at(0.0),
-            enter_t: osjeff_core::anim::Tween::at(1.0),
+            sheet_t: kitsune_core::anim::Tween::at(0.0),
+            enter_t: kitsune_core::anim::Tween::at(1.0),
             seen_nav: 0,
         }
     }
@@ -601,9 +601,9 @@ impl FilesState {
 
     /// Start the sheet's slide-in.
     pub(crate) fn open_sheet(&mut self) {
-        self.sheet_t = osjeff_core::anim::Tween::at(0.0);
+        self.sheet_t = kitsune_core::anim::Tween::at(0.0);
         self.sheet_t
-            .retarget(1.0, 0.24, osjeff_core::anim::curves::ENTER);
+            .retarget(1.0, 0.24, kitsune_core::anim::curves::ENTER);
     }
 
     /// Whether something in the window moves on its own and needs frames.
@@ -627,46 +627,46 @@ impl FilesState {
 /// A filmstrip thumbnail: not made yet, made, or impossible (too big or unreadable).
 pub(crate) enum Thumb {
     Pending,
-    Ready(osjeff_core::raster::Surface),
+    Ready(kitsune_core::raster::Surface),
     Missing,
 }
 
 /// An image-viewer window.
 pub(crate) struct ViewerState {
     pub path: Vec<u8>,
-    pub image: Option<osjeff_core::image::Image>,
+    pub image: Option<kitsune_core::image::Image>,
     /// Box-filtered copy for zooms below 100 %: `(zoom, image)`.
-    pub scaled: Option<(u32, osjeff_core::image::Image)>,
+    pub scaled: Option<(u32, kitsune_core::image::Image)>,
     pub opaque: bool,
     /// Where the zoom and pan are heading (the drawn values follow with springs).
-    pub view: osjeff_core::viewer::View,
-    pub list: osjeff_core::viewer::ImageList,
-    pub format: Option<osjeff_core::image::Format>,
+    pub view: kitsune_core::viewer::View,
+    pub list: kitsune_core::viewer::ImageList,
+    pub format: Option<kitsune_core::image::Format>,
     pub file_bytes: u64,
     /// Why the file could not be shown.
     pub error: Option<[String; 2]>,
     pub show_info: bool,
     /// The "save as" sheet.
-    pub save: Option<osjeff_core::fileman::TextInput>,
+    pub save: Option<kitsune_core::fileman::TextInput>,
     pub msg: Option<(String, bool)>,
     /// The zoom (permille) and pan being drawn.
-    pub zoom_s: osjeff_core::anim::Spring,
-    pub pan_x_s: osjeff_core::anim::Spring,
-    pub pan_y_s: osjeff_core::anim::Spring,
+    pub zoom_s: kitsune_core::anim::Spring,
+    pub pan_x_s: kitsune_core::anim::Spring,
+    pub pan_y_s: kitsune_core::anim::Spring,
     /// Extra turn (degrees, clockwise) of the drawn picture while a rotation animates.
-    pub rot: osjeff_core::anim::Tween,
+    pub rot: kitsune_core::anim::Tween,
     /// The picture fading in after a change of image.
-    pub enter_t: osjeff_core::anim::Tween,
-    pub info_t: osjeff_core::anim::Tween,
-    pub sheet_t: osjeff_core::anim::Tween,
-    pub hover: Option<osjeff_core::viewer::ui::Hit>,
-    pub hover_t: osjeff_core::anim::Tween,
-    pub inertia: osjeff_core::viewer::ui::Inertia,
+    pub enter_t: kitsune_core::anim::Tween,
+    pub info_t: kitsune_core::anim::Tween,
+    pub sheet_t: kitsune_core::anim::Tween,
+    pub hover: Option<kitsune_core::viewer::ui::Hit>,
+    pub hover_t: kitsune_core::anim::Tween,
+    pub inertia: kitsune_core::viewer::ui::Inertia,
     /// Tick of the last drag event (for the speed of a flick).
     pub drag_tick: u64,
-    pub slideshow: osjeff_core::viewer::ui::Slideshow,
+    pub slideshow: kitsune_core::viewer::ui::Slideshow,
     pub thumbs: Vec<Thumb>,
-    pub strip_scroll: osjeff_core::anim::Spring,
+    pub strip_scroll: kitsune_core::anim::Spring,
     /// Tick the last thumbnail was made.
     pub thumb_tick: u64,
     /// The viewport the zoom was last fitted for: a change jumps instead of animating.
@@ -675,14 +675,14 @@ pub(crate) struct ViewerState {
 
 impl ViewerState {
     pub(crate) fn new() -> Self {
-        use osjeff_core::anim::{Spring, Tween};
+        use kitsune_core::anim::{Spring, Tween};
         ViewerState {
             path: Vec::new(),
             image: None,
             scaled: None,
             opaque: true,
-            view: osjeff_core::viewer::View::default(),
-            list: osjeff_core::viewer::ImageList::default(),
+            view: kitsune_core::viewer::View::default(),
+            list: kitsune_core::viewer::ImageList::default(),
             format: None,
             file_bytes: 0,
             error: None,
@@ -698,9 +698,9 @@ impl ViewerState {
             sheet_t: Tween::at(0.0),
             hover: None,
             hover_t: Tween::at(1.0),
-            inertia: osjeff_core::viewer::ui::Inertia::new(),
+            inertia: kitsune_core::viewer::ui::Inertia::new(),
             drag_tick: 0,
-            slideshow: osjeff_core::viewer::ui::Slideshow::new(),
+            slideshow: kitsune_core::viewer::ui::Slideshow::new(),
             thumbs: Vec::new(),
             strip_scroll: Spring::pixels(0.0, 260.0, 32.0),
             thumb_tick: 0,
@@ -739,7 +739,7 @@ pub(crate) struct WasmWin {
 
 /// Title-bar text of instance `index` of `kind` (`OSJEFF SHELL`, `OSJEFF SHELL 2`...).
 pub(crate) fn base_title(kind: Kind, index: u8) -> String {
-    base_title_in(osjeff_core::i18n::lang(), kind, index)
+    base_title_in(kitsune_core::i18n::lang(), kind, index)
 }
 
 /// [`base_title`] in language `l`.
@@ -829,6 +829,6 @@ impl Inst {
 }
 
 /// A window record of this desktop.
-pub(crate) type Win = osjeff_core::winman::Window<Inst>;
+pub(crate) type Win = kitsune_core::winman::Window<Inst>;
 
-pub(crate) use osjeff_core::winman::numbered_name;
+pub(crate) use kitsune_core::winman::numbered_name;

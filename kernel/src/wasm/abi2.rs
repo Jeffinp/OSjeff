@@ -1,14 +1,14 @@
 //! ABI v2: the `osj.*` host functions.
 //!
 //! Every function validates what the guest hands it before touching anything
-//! (`osjeff_core::appabi::check_range`): a pointer/length outside the guest's
+//! (`kitsune_core::appabi::check_range`): a pointer/length outside the guest's
 //! linear memory raises an [`AppFault`] trap and **only that app dies** ("ponteiro
 //! invalido"); a length above the function's cap returns `ERR_INVAL`; a denied
 //! permission returns `ERR_PERM`. Host work the fuel meter cannot see (pixel
 //! fills, image decoding, file I/O) is charged to the guest's fuel.
 //!
 //! The decisions (paths, quotas, descriptors, URL filter) live in
-//! `osjeff_core::{appfs, appnet}`; this file only moves bytes between the guest's
+//! `kitsune_core::{appfs, appnet}`; this file only moves bytes between the guest's
 //! memory and those pure pieces.
 
 use super::{AppFault, HostState, appfs_backend, charge, guest_mem, host_fill, host_text, manager};
@@ -16,10 +16,10 @@ use crate::interrupts;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ops::Range;
-use osjeff_core::appabi::*;
-use osjeff_core::appfs::Sandbox;
-use osjeff_core::appmanifest::{ClipPerm, NetPerm};
-use osjeff_core::appnet;
+use kitsune_core::appabi::*;
+use kitsune_core::appfs::Sandbox;
+use kitsune_core::appmanifest::{ClipPerm, NetPerm};
+use kitsune_core::appnet;
 use wasmi::{Caller, Linker, Memory};
 
 type C<'a> = Caller<'a, HostState>;
@@ -86,22 +86,22 @@ fn v2<'a>(c: &'a mut Caller<'_, HostState>) -> R<&'a mut V2> {
     c.data_mut()
         .v2
         .as_deref_mut()
-        .ok_or_else(|| fault(osjeff_core::tk!("apps.why.no_abi2")))
+        .ok_or_else(|| fault(kitsune_core::tk!("apps.why.no_abi2")))
 }
 
 /// Memory + validated range. A bad range is a fault (the app dies).
 fn range(c: &C, ptr: i32, len: i32) -> R<(Memory, Range<usize>)> {
-    let mem = guest_mem(c).ok_or_else(|| fault(osjeff_core::tk!("apps.why.no_memory")))?;
+    let mem = guest_mem(c).ok_or_else(|| fault(kitsune_core::tk!("apps.why.no_memory")))?;
     let r = check_range(mem.data_size(c), ptr, len)
-        .map_err(|_| fault(osjeff_core::tk!("apps.why.bad_pointer")))?;
+        .map_err(|_| fault(kitsune_core::tk!("apps.why.bad_pointer")))?;
     Ok((mem, r))
 }
 
 /// Copy `[ptr, ptr+len)` out of guest memory. `Ok(Err(code))` when `len > cap`.
 fn read_capped(c: &C, ptr: i32, len: i32, cap: usize) -> R<Result<Vec<u8>, i32>> {
-    let mem = guest_mem(c).ok_or_else(|| fault(osjeff_core::tk!("apps.why.no_memory")))?;
+    let mem = guest_mem(c).ok_or_else(|| fault(kitsune_core::tk!("apps.why.no_memory")))?;
     let r = check_capped(mem.data_size(c), ptr, len, cap)
-        .map_err(|_| fault(osjeff_core::tk!("apps.why.bad_pointer")))?;
+        .map_err(|_| fault(kitsune_core::tk!("apps.why.bad_pointer")))?;
     Ok(r.map(|r| mem.data(c)[r].to_vec()))
 }
 
@@ -183,7 +183,7 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
     // The language of the interface: 0 Portuguese (Brazil), 1 English. An app asks again each
     // time it draws, because the language can change while it runs.
     reg!(l, "lang", |_c: C| -> R<i32> {
-        Ok(i32::from(osjeff_core::i18n::lang().index()))
+        Ok(i32::from(kitsune_core::i18n::lang().index()))
     });
     reg!(l, "blit_rgba", |mut c: C,
                           ptr: i32,
@@ -211,14 +211,14 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
             Ok(b) => b,
             Err(e) => return Ok(e),
         };
-        let Ok(h) = osjeff_core::png::read_header(&bytes) else {
+        let Ok(h) = kitsune_core::png::read_header(&bytes) else {
             return Ok(ERR_INVAL);
         };
         if h.width > MAX_PNG_DIM || h.height > MAX_PNG_DIM {
             return Ok(ERR_INVAL);
         }
         charge(&mut c, (h.width as u64) * (h.height as u64) / 2 + 1000)?;
-        let Ok(img) = osjeff_core::png::decode(&bytes) else {
+        let Ok(img) = kitsune_core::png::decode(&bytes) else {
             return Ok(ERR_INVAL);
         };
         let Ok(rgba) = img.to_rgba() else {
@@ -323,13 +323,13 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
                         len: i32|
      -> R<i32> {
         if len < 0 {
-            return Err(fault(osjeff_core::tk!("apps.why.bad_pointer")));
+            return Err(fault(kitsune_core::tk!("apps.why.bad_pointer")));
         }
         let want = (len as usize).min(MAX_IO);
         let (mem, r) = range(&c, ptr, want as i32)?;
         let (data, st) = mem.data_and_store_mut(&mut c);
         let Some(v) = st.v2.as_deref_mut() else {
-            return Err(fault(osjeff_core::tk!("apps.why.no_abi2")));
+            return Err(fault(kitsune_core::tk!("apps.why.no_abi2")));
         };
         let out = appfs_backend::try_with(|fs| v.sandbox.read(fs, fd, &mut data[r]));
         let code = res(out.map(|n| n as i32));
@@ -342,13 +342,13 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
                          len: i32|
      -> R<i32> {
         if len < 0 {
-            return Err(fault(osjeff_core::tk!("apps.why.bad_pointer")));
+            return Err(fault(kitsune_core::tk!("apps.why.bad_pointer")));
         }
         let want = (len as usize).min(MAX_IO);
         let (mem, r) = range(&c, ptr, want as i32)?;
         let (data, st) = mem.data_and_store_mut(&mut c);
         let Some(v) = st.v2.as_deref_mut() else {
-            return Err(fault(osjeff_core::tk!("apps.why.no_abi2")));
+            return Err(fault(kitsune_core::tk!("apps.why.no_abi2")));
         };
         let out = appfs_backend::try_with(|fs| v.sandbox.write(fs, fd, &data[r]));
         let code = res(out.map(|n| n as i32));
@@ -526,7 +526,7 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn res(r: Result<i32, osjeff_core::appfs::FsError>) -> i32 {
+fn res(r: Result<i32, kitsune_core::appfs::FsError>) -> i32 {
     match r {
         Ok(v) => v,
         Err(e) => e.code(),
@@ -552,9 +552,9 @@ fn path_op(
     n: i32,
     f: impl FnOnce(
         &mut Sandbox,
-        &mut dyn osjeff_core::appfs::AppFs,
+        &mut dyn kitsune_core::appfs::AppFs,
         &[u8],
-    ) -> Result<(), osjeff_core::appfs::FsError>,
+    ) -> Result<(), kitsune_core::appfs::FsError>,
 ) -> R<i32> {
     let path = match read_capped(c, p, n, MAX_PATH_ARG)? {
         Ok(b) => b,

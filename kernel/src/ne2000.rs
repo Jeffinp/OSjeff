@@ -11,8 +11,8 @@
 
 use crate::io::{inb, outb};
 use crate::nic::{Nic, STATS, TxError};
-use osjeff_core::net::{Mac, ring_prev_page, tx_len};
-use osjeff_core::netstats::NicKind;
+use kitsune_core::net::{Mac, ring_prev_page, tx_len};
+use kitsune_core::netstats::NicKind;
 
 const IO: u16 = 0x300; // ISA I/O base (QEMU ne2k_isa default)
 const DATA: u16 = IO + 0x10; // NE2000 data port (remote DMA window)
@@ -84,7 +84,7 @@ impl Nic for Ne2000 {
         MAC
     }
     fn send(&mut self, frame: &[u8]) -> Result<(), TxError> {
-        if frame.is_empty() || frame.len() > osjeff_core::net::MAX_TX_FRAME {
+        if frame.is_empty() || frame.len() > kitsune_core::net::MAX_TX_FRAME {
             return Err(TxError::BadLength);
         }
         if send(frame) {

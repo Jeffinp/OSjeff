@@ -8,10 +8,10 @@
 use super::glass::BackdropSlot;
 use super::*;
 use core::cell::Cell;
-use osjeff_core::anim::{Tween, curves};
-use osjeff_core::chrome::{MenuGeom, MenuRow};
-use osjeff_core::raster::Surface;
-use osjeff_core::snap::SnapZone;
+use kitsune_core::anim::{Tween, curves};
+use kitsune_core::chrome::{MenuGeom, MenuRow};
+use kitsune_core::raster::Surface;
+use kitsune_core::snap::SnapZone;
 
 /// Everything a menu entry or a button can ask the desktop to do.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -56,7 +56,7 @@ pub(crate) enum Cmd {
     /// Close every window of an app (app-bar menu).
     QuitOf(Kind),
     /// A command of the file manager (its context and sort menus, the View menu).
-    Files(osjeff_core::fileman::Cmd),
+    Files(kitsune_core::fileman::Cmd),
 }
 
 /// One row of a menu.
@@ -164,7 +164,7 @@ pub(crate) struct Tile {
     pub target: Target,
     pub icon: Surface,
     /// Its category in the rail and the key *Recentes* remembers it by.
-    pub cat: osjeff_core::launcher::Category,
+    pub cat: kitsune_core::launcher::Category,
     pub key: String,
 }
 
@@ -240,7 +240,7 @@ pub(crate) struct Shell {
     pub notif_seen: u32,
     pub notif_unread: usize,
     /// The apps launched most recently (the launcher's *Recentes* row).
-    pub recents: osjeff_core::launcher::Recents,
+    pub recents: kitsune_core::launcher::Recents,
     /// The performance HUD (Ctrl+Alt+H).
     pub hud: bool,
     /// Region of the Apps overlay that changed since it was last painted.
@@ -267,7 +267,7 @@ impl Shell {
             notifs: Vec::new(),
             notif_seen: crate::klog::seq(),
             notif_unread: 0,
-            recents: osjeff_core::launcher::Recents::new(),
+            recents: kitsune_core::launcher::Recents::new(),
             hud: false,
             dirty: Cell::new(Rect::new(0, 0, 0, 0)),
             knobs: [Tween::at(0.0); 3],
@@ -437,7 +437,7 @@ impl Desktop {
 
     /// Run a menu or button command.
     pub(crate) fn execute(&mut self, cmd: Cmd) {
-        use osjeff_core::input::{KeyCode, KeyEvent, Mods};
+        use kitsune_core::input::{KeyCode, KeyEvent, Mods};
         let target = self.target_window();
         let ctrl = |c: char| KeyEvent::new(KeyCode::Char(c), Mods::CTRL);
         match cmd {
@@ -477,7 +477,7 @@ impl Desktop {
             Cmd::Copy | Cmd::Paste | Cmd::Cut | Cmd::SelectAll
                 if target.is_some_and(|(_, k)| k == Kind::Files) =>
             {
-                use osjeff_core::fileman::Cmd as F;
+                use kitsune_core::fileman::Cmd as F;
                 self.files_run_focused(match cmd {
                     Cmd::Copy => F::Copy,
                     Cmd::Paste => F::Paste,
@@ -546,7 +546,7 @@ impl Desktop {
     }
 
     /// Send a Ctrl chord to the focused app as if typed (menu entries reuse the keys).
-    fn menu_ctrl(&mut self, ev: osjeff_core::input::KeyEvent) {
+    fn menu_ctrl(&mut self, ev: kitsune_core::input::KeyEvent) {
         let Some((id, kind)) = self.target_window() else {
             return;
         };
@@ -558,7 +558,7 @@ impl Desktop {
                 self.term_event(id, ev);
             }
             Kind::Browser => {
-                use osjeff_core::input::KeyCode;
+                use kitsune_core::input::KeyCode;
                 if let KeyCode::Char(c) = ev.code {
                     self.browser_ctrl_chord(id, c);
                 }
@@ -581,15 +581,15 @@ impl Desktop {
         self.close_transients();
         self.shell.dialog = Some(Dialog {
             title: String::from(if shutdown {
-                osjeff_core::t!("power.shutdown_title")
+                kitsune_core::t!("power.shutdown_title")
             } else {
-                osjeff_core::t!("power.restart_title")
+                kitsune_core::t!("power.restart_title")
             }),
-            body: String::from(osjeff_core::t!("power.body")),
+            body: String::from(kitsune_core::t!("power.body")),
             ok: String::from(if shutdown {
-                osjeff_core::t!("power.shutdown")
+                kitsune_core::t!("power.shutdown")
             } else {
-                osjeff_core::t!("power.restart")
+                kitsune_core::t!("power.restart")
             }),
             cmd: if shutdown { Cmd::Shutdown } else { Cmd::Reboot },
             t: fade_in(MENU_FADE),

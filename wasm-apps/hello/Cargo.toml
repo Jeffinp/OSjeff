@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-osjeff-sdk = { path = "../sdk" }
+kitsune-sdk = { path = "../sdk" }
 
 [profile.release]
 opt-level = "s"

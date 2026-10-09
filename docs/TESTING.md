@@ -5,7 +5,7 @@ diferente, e a lista abaixo diz **o que cada uma não cobre**.
 
 | Camada | Pergunta que responde | Comando | Cobre | Não cobre |
 |---|---|---|---|---|
-| Testes unitários | A lógica pura está certa? | `cargo test-core` | `osjeff_core` (shell, editor2, calc, janelas, heap, FS v2/v3, blockdev/blockcache, rede, HTML/CSS, browser) | `kernel/` (hardware) |
+| Testes unitários | A lógica pura está certa? | `cargo test-core` | `kitsune_core` (shell, editor2, calc, janelas, heap, FS v2/v3, blockdev/blockcache, rede, HTML/CSS, browser) | `kernel/` (hardware) |
 | Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net` (+ lease DHCP, DNS, ICMP), `fs` (v2 e v3), `web`, `shell` (com sessão de terminal), `editor2` (com os diálogos), `image`, `x509` (cadeia de certificados) | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
 
 | Fuzzing | Dado hostil derruba o parser? | `cd fuzz && cargo fuzz run <alvo>` | `net`, `fs` (v2 e v3), `web`, `shell`, `editor2`, manifesto de app (`app_manifest`), sandbox de arquivos (`app_sandbox`) | TCP/TLS/DNS (`smoltcp`, `embedded-tls`), drivers |
@@ -17,14 +17,14 @@ diferente, e a lista abaixo diz **o que cada uma não cobre**.
 Tudo roda no CI (`.github/workflows/ci.yml`), exceto os boots em QEMU e o fuzzing,
 que precisam de mais tempo e de OVMF.
 
-## 1. Testes unitários (`osjeff_core`)
+## 1. Testes unitários (`kitsune_core`)
 
 ```bash
-cargo test-core          # alias de `cargo test -p osjeff_core`
+cargo test-core          # alias de `cargo test -p kitsune_core`
 ```
 
 Por que só o core: um binário `no_std`/`no_main` não tem harness de teste. Por isso
-toda decisão que não precisa tocar hardware mora em `osjeff_core`, que compila
+toda decisão que não precisa tocar hardware mora em `kitsune_core`, que compila
 com `std` sob teste e `no_std` em produção (`#![forbid(unsafe_code)]`).
 Regra do projeto: **lógica nova vai para o core com teste; o kernel só liga o
 hardware a ela.**
@@ -33,8 +33,8 @@ hardware a ela.**
 
 ```bash
 cargo install cargo-llvm-cov
-cargo llvm-cov -p osjeff_core --summary-only            # linhas, funções, regiões
-cargo llvm-cov -p osjeff_core --branch --summary-only   # + branches (precisa nightly)
+cargo llvm-cov -p kitsune_core --summary-only            # linhas, funções, regiões
+cargo llvm-cov -p kitsune_core --branch --summary-only   # + branches (precisa nightly)
 ```
 
 Leia a tabela com cuidado: a coluna **Cover** à esquerda é de *regiões*; a de
@@ -42,13 +42,13 @@ Leia a tabela com cuidado: a coluna **Cover** à esquerda é de *regiões*; a de
 então a cobertura de **código de produção** é menor (~88% na auditoria). O CI
 falha abaixo de 90% de linhas.
 
-### Idiomas (`cargo test -p osjeff_core i18n`)
+### Idiomas (`cargo test -p kitsune_core i18n`)
 
 Confere os dois catálogos (mesmas chaves e marcadores, plurais completos), as chaves usadas em
-`kernel/` e `osjeff_core/` (nenhuma faltando, nenhuma sobrando), os acentos do português
+`kernel/` e `kitsune_core/` (nenhuma faltando, nenhuma sobrando), os acentos do português
 (`tools/i18n/accents.txt`, ~190 palavras e sufixos) nos catálogos e nos literais dos arquivos já migrados,
 a cobertura de glifos das quatro fontes e os formatadores (números, tamanhos, datas, plurais).
-`cargo test -p osjeff_core i18n_report -- --ignored --nocapture` lista os literais sem acento do resto da
+`cargo test -p kitsune_core i18n_report -- --ignored --nocapture` lista os literais sem acento do resto da
 árvore; `python3 -I tools/i18n-audit.py --check` confere `docs/design/i18n-audit.md`.
 
 Cenários de tela dos apps migrados (W30; mostram o português, trocam o idioma em *Ajustes* com a janela
@@ -85,7 +85,7 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 
 | Alvo | Entrada | Exercita |
 |---|---|---|
-| `net_parse` | bytes como frame Ethernet; os mesmos bytes como mensagem DNS e como programa da máquina de lease | `osjeff_core::net` (ARP, IPv4, ICMP, UDP, DHCP, `respond`) com buffers de saída de vários tamanhos; `lease` (ticks e respostas em qualquer ordem: configuração só com lease em mãos); `dns` (resposta, cache, `Resolve` terminando dentro do limite); `icmp` (eventos, ping, `next_hop`, checksums do pedido) |
+| `net_parse` | bytes como frame Ethernet; os mesmos bytes como mensagem DNS e como programa da máquina de lease | `kitsune_core::net` (ARP, IPv4, ICMP, UDP, DHCP, `respond`) com buffers de saída de vários tamanhos; `lease` (ticks e respostas em qualquer ordem: configuração só com lease em mãos); `dns` (resposta, cache, `Resolve` terminando dentro do limite); `icmp` (eventos, ping, `next_hop`, checksums do pedido) |
 | `ojfs_parse` | bytes como imagem de disco | todas as operações do OJFS v2 (`list/read/write/remove/mkdir/trash/purge`) |
 | `ojfs3_parse` | remendos sobre um OJFS v3 válido (com todos os CRC refeitos, para passar do checksum), bytes crus, ou dispositivo de tamanho qualquer | `detect`, `mount`, caminhada (`readdir/stat/read_at/path_of/trash_list`), `fsck`, 16 operações, `fsck` de novo (um FS são continua são) |
 | `ojfs3_ops` | sequência de operações, com queda de energia opcional (em ordem ou cache volátil) | escrita lida de volta, `fsck` limpo, remount idêntico, estado exatamente antes/depois da operação cortada |
@@ -95,13 +95,13 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 | `editor_dialog` | listagem de pasta arbitrária (nomes com `..`, `/`, controles) + teclas, cliques, roda, tamanhos de janela, erros e a pergunta de substituir | `editor2::dialog`: seleção, rolagem e cursor dentro dos limites, campo até `MAX_FIELD`, e todo caminho que o seletor entrega ao kernel é absoluto e normalizado; `CloseAsk` com teclas quaisquer |
 | `image_decode` | bytes como PNG/BMP/PPM/zlib (cru, com CRCs reparados, PNG sintetizado ou BMP com offset ajustado) | `image::decode`, `inflate` (com `max_output` pequeno, também em fluxo), e as operações sobre a imagem decodificada (resize, fit, rotação, composição) mais a ida e volta exata dos codificadores PNG/BMP |
 | `html_img_form` | `[modo, zoom, largura, ...bytes]`: os bytes como HTML cru, dentro de `<img src/alt/width>`, de um `<form>` (action, name, value, size, método) ou como payload `data:image/png;base64,` | `web::Doc` com zoom 50-300% e qualquer estado de imagem (invariantes de geometria, índices de links, imagens e campos), `FormState` (teclas, Tab, foco, colagem, query, `target`, teclas mortas), `Page::find`/`select`, `base64`, `decode_for_page`/`decode_data_uri`/`image_key`, `ImageCache` (sequências de operações dentro do teto de bytes) e o `Browser` (barra, histórico, favoritos, sugestões, páginas `osjeff://`); roda numa thread de pilha pequena |
-| `x509_parse` | `[modo, bytes]`: o leitor DER/X.509 estrito, o casamento de nomes (SAN/curinga), o parser de datas, a validação de cadeia (`rustls-webpki` com âncora real) com os bytes como cadeia de 1 a 4 certificados, como folha ou intermediária substituindo as de uma cadeia de teste válida (chega à checagem de assinatura), e o `CertificateVerify` do TLS 1.3 com os bytes como assinatura | `osjeff_core::x509`, `osjeff_core::tlsverify` (nunca pânico nem travamento; semente: os certificados de `tools/gen-test-certs.py`) |
+| `x509_parse` | `[modo, bytes]`: o leitor DER/X.509 estrito, o casamento de nomes (SAN/curinga), o parser de datas, a validação de cadeia (`rustls-webpki` com âncora real) com os bytes como cadeia de 1 a 4 certificados, como folha ou intermediária substituindo as de uma cadeia de teste válida (chega à checagem de assinatura), e o `CertificateVerify` do TLS 1.3 com os bytes como assinatura | `kitsune_core::x509`, `kitsune_core::tlsverify` (nunca pânico nem travamento; semente: os certificados de `tools/gen-test-certs.py`) |
 
 | `http_body` | `[modo, corte(2 B), ...bytes]`: os bytes como resposta HTTP inteira, como corpo sob cabeçalhos hostis (`gzip, gzip, deflate`, `br`, `Content-Length` enorme...), em leitura parcial do `Inflater`, e (modo `0x10`) comprimidos por nosso codificador (gzip, zlib, deflate cru, gzip em cadeia, `chunked`), **cortados** em qualquer ponto | `browser::body_partial`/`page_body_partial`/`body_bytes`, `appnet::app_response`, `Inflater::read_partial`. Invariantes: nunca pânico, corpo <= `MAX_DECODED_BYTES`, um fluxo válido cortado decodifica para **prefixo do original** e inteiro decodifica exato e sem aviso (regressões: `fuzz/regressions/http_body/`) |
 | `app_manifest` | bytes como `.wasm` inteiro, como payload de `osjeff.manifest` ou de `osjeff.icon` (embrulhado numa seção válida), ou como manifesto/ícone soltos | `wasmsec` (cabeçalho, seções, LEB128), `appmanifest` (chaves, quotas, `net_hosts`, ícone PNG até 64x64) e as invariantes do manifesto aceito (inclui: `net_hosts` limitado, só com permissão de rede, nunca admite o que o filtro de destinos recusa) |
-| `compositor_ops` | sequência de operações de área de trabalho (abrir, fechar, mover, redimensionar, focar, minimizar, encaixar, áreas de trabalho, overlays, ticks de animação, janelas vivas, relógio, quadros ociosos), 1 a 4 por quadro | `osjeff_core::compositor`: depois de cada quadro o resultado incremental é idêntico ao redesenho completo, o pintor nunca escreve fora do footprint, um quadro ocioso não planeja nada. 5 minutos: 25 351 execuções (84/s, até 400 quadros cada), 0 falhas |
-| `i18n_format` | `[modo, idioma, ...bytes]`: modelos de mensagem hostis (chaves desbalanceadas, nomes enormes, índices posicionais), números/tamanhos crus, datas fora de faixa, chaves e etiquetas de idioma arbitrárias | `osjeff_core::i18n`: nunca pânico, saída limitada, números só com dígitos e separadores, todo texto do catálogo formata com argumentos hostis |
-| `entropy_api` | sequência de operações (`add` com id e crédito declarado quaisquer, timestamps, `fill` de qualquer tamanho, reseed, relógio) | `osjeff_core::entropy`: nunca pânico; crédito por fonte <= 8 bits por byte e nunca decrescente; nota nunca decrescente e timing sozinho nunca Strong; crédito na chave <= 256 por classe; nenhuma saída de 32 bytes se repete |
+| `compositor_ops` | sequência de operações de área de trabalho (abrir, fechar, mover, redimensionar, focar, minimizar, encaixar, áreas de trabalho, overlays, ticks de animação, janelas vivas, relógio, quadros ociosos), 1 a 4 por quadro | `kitsune_core::compositor`: depois de cada quadro o resultado incremental é idêntico ao redesenho completo, o pintor nunca escreve fora do footprint, um quadro ocioso não planeja nada. 5 minutos: 25 351 execuções (84/s, até 400 quadros cada), 0 falhas |
+| `i18n_format` | `[modo, idioma, ...bytes]`: modelos de mensagem hostis (chaves desbalanceadas, nomes enormes, índices posicionais), números/tamanhos crus, datas fora de faixa, chaves e etiquetas de idioma arbitrárias | `kitsune_core::i18n`: nunca pânico, saída limitada, números só com dígitos e separadores, todo texto do catálogo formata com argumentos hostis |
+| `entropy_api` | sequência de operações (`add` com id e crédito declarado quaisquer, timestamps, `fill` de qualquer tamanho, reseed, relógio) | `kitsune_core::entropy`: nunca pânico; crédito por fonte <= 8 bits por byte e nunca decrescente; nota nunca decrescente e timing sozinho nunca Strong; crédito na chave <= 256 por classe; nenhuma saída de 32 bytes se repete |
 | `app_sandbox` | sequência de operações com caminhos em bytes crus sobre dois apps que dividem um `MemFs` **ou** um `VolumeFs` sobre um OJFS v3 de 1 MiB em RAM (o primeiro bool escolhe; mais URLs) | `appfs` (normalização, `Sandbox`, `VolumeFs`, cota, descritores) e `appnet`: nada existe fora de `/data/<id>`, os arquivos do sistema e do usuário ficam intactos, a cota vale, `fsck` limpo, URL aceita nunca é local |
 
 ```bash
@@ -132,7 +132,7 @@ estouro aritmético que no kernel (release, sem checagem) daria a volta em silê
 aqui vira crash.
 
 **Regressões.** Cada bug achado ficou como arquivo em `fuzz/regressions/<alvo>/`
-(entrada mínima) **e** como teste unitário em `osjeff_core`. Para repetir:
+(entrada mínima) **e** como teste unitário em `kitsune_core`. Para repetir:
 
 ```bash
 cd fuzz
@@ -180,26 +180,26 @@ ambos terminam com `fsck`.
 ### OJFS v3: queda de energia, desempenho
 
 ```bash
-cargo test -p osjeff_core fs3::tests::crash         # corta a energia em cada setor/flush
-cargo test -p osjeff_core -- --ignored many_seeds   # 60 sementes x 6000 operações vs. modelo
-cargo run --release -p osjeff_core --example ojfs3_bench   # MiB/s e setores por operação
+cargo test -p kitsune_core fs3::tests::crash         # corta a energia em cada setor/flush
+cargo test -p kitsune_core -- --ignored many_seeds   # 60 sementes x 6000 operações vs. modelo
+cargo run --release -p kitsune_core --example ojfs3_bench   # MiB/s e setores por operação
 ```
 
-`cargo test -p osjeff_core` compila o core com `opt-level = 2` (perfil `test` no
+`cargo test -p kitsune_core` compila o core com `opt-level = 2` (perfil `test` no
 `Cargo.toml` raiz): as varreduras de queda de energia rodam em segundos em vez de minutos.
 O kernel e os perfis `dev`/`release` não mudam.
 
 ### Injetar arquivos num disco v3 (host)
 
-`osjeff_core/examples/fs3_inject.rs` abre (ou formata, se estiver em branco, ou migra, se for
+`kitsune_core/examples/fs3_inject.rs` abre (ou formata, se estiver em branco, ou migra, se for
 v2) a imagem do disco do sistema de arquivos e copia arquivos para ela, para testar o desktop
 com dados grandes sem digitá-los:
 
 ```bash
 truncate -s 64M fs.img
-cargo run --release -p osjeff_core --example fs3_inject -- fs.img foto.png /Imagens/foto.png
-cargo run --release -p osjeff_core --example fs3_inject -- fs.img --files 2000 /many   # 2000 arquivos
-cargo run --release -p osjeff_core --example fs3_inject -- fs.img --ls /
+cargo run --release -p kitsune_core --example fs3_inject -- fs.img foto.png /Imagens/foto.png
+cargo run --release -p kitsune_core --example fs3_inject -- fs.img --files 2000 /many   # 2000 arquivos
+cargo run --release -p kitsune_core --example fs3_inject -- fs.img --ls /
 KEEP_FS=1 tools/qemu-headless.sh bios out 25      # usa o <out>/fs.img existente
 ```
 
@@ -271,7 +271,7 @@ montar o v3 não muda um pixel do desktop (provado: 0 pixels em BIOS e UEFI).
 ### Cursor sem rastro (W20)
 
 O cursor é desenhado só no framebuffer; um sprite que não é apagado deixa um rastro de
-setas. O modelo puro (`osjeff_core::cursor`, testes com um framebuffer simulado) prova a
+setas. O modelo puro (`kitsune_core::cursor`, testes com um framebuffer simulado) prova a
 regra apagar-no-início / pintar-no-fim; o QEMU prova o kernel:
 
 ```bash
@@ -384,7 +384,7 @@ Os marcos de boot (`[trace] boot + N ms`) saem na serial em qualquer build.
 
 ### Interface (W22): testes e custo de quadro
 
-Testes novos no `osjeff_core` (todos no host; o kernel só liga o framebuffer a eles):
+Testes novos no `kitsune_core` (todos no host; o kernel só liga o framebuffer a eles):
 
 | Módulo | Testes | O que prova |
 |---|---|---|
@@ -432,7 +432,7 @@ borrado (um quarto da resolução). O ocioso continua em zero quadros fora do ti
 
 ### Apps do sistema (W25): Tarefas, Registro, Ajustes, Calculadora, banners
 
-A contagem do `osjeff_core` passou de 2497 para 2532 testes (todos no host). A lógica nova mora no
+A contagem do `kitsune_core` passou de 2497 para 2532 testes (todos no host). A lógica nova mora no
 core; o kernel só desenha e liga a entrada:
 
 | Módulo | Testes | O que prova |
@@ -472,7 +472,7 @@ uns 5 %; não achei a causa e não é efeito do repintar parcial (desligado numa
 resultado é o mesmo). Fica como lacuna conhecida.
 ### Arquivos, Imagens, Editor e Terminal (W23): testes e custo de quadro
 
-Testes novos no `osjeff_core` (todos no host; o kernel só desenha e roteia; 2497 → 2590 passando, 3 ignorados):
+Testes novos no `kitsune_core` (todos no host; o kernel só desenha e roteia; 2497 → 2590 passando, 3 ignorados):
 
 | Módulo | Testes | O que prova |
 |---|---|---|
@@ -516,12 +516,12 @@ janela que nunca recebeu entrada não pisca e não pede quadros (corrigido duran
 terminal aberto no boot fazia cerca de cem quadros por segundo nos primeiros 12 s).
 ### Navegador na W24: testes, fuzz e custo
 
-Testes novos no `osjeff_core` (todos no host): `web::layout_tests` (quebra por largura medida,
+Testes novos no `kitsune_core` (todos no host): `web::layout_tests` (quebra por largura medida,
 zoom 50 a 300, tabelas, estilos aninhados, palavras longas, texto vazio, páginas enormes,
 alinhamento vertical, colunas com largura em px), `web::css` (índice de regras), `browser::tabs`,
 `browser::{cert,errors,motion,pages}`, `browser::ui_tests` (abas compartilham favoritos,
 recarregar, parar, recentes), `layout` (geometria da moldura, balão, busca, erro, nova aba).
-Total: 2631 no `osjeff_core` (eram 2497).
+Total: 2631 no `kitsune_core` (eram 2497).
 
 Fuzz: `web_parse` (agora também tabelas, seletores, vários zooms e métricas hostis),
 `html_img_form` (formas de tabela, estilo, listas, abas, páginas `osjeff://`) e `x509_parse`
@@ -556,7 +556,7 @@ Agora há um caminho só, e a corretude é **testada contra um redesenho complet
 
 | Camada | Comando | O que prova |
 |---|---|---|
-| Host, `osjeff_core::compositor` (52 testes, ~40 s) | `cargo test -p osjeff_core compositor` | `Region` (disjunta, só cresce, subtração exata), o motor em cenas feitas à mão, e o **teste diferencial**: um simulador de área de trabalho (janelas, áreas de trabalho, z-order, animações com opacidade, janelas "vivas" e "jogo", painel, barra, popover, toast, pré-visualização de encaixe) com um pintor de modelo (cor única por janela, faixa de título, cantos recortados, anel de sombra translúcido em aritmética inteira, escritas fora do footprint são acusadas). 1500 históricos x 60 quadros e 40 x 400, de 1 a 3 eventos por quadro: depois de **cada** quadro o resultado incremental (só com o dano do motor) é idêntico, byte a byte, ao redesenho completo. A mensagem de falha traz o seed e as operações |
+| Host, `kitsune_core::compositor` (52 testes, ~40 s) | `cargo test -p kitsune_core compositor` | `Region` (disjunta, só cresce, subtração exata), o motor em cenas feitas à mão, e o **teste diferencial**: um simulador de área de trabalho (janelas, áreas de trabalho, z-order, animações com opacidade, janelas "vivas" e "jogo", painel, barra, popover, toast, pré-visualização de encaixe) com um pintor de modelo (cor única por janela, faixa de título, cantos recortados, anel de sombra translúcido em aritmética inteira, escritas fora do footprint são acusadas). 1500 históricos x 60 quadros e 40 x 400, de 1 a 3 eventos por quadro: depois de **cada** quadro o resultado incremental (só com o dano do motor) é idêntico, byte a byte, ao redesenho completo. A mensagem de falha traz o seed e as operações |
 | Host, casos dirigidos | idem | sombra sob a vizinha, janela acima de uma animada, sombra cortada pela borda do dano, janela saindo da tela pelos quatro lados, maximizada, translúcida, dano de 1 pixel, áreas de trabalho, overlays, e os dois bugs reportados (Tarefas + Snake; Editor sobre Tarefas, com a sombra afirmada presente) |
 | Host, **testes de mutação** | idem (`tests/mutants.rs`) | quebra-se de propósito cada regra e exige-se que o teste diferencial falhe: esquecer o footprint antigo, as trocas de z-order, a camada removida, o `look`, o `dirty`; omitir a sombra do footprint; declarar os cantos arredondados como opacos; esquecer o `dirty`, o `look`, a invalidação do relógio. 11 mutantes, todos pegos |
 | Fuzz | `cd fuzz && cargo fuzz run compositor_ops -- -max_total_time=300 -print_final_stats=1` | o mesmo simulador dirigido pela entrada: incremental == completo, nenhuma escrita fora do footprint, quadro ocioso não planeja nada |
@@ -629,11 +629,11 @@ Projeto em [`docs/design/apps.md`](design/apps.md). O que é testado e como:
 
 | O quê | Como | Resultado |
 |---|---|---|
-| `VolumeFs` (AppFs sobre o VFS) | `cargo test -p osjeff_core volume` (18 testes) | os mesmos passos dão os mesmos resultados no `MemFs`; só `/apps`, `/data`, `/home` alcançáveis; persistência de dados, pacotes e remoções por remount de um `Fs3<RamDisk>`; cota exata depois do remount; volume de 1 MiB cheio: `NOSPC` e `fsck` limpo; esparsos; sequência do sandbox idêntica nos dois |
-| `seed_once` | `cargo test -p osjeff_core appinstall` | uma vez só; app removido não volta, mesmo depois de remount; pacote novo entra; marcador hostil |
-| Lugar Apps do Arquivos | `cargo test -p osjeff_core fileman` (11 novos) | pseudo-caminho que nunca lê o volume; seleção por id; `Enter`/`I`/`Del` e mensagens; menu sem comandos de arquivo; texto do manifesto |
-| Política de rede | `cargo test -p osjeff_core appnet appmanifest` | `net_hosts`, `authorize`, cada salto de redirecionamento, `app_response` |
-| Log de boot | `cargo test -p osjeff_core klog` | `dump_bounded` nunca passa do limite, mantém as linhas mais novas inteiras |
+| `VolumeFs` (AppFs sobre o VFS) | `cargo test -p kitsune_core volume` (18 testes) | os mesmos passos dão os mesmos resultados no `MemFs`; só `/apps`, `/data`, `/home` alcançáveis; persistência de dados, pacotes e remoções por remount de um `Fs3<RamDisk>`; cota exata depois do remount; volume de 1 MiB cheio: `NOSPC` e `fsck` limpo; esparsos; sequência do sandbox idêntica nos dois |
+| `seed_once` | `cargo test -p kitsune_core appinstall` | uma vez só; app removido não volta, mesmo depois de remount; pacote novo entra; marcador hostil |
+| Lugar Apps do Arquivos | `cargo test -p kitsune_core fileman` (11 novos) | pseudo-caminho que nunca lê o volume; seleção por id; `Enter`/`I`/`Del` e mensagens; menu sem comandos de arquivo; texto do manifesto |
+| Política de rede | `cargo test -p kitsune_core appnet appmanifest` | `net_hosts`, `authorize`, cada salto de redirecionamento, `app_response` |
+| Log de boot | `cargo test -p kitsune_core klog` | `dump_bounded` nunca passa do limite, mantém as linhas mais novas inteiras |
 | Persistência de app (QEMU) | `w18-persist-1.sh`, depois `FS_IMG=<out1>/fs.img` com `w18-persist-2.sh` | boot 1: Notas salva `nota-1.txt` (29 B) em `/data/notes`; boot 2: `apps: 0 bundled packages installed` e a nota abre (`docs/img/w18-persist-notes.png`) |
 | Lugar Apps (QEMU) | `w18-apps.sh`, `w18-wasmfile.sh` | remover/instalar/abrir, erros, menu, Propriedades do app e de `/apps/hello.wasm` (`docs/img/w18-files-apps.png`, `w18-app-props.png`, `w18-wasm-props.png`) |
 | Configurações e logs entre boots (QEMU) | `w18-settings-1.sh`, depois `-2.sh` com o mesmo disco (preparo no cabeçalho do primeiro) | imagem `/papel.png`, destaque violeta, 12 h, fuso UTC-02:00 e ABNT2 voltam (`settings: loaded 120 bytes`); `fs3_inject --ls /var/log` lista `boot.log` e `syslog.txt`; `/etc/osjeff.conf` no disco (`docs/img/w18-settings-persisted.png`) |
@@ -670,7 +670,7 @@ Os ataques que matam o app (laço infinito, ponteiro inválido) deixam na janela
 - As funções `osj.*` (`kernel/src/wasm/abi2.rs`), o `AppManager`, a cola do desktop e o
   transporte de rede do app (`fetch::app_get`, o slot compartilhado com o navegador) não são
   fuzzados nem têm teste unitário (são `kernel/`): a decisão que eles executam (caminhos, cotas,
-  URL, `net_hosts`, resposta, manifesto, ponteiros) está em `osjeff_core` e é testada, e o
+  URL, `net_hosts`, resposta, manifesto, ponteiros) está em `kitsune_core` e é testada, e o
   conjunto é exercitado por boot (`w13-*.sh`, `w18-*.sh`, app hostil). Uma falha de E/S do ATA
   no meio de uma instalação (volume "envenenado" por um erro de commit) foi vista **uma vez**
   num boot de QEMU muito carregado e não se repetiu em 10 execuções seguintes (nem com 4

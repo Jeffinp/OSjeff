@@ -9,7 +9,7 @@
 #![no_std]
 
 use core::fmt::Write;
-use osjeff_sdk::*;
+use kitsune_sdk::*;
 
 manifest!(
     "id=notes\nname=Notes\nname.pt=Notas\nname.en=Notes\nversion=1.0.0\nabi=2\nfs=own\ndisk_kib=64\nmax_fds=4\nwin_w=520\nwin_h=300\nwin_min_w=360\nwin_min_h=220\nmem_mib=2\n"

@@ -1,7 +1,7 @@
 //! The terminal window: `Desktop` methods around [`TermState`].
 //!
 //! The behaviour (line editing, history, Tab, Ctrl+C / Ctrl+L, scrollback) is
-//! `osjeff_core::shell::Term`, tested on the host. This file connects it to the
+//! `kitsune_core::shell::Term`, tested on the host. This file connects it to the
 //! window: the character grid that fits the window, keys in, pixels out, and the
 //! hand-off of command lines to the `shelld` thread
 //! ([`shellhost`](super::shellhost)). A command that waits (`sleep`, `ping`,
@@ -15,15 +15,15 @@ use super::*;
 use crate::text::{self, BODY, FOOTNOTE, Weight};
 use alloc::boxed::Box;
 use core::sync::atomic::{AtomicU32, Ordering};
-use osjeff_core::appart::Tool;
-use osjeff_core::input::{KeyCode, KeyEvent, Mods};
-use osjeff_core::settings::{FONT_MAX, FONT_MIN, font_step};
-use osjeff_core::shell::sys::{MemInfo, ProcInfo};
-use osjeff_core::shell::{ShellFs, Term, TermAction};
-use osjeff_core::sysif::SettingsStore;
-use osjeff_core::t;
-use osjeff_core::termui::{self, Grid, Metrics, Selection};
-use osjeff_core::widgets::ScrollbarFade;
+use kitsune_core::appart::Tool;
+use kitsune_core::input::{KeyCode, KeyEvent, Mods};
+use kitsune_core::settings::{FONT_MAX, FONT_MIN, font_step};
+use kitsune_core::shell::sys::{MemInfo, ProcInfo};
+use kitsune_core::shell::{ShellFs, Term, TermAction};
+use kitsune_core::sysif::SettingsStore;
+use kitsune_core::t;
+use kitsune_core::termui::{self, Grid, Metrics, Selection};
+use kitsune_core::widgets::ScrollbarFade;
 
 static NEXT_UID: AtomicU32 = AtomicU32::new(1);
 
@@ -263,7 +263,7 @@ impl Desktop {
         };
         let ctx = ts.ctx.get_or_insert_with(Ctx::new);
         let prompt = shellhost::prompt_of(ctx);
-        let res = osjeff_core::shell::RunResult {
+        let res = kitsune_core::shell::RunResult {
             status: 1,
             output: alloc::format!("sh: {problem}\n").into_bytes(),
             ..Default::default()
@@ -391,7 +391,7 @@ impl Desktop {
                 if let Some(ts) = self.term_state_mut(id) {
                     let ctx = ts.ctx.get_or_insert_with(Ctx::new);
                     let prompt = shellhost::prompt_of(ctx);
-                    let res = osjeff_core::shell::RunResult {
+                    let res = kitsune_core::shell::RunResult {
                         status: 1,
                         output: alloc::format!("sh: {}\n", t!("term.err.thread_stopped"))
                             .into_bytes(),

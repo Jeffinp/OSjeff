@@ -7,8 +7,8 @@
 //! corners (scaled with it). Integer arithmetic only.
 
 use super::Canvas;
-use osjeff_core::Rect;
-use osjeff_core::raster::{Corner, rrect_cov};
+use kitsune_core::Rect;
+use kitsune_core::raster::{Corner, rrect_cov};
 
 impl Canvas<'_> {
     /// Draw the `sw x sh` texture `src` (same pixel layout as this canvas, rows

@@ -13,8 +13,8 @@
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::blockdev::{BlockDevice, CrashMode, FaultyDisk, RamDisk};
-use osjeff_core::fs3::{FormatOptions, Fs3, Kind};
+use kitsune_core::blockdev::{BlockDevice, CrashMode, FaultyDisk, RamDisk};
+use kitsune_core::fs3::{FormatOptions, Fs3, Kind};
 use std::collections::BTreeMap;
 
 #[derive(Arbitrary, Debug)]
@@ -81,7 +81,7 @@ fn snapshot<D: BlockDevice>(fs: &mut Fs3<D>) -> Snap {
 
 /// Returns `Err(())` if the operation failed with an I/O error (power cut).
 fn apply<D: BlockDevice>(fs: &mut Fs3<D>, op: &Op, now: u64) -> Result<(), ()> {
-    use osjeff_core::fs3::FsError;
+    use kitsune_core::fs3::FsError;
     let io = |r: Result<(), FsError>| match r {
         Err(FsError::Io(_)) | Err(FsError::Poisoned) => Err(()),
         _ => Ok(()),

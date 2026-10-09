@@ -3,7 +3,7 @@
 //! 520x324 shadow layer, a 48-char string at scale 2).
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use osjeff_bench::{fb, fb_old, font, font_old};
+use kitsune_bench::{fb, fb_old, font, font_old};
 
 fn info(bpp: usize, h: usize) -> FrameBufferInfo {
     FrameBufferInfo {

@@ -9,7 +9,7 @@
 
 use crate::fb::Color;
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
-use osjeff_core::style::{self, Appearance, Palette};
+use kitsune_core::style::{self, Appearance, Palette};
 
 /// The current accent colour (`0xRRGGBB`), the primary highlight of the whole UI.
 static ACCENT_RGB: AtomicU32 = AtomicU32::new(0x5B_5C_F6);

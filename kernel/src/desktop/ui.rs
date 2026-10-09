@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use super::*;
-use osjeff_core::iconart;
+use kitsune_core::iconart;
 
 pub(crate) const PANEL_DARK: Color = Color::rgb(0x0E, 0x16, 0x28);
 pub(crate) const GRID: Color = Color::rgb(0x23, 0x2E, 0x4A);
@@ -126,7 +126,7 @@ pub(crate) fn scrollbar(c: &mut Canvas, track: Rect, top: usize, total: usize, r
     if total <= rows || track.h <= 0 {
         return;
     }
-    let (off, len) = osjeff_core::widgets::scroll_thumb(track.h, total, rows, top, 24);
+    let (off, len) = kitsune_core::widgets::scroll_thumb(track.h, total, rows, top, 24);
     let w = 6.min(track.w);
     let thumb = Rect::new(track.right() - w - 1, track.y + off, w, len);
     c.fill_rrect(
@@ -149,7 +149,7 @@ pub(crate) fn scrollbar_pos(track: Rect, y: i32, total: usize, rows: usize) -> u
 
 /// One line of a graph; a non-empty `label` adds it to the legend.
 pub(crate) struct Line<'a> {
-    pub series: &'a osjeff_core::sysmon::Series,
+    pub series: &'a kitsune_core::sysmon::Series,
     pub color: Color,
     pub label: &'a [u8],
 }
@@ -175,7 +175,7 @@ pub(crate) struct Graph<'a> {
 pub(crate) fn graph(c: &mut Canvas, r: Rect, g: &Graph<'_>) {
     let (title, value, sub, lines, ceiling, ceiling_label) =
         (g.title, g.value, g.sub, g.lines, g.ceiling, g.ceiling_label);
-    use osjeff_core::sysmon::{HIST, scale_to};
+    use kitsune_core::sysmon::{HIST, scale_to};
     fill_round(c, r, 10, PANEL_DARK);
     let inner = r.w - 20;
     text(c, r.x + 10, r.y + 8, inner, title, theme::HEADER_TEXT);
@@ -296,12 +296,12 @@ pub(crate) fn usage_bar(c: &mut Canvas, track: Rect, permille: u32, color: Color
 // the colours of the *current appearance* (`theme::pal()`), and takes the
 // interaction state as an argument: the caller derives `Control::Hover` /
 // `Pressed` from the pointer. Geometry shared with hit testing comes from
-// `osjeff_core::widgets` and `osjeff_core::chrome`.
+// `kitsune_core::widgets` and `kitsune_core::chrome`.
 // =====================================================================
 
 use crate::text::{self, BODY, CAPTION, FOOTNOTE, Weight};
-use osjeff_core::style::Palette;
-use osjeff_core::widgets as wg;
+use kitsune_core::style::Palette;
+use kitsune_core::widgets as wg;
 
 /// Interaction state of a control.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -378,7 +378,7 @@ fn draw_button(c: &mut Canvas, r: Rect, label: &str, kind: ButtonKind, st: Contr
     };
     c.fill_rrect(
         r,
-        osjeff_core::style::R_CONTROL,
+        kitsune_core::style::R_CONTROL,
         Corner::Circle,
         bg,
         (bg_alpha as u32 * a_scale / 256) as u16,
@@ -387,7 +387,7 @@ fn draw_button(c: &mut Canvas, r: Rect, label: &str, kind: ButtonKind, st: Contr
         let (bc, ba) = theme::tint(b);
         c.stroke_rrect(
             r,
-            osjeff_core::style::R_CONTROL,
+            kitsune_core::style::R_CONTROL,
             Corner::Circle,
             bc,
             (ba as u32 * a_scale / 256) as u16,
@@ -415,7 +415,7 @@ fn draw_field(
     caret: bool,
     p: &Palette,
 ) {
-    let rad = osjeff_core::style::R_CONTROL;
+    let rad = kitsune_core::style::R_CONTROL;
     fill_token(c, r, rad, p.field_bg);
     if focused {
         // Focus ring: the accent, soft outside and crisp inside.
@@ -495,7 +495,7 @@ pub(crate) fn text_field(
 /// A segmented control with `labels`; segment `selected` is raised.
 pub(crate) fn segmented(c: &mut Canvas, r: Rect, labels: &[&str], selected: usize) {
     let p = theme::pal();
-    let rad = osjeff_core::style::R_CONTROL;
+    let rad = kitsune_core::style::R_CONTROL;
     fill_token(
         c,
         r,
@@ -718,7 +718,7 @@ pub(crate) fn menu_item(
     let (fg, fg2) = if hovered && enabled {
         c.fill_rrect(
             r,
-            osjeff_core::style::R_MENU - 3,
+            kitsune_core::style::R_MENU - 3,
             Corner::Circle,
             theme::accent(),
             256,
@@ -744,7 +744,7 @@ pub(crate) fn menu_item(
             col,
         );
     }
-    let lx = r.x + osjeff_core::chrome::MENU_CHECK_W + 4;
+    let lx = r.x + kitsune_core::chrome::MENU_CHECK_W + 4;
     text::draw_left(
         c,
         Rect::new(lx, r.y, r.w - (lx - r.x) - 8, r.h),
@@ -785,7 +785,7 @@ pub(crate) fn tooltip(c: &mut Canvas, cx: i32, bottom: i32, label: &str) -> Rect
         },
         Rect::new(r.x, r.y + 6, r.w, (r.h - 12).max(0)),
     );
-    fill_token(c, r, osjeff_core::style::R_TOOLTIP, p.tooltip_bg);
+    fill_token(c, r, kitsune_core::style::R_TOOLTIP, p.tooltip_bg);
     text::draw_centered(
         c,
         r,

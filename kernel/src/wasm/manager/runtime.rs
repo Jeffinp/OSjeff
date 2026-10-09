@@ -3,7 +3,7 @@
 //! `appd` thread only.
 
 use super::*;
-use osjeff_core::tk;
+use kitsune_core::tk;
 
 /// Wall clock in ms since local midnight (the RTC has no date or sub-second part).
 fn wall_ms() -> u64 {

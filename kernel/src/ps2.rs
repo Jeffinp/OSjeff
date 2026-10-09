@@ -107,7 +107,7 @@ pub fn init() {
 /// exercised on a mouse that does have a wheel).
 const WHEEL_ENABLED: bool = true;
 
-pub use osjeff_core::hw::ps2::{Decoder, Event, MouseMode, WHEEL_MAGIC};
+pub use kitsune_core::hw::ps2::{Decoder, Event, MouseMode, WHEEL_MAGIC};
 
 /// Incremental decoder state for the scancode/mouse-packet state machines.
 /// Touched only by [`poll`] on the main loop (the sole consumer of the IRQ

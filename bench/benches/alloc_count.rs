@@ -1,7 +1,7 @@
-//! How many heap allocations do the `alloc`-using parts of `osjeff_core` make?
+//! How many heap allocations do the `alloc`-using parts of `kitsune_core` make?
 //! (The kernel's free-list allocator is O(free holes) per operation, so the
 //! *count* matters as much as the bytes.) Run: `cargo bench --bench alloc_count`.
-use osjeff_core::{browser, web};
+use kitsune_core::{browser, web};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 

@@ -27,7 +27,7 @@ fn main() {
     // blank on first run (a 64 MiB sparse file: OJFS v3 needs at least 1 MiB); the
     // kernel formats it if it holds no filesystem. An older 64 KiB disk still boots:
     // the kernel logs "disk too small for OJFS v3" and stays on OJFS v2.
-    let fs_img = "osjeff-fs.img";
+    let fs_img = "kitsune-fs.img";
     if !std::path::Path::new(fs_img).exists() {
         std::fs::File::create(fs_img)
             .and_then(|f| f.set_len(64 * 1024 * 1024))
@@ -42,7 +42,7 @@ fn main() {
     qemu.arg("-device")
         .arg("ne2k_isa,netdev=n0,mac=52:54:00:12:34:56");
     qemu.arg("-object")
-        .arg("filter-dump,id=dump,netdev=n0,file=osjeff-net.pcap");
+        .arg("filter-dump,id=dump,netdev=n0,file=kitsune-net.pcap");
 
     let status = qemu.status().expect("failed to launch qemu-system-x86_64");
     std::process::exit(status.code().unwrap_or(-1));

@@ -618,13 +618,25 @@ dependencies = [
  "bootloader_api",
  "embedded-io",
  "embedded-tls",
- "osjeff_core",
+ "kitsune_core",
  "rand_core",
  "sha2",
  "smoltcp",
  "wasmi",
  "wat",
  "x86_64",
+]
+
+[[package]]
+name = "kitsune_core"
+version = "0.1.0"
+dependencies = [
+ "p256",
+ "p384",
+ "rsa",
+ "rustls-pki-types",
+ "rustls-webpki",
+ "sha2",
 ]
 
 [[package]]
@@ -760,18 +772,6 @@ version = "0.1.0"
 dependencies = [
  "bootloader",
  "kernel",
-]
-
-[[package]]
-name = "osjeff_core"
-version = "0.1.0"
-dependencies = [
- "p256",
- "p384",
- "rsa",
- "rustls-pki-types",
- "rustls-webpki",
- "sha2",
 ]
 
 [[package]]

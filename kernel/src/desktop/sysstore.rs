@@ -1,11 +1,11 @@
-//! Kernel implementations of the `osjeff_core::sysif` traits that the
+//! Kernel implementations of the `kitsune_core::sysif` traits that the
 //! system-management apps use, backed by the desktop VFS (OJFS v3 on the disk,
 //! or the RAM volume when no v3 disk is mounted): the log goes to
 //! `/var/log/`, the settings to `/etc/osjeff.conf`, and the space accounting
 //! is the volume's `statfs`.
 
 use alloc::vec::Vec;
-use osjeff_core::sysif::{
+use kitsune_core::sysif::{
     DiskUsage, DiskUsageInfo, LogSink, NetCounters, NetStats, SettingsStore, SinkError,
 };
 
@@ -42,7 +42,7 @@ pub(crate) struct VfsSink;
 
 impl LogSink for VfsSink {
     fn write_file(&mut self, name: &[u8], data: &[u8]) -> Result<(), SinkError> {
-        let (body, cut) = osjeff_core::klog::tail_lines(data, MAX_LOG_FILE);
+        let (body, cut) = kitsune_core::klog::tail_lines(data, MAX_LOG_FILE);
         ensure_dir(b"/var");
         ensure_dir(b"/var/log");
         let path = vfs::join(b"/var/log", name);
@@ -62,7 +62,7 @@ impl DiskUsage for VfsUsage {
     fn label(&self) -> &str {
         match vfs::volume() {
             vfs::Volume::Disk => "OJFS v3 (IDE)",
-            vfs::Volume::Memory => osjeff_core::t!("files.vol.memory_label"),
+            vfs::Volume::Memory => kitsune_core::t!("files.vol.memory_label"),
         }
     }
 
@@ -84,7 +84,7 @@ pub(crate) struct KernelNetStats;
 impl NetStats for KernelNetStats {
     fn counters(&self) -> Option<NetCounters> {
         let s = crate::netd::stats();
-        (s.nic != osjeff_core::netstats::NicKind::None).then_some(NetCounters {
+        (s.nic != kitsune_core::netstats::NicKind::None).then_some(NetCounters {
             rx_bytes: s.rx_bytes,
             tx_bytes: s.tx_bytes,
             rx_frames: s.rx_packets,
@@ -114,5 +114,5 @@ impl SettingsStore for VfsStore {
 /// root as the settings page and older settings files store it), if it exists and is
 /// a file.
 pub(crate) fn read_path(path: &[u8]) -> Option<Vec<u8>> {
-    vfs::read_file(&osjeff_core::settings::absolute_path(path)).ok()
+    vfs::read_file(&kitsune_core::settings::absolute_path(path)).ok()
 }

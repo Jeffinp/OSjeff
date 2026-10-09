@@ -11,7 +11,7 @@
 use super::super::*;
 use super::paint::DeskPainter;
 use super::present::Screen;
-use osjeff_core::compositor::{Engine, Scene};
+use kitsune_core::compositor::{Engine, Scene};
 
 /// How many mismatching frames are logged before going quiet.
 const MAX_REPORTS: u32 = 40;

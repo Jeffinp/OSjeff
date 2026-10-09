@@ -8,7 +8,7 @@
 #![no_std]
 
 use core::fmt::Write;
-use osjeff_sdk::*;
+use kitsune_sdk::*;
 
 manifest!(
     "id=clock\nname=Clock\nname.pt=Relógio\nname.en=Clock\nversion=1.0.0\nabi=2\ntick_ms=1000\nwin_w=300\nwin_h=320\nwin_min_w=200\nwin_min_h=240\nmem_mib=2\n"

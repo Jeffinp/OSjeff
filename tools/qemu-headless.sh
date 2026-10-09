@@ -41,13 +41,13 @@ shift 3 2>/dev/null || shift $#
 [ "${1:-}" = "--" ] && shift
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-img=$(find "$root/target/release/build" -path "*/out/osjeff-$mode.img" -printf '%T@ %p\n' 2>/dev/null \
+img=$(find "$root/target/release/build" -path "*/out/kitsune-$mode.img" -printf '%T@ %p\n' 2>/dev/null \
         | sort -rn | head -1 | cut -d" " -f2-)
 [ -f "$img" ] || { echo "image not found; run: cargo build --release -p os" >&2; exit 2; }
 
 mkdir -p "$out"
 rm -f "$out"/serial.log "$out"/mon.sock "$out"/mon.path "$out"/screen.ppm "$out"/screen.png
-sock=$(mktemp -u "${TMPDIR:-/tmp}/osjeff-mon.XXXXXX")
+sock=$(mktemp -u "${TMPDIR:-/tmp}/kitsune-mon.XXXXXX")
 echo "$sock" > "$out/mon.path"
 # Fresh persistent-FS disk each run so results are reproducible (KEEP_FS=1 keeps
 # an existing <outdir>/fs.img, e.g. to test persistence or corrupted disks).

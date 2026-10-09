@@ -1,7 +1,7 @@
 //! The toast overlay: notification banners stacked down from the top-right corner.
 //!
 //! The model (three visible, a short queue, a chosen time each, merging repeats) is
-//! `osjeff_core::notify::Toasts`. The desktop feeds it from two places:
+//! `kitsune_core::notify::Toasts`. The desktop feeds it from two places:
 //! WARN-and-above records of the system log (`klog::take_warnings`, checked with
 //! one atomic load per compositor pass) and the queue behind `notify::notify`.
 //! The compositor repaints the toasts straight onto the framebuffer after a
@@ -12,7 +12,7 @@
 use super::ui::*;
 use super::*;
 use crate::klog::{self, Level};
-use osjeff_core::notify::{TOAST_W, Toasts};
+use kitsune_core::notify::{TOAST_W, Toasts};
 
 /// Milliseconds since boot (the clock the toasts are timed with).
 pub(crate) fn now_ms() -> u32 {
@@ -29,7 +29,7 @@ fn level_color(l: Level) -> Color {
 }
 
 fn level_title(l: Level) -> &'static str {
-    osjeff_core::i18n::tr(l.title_key())
+    kitsune_core::i18n::tr(l.title_key())
 }
 
 impl Desktop {
@@ -87,7 +87,7 @@ impl Desktop {
     /// Does a banner need frames: one is sliding, or its dismiss line is running down (the
     /// line steps once a second with reduced motion).
     pub(crate) fn toasts_sliding(&self) -> bool {
-        if osjeff_core::anim::reduce_motion() {
+        if kitsune_core::anim::reduce_motion() {
             self.toasts.sliding(now_ms())
         } else {
             !self.toasts.is_idle()
@@ -165,7 +165,7 @@ impl Desktop {
                 theme::solid(p.text),
             );
             if t.count > 1 {
-                let n = osjeff_core::t!("toast.repeat", n = t.count);
+                let n = kitsune_core::t!("toast.repeat", n = t.count);
                 text::draw_right(
                     c,
                     Rect::new(r.x, r.y + 10, r.w - 14, 20),

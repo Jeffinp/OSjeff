@@ -2,18 +2,18 @@
 //! secondary IDE master). Formats a blank image, migrates a v2 one, mounts a v3 one.
 //!
 //! ```text
-//! cargo run -p osjeff_core --example fs3_inject -- <disk.img> <host-file> <dest-path>
-//! cargo run -p osjeff_core --example fs3_inject -- <disk.img> --mkdir <dest-dir>
-//! cargo run -p osjeff_core --example fs3_inject -- <disk.img> --files <count> <dest-dir>
-//! cargo run -p osjeff_core --example fs3_inject -- <disk.img> --ls <dir>
+//! cargo run -p kitsune_core --example fs3_inject -- <disk.img> <host-file> <dest-path>
+//! cargo run -p kitsune_core --example fs3_inject -- <disk.img> --mkdir <dest-dir>
+//! cargo run -p kitsune_core --example fs3_inject -- <disk.img> --files <count> <dest-dir>
+//! cargo run -p kitsune_core --example fs3_inject -- <disk.img> --ls <dir>
 //! ```
 //!
 //! `<dest-path>` is absolute (`/Documentos/foto.png`); missing parent folders are
 //! created. `--files` makes `<count>` small files `arquivo0001.txt`... for big-folder
 //! tests. Refuses an image that holds something that is not OJFS (never reformats).
 
-use osjeff_core::blockdev::{BlockDevice, IoError, SECTOR_SIZE};
-use osjeff_core::fs3::{self, Detected, FormatOptions, Fs3};
+use kitsune_core::blockdev::{BlockDevice, IoError, SECTOR_SIZE};
+use kitsune_core::fs3::{self, Detected, FormatOptions, Fs3};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::process::ExitCode;

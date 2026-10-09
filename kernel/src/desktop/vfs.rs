@@ -2,7 +2,7 @@
 //!
 //! Every consumer (file manager, image viewer, editor, terminal commands) goes
 //! through this module; nothing in the desktop touches a filesystem image any
-//! more. The logic (paths, names, copy, move, trash) is in `osjeff_core::vfs`,
+//! more. The logic (paths, names, copy, move, trash) is in `kitsune_core::vfs`,
 //! unit-tested on the host; this file is the glue: which volume, the lock, the
 //! clock.
 //!
@@ -46,9 +46,9 @@ use crate::storage;
 use crate::sync::YieldMutex;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use osjeff_core::blockdev::RamDisk;
-use osjeff_core::fs3::{self, FormatOptions, Fs3};
-use osjeff_core::vfs as core_vfs;
+use kitsune_core::blockdev::RamDisk;
+use kitsune_core::fs3::{self, FormatOptions, Fs3};
+use kitsune_core::vfs as core_vfs;
 
 #[allow(unused_imports)]
 pub use core_vfs::{
@@ -91,10 +91,10 @@ pub fn notice() -> Option<&'static str> {
         return None;
     }
     Some(match storage::state() {
-        storage::State::TooSmall => osjeff_core::t!("files.vol.too_small"),
-        storage::State::NoDisk => osjeff_core::t!("files.vol.none"),
-        storage::State::Unknown => osjeff_core::t!("files.vol.unknown"),
-        _ => osjeff_core::t!("files.vol.failed"),
+        storage::State::TooSmall => kitsune_core::t!("files.vol.too_small"),
+        storage::State::NoDisk => kitsune_core::t!("files.vol.none"),
+        storage::State::Unknown => kitsune_core::t!("files.vol.unknown"),
+        _ => kitsune_core::t!("files.vol.failed"),
     })
 }
 

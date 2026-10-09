@@ -16,8 +16,8 @@
 use crate::io::{inb, outb};
 use crate::netd::now_ms;
 use core::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
-use osjeff_core::sntp::{Measurement, NtpTs};
-use osjeff_core::unixtime::{self, from_rtc_fields};
+use kitsune_core::sntp::{Measurement, NtpTs};
+use kitsune_core::unixtime::{self, from_rtc_fields};
 
 /// RTC reading at boot as Unix milliseconds (0 = the RTC was unreadable or
 /// absurd), and the monotonic ms at which it was taken.
@@ -69,7 +69,7 @@ fn read_rtc_unix() -> Option<u64> {
         if bin {
             v
         } else {
-            osjeff_core::hw::rtc::bcd_to_bin(v)
+            kitsune_core::hw::rtc::bcd_to_bin(v)
         }
     };
     // The hour register keeps the PM flag in bit 7 in 12-hour mode.

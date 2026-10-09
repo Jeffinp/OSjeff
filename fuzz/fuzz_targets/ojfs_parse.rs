@@ -1,4 +1,4 @@
-//! Fuzz target: the OJFS on-disk format (`osjeff_core::fs`).
+//! Fuzz target: the OJFS on-disk format (`kitsune_core::fs`).
 //!
 //! The "disk" is attacker/corruption controlled, so the image is built in one of
 //! three ways (see [`Image`]): fully raw bytes, raw bytes of the wrong length,
@@ -13,7 +13,7 @@
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::fs::{self, IMAGE_SIZE, MAX_FILES, MAX_FILE_SIZE, MAX_NAME};
+use kitsune_core::fs::{self, IMAGE_SIZE, MAX_FILES, MAX_FILE_SIZE, MAX_NAME};
 
 /// Byte offset of record `i` (4-byte magic + i * (header 22 + payload 1024)).
 const REC_SIZE: usize = 1 + 1 + 1 + 1 + MAX_NAME + 2 + MAX_FILE_SIZE;

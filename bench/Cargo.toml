@@ -8,7 +8,7 @@
 # Host numbers are indicative only: the host compiles with SSE2/AVX available,
 # while the kernel target (x86_64-unknown-none) has SSE disabled.
 [package]
-name = "osjeff-bench"
+name = "kitsune-bench"
 version = "0.0.0"
 edition = "2024"
 publish = false
@@ -16,7 +16,7 @@ publish = false
 [workspace]
 
 [dependencies]
-osjeff_core = { path = "../osjeff_core" }
+kitsune_core = { path = "../kitsune_core" }
 # Same version the kernel uses; only for `FrameBufferInfo`/`PixelFormat`.
 bootloader_api = "0.11"
 

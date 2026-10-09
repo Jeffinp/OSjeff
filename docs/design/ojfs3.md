@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| Status | **Implementado em `osjeff_core`** (biblioteca pura); a camada de armazenamento do kernel (`ata.rs` `AtaDisk`, `storage.rs`) monta o v3 no boot e o desktop (gerenciador de arquivos, visualizador, editor, terminal) usa o v3 pela camada VFS (§9.1); o shell v2 e o editor v2 são a onda seguinte |
-| Módulos | `osjeff_core::blockdev`, `osjeff_core::blockcache`, `osjeff_core::fs3` |
-| Substitui | `osjeff_core::fs` (OJFS v2, `OJF2`), que continua intacto e é lido na migração |
+| Status | **Implementado em `kitsune_core`** (biblioteca pura); a camada de armazenamento do kernel (`ata.rs` `AtaDisk`, `storage.rs`) monta o v3 no boot e o desktop (gerenciador de arquivos, visualizador, editor, terminal) usa o v3 pela camada VFS (§9.1); o shell v2 e o editor v2 são a onda seguinte |
+| Módulos | `kitsune_core::blockdev`, `kitsune_core::blockcache`, `kitsune_core::fs3` |
+| Substitui | `kitsune_core::fs` (OJFS v2, `OJF2`), que continua intacto e é lido na migração |
 | Restrições | `no_std` + `alloc`, `forbid(unsafe_code)`, sem dependências (CRC32 próprio) |
 
 Este documento é o contrato entre a biblioteca e quem a consome (kernel, ferramentas
@@ -353,7 +353,7 @@ fora de faixa, arquivo, lixeira ou em ciclo vão para a raiz.
 ## 8. API pública
 
 ```rust
-// osjeff_core::blockdev
+// kitsune_core::blockdev
 pub const SECTOR_SIZE: usize = 512;
 pub enum IoError { OutOfRange, BadLength, Read, Write, Flush, PowerLoss }
 pub trait BlockDevice {
@@ -366,11 +366,11 @@ pub struct RamDisk;             // new(sectors), from_bytes, as_bytes, counters(
 pub struct FaultyDisk<D>;       // crash_after(events), CrashMode, fail_*_nth,
                                 // set_fail_{read,write}_at, bad ranges, read_calls()
 
-// osjeff_core::blockcache
+// kitsune_core::blockcache
 pub struct BlockCache<D: BlockDevice>;  // new(dev, base_lba, nblocks, capacity)
 //   read/get/write/write_direct/read_many/write_many/flush/discard/stats
 
-// osjeff_core::fs3
+// kitsune_core::fs3
 pub fn detect<D: BlockDevice>(dev: &mut D) -> Result<Detected, IoError>;
 pub enum Detected { V3, V2, Blank, Unknown }
 pub fn read_v2_image<D: BlockDevice>(dev: &mut D) -> Result<Vec<u8>, IoError>;
@@ -439,17 +439,17 @@ Plano original:
    em `flush`). O comando ATA PIO move no máximo 255 setores: o impl deve **fatiar**
    transferências maiores (o cache pede até 16 blocos = 128 setores ao descarregar e
    leituras sequenciais longas chegam a 256 blocos = 2048 setores de uma vez). `sector_count`
-   vem do `IDENTIFY` (`osjeff_core::hw::ata::parse_identify`).
+   vem do `IDENTIFY` (`kitsune_core::hw::ata::parse_identify`).
 2. No boot: `detect` → `V3`: `Fs3::mount`; `V2`: `read_v2_image` + `migrate_v2` (e depois
    `mount`); `TooSmall`: seguir no v2; `Blank`: `Fs3::format`; `Unknown`: não escrever.
 3. O disco de 64 KiB do `run.ps1` precisa crescer para ≥ 1 MiB (recomendado 64 MiB) para
    migrar; com 64 KiB a migração devolve `TooSmall` e o v2 segue funcionando.
 
-### 9.1 Integração do desktop (`desktop/vfs.rs`, `osjeff_core::vfs`)
+### 9.1 Integração do desktop (`desktop/vfs.rs`, `kitsune_core::vfs`)
 
 O desktop não toca mais o v2 (`disk()`, `PERSIST`, `flush_disk`, `fs::*` e
 `ata::read_image/write_image` foram removidos). Todos os consumidores usam **uma** API de
-caminhos absolutos, `desktop::vfs`, cuja lógica vive em `osjeff_core::vfs` (testada sobre
+caminhos absolutos, `desktop::vfs`, cuja lógica vive em `kitsune_core::vfs` (testada sobre
 `RamDisk`): o trait object-safe `Backend` (implementado para todo `Fs3<D>`), `VfsError`
 (mapeia `FsError`, mensagens em português), `unique_name` (`a (2).txt`), `move_to` (um
 `rename`: instantâneo para qualquer tamanho), `CopyJob` (cópia recursiva em passos limitados:
@@ -463,10 +463,10 @@ no meio de uma cópia grande deixa um `fsck` limpo e, no máximo, um arquivo par
   com um v2 legível **importa** o v2 para a RAM (`migrate_v2` sobre o `RamDisk`, o disco não
   é escrito); sem disco/`Unknown`/`Failed` nasce com a semente. `Unknown` nunca é escrito.
 * **Erros:** E/S que falha vira `VfsError::Io` mostrado na janela; `Poisoned` também.
-* **Gerenciador de arquivos:** `osjeff_core::fileman` (`FileView`, ordenação natural,
+* **Gerenciador de arquivos:** `kitsune_core::fileman` (`FileView`, ordenação natural,
   seleção, migalhas, histórico, `Layout` com hit-testing, formatação de data/tamanho,
-  `TextInput`, `PathClip`) e o visualizador `osjeff_core::viewer`.
-* **Ferramenta de host:** `cargo run -p osjeff_core --example fs3_inject -- <disco.img>
+  `TextInput`, `PathClip`) e o visualizador `kitsune_core::viewer`.
+* **Ferramenta de host:** `cargo run -p kitsune_core --example fs3_inject -- <disco.img>
   <arquivo> <destino>` (também `--mkdir`, `--files N dir`, `--ls dir`) formata/abre o v3 de
   uma imagem e copia arquivos para ela (ver `docs/TESTING.md`).
 
@@ -514,7 +514,7 @@ no meio de uma cópia grande deixa um `fsck` limpo e, no máximo, um arquivo par
 
 ## 12. Desempenho medido
 
-`cargo run --release -p osjeff_core --example ojfs3_bench` (RamDisk no host, CPU de uma
+`cargo run --release -p kitsune_core --example ojfs3_bench` (RamDisk no host, CPU de uma
 máquina de nuvem compartilhada: vale pela proporção e pelas contagens de setores, que
 são exatas; a latência de um disco real vem por cima):
 

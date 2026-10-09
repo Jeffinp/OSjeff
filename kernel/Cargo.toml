@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 bootloader_api = "0.11"
-osjeff_core = { path = "../osjeff_core" }
+kitsune_core = { path = "../kitsune_core" }
 x86_64 = "0.15"
 # no_std TCP/IP stack layered over our NE2000 driver (the browser's networking).
 smoltcp = { version = "0.12", default-features = false, features = [
@@ -20,7 +20,7 @@ smoltcp = { version = "0.12", default-features = false, features = [
     "socket-udp",
 ] }
 # TLS 1.3 for HTTPS. no_std, no alloc — uses heapless. The server certificate is
-# verified by our own `CryptoProvider` (src/tlsv.rs -> osjeff_core::tlsverify);
+# verified by our own `CryptoProvider` (src/tlsv.rs -> kitsune_core::tlsverify);
 # `UnsecureProvider` (no verification) is not used.
 embedded-tls = { version = "0.19", default-features = false }
 embedded-io = "0.7"

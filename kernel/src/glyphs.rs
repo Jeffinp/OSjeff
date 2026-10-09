@@ -1,10 +1,10 @@
 //! Cache of the monochrome UI glyphs (search, network, chevrons, ...): each
-//! (glyph, size, colour) is drawn once by `osjeff_core::iconart::glyph`.
+//! (glyph, size, colour) is drawn once by `kitsune_core::iconart::glyph`.
 
 use crate::sync::RacyCell;
 use alloc::vec::Vec;
-use osjeff_core::iconart::{self, Glyph};
-use osjeff_core::raster::Surface;
+use kitsune_core::iconart::{self, Glyph};
+use kitsune_core::raster::Surface;
 
 const MAX: usize = 96;
 

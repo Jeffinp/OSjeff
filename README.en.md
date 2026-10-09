@@ -80,13 +80,13 @@ variants (DOOM) and troubleshooting: [`docs/BUILDING.md`](docs/BUILDING.md) (Por
 |---|---|---|
 | **Boot and CPU** | BIOS/UEFI boot (`bootloader 0.11`), own GDT/TSS with an IST stack for #DF, full IDT, 8259 PIC, 250 Hz PIT, every CPU exception and spurious IRQ handled, error screen | `kernel/src/{gdt,interrupts,crash}.rs` |
 | **Scheduler** | Timer-preemptive (context switch in the ISR, assembly), **ready/blocked** threads, yield via `int 0x81`, `hlt` without lost wakeups, **guard-page stacks**, **a failing thread dies alone**, real per-thread CPU | `sched.rs`, `switch.s` |
-| **Memory** | `GlobalAlloc` heap (free list with coalescing, spin lock with IRQs off), alignment math tested on the host | `allocator.rs`, `osjeff_core/src/heap.rs` |
+| **Memory** | `GlobalAlloc` heap (free list with coalescing, spin lock with IRQs off), alignment math tested on the host | `allocator.rs`, `kitsune_core/src/heap.rs` |
 | **Graphics** | Damage-tracking compositor, double buffering, own 8×8 font, alpha shadows, animations; performance HUD | `fb.rs`, `desktop/` |
-| **Apps** | Terminal (shell with ~55 commands, pipes, scripts, scrollback, history, Tab completion, `ping`/`nslookup`/`curl`), Editor (find/replace, undo, 16 MiB files, Open/Save dialogs), File manager (copy/move with progress, trash, Apps), Image viewer, Browser, Tarefas (activity monitor), Registro (log viewer), Ajustes (settings), Calculator, WebAssembly apps | `desktop/`, `osjeff_core` |
-| **Storage** | **OJFS v3**: metadata journal + copy-on-write data, extents, CRC32, `fsck` at boot, automatic v2 migration, block cache, ATA with `FLUSH`; the whole desktop reaches the disk through one VFS layer (with a RAM volume when there is no v3 disk) | `osjeff_core/src/{fs3,vfs,blockcache}`, `ata.rs`, `storage.rs` |
-| **System** | Persistent settings (`/etc/osjeff.conf`: accent colour, wallpaper, ABNT2 keyboard, time zone, clock), ring-buffer kernel log (`/var/log`), activity monitor, notifications, apps installed in `/apps` with data in `/data/<id>` | `osjeff_core/src/{settings,klog,sysmon,notify}.rs`, `kernel/src/desktop/` |
-| **Network** | `virtio-net` and NE2000 (`Nic` trait), own ARP/IPv4/ICMP/DHCP (renews the lease, answers and sends `ping`), DNS with a cache and several servers, `smoltcp` for TCP, **TLS 1.3** (`embedded-tls`) | `nic.rs`, `virtio_net.rs`, `ne2000.rs`, `netd.rs`, `netstack.rs`, `osjeff_core/src/{net,lease,dns,icmp}.rs` |
-| **Browser** | HTML parser, CSS (cascade), layout, PNG/BMP/PPM images, GET forms, bookmarks and suggestions, find in page, zoom, redirects, resource limits, connection indicator; mouse wheel system-wide | `osjeff_core/src/{web,browser,redirect}`; bookmarks persist in `/home/.bookmarks` |
+| **Apps** | Terminal (shell with ~55 commands, pipes, scripts, scrollback, history, Tab completion, `ping`/`nslookup`/`curl`), Editor (find/replace, undo, 16 MiB files, Open/Save dialogs), File manager (copy/move with progress, trash, Apps), Image viewer, Browser, Tarefas (activity monitor), Registro (log viewer), Ajustes (settings), Calculator, WebAssembly apps | `desktop/`, `kitsune_core` |
+| **Storage** | **OJFS v3**: metadata journal + copy-on-write data, extents, CRC32, `fsck` at boot, automatic v2 migration, block cache, ATA with `FLUSH`; the whole desktop reaches the disk through one VFS layer (with a RAM volume when there is no v3 disk) | `kitsune_core/src/{fs3,vfs,blockcache}`, `ata.rs`, `storage.rs` |
+| **System** | Persistent settings (`/etc/osjeff.conf`: accent colour, wallpaper, ABNT2 keyboard, time zone, clock), ring-buffer kernel log (`/var/log`), activity monitor, notifications, apps installed in `/apps` with data in `/data/<id>` | `kitsune_core/src/{settings,klog,sysmon,notify}.rs`, `kernel/src/desktop/` |
+| **Network** | `virtio-net` and NE2000 (`Nic` trait), own ARP/IPv4/ICMP/DHCP (renews the lease, answers and sends `ping`), DNS with a cache and several servers, `smoltcp` for TCP, **TLS 1.3** (`embedded-tls`) | `nic.rs`, `virtio_net.rs`, `ne2000.rs`, `netd.rs`, `netstack.rs`, `kitsune_core/src/{net,lease,dns,icmp}.rs` |
+| **Browser** | HTML parser, CSS (cascade), layout, PNG/BMP/PPM images, GET forms, bookmarks and suggestions, find in page, zoom, redirects, resource limits, connection indicator; mouse wheel system-wide | `kitsune_core/src/{web,browser,redirect}`; bookmarks persist in `/home/.bookmarks` |
 | **WebAssembly** | `wasmi` as the native app format: own ABI + a WASI subset, per-call *fuel*, 24 MiB memory cap, real app termination. Runs Snake; **DOOM** via `wasi-sdk` | `kernel/src/wasm/`, `wasm-apps/` |
 | **Devices** | PS/2 (keyboard, mouse), RTC, PCI, virtio-gpu (2D), ATA IDENTIFY | `ps2.rs`, `pci.rs`, `virtio*.rs` |
 
@@ -95,12 +95,12 @@ variants (DOOM) and troubleshooting: [`docs/BUILDING.md`](docs/BUILDING.md) (Por
 ## 🧪 Why it can be trusted
 
 A `no_std` binary can't run `cargo test`. The fix is structural: **every decision
-that doesn't need hardware lives in `osjeff_core`** (`#![forbid(unsafe_code)]`), which
+that doesn't need hardware lives in `kitsune_core`** (`#![forbid(unsafe_code)]`), which
 builds with `std` under test. The kernel only wires hardware to it.
 
 ```mermaid
 flowchart LR
-    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2927 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["kitsune_core<br/>no_std · forbid(unsafe) · 2927 tests<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · documented unsafe<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>BIOS/UEFI image builder"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -110,7 +110,7 @@ flowchart LR
 
 | Verification | Status |
 |---|---|
-| Unit tests | **2927** in `osjeff_core`; 96.6% line coverage (raw, includes the test modules; measured with `cargo llvm-cov`) |
+| Unit tests | **2927** in `kitsune_core`; 96.6% line coverage (raw, includes the test modules; measured with `cargo llvm-cov`) |
 | Fuzzing | 17 targets (network, OJFS v2/v3 disks, HTML/CSS/images/forms, shell, editor, X.509 certificates, app manifest and sandbox); every bug found is fixed with a minimal input and a regression test |
 | `unsafe` | **100%** of kernel blocks carry `// SAFETY:`, enforced by `clippy::undocumented_unsafe_blocks` |
 | QEMU boot | BIOS **and** UEFI on every kernel commit, desktop compared pixel by pixel to a baseline (`tools/verify-boot.sh`) |
@@ -185,7 +185,7 @@ Most documents are in Portuguese.
 
 ```
 OSjeff/
-├── osjeff_core/   # pure no_std logic, tested on the host (forbid(unsafe_code))
+├── kitsune_core/   # pure no_std logic, tested on the host (forbid(unsafe_code))
 ├── kernel/        # bare-metal x86_64-unknown-none: drivers, scheduler, compositor, wasm
 ├── os/            # builder: embeds the kernel and produces the BIOS/UEFI images
 ├── fuzz/          # cargo-fuzz: 17 targets (entropy, network, OJFS, web, shell, editor, X.509, apps) + regressions

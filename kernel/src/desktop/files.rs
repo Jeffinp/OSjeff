@@ -2,7 +2,7 @@
 //! desktop goes through [`vfs`](super::vfs): the terminal commands (`shellhost`), the
 //! editor's load and save (`edit`), and the file manager's commands (here).
 //!
-//! The file manager's state and decisions live in `osjeff_core::fileman` (tested
+//! The file manager's state and decisions live in `kitsune_core::fileman` (tested
 //! on the host: rows, sort, search, selection, the geometry and hit testing of
 //! `fileman::ui`, the drag-and-drop rules); this module wires them to the VFS, the
 //! window table, the shell's menus and the clipboard of paths, and runs long copies
@@ -12,14 +12,14 @@ use super::shell::{Cmd as ShellCmd, Entry, MenuOrigin};
 use super::*;
 use alloc::boxed::Box;
 use core::sync::atomic::{AtomicU64, Ordering};
-use osjeff_core::fileman::apps::{self as fapps, AppAction, AppItem, AppKey};
-use osjeff_core::fileman::ui::{
+use kitsune_core::fileman::apps::{self as fapps, AppAction, AppItem, AppKey};
+use kitsune_core::fileman::ui::{
     self, Dir, DropOp, DropTarget, HitCtx, Layout, ViewMode, crumb_layout,
 };
-use osjeff_core::fileman::{
+use kitsune_core::fileman::{
     self, APPS_PATH, Activation, Cmd, Crumb, FileClass, MenuCtx, Place, SortKey, TRASH_PATH,
 };
-use osjeff_core::{t, tk, tp};
+use kitsune_core::{t, tk, tp};
 
 /// Bytes copied per frame by a running copy job.
 const JOB_CHUNK: usize = 128 * 1024;
@@ -68,7 +68,7 @@ fn crumb_label(c: &Crumb) -> String {
 fn prop(label_key: &str, value: &str) -> String {
     t!(
         "files.prop.line",
-        label = osjeff_core::i18n::tr(label_key),
+        label = kitsune_core::i18n::tr(label_key),
         value = value
     )
 }
@@ -131,7 +131,7 @@ impl Desktop {
             }
             // The sheet stays up as it was: no slide-in again.
             if let Some(f) = self.files_mut(id) {
-                f.sheet_t = osjeff_core::anim::Tween::at(1.0);
+                f.sheet_t = kitsune_core::anim::Tween::at(1.0);
             }
         }
         self.files_sync_preview(id);
@@ -666,7 +666,7 @@ impl Desktop {
         if content <= lay.list.h || px < lay.list.right() - 14 {
             return false;
         }
-        let (off, len) = osjeff_core::widgets::scroll_thumb(
+        let (off, len) = kitsune_core::widgets::scroll_thumb(
             lay.list.h,
             content as usize,
             lay.list.h as usize,
@@ -702,7 +702,7 @@ impl Desktop {
         };
         let n = f.view.rows.len();
         let content = ui::content_height(f.mode, lay.list.w, n);
-        let (_, len) = osjeff_core::widgets::scroll_thumb(
+        let (_, len) = kitsune_core::widgets::scroll_thumb(
             lay.list.h,
             content as usize,
             lay.list.h as usize,
@@ -791,7 +791,7 @@ impl Desktop {
                 let label = first
                     .map(|r| String::from_utf8_lossy(&r.name).into_owned())
                     .unwrap_or_default();
-                let kind = first.map_or(osjeff_core::appart::FileKind::Generic, |r| {
+                let kind = first.map_or(kitsune_core::appart::FileKind::Generic, |r| {
                     ui::icon_kind(&r.name, r.is_dir())
                 });
                 f.gesture = Gesture::Drag(Box::new(DragState {
@@ -1056,9 +1056,9 @@ impl Desktop {
             return false;
         }
         f.hover = hit;
-        f.hover_t = osjeff_core::anim::Tween::at(0.0);
+        f.hover_t = kitsune_core::anim::Tween::at(0.0);
         f.hover_t
-            .retarget(1.0, 0.12, osjeff_core::anim::curves::STANDARD);
+            .retarget(1.0, 0.12, kitsune_core::anim::curves::STANDARD);
         true
     }
 
@@ -1322,9 +1322,9 @@ impl Desktop {
             return;
         }
         f.mode = m;
-        f.enter_t = osjeff_core::anim::Tween::at(0.0);
+        f.enter_t = kitsune_core::anim::Tween::at(0.0);
         f.enter_t
-            .retarget(1.0, 0.18, osjeff_core::anim::curves::ENTER);
+            .retarget(1.0, 0.18, kitsune_core::anim::curves::ENTER);
         f.scroller.jump(0);
         f.hover = None;
         self.files_reveal(id);
@@ -1780,7 +1780,7 @@ impl Desktop {
             match vfs::stat(p) {
                 Ok(info) => {
                     if info.kind == vfs::EntryKind::Dir {
-                        let t = vfs::with_backend(|b| osjeff_core::vfs::tree_size(b, p));
+                        let t = vfs::with_backend(|b| kitsune_core::vfs::tree_size(b, p));
                         lines.push(prop(tk!("files.prop.type"), t!("files.kind.folder")));
                         if let Ok(Ok(t)) = t {
                             lines.push(prop(
@@ -1805,7 +1805,7 @@ impl Desktop {
                                 "files.prop.size_bytes",
                                 size = &fileman::format_size(info.size),
                                 bytes =
-                                    osjeff_core::i18n::num(info.size.min(i64::MAX as u64) as i64)
+                                    kitsune_core::i18n::num(info.size.min(i64::MAX as u64) as i64)
                             ),
                         ));
                     }
@@ -1826,7 +1826,7 @@ impl Desktop {
             ));
             let mut bytes = 0u64;
             for p in paths {
-                if let Ok(Ok(t)) = vfs::with_backend(|b| osjeff_core::vfs::tree_size(b, p)) {
+                if let Ok(Ok(t)) = vfs::with_backend(|b| kitsune_core::vfs::tree_size(b, p)) {
                     bytes += t.bytes;
                 }
             }
@@ -1898,11 +1898,12 @@ impl Desktop {
     /// Properties lines of a `.wasm` file: whether it is a valid app package and, if
     /// so, its manifest (permissions and limits) and whether it is installed.
     fn wasm_property_lines(&self, path: &[u8]) -> Vec<String> {
-        let bytes = match vfs::read_range(path, 0, osjeff_core::appinstall::MAX_PACKAGE_BYTES + 1) {
+        let bytes = match vfs::read_range(path, 0, kitsune_core::appinstall::MAX_PACKAGE_BYTES + 1)
+        {
             Ok(b) => b,
             Err(e) => return alloc::vec![prop(tk!("files.prop.error"), e.message())],
         };
-        match osjeff_core::appinstall::check(&bytes) {
+        match kitsune_core::appinstall::check(&bytes) {
             Ok(m) => {
                 let mut v =
                     alloc::vec![prop(tk!("files.prop.package"), t!("files.prop.pkg_valid"))];
@@ -2004,9 +2005,9 @@ impl Desktop {
                 f.scroller.jump(0);
                 f.hover = None;
                 f.search.input.clear();
-                f.enter_t = osjeff_core::anim::Tween::at(0.0);
+                f.enter_t = kitsune_core::anim::Tween::at(0.0);
                 f.enter_t
-                    .retarget(1.0, 0.2, osjeff_core::anim::curves::ENTER);
+                    .retarget(1.0, 0.2, kitsune_core::anim::curves::ENTER);
             }
             if f.copy_sheet() && f.sheet_t.target() < 1.0 {
                 f.open_sheet();
@@ -2057,7 +2058,7 @@ impl Desktop {
     }
 
     fn build_preview(&mut self, id: WindowId, key: Vec<u8>) -> PreviewData {
-        use osjeff_core::appart::FileKind;
+        use kitsune_core::appart::FileKind;
         let empty = |key: Vec<u8>| PreviewData {
             path: key,
             name: String::new(),
@@ -2136,7 +2137,7 @@ impl Desktop {
                 } else {
                     match vfs::read_file(&path)
                         .ok()
-                        .and_then(|b| osjeff_core::image::decode(&b).ok())
+                        .and_then(|b| kitsune_core::image::decode(&b).ok())
                     {
                         Some(img) => {
                             d.info.insert(
@@ -2179,15 +2180,15 @@ impl Desktop {
 
 /// A picture scaled to fit `bw x bh`, as a premultiplied surface for the preview pane.
 fn thumbnail(
-    img: &osjeff_core::image::Image,
+    img: &kitsune_core::image::Image,
     bw: usize,
     bh: usize,
-) -> Option<osjeff_core::raster::Surface> {
-    use osjeff_core::image::Filter;
+) -> Option<kitsune_core::raster::Surface> {
+    use kitsune_core::image::Filter;
     let small = img.fit(bw, bh, false, Filter::Box).ok()?;
-    let mut s = osjeff_core::raster::Surface::new(small.width(), small.height());
+    let mut s = kitsune_core::raster::Surface::new(small.width(), small.height());
     for (d, &p) in s.px.iter_mut().zip(small.pixels()) {
-        *d = osjeff_core::raster::premul(p);
+        *d = kitsune_core::raster::premul(p);
     }
     Some(s)
 }

@@ -1,4 +1,4 @@
-//! What the shell engine (`osjeff_core::shell`) runs on: the filesystem, the
+//! What the shell engine (`kitsune_core::shell`) runs on: the filesystem, the
 //! system information and the thread that executes command lines.
 //!
 //! * [`VfsFs`] implements `ShellFs` over [`vfs`](super::vfs), the desktop's only
@@ -23,13 +23,13 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::string::ToString;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use osjeff_core::shell::exec::CmdCtx;
-use osjeff_core::shell::fs::{DirEntry, FsErr, FsUsage, Kind as FsKind, ShellFs, Stat};
-use osjeff_core::shell::sys::{
+use kitsune_core::shell::exec::CmdCtx;
+use kitsune_core::shell::fs::{DirEntry, FsErr, FsUsage, Kind as FsKind, ShellFs, Stat};
+use kitsune_core::shell::sys::{
     DateTime, DiskInfo, HttpResponse, MemInfo, NetInfo, PingStats, ProcInfo, SysErr, SysInfo,
 };
-use osjeff_core::shell::{Host, RunResult, Shell};
-use osjeff_core::{t, tk};
+use kitsune_core::shell::{Host, RunResult, Shell};
+use kitsune_core::{t, tk};
 
 // ---- filesystem ------------------------------------------------------------
 
@@ -220,7 +220,7 @@ impl KSys {
 
     /// An address from a dotted-quad literal or through DNS.
     fn address(&mut self, host: &str) -> Result<[u8; 4], SysErr> {
-        if let Some(ip) = osjeff_core::shell::netcmds::parse_ipv4(host) {
+        if let Some(ip) = kitsune_core::shell::netcmds::parse_ipv4(host) {
             return Ok(ip);
         }
         let uid = self.uid;
@@ -244,8 +244,8 @@ fn job_err(e: crate::fetch::JobError) -> SysErr {
     }
 }
 
-fn fail_err(r: osjeff_core::browser::FailReason) -> SysErr {
-    use osjeff_core::browser::FailReason as F;
+fn fail_err(r: kitsune_core::browser::FailReason) -> SysErr {
+    use kitsune_core::browser::FailReason as F;
     match r {
         F::Dns => SysErr::HostNotFound,
         F::Timeout => SysErr::Timeout,
@@ -263,7 +263,7 @@ impl SysInfo for KSys {
             .or_else(|| crate::clock::local_unix_ms().map(|ms| ms / 1000))
             .unwrap_or(0);
         let local = secs as i64 + i64::from(crate::rtc::tz_minutes()) * 60;
-        let d = osjeff_core::hw::rtc::DateTime::from_epoch(local);
+        let d = kitsune_core::hw::rtc::DateTime::from_epoch(local);
         DateTime {
             year: d.date.y,
             month: d.date.m,
@@ -334,9 +334,9 @@ impl SysInfo for KSys {
     }
 
     fn ping(&mut self, host: &str, count: u32) -> Result<PingStats, SysErr> {
-        use osjeff_core::icmp::PingError;
+        use kitsune_core::icmp::PingError;
         let ip = self.address(host)?;
-        let target = osjeff_core::net::Ipv4(ip);
+        let target = kitsune_core::net::Ipv4(ip);
         let mut stats = PingStats::default();
         let mut total_us = 0u64;
         let mut hard_fail = 0u32;
@@ -401,7 +401,7 @@ impl SysInfo for KSys {
             .windows(4)
             .position(|w| w == b"\r\n\r\n")
             .map_or(data.len(), |i| i + 4);
-        let decoded = osjeff_core::browser::page_body_partial(&data, page.truncated);
+        let decoded = kitsune_core::browser::page_body_partial(&data, page.truncated);
         let mut body = decoded.body;
         let mut truncated = page.truncated || decoded.note.is_some();
         if body.len() > max_body {
@@ -409,7 +409,7 @@ impl SysInfo for KSys {
             truncated = true;
         }
         Ok(HttpResponse {
-            status: osjeff_core::browser::status_code(&data).unwrap_or(0),
+            status: kitsune_core::browser::status_code(&data).unwrap_or(0),
             head: data[..split].to_vec(),
             body,
             truncated,

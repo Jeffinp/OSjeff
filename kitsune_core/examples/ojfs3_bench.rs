@@ -1,15 +1,15 @@
 //! OJFS v3 micro-benchmark over a `RamDisk`.
 //!
 //! ```text
-//! cargo run --release -p osjeff_core --example ojfs3_bench
+//! cargo run --release -p kitsune_core --example ojfs3_bench
 //! ```
 //!
 //! Reports host time (RAM disk, so this is the CPU cost of the format logic,
 //! not of a real disk), and, more usefully, how many 512-byte sectors each
 //! operation reads and writes: the write amplification the journal costs.
 
-use osjeff_core::blockdev::{IoCounters, RamDisk};
-use osjeff_core::fs3::{FormatOptions, Fs3};
+use kitsune_core::blockdev::{IoCounters, RamDisk};
+use kitsune_core::fs3::{FormatOptions, Fs3};
 use std::time::Instant;
 
 const MIB: usize = 1024 * 1024;

@@ -1,4 +1,4 @@
-//! Fuzz target: the OJFS v3 on-disk format (`osjeff_core::fs3`).
+//! Fuzz target: the OJFS v3 on-disk format (`kitsune_core::fs3`).
 //!
 //! The "disk" is attacker/corruption controlled. It is built in one of three
 //! ways (see [`Image`]):
@@ -19,9 +19,9 @@
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::blockdev::{BlockDevice, RamDisk};
-use osjeff_core::fs3::crc32::crc32;
-use osjeff_core::fs3::{Detected, FormatOptions, Fs3, Kind, detect};
+use kitsune_core::blockdev::{BlockDevice, RamDisk};
+use kitsune_core::fs3::crc32::crc32;
+use kitsune_core::fs3::{Detected, FormatOptions, Fs3, Kind, detect};
 use std::sync::OnceLock;
 
 const BASE: usize = 128 * 512;

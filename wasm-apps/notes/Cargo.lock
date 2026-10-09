@@ -3,12 +3,12 @@
 version = 4
 
 [[package]]
+name = "kitsune-sdk"
+version = "0.1.0"
+
+[[package]]
 name = "notes"
 version = "0.1.0"
 dependencies = [
- "osjeff-sdk",
+ "kitsune-sdk",
 ]
-
-[[package]]
-name = "osjeff-sdk"
-version = "0.1.0"

@@ -17,5 +17,5 @@ rustflags = [
 # `cargo clippy` (no target) fails because the no_std kernel can't unwind on host.
 [alias]
 lint-kernel = "clippy -p kernel --target x86_64-unknown-none -- -D warnings"
-lint-host = "clippy -p osjeff_core -p os --all-targets -- -D warnings"
-test-core = "test -p osjeff_core"
+lint-host = "clippy -p kitsune_core -p os --all-targets -- -D warnings"
+test-core = "test -p kitsune_core"

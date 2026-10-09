@@ -18,7 +18,7 @@ depois o que limita o que ele consegue fazer, depois polimento.
 | Plataforma de apps | Manifesto, ABI v2, sandbox de arquivos (`/data/<id>`), instalação em `/apps`, cotas de *fuel* e memória, `net_http_get` pela rede real com lista de hosts por app, dados persistentes no disco, vista "Apps" no gerenciador de arquivos |
 | Sistema | Configurações persistentes (cor, papel de parede, teclado ABNT2, fuso, relógio), log em anel + `/var/log`, monitor de recursos, notificações |
 | Desktop | Gerenciador de arquivos v2 (copiar/mover com progresso, lixeira), visualizador de imagens, terminal com shell completo e rede, editor com Abrir/Salvar e confirmação ao fechar, roda do mouse |
-| Qualidade | 2927 testes (de 189), cobertura de linhas 96,6% no `osjeff_core`, 17 alvos de fuzz; `unsafe` 100% documentado e imposto pelo lint; CI, `cargo deny`, `cargo audit`, harness de boot em QEMU, cenários de interface em `tools/perf/scen` |
+| Qualidade | 2927 testes (de 189), cobertura de linhas 96,6% no `kitsune_core`, 17 alvos de fuzz; `unsafe` 100% documentado e imposto pelo lint; CI, `cargo deny`, `cargo audit`, harness de boot em QEMU, cenários de interface em `tools/perf/scen` |
 
 ## Próximos passos, em ordem
 
@@ -62,7 +62,7 @@ tecla, framebuffer sem *write-combining*), dimensionar os buffers pelo framebuff
 *Aceite:* boot e desktop num PC real com tela > 1080p; custo de quadro medido lá.
 
 ### 6. Mais kernel testado
-Continuar migrando lógica pura para o `osjeff_core`: o despacho de entrada
+Continuar migrando lógica pura para o `kitsune_core`: o despacho de entrada
 (`desktop/input.rs`, exige trocar chamadas diretas por um enum de comandos), a lógica de
 dano do `render.rs`, o parse do cabeçalho do anel do DP8390.
 *Aceite:* o kernel perde linhas de decisão a cada PR e o core ganha testes.

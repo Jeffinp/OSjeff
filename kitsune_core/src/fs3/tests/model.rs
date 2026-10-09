@@ -479,7 +479,7 @@ fn model_sanity_itself() {
     assert!(m.restore("a").is_err());
 }
 
-/// A wider sweep for local use: `cargo test -p osjeff_core -- --ignored many_seeds`.
+/// A wider sweep for local use: `cargo test -p kitsune_core -- --ignored many_seeds`.
 #[test]
 #[ignore = "slow sweep; run with --ignored"]
 fn random_operations_match_the_model_many_seeds() {

@@ -302,7 +302,7 @@ fn internal_pages_load_without_the_network() {
 }
 
 #[test]
-fn typed_osjeff_url_is_not_a_search() {
+fn typed_kitsune_url_is_not_a_search() {
     let mut b = Browser::new();
     type_str(&mut b, "osjeff://favoritos");
     b.on_key(Key::Enter);

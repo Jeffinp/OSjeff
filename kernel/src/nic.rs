@@ -13,8 +13,8 @@
 
 use crate::{ne2000, serial_println, virtio_net};
 use alloc::boxed::Box;
-use osjeff_core::net::Mac;
-use osjeff_core::netstats::{NetStats, NicKind};
+use kitsune_core::net::Mac;
+use kitsune_core::netstats::{NetStats, NicKind};
 
 /// The one interface's counters; readable from any thread (`STATS.snapshot`).
 pub static STATS: NetStats = NetStats::new();
@@ -90,7 +90,7 @@ impl Port {
     pub fn send(&mut self, frame: &[u8]) -> bool {
         match self.nic.send(frame) {
             Ok(()) => {
-                STATS.on_tx(frame.len().max(osjeff_core::net::MIN_TX_FRAME));
+                STATS.on_tx(frame.len().max(kitsune_core::net::MIN_TX_FRAME));
                 true
             }
             Err(TxError::BadLength) => {

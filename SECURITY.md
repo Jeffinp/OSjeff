@@ -34,4 +34,4 @@ sem detalhes de exploração pedindo um canal privado. Inclua:
 
 Para achar bugs sozinho: `cd fuzz && cargo fuzz run web_parse` (veja
 [`docs/TESTING.md`](docs/TESTING.md#2-fuzzing)). Todo crash vira um teste de
-regressão em `osjeff_core` antes de ser corrigido.
+regressão em `kitsune_core` antes de ser corrigido.

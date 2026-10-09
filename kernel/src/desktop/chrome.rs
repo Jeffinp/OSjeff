@@ -5,9 +5,9 @@
 
 use super::*;
 use crate::text::{self, BODY, Weight};
-use osjeff_core::anim::{Tween, curves};
-use osjeff_core::style::{R_CONTROL, R_WINDOW};
-use osjeff_core::window::TitleBtn;
+use kitsune_core::anim::{Tween, curves};
+use kitsune_core::style::{R_CONTROL, R_WINDOW};
+use kitsune_core::window::TitleBtn;
 
 /// Seconds the title bar and shadow take to change between focused and not.
 const FOCUS_SECS: f32 = 0.12;
@@ -222,7 +222,7 @@ impl Desktop {
         win: &Win,
         r: Rect,
         mix: u32,
-        p: &osjeff_core::style::Palette,
+        p: &kitsune_core::style::Palette,
     ) {
         let lay = r.title_layout(win.resizable, true);
         let a = (mix * 255 / 256) as u16;
@@ -249,7 +249,7 @@ impl Desktop {
 
     /// The pointer of a window drag is at `(cx, cy)`: show, move or hide the snap preview.
     pub(crate) fn update_snap_preview(&mut self, id: WindowId, cx: i32, cy: i32) {
-        use osjeff_core::snap;
+        use kitsune_core::snap;
         let zone = self
             .wm
             .get(id)
@@ -277,7 +277,7 @@ impl Desktop {
     pub(crate) fn snap_preview_rect(&self) -> Option<Rect> {
         let p = self.shell.snap.as_ref()?;
         let t = (p.t.value().clamp(0.0, 1.0) * 256.0) as i32;
-        Some(osjeff_core::snap::lerp_rect(p.from, p.to, t))
+        Some(kitsune_core::snap::lerp_rect(p.from, p.to, t))
     }
 
     /// The translucent outline previewing where a dragged window will snap, travelling from the
@@ -310,11 +310,11 @@ impl Desktop {
 /// (0..=255) when the window is not focused. Shared with the component gallery.
 pub(super) fn draw_title_buttons(
     c: &mut Canvas,
-    lay: &osjeff_core::window::TitleLayout,
+    lay: &kitsune_core::window::TitleLayout,
     hover: Option<TitleBtn>,
     restore_glyph: bool,
     a: u16,
-    p: &osjeff_core::style::Palette,
+    p: &kitsune_core::style::Palette,
 ) {
     let ink = theme::solid(p.title_inactive).lerp(theme::solid(p.text_secondary), a);
     let cell = |c: &mut Canvas, rect: Rect, btn: TitleBtn| -> Color {

@@ -18,10 +18,10 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::browser;
-use osjeff_core::web;
-use osjeff_core::web::imgcache::NoImages;
-use osjeff_core::web::{Doc, FixedAdvance, Font, Layout, TextMetrics};
+use kitsune_core::browser;
+use kitsune_core::web;
+use kitsune_core::web::imgcache::NoImages;
+use kitsune_core::web::{Doc, FixedAdvance, Font, Layout, TextMetrics};
 
 /// Metrics that misbehave (zero, negative, huge): layout must stay bounded whatever they say.
 struct Weird(u8);

@@ -1,4 +1,4 @@
-//! App icons: procedural squircle tiles (`osjeff_core::iconart`), drawn at 128 px
+//! App icons: procedural squircle tiles (`kitsune_core::iconart`), drawn at 128 px
 //! once and cached per size so every blit is a plain surface copy.
 //!
 //! The cache is bounded (it is cleared when it outgrows [`MAX_SCALED`] entries)
@@ -8,8 +8,8 @@
 use crate::fb::Canvas;
 use crate::sync::RacyCell;
 use alloc::vec::Vec;
-use osjeff_core::iconart::{self, IconId};
-use osjeff_core::raster::Surface;
+use kitsune_core::iconart::{self, IconId};
+use kitsune_core::raster::Surface;
 
 /// Which app an icon represents.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

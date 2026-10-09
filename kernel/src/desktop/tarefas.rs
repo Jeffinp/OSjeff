@@ -7,7 +7,7 @@
 //!   per signal and the previous value, so the window can glide between two samples.
 //! * [`TarefasState`] is the window: the tab, the sort column, the selection, the search
 //!   text. The pure parts (names, formatting, sorting, interpolation, rates) are in
-//!   `osjeff_core::activity`; this file is layout, drawing and the glue to the kernel.
+//!   `kitsune_core::activity`; this file is layout, drawing and the glue to the kernel.
 //!
 //! The window repaints itself once a second like the other live windows, and for about half
 //! a second after each sample it animates (the curves scroll by one step, the bars slide to
@@ -20,15 +20,15 @@ use super::*;
 use crate::text::{self, BODY, CALLOUT, FOOTNOTE, TITLE2, TITLE3, Weight};
 use core::cell::Cell;
 use core::fmt::Write as _;
-use osjeff_core::activity::{
+use kitsune_core::activity::{
     self, Column, Glide, LoadAvg, Pressure, Rate, TaskKind, TaskRow, TaskState, fold, sample_under,
     smooth121, snapshot, sort_tasks,
 };
-use osjeff_core::i18n;
-use osjeff_core::klog::FixedBuf;
-use osjeff_core::sysif::{DiskUsage, NetStats};
-use osjeff_core::sysmon::{CpuSample, CpuSampler, HIST, MAX_THREADS, Series, nice_ceiling};
-use osjeff_core::{t, tk, tp};
+use kitsune_core::i18n;
+use kitsune_core::klog::FixedBuf;
+use kitsune_core::sysif::{DiskUsage, NetStats};
+use kitsune_core::sysmon::{CpuSample, CpuSampler, HIST, MAX_THREADS, Series, nice_ceiling};
+use kitsune_core::{t, tk, tp};
 
 /// Milliseconds the glide between two samples takes.
 pub(crate) const ANIM_MS: u32 = 450;
@@ -178,7 +178,7 @@ impl SysMon {
 
     /// Progress of the glide since the last sample, 0..=256 (256 = settled), eased out.
     pub(crate) fn t_q8(&self) -> i64 {
-        if osjeff_core::anim::reduce_motion() || self.samples < 2 {
+        if kitsune_core::anim::reduce_motion() || self.samples < 2 {
             return 256;
         }
         kit::ease_out((self.age_ms.min(ANIM_MS) as i64 * 256) / ANIM_MS as i64)
@@ -186,7 +186,7 @@ impl SysMon {
 
     /// Is the glide still running?
     pub(crate) fn gliding(&self) -> bool {
-        !osjeff_core::anim::reduce_motion() && self.samples >= 2 && self.age_ms < ANIM_MS
+        !kitsune_core::anim::reduce_motion() && self.samples >= 2 && self.age_ms < ANIM_MS
     }
 
     /// Peak heap use among the samples kept (KiB resolution).
@@ -258,7 +258,7 @@ pub(crate) struct TarefasState {
     pub hover: Cell<u32>,
     /// Scroll position of the process table in pixels.
     scroll: Glide,
-    sb: osjeff_core::widgets::ScrollbarFade,
+    sb: kitsune_core::widgets::ScrollbarFade,
     /// A short message after an action (`(text, error)`), cleared by the next sample.
     pub msg: Option<(String, bool)>,
 }
@@ -278,7 +278,7 @@ impl TarefasState {
             confirm: None,
             hover: Cell::new(0),
             scroll: Glide::at(0),
-            sb: osjeff_core::widgets::ScrollbarFade::new(),
+            sb: kitsune_core::widgets::ScrollbarFade::new(),
             msg: None,
         }
     }
@@ -447,7 +447,7 @@ impl App {
                     + b.images.bytes()
                     + b.page
                         .as_ref()
-                        .map_or(0, |p| p.cmds.len() * size_of::<osjeff_core::web::Cmd>())
+                        .map_or(0, |p| p.cmds.len() * size_of::<kitsune_core::web::Cmd>())
             }
             App::Log(l) => size_of::<LogState>() + l.heap_bytes(),
             App::Tarefas(m) => size_of::<TarefasState>() + m.heap_bytes(),
@@ -894,7 +894,7 @@ impl Desktop {
             return;
         }
         t.search_focus = false;
-        if let Some(i) = osjeff_core::widgets::segmented_hit(l.tabs, 5, px, py) {
+        if let Some(i) = kitsune_core::widgets::segmented_hit(l.tabs, 5, px, py) {
             if t.tab != i as u8 {
                 t.tab = i as u8;
                 self.tarefas_rebuild(id);
@@ -952,7 +952,7 @@ impl Desktop {
         if !rect.body().contains(cx, cy) {
             return 0;
         }
-        if let Some(i) = osjeff_core::widgets::segmented_hit(l.tabs, 5, cx, cy) {
+        if let Some(i) = kitsune_core::widgets::segmented_hit(l.tabs, 5, cx, cy) {
             return H_TAB + i as u32;
         }
         match st.tab {
@@ -1741,7 +1741,7 @@ impl Desktop {
     }
 
     fn tf_network(&self, c: &mut Canvas, l: &Lay, st: &TarefasState) {
-        use osjeff_core::netstats::NicKind;
+        use kitsune_core::netstats::NicKind;
         let mon = &self.sysmon;
         let sp = tab_split(l.content, 3);
         let t = mon.t_q8();
@@ -1819,7 +1819,7 @@ impl Desktop {
                     }
                     let _ = write!(dns, "{d}");
                 }
-                if cfg == osjeff_core::net::NetConfig::STATIC_FALLBACK {
+                if cfg == kitsune_core::net::NetConfig::STATIC_FALLBACK {
                     let _ = lease.write_str(t!("tasks.net.static"));
                 } else if let Some(ms) = snap.lease_remaining_ms {
                     let _ = lease.write_str(&t!(

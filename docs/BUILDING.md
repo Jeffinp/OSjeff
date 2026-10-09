@@ -27,8 +27,8 @@ cargo build --release -p os
 
 O crate `os` embute o kernel como *artifact dependency* (`-Z bindeps`, já
 habilitado em `.cargo/config.toml`) e gera duas imagens de disco em
-`target/release/build/os-*/out/`: `osjeff-bios.img` (~4,7 MB) e
-`osjeff-uefi.img` (~4,3 MB). A primeira compilação leva ~1–2 min (baixa e compila
+`target/release/build/os-*/out/`: `kitsune-bios.img` (~4,7 MB) e
+`kitsune-uefi.img` (~4,3 MB). A primeira compilação leva ~1–2 min (baixa e compila
 o bootloader); as seguintes ~25 s.
 
 ## 3. Rodar
@@ -41,12 +41,12 @@ tools/run.sh uefi       # UEFI (usa OVMF)
 tools/run.sh bios -- -accel kvm   # com KVM, bem mais rápido
 ```
 
-O disco do filesystem (`osjeff-fs.img`) é criado na primeira execução e persiste entre
+O disco do filesystem (`kitsune-fs.img`) é criado na primeira execução e persiste entre
 boots. Desde o OJFS v3 ele tem **64 MiB**, mas é um arquivo *esparso* (`truncate -s 64M`;
 `run.ps1` usa `SetLength(64MB)`): quase nada ocupa o disco do host. O OJFS v3 exige pelo
-menos 1 MiB. Um `osjeff-fs.img` antigo de 64 KiB continua aceito: o boot loga
+menos 1 MiB. Um `kitsune-fs.img` antigo de 64 KiB continua aceito: o boot loga
 `storage: disk too small for OJFS v3 (64 KiB), staying on v2` e segue com o v2 como antes.
-Para migrar um disco antigo, aumente-o (`truncate -s 64M osjeff-fs.img`): a imagem v2 dos
+Para migrar um disco antigo, aumente-o (`truncate -s 64M kitsune-fs.img`): a imagem v2 dos
 primeiros 64 KiB é migrada para o v3 no boot seguinte e esses 64 KiB não são alterados.
 `FS_SIZE=64K tools/run.sh` (ou apagar o arquivo e criá-lo de 64 KiB) reproduz o disco antigo.
 
@@ -68,7 +68,7 @@ foi exercitado em uma máquina Windows real: se falhar, o WSL continua sendo o c
 .\run.ps1              # compila no WSL e roda com WHPX
 .\run.ps1 -NoAccel     # TCG (software)
 .\run.ps1 -SkipBuild   # só boota a imagem existente
-.\run.ps1 -Usb         # gera osjeff-uefi.img para gravar em pendrive
+.\run.ps1 -Usb         # gera kitsune-uefi.img para gravar em pendrive
 .\run.ps1 -Doom        # variante com DOOM (ver §4)
 ```
 
@@ -126,7 +126,7 @@ Um app é **um arquivo `.wasm`**: o código mais uma seção `osjeff.manifest` (
    crate-type = ["cdylib"]
 
    [dependencies]
-   osjeff-sdk = { path = "../sdk" }
+   kitsune-sdk = { path = "../sdk" }
 
    [profile.release]
    opt-level = "s"
@@ -141,7 +141,7 @@ Um app é **um arquivo `.wasm`**: o código mais uma seção `osjeff.manifest` (
 
    ```rust
    #![no_std]
-   use osjeff_sdk::*;
+   use kitsune_sdk::*;
 
    manifest!("id=meuapp\nname=Meu App\nversion=1.0.0\nfs=own\nwin_w=420\nwin_h=300\n");
    icon!(include_bytes!("../icon.png")); // opcional: PNG de até 64x64

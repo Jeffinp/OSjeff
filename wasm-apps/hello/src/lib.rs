@@ -4,7 +4,7 @@
 #![no_std]
 
 use core::fmt::Write;
-use osjeff_sdk::*;
+use kitsune_sdk::*;
 
 manifest!(
     "id=hello\nname=Hello\nname.pt=Olá\nname.en=Hello\nversion=1.0.0\nabi=2\nwin_w=380\nwin_h=240\nwin_min_w=260\nwin_min_h=160\nmem_mib=2\n"

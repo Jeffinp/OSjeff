@@ -11,12 +11,12 @@
 use super::ui;
 use super::*;
 use crate::text::{self, BODY, CAPTION, FOOTNOTE, TITLE2, Weight};
-use osjeff_core::activity::{self, slice_at};
-use osjeff_core::iconart::Glyph;
-use osjeff_core::sysmon::HIST;
+use kitsune_core::activity::{self, slice_at};
+use kitsune_core::iconart::Glyph;
+use kitsune_core::sysmon::HIST;
 
 /// The text of a formatting buffer.
-pub(crate) fn fb_str<const N: usize>(b: &osjeff_core::klog::FixedBuf<N>) -> &str {
+pub(crate) fn fb_str<const N: usize>(b: &kitsune_core::klog::FixedBuf<N>) -> &str {
     activity::text(b)
 }
 

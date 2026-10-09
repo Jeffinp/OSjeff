@@ -1,7 +1,7 @@
 //! Fuzz target: everything the browser does with a server-supplied certificate
-//! chain: the strict DER / X.509 reader (`osjeff_core::x509`), the SAN/name
+//! chain: the strict DER / X.509 reader (`kitsune_core::x509`), the SAN/name
 //! matcher, the time parser and the full chain validation
-//! (`osjeff_core::tlsverify::verify_chain` on `rustls-webpki`, with a real
+//! (`kitsune_core::tlsverify::verify_chain` on `rustls-webpki`, with a real
 //! trust anchor), plus the TLS 1.3 `CertificateVerify` check.
 //!
 //! Input layout: `[mode, ...bytes]`.
@@ -17,8 +17,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::tlsverify::{self, TrustStore};
-use osjeff_core::x509;
+use kitsune_core::tlsverify::{self, TrustStore};
+use kitsune_core::x509;
 
 /// 2026-10-07T12:00:00Z
 const NOW: u64 = 1_791_374_400;
@@ -29,7 +29,7 @@ const NOW: u64 = 1_791_374_400;
 mod testcerts {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../osjeff_core/src/tlsverify/testcerts.rs"
+        "/../kitsune_core/src/tlsverify/testcerts.rs"
     ));
 }
 
@@ -86,7 +86,7 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // What the security popover shows of a server certificate: any bytes, any host text.
-    if let Some(ci) = osjeff_core::browser::CertInfo::from_leaf(
+    if let Some(ci) = kitsune_core::browser::CertInfo::from_leaf(
         rest,
         &String::from_utf8_lossy(&rest[..rest.len().min(40)]),
         usize::from(mode),
@@ -94,8 +94,8 @@ fuzz_target!(|data: &[u8]| {
     ) {
         assert!(!ci.issuer.contains(['\n', '\r', '\0']));
         assert!(!ci.host.contains(['\n', '\r', '\0']));
-        let _ = osjeff_core::browser::cert::format_date(ci.not_before);
-        let _ = osjeff_core::browser::cert::format_date(ci.not_after);
+        let _ = kitsune_core::browser::cert::format_date(ci.not_before);
+        let _ = kitsune_core::browser::cert::format_date(ci.not_after);
     }
 
     // Chain validation against a real trust anchor (the first embedded root).

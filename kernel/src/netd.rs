@@ -43,9 +43,9 @@ use crate::netstack::Net;
 use crate::nic::{Port, STATS};
 use crate::{interrupts, io, serial_println};
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
-use osjeff_core::icmp::{self, Echo, Ping, PingError};
-use osjeff_core::lease::{Action, Lease, Request};
-use osjeff_core::net::{self, DHCP_BUILD_MIN, DhcpReply, Ipv4, Mac, NetConfig};
+use kitsune_core::icmp::{self, Echo, Ping, PingError};
+use kitsune_core::lease::{Action, Lease, Request};
+use kitsune_core::net::{self, DHCP_BUILD_MIN, DhcpReply, Ipv4, Mac, NetConfig};
 
 /// While idle the service runs this often (ticks of 4 ms).
 pub const IDLE_POLL_TICKS: u64 = 4;
@@ -224,7 +224,7 @@ pub fn ping_pending() -> bool {
 }
 
 /// A copy of the interface statistics (packets, lease, resolver, ping counters).
-pub fn stats() -> osjeff_core::netstats::Snapshot {
+pub fn stats() -> kitsune_core::netstats::Snapshot {
     STATS.snapshot(now_ms())
 }
 
@@ -370,7 +370,7 @@ impl Netd {
             }
             None => {
                 let why = match lease.state() {
-                    osjeff_core::lease::State::Requesting => "no DHCP ack",
+                    kitsune_core::lease::State::Requesting => "no DHCP ack",
                     _ => "no DHCP offer",
                 };
                 serial_println!("net: static fallback ({})", why);

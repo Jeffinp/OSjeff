@@ -1,7 +1,7 @@
 //! Host benchmark for the image stack (not part of the kernel build).
 //!
 //! ```text
-//! cargo run --release -p osjeff_core --example image_bench [-- [--dump DIR] [FILE.png]]
+//! cargo run --release -p kitsune_core --example image_bench [-- [--dump DIR] [FILE.png]]
 //! ```
 //!
 //! Without a file it builds a deterministic 1024x768 RGBA test picture
@@ -10,10 +10,10 @@
 //! measure real dynamic-Huffman streams). `--dump DIR` writes our encoders'
 //! output (PNG, BMP24, BMP32) so other tools can cross-check it.
 
-use osjeff_core::bmp;
-use osjeff_core::image::{Filter, Image, rgba};
-use osjeff_core::inflate::{adler32, crc32, zlib_decompress};
-use osjeff_core::png;
+use kitsune_core::bmp;
+use kitsune_core::image::{Filter, Image, rgba};
+use kitsune_core::inflate::{adler32, crc32, zlib_decompress};
+use kitsune_core::png;
 use std::time::{Duration, Instant};
 
 const W: usize = 1024;

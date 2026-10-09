@@ -1,5 +1,5 @@
 # Words that must never appear without their accent in Portuguese text (wrong=right).
-# Used by the host test `cargo test -p osjeff_core i18n` and by tools/i18n-audit.py.
+# Used by the host test `cargo test -p kitsune_core i18n` and by tools/i18n-audit.py.
 # ~suffix: any word ending in it is wrong (a -ção noun written -cao); !word: allowed anyway.
 
 acao=ação

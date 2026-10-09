@@ -7,11 +7,11 @@ use super::glass::panel;
 use super::shell::*;
 use super::*;
 use crate::text::{self, BODY, CALLOUT, FOOTNOTE, TITLE2, TITLE3, Weight};
-use osjeff_core::chrome::{self, LP_ICON, launcher_cell_at, launcher_grid, spotlight_geom};
-use osjeff_core::iconart::Glyph;
-use osjeff_core::launcher;
-use osjeff_core::search;
-use osjeff_core::style::PANEL_H;
+use kitsune_core::chrome::{self, LP_ICON, launcher_cell_at, launcher_grid, spotlight_geom};
+use kitsune_core::iconart::Glyph;
+use kitsune_core::launcher;
+use kitsune_core::search;
+use kitsune_core::style::PANEL_H;
 
 /// Corner radius of the Busca panel and of the confirmation sheet.
 const R_PANEL: i32 = 12;
@@ -220,7 +220,7 @@ impl Desktop {
                 c,
                 g.field,
                 &a.query,
-                osjeff_core::t!("launcher.search_apps"),
+                kitsune_core::t!("launcher.search_apps"),
                 true,
                 true,
             );
@@ -229,7 +229,7 @@ impl Desktop {
                 text::draw_left(
                     c,
                     g.recents_label,
-                    osjeff_core::t!("launcher.recents"),
+                    kitsune_core::t!("launcher.recents"),
                     FOOTNOTE,
                     Weight::Medium,
                     theme::solid(p.text_secondary),
@@ -294,7 +294,7 @@ impl Desktop {
             text::draw_centered(
                 c,
                 r,
-                osjeff_core::t!("launcher.empty"),
+                kitsune_core::t!("launcher.empty"),
                 CALLOUT,
                 Weight::Regular,
                 theme::solid(p.text_secondary),
@@ -457,7 +457,7 @@ impl Desktop {
                     0,
                     SearchHit {
                         title: alloc::format!("= {ans}"),
-                        sub: String::from(osjeff_core::t!("search.calc_hint")),
+                        sub: String::from(kitsune_core::t!("search.calc_hint")),
                         kind: HitKind::Calc,
                     },
                 ));
@@ -468,14 +468,14 @@ impl Desktop {
                 }
                 if let Some(r) = search::rank(&q, k.label())
                     .into_iter()
-                    .chain(search::rank(&q, k.label_in(osjeff_core::i18n::Lang::En)))
+                    .chain(search::rank(&q, k.label_in(kitsune_core::i18n::Lang::En)))
                     .min()
                 {
                     hits.push((
                         r,
                         SearchHit {
                             title: String::from(k.label()),
-                            sub: String::from(osjeff_core::t!("search.kind_app")),
+                            sub: String::from(kitsune_core::t!("search.kind_app")),
                             kind: HitKind::App(Target::Kind(k)),
                         },
                     ));
@@ -483,11 +483,11 @@ impl Desktop {
             }
             for (word_key, tab) in tarefas::SEARCH_ALIASES {
                 // The alias is known in both languages, like the app names above.
-                if let Some(r) = search::rank(&q, osjeff_core::i18n::tr(word_key))
+                if let Some(r) = search::rank(&q, kitsune_core::i18n::tr(word_key))
                     .into_iter()
                     .chain(search::rank(
                         &q,
-                        osjeff_core::i18n::tr_in(osjeff_core::i18n::Lang::En, word_key),
+                        kitsune_core::i18n::tr_in(kitsune_core::i18n::Lang::En, word_key),
                     ))
                     .min()
                     && search::rank(&q, Kind::TaskMgr.label()).is_none()
@@ -495,12 +495,12 @@ impl Desktop {
                     hits.push((
                         r.saturating_add(1),
                         SearchHit {
-                            title: osjeff_core::t!(
+                            title: kitsune_core::t!(
                                 "search.tasks_tab",
                                 app = Kind::TaskMgr.label(),
                                 tab = tarefas::tab_name(tab)
                             ),
-                            sub: String::from(osjeff_core::t!("search.kind_app")),
+                            sub: String::from(kitsune_core::t!("search.kind_app")),
                             kind: HitKind::Tab(tab),
                         },
                     ));
@@ -512,7 +512,7 @@ impl Desktop {
                         r,
                         SearchHit {
                             title: a.name.clone(),
-                            sub: String::from(osjeff_core::t!("search.kind_app")),
+                            sub: String::from(kitsune_core::t!("search.kind_app")),
                             kind: HitKind::App(Target::Wasm(i)),
                         },
                     ));
@@ -555,7 +555,7 @@ impl Desktop {
                         self.files_go(id, &path);
                     }
                 } else {
-                    let class = osjeff_core::fileman::classify(&path);
+                    let class = kitsune_core::fileman::classify(&path);
                     self.open_path(WindowId::from_raw(u32::MAX), &path, class);
                 }
             }
@@ -606,7 +606,7 @@ impl Desktop {
                 c,
                 tx,
                 ty,
-                osjeff_core::t!("search.placeholder"),
+                kitsune_core::t!("search.placeholder"),
                 TITLE2,
                 Weight::Regular,
                 theme::solid(p.text_tertiary),
@@ -819,7 +819,7 @@ impl Desktop {
         ui::push_button(
             c,
             off(cancel),
-            osjeff_core::t!("common.cancel"),
+            kitsune_core::t!("common.cancel"),
             ui::ButtonKind::Secondary,
             st(0),
         );
@@ -896,7 +896,7 @@ impl Desktop {
         }
         // (The hover washes inside a popover repaint with the overlay on every pointer move.)
         if let Some(m) = self.shell.menu.as_mut() {
-            let hover = osjeff_core::chrome::menu_row_at(&m.geom, &m.rows, x, y);
+            let hover = kitsune_core::chrome::menu_row_at(&m.geom, &m.rows, x, y);
             if hover != m.hover {
                 m.hover = hover;
             }
@@ -1028,7 +1028,7 @@ impl Desktop {
             let (row, inside) = {
                 let m = self.shell.menu.as_ref().expect("checked");
                 (
-                    osjeff_core::chrome::menu_row_at(&m.geom, &m.rows, x, y),
+                    kitsune_core::chrome::menu_row_at(&m.geom, &m.rows, x, y),
                     m.geom.rect.contains(x, y),
                 )
             };
@@ -1185,30 +1185,30 @@ impl Desktop {
     /// Context menu on the empty desktop.
     pub(crate) fn desktop_context(&mut self, x: i32, y: i32) {
         let entries = alloc::vec![
-            Entry::item(osjeff_core::t!("menu.view.show_apps"), "", Cmd::ShowApps),
+            Entry::item(kitsune_core::t!("menu.view.show_apps"), "", Cmd::ShowApps),
             Entry::item(
-                osjeff_core::t!("menu.view.search"),
-                osjeff_core::t!("menu.shortcut.search"),
+                kitsune_core::t!("menu.view.search"),
+                kitsune_core::t!("menu.shortcut.search"),
                 Cmd::ShowSearch,
             ),
             Entry::item(
-                osjeff_core::t!("menu.desktop.show_desktop"),
+                kitsune_core::t!("menu.desktop.show_desktop"),
                 "Ctrl+Alt+D",
                 Cmd::ShowDesktop,
             ),
             Entry::sep(),
             Entry::item(
-                &osjeff_core::t!("common.open_app", app = Kind::Files.label()),
+                &kitsune_core::t!("common.open_app", app = Kind::Files.label()),
                 "",
                 Cmd::Launch(Kind::Files),
             ),
             Entry::item(
-                &osjeff_core::t!("common.open_app", app = Kind::Terminal.label()),
+                &kitsune_core::t!("common.open_app", app = Kind::Terminal.label()),
                 "",
                 Cmd::Launch(Kind::Terminal),
             ),
             Entry::sep(),
-            Entry::item(osjeff_core::t!("menu.system.settings"), "", Cmd::Settings),
+            Entry::item(kitsune_core::t!("menu.system.settings"), "", Cmd::Settings),
         ];
         self.open_menu(MenuOrigin::Context, entries, (x, y));
     }

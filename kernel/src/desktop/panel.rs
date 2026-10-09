@@ -7,16 +7,16 @@ use super::glass::panel as glass_panel;
 use super::shell::*;
 use super::*;
 use crate::text::{self, BODY, FOOTNOTE, TITLE2, TITLE3, Weight};
-use osjeff_core::chrome::PANEL_PAD;
-use osjeff_core::chrome::{
+use kitsune_core::chrome::PANEL_PAD;
+use kitsune_core::chrome::{
     self, MenuRow, QuickTile, centre_geom, menu_geom, panel_layout, popover_centered, popover_rect,
     quick_geom,
 };
-use osjeff_core::i18n::{self, Civil, DateStyle};
-use osjeff_core::iconart::Glyph;
-use osjeff_core::snap::SnapZone;
-use osjeff_core::style::{PANEL_H, R_CONTROL, R_MENU, R_POPOVER};
-use osjeff_core::t;
+use kitsune_core::i18n::{self, Civil, DateStyle};
+use kitsune_core::iconart::Glyph;
+use kitsune_core::snap::SnapZone;
+use kitsune_core::style::{PANEL_H, R_CONTROL, R_MENU, R_POPOVER};
+use kitsune_core::t;
 
 /// Room kept left of the clock text for the unread-notifications dot.
 const CLOCK_DOT_W: i32 = 14;
@@ -31,7 +31,7 @@ pub(crate) struct Notif {
 }
 
 fn level_title(l: crate::klog::Level) -> &'static str {
-    osjeff_core::i18n::tr(l.title_key())
+    kitsune_core::i18n::tr(l.title_key())
 }
 
 fn level_color(l: crate::klog::Level) -> Color {
@@ -369,7 +369,7 @@ impl Desktop {
                 if let Some(fid) = self.focused().filter(|_| kind == Some(Kind::Files))
                     && let Some(App::Files(f)) = self.wm.get(fid).map(|w| &w.app.app)
                 {
-                    use osjeff_core::fileman::{Cmd as FCmd, ui::ViewMode};
+                    use kitsune_core::fileman::{Cmd as FCmd, ui::ViewMode};
                     let mut list = Entry::item(
                         t!("menu.view.as_list"),
                         "Ctrl+1",
@@ -751,11 +751,11 @@ impl Desktop {
                     },
                     t!("quick.appearance"),
                     String::from(match s.appearance {
-                        osjeff_core::style::AppearanceSetting::Auto => t!("quick.appearance.auto"),
-                        osjeff_core::style::AppearanceSetting::Light => {
+                        kitsune_core::style::AppearanceSetting::Auto => t!("quick.appearance.auto"),
+                        kitsune_core::style::AppearanceSetting::Light => {
                             t!("quick.appearance.light")
                         }
-                        osjeff_core::style::AppearanceSetting::Dark => t!("quick.appearance.dark"),
+                        kitsune_core::style::AppearanceSetting::Dark => t!("quick.appearance.dark"),
                     }),
                     theme::dark(),
                 ),
@@ -801,7 +801,7 @@ impl Desktop {
         }
         ui::caption(c, g.accent_label.x, g.accent_label.y, t!("quick.accent"));
         for (i, sw) in g.swatches.iter().enumerate() {
-            let rgb = osjeff_core::settings::ACCENTS[i];
+            let rgb = kitsune_core::settings::ACCENTS[i];
             let col = Color::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
             if s.accent as usize == i {
                 c.stroke_rrect(sw.inflated(3), 9, Corner::Circle, theme::solid(p.text), 200);
@@ -1172,7 +1172,7 @@ impl Desktop {
                     self.shell.knobs[2].retarget(
                         if s.toasts { 0.0 } else { 1.0 },
                         0.18,
-                        osjeff_core::anim::curves::ENTER,
+                        kitsune_core::anim::curves::ENTER,
                     );
                     let _ = self.settings_apply(s);
                 } else if cal.prev.contains(x, y) {
@@ -1213,8 +1213,8 @@ impl Entry {
     }
 }
 
-fn tween_at(on: bool) -> osjeff_core::anim::Tween {
-    osjeff_core::anim::Tween::at(if on { 1.0 } else { 0.0 })
+fn tween_at(on: bool) -> kitsune_core::anim::Tween {
+    kitsune_core::anim::Tween::at(if on { 1.0 } else { 0.0 })
 }
 
 /// Draw `label` left-aligned in `r`, cut with an ellipsis if it does not fit.
@@ -1228,8 +1228,8 @@ fn pack(c: Color) -> u32 {
 }
 
 /// A horizontally mirrored copy of a surface (for the "previous" chevron).
-fn mirror_x(s: &osjeff_core::raster::Surface) -> osjeff_core::raster::Surface {
-    let mut m = osjeff_core::raster::Surface::new(s.w, s.h);
+fn mirror_x(s: &kitsune_core::raster::Surface) -> kitsune_core::raster::Surface {
+    let mut m = kitsune_core::raster::Surface::new(s.w, s.h);
     for y in 0..s.h {
         for x in 0..s.w {
             m.px[y * s.w + x] = s.px[y * s.w + (s.w - 1 - x)];

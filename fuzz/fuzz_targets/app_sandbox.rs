@@ -1,4 +1,4 @@
-//! Fuzz target: the app sandbox (`osjeff_core::{appfs, appnet}`).
+//! Fuzz target: the app sandbox (`kitsune_core::{appfs, appnet}`).
 //!
 //! Two apps share one file system (seeded with a "system" file outside both roots):
 //! the in-memory `MemFs`, or `VolumeFs` over an OJFS v3 volume in RAM (the real
@@ -12,12 +12,12 @@
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::appfs::{AppFs, MemFs, Sandbox, VolumeFs};
-use osjeff_core::appmanifest::FsPerm;
-use osjeff_core::appnet;
-use osjeff_core::blockdev::RamDisk;
-use osjeff_core::fs3::{FormatOptions, Fs3};
-use osjeff_core::vfs::Backend;
+use kitsune_core::appfs::{AppFs, MemFs, Sandbox, VolumeFs};
+use kitsune_core::appmanifest::FsPerm;
+use kitsune_core::appnet;
+use kitsune_core::blockdev::RamDisk;
+use kitsune_core::fs3::{FormatOptions, Fs3};
+use kitsune_core::vfs::Backend;
 
 #[derive(Arbitrary, Debug)]
 enum Op {

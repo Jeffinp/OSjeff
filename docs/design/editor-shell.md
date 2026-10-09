@@ -1,11 +1,11 @@
 # Editor de texto v2 e motor de shell
 
-Dois módulos novos em `osjeff_core`, ambos puros (`no_std` + `alloc`,
+Dois módulos novos em `kitsune_core`, ambos puros (`no_std` + `alloc`,
 `#![forbid(unsafe_code)]`, testados no host): `editor2` (editor de texto) e `shell`
 (linha de comando). Desde a onda W15b eles são o Editor e o Terminal do desktop (veja
 [Integração no desktop](#integração-no-desktop-w15b)); `editor.rs` e `terminal.rs` (a grade fixa
 antiga) foram removidos. Teclas com modificadores vêm de
-`osjeff_core::input` (`KeyEvent`, `KeyCode`, `Mods`), que embrulha o `keymap::Key`
+`kitsune_core::input` (`KeyEvent`, `KeyCode`, `Mods`), que embrulha o `keymap::Key`
 existente em vez de mudá-lo.
 
 ## Arquitetura
@@ -36,7 +36,7 @@ teclado -> Keymap -> Key ----> KeyEvent::from_key(key, Mods{ctrl,shift,alt})
 
 ## O que o kernel deve implementar
 
-Definidos em `osjeff_core::shell::fs` e `osjeff_core::shell::sys`.
+Definidos em `kitsune_core::shell::fs` e `kitsune_core::shell::sys`.
 
 ```rust
 pub trait ShellFs {
@@ -78,7 +78,7 @@ repetidas (`fs::normalize` resolve; `..` acima de `/` fica em `/`). Erros usam `
 (`NotFound`, `NotADirectory`, `IsADirectory`, `AlreadyExists`, `NotEmpty`, `NoSpace`,
 `TooBig`, `NameTooLong`, `InvalidPath`, `ReadOnly`, `Io`). Toda a aritmética é inteira
 (o kernel é *soft-float*). O OJFS v3 deve virar um `impl ShellFs`; o motor nunca importa
-`osjeff_core::fs`.
+`kitsune_core::fs`.
 
 O kernel também pode registrar comandos próprios com `Shell::register(nome, ajuda, fn)`
 (por exemplo abrir apps) e persistir o histórico com `History::to_bytes`/`load`.
@@ -125,7 +125,7 @@ if let Some(p) = ed.prompt() { /* barra de busca / ir para linha: p.label, p.tex
 
 O Editor e o Terminal do desktop são esses dois módulos; o que o kernel acrescenta é só cola
 (`kernel/src/desktop/`): `edit.rs`, `term.rs` e `shellhost.rs`. Tudo que toca arquivo passa por
-`desktop/vfs.rs`. Os módulos antigos `osjeff_core::editor` e `terminal` (grade fixa 44x18 / 40x14)
+`desktop/vfs.rs`. Os módulos antigos `kitsune_core::editor` e `terminal` (grade fixa 44x18 / 40x14)
 foram removidos.
 
 ```text
@@ -140,7 +140,7 @@ tecla ─► Desktop::dispatch_key ─┬─► Terminal: Term::key ─► TermA
 ### Terminal
 
 * **Estado:** `TermState { uid, term: Term, ctx: Option<Box<Ctx>> }`. `Term` (puro, em
-  `osjeff_core::shell::term`) liga o `LineEditor` ao `Screen`; `Ctx` = `Shell` + `VfsFs` e **muda de
+  `kitsune_core::shell::term`) liga o `LineEditor` ao `Screen`; `Ctx` = `Shell` + `VfsFs` e **muda de
   mãos** a cada linha: o terminal o entrega à thread de comandos e o recebe de volta com o resultado.
 * **Grade:** texto na escala 2 (célula 12x18 px); colunas e linhas são o que cabe na janela
   (`term_grid`), então maximizar mostra mais texto em vez de letra maior. O histórico (`Screen`) guarda

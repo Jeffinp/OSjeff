@@ -7,7 +7,7 @@
 # 1024 bytes, so make a small PNG and inject it before running:
 #   convert -size 128x72 gradient:'#1b2a6b-#f4a259' -fill '#fff3c4' \
 #     -draw 'circle 88,42 88,54' -colors 16 PNG8:papel.png
-#   cargo run -p osjeff_core --example fsinject -- fs-papel.img papel.png papel.png
+#   cargo run -p kitsune_core --example fsinject -- fs-papel.img papel.png papel.png
 #   FS_IMG=fs-papel.img tools/perf/run.sh <img> bios <outdir> 120 tools/perf/scen/w14-set.sh
 # Coordinates are for the default window position on a 1280x720 screen (BIOS).
 source "$(dirname "$0")/../lib.sh"

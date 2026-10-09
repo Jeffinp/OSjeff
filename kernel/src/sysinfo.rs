@@ -4,7 +4,7 @@
 
 use crate::sync::RacyCell;
 use bootloader_api::info::{MemoryRegion, MemoryRegionKind};
-use osjeff_core::klog::FixedBuf;
+use kitsune_core::klog::FixedBuf;
 
 pub struct SysInfo {
     /// RAM the firmware reported as usable (free for the bootloader / kernel).

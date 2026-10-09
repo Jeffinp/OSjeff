@@ -3,12 +3,12 @@
 Frente W14, refeita na W25: o Monitor de recursos e o Gerenciador de tarefas viraram um app só, **Tarefas**; o visualizador de log é o **Registro**; as Configurações são os **Ajustes**; a Calculadora e os banners ganharam o visual novo. A aparência e os números da W25 estão em `docs/design/ui-macos.md`, seção 11, e nas seções marcadas "W25" abaixo; o resto descreve a W14 e continua valendo para a lógica.
 
 Frente W14. Quatro ferramentas que um SO precisa, no padrão do resto do projeto: a
-lógica pura e testada em `osjeff_core`, a cola de hardware no `kernel`, prova em QEMU
+lógica pura e testada em `kitsune_core`, a cola de hardware no `kernel`, prova em QEMU
 (BIOS e UEFI) com capturas de tela. O desktop ocioso com as configurações padrão
 continua **idêntico, pixel a pixel**, à linha de base (`tools/verify-boot.sh`, 0 pixels
 de diferença nos dois modos).
 
-| Peça | Lógica pura (`osjeff_core`) | Cola (`kernel/src`) |
+| Peça | Lógica pura (`kitsune_core`) | Cola (`kernel/src`) |
 |---|---|---|
 | Registro (W25; era o Log do sistema) | `klog` (anel, filtro, visão, `LineAsm`/`classify`, `dump_bounded`) | `klog.rs`, `desktop/logview.rs`, `logd.rs` (gravação em disco) |
 | Tarefas (W25; era o Monitor de recursos) | `sysmon` (séries, `CpuSampler`), `activity` (nomes, formatação pt-BR, interpolação, taxas, carga, pressão, tabela ordenável) | `desktop/{tarefas,kit,live}.rs`, `ata::io_bytes`, `netd::stats()` |
@@ -49,7 +49,7 @@ editor foram migrados para `klog!` com nível explícito; a saída serial é a m
   referência única ao anel: máquina de um núcleo, então IF=0 é exclusão mútua, sem lock
   para girar e sem como uma ISR travar contra a thread que ela interrompeu.
 - Nada ali chama o alocador nem pega o lock do heap. O teste
-  `osjeff_core/tests/klog_noalloc.rs` instala um alocador global contador (por thread) e
+  `kitsune_core/tests/klog_noalloc.rs` instala um alocador global contador (por thread) e
   confere **0 alocações** em 100 000 rodadas de formatar + `push` + montagem de linha da
   serial + `classify` + `for_each_since` + `copy_out` (com um controle positivo que mostra
   que o contador conta). O teste `hundred_thousand_messages_never_corrupt_the_ring`
@@ -112,14 +112,14 @@ têm CPU própria: a coluna mostra o **tempo de desenho** do app (TSC acumulado 
 `draw_window`, em % do segundo), que é um subconjunto da linha Interface; para apps WASM é a CPU real medida
 pelo gerenciador. Memória por app só existe como estimativa do estado da instância; `—` quando o kernel não acompanha.
 
-**Lógica pura (`osjeff_core::activity`, 16 testes).** Nomes amigáveis, formatação pt-BR (`12,3%`, `1,5 MiB`, `3 min 05 s`,
+**Lógica pura (`kitsune_core::activity`, 16 testes).** Nomes amigáveis, formatação pt-BR (`12,3%`, `1,5 MiB`, `3 min 05 s`,
 `1.234.567`), `Glide`/`ease_toward` (aproximação exponencial que nunca passa do alvo e sempre termina), interpolação
 fracionária e filtro 1-2-1 da história, qual amostra está sob o ponteiro, **taxas a partir de contadores com volta
 ao zero** (`wrapping_delta`, `Rate`), carga média, nível de pressão, tabela ordenável estável (nomes sem acento).
 
 ## 3. Ajustes (W25; eram as Configurações, `desktop/settings_ui.rs`)
 
-`Settings` (`osjeff_core::settings`) é um `Copy` com texto `chave=valor`:
+`Settings` (`kitsune_core::settings`) é um `Copy` com texto `chave=valor`:
 
 ```
 # OSjeff settings
@@ -201,7 +201,7 @@ ponteiro está sobre ele e uma linha fina na base que diminui até o fim; o temp
 `Toasts::set_lifetime_secs`, cada banner leva o seu). Enquanto há banner o compositor pede quadros (um por segundo com
 *reduzir movimento*).
 
-`osjeff_core::notify::Toasts`: no máximo 3 visíveis (4 s cada por padrão) empilhadas abaixo da barra de menus,
+`kitsune_core::notify::Toasts`: no máximo 3 visíveis (4 s cada por padrão) empilhadas abaixo da barra de menus,
 fila de 8, uma repetição de mensagem visível só reinicia o tempo e incrementa um contador
 (`x3`), clique fecha. O compositor desenha direto no framebuffer depois do quadro
 (restaurando o fundo a partir do `back`, como o HUD) **só enquanto há toast na tela ou
@@ -215,7 +215,7 @@ Hoje: thread morta (`died:`), lease DHCP expirado, falha de escrita no disco
 Só entram eventos **depois** do desktop pronto (o cursor de leitura começa em `klog::seq()`),
 então o boot não gera toast. Desligável nas Configurações.
 
-## 5. Traits para outras frentes (`osjeff_core::sysif`)
+## 5. Traits para outras frentes (`kitsune_core::sysif`)
 
 Cada uma tem um padrão trivial no core e uma implementação do kernel com o que existe
 hoje; a frente que trouxer algo melhor só implementa o trait e troca o objeto.
@@ -239,7 +239,7 @@ ou pela palavra-chave; trocar por `klog!(Warn, ...)` dá o nível exato);
 
 Todos os cenários são `tools/perf/scen/w14-*.sh` (rodam com `tools/perf/run.sh`; o de
 configurações usa `FS_IMG=` com um disco que tem `papel.png`, preparado por
-`cargo run -p osjeff_core --example fs3_inject -- disco.img papel.png /papel.png`; os de W18 são
+`cargo run -p kitsune_core --example fs3_inject -- disco.img papel.png /papel.png`; os de W18 são
 `w18-*.sh`).
 
 | Cenário | Mostra |

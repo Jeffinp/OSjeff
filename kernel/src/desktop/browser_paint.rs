@@ -1,7 +1,7 @@
 //! Painting a laid-out web page: the kernel half of the `web` engine.
 //!
 //! The engine produces a display list in page coordinates and asks for its text
-//! widths through [`osjeff_core::web::TextMetrics`]; [`KernelMetrics`] answers with
+//! widths through [`kitsune_core::web::TextMetrics`]; [`KernelMetrics`] answers with
 //! the same glyph engine that draws the text here (Inter for text, JetBrains Mono for
 //! `<pre>` and `<code>`), so a line that was wrapped to fit really does fit.
 //!
@@ -15,7 +15,7 @@
 
 use super::*;
 use crate::text::{self, Weight};
-use osjeff_core::web::{
+use kitsune_core::web::{
     Cmd as WebCmd, DECO_STRIKE, DECO_UNDERLINE, Font, Page, Rgb, TextMetrics, form::FieldKind,
     textops::Span,
 };
@@ -153,7 +153,7 @@ impl TextMetrics for KernelMetrics {
         let mut start = 0;
         let mut in_run = true;
         for (i, ch) in t.char_indices() {
-            let zero = osjeff_core::web::metrics::is_zero_width(ch);
+            let zero = kitsune_core::web::metrics::is_zero_width(ch);
             let ok = zero || drawable(ch, w);
             if ok != in_run {
                 if in_run {
@@ -224,7 +224,7 @@ fn draw_run(c: &mut Canvas, x: i32, y: i32, t: &str, f: Font, color: Color) -> i
         }
     };
     for (i, ch) in t.char_indices() {
-        if osjeff_core::web::metrics::is_zero_width(ch) {
+        if kitsune_core::web::metrics::is_zero_width(ch) {
             flush(c, &mut pen, seg_start, i);
             seg_start = i + ch.len_utf8();
         } else if !drawable(ch, w) {
@@ -253,7 +253,7 @@ fn draw_run(c: &mut Canvas, x: i32, y: i32, t: &str, f: Font, color: Color) -> i
 /// size is not the box's (the layout moved on, an image just arrived) is sampled nearest-neighbour.
 fn paint_picture(
     c: &mut Canvas,
-    img: &osjeff_core::image::Image,
+    img: &kitsune_core::image::Image,
     x: i32,
     y: i32,
     w: i32,
@@ -669,7 +669,7 @@ impl Desktop {
                         } else {
                             ui::draw_glyph(
                                 c,
-                                osjeff_core::iconart::Glyph::Check,
+                                kitsune_core::iconart::Glyph::Check,
                                 r.x,
                                 r.y,
                                 f.h,

@@ -42,7 +42,7 @@ use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use osjeff_core::paging::{self, PAGE_SIZE};
+use kitsune_core::paging::{self, PAGE_SIZE};
 use x86_64::registers::segmentation::{CS, SS, Segment};
 
 // Per-thread stack. Sized generously (128 KiB) because the background fetcher
@@ -315,7 +315,7 @@ fn reschedule(rsp: u64, timer_tick: bool) -> u64 {
     // candidate, so it keeps the CPU when nobody else can run (unless it died).
     let n = s.threads.len();
     let now = crate::interrupts::ticks();
-    let next = match osjeff_core::schedule::next_runnable(cur, n, |i| runnable(i, now)) {
+    let next = match kitsune_core::schedule::next_runnable(cur, n, |i| runnable(i, now)) {
         Some(next) => next,
         // Only possible if the compositor were dead or missing, which `kill_current` forbids.
         None => crate::crash::halt(),
@@ -420,7 +420,7 @@ pub fn kill_current(reason: core::fmt::Arguments<'_>) -> ! {
     let s = scheduler();
     let now = crate::interrupts::ticks();
     let Some(next) =
-        osjeff_core::schedule::next_runnable(cur, s.threads.len(), |i| runnable(i, now))
+        kitsune_core::schedule::next_runnable(cur, s.threads.len(), |i| runnable(i, now))
     else {
         crate::serial_println!("no runnable thread left");
         crate::crash::halt();
@@ -554,7 +554,7 @@ pub fn thread_dead(i: usize) -> bool {
 
 /// Cumulative "ticks found running" of every scheduler slot (the resource monitor
 /// turns the deltas into CPU shares).
-pub fn busy_ticks() -> [u64; osjeff_core::sysmon::MAX_THREADS] {
+pub fn busy_ticks() -> [u64; kitsune_core::sysmon::MAX_THREADS] {
     core::array::from_fn(|i| TICKS[i].load(Ordering::Relaxed))
 }
 
@@ -568,7 +568,7 @@ pub fn thread_stack_kib(i: usize) -> u32 {
     }
 }
 
-const _: () = assert!(MAX_THREADS == osjeff_core::sysmon::MAX_THREADS);
+const _: () = assert!(MAX_THREADS == kitsune_core::sysmon::MAX_THREADS);
 
 fn scheduler() -> &'static mut Scheduler {
     // SAFETY: only called from `spawn`, which every caller runs with IF=0 (`without_interrupts` in

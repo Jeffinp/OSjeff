@@ -10,9 +10,9 @@ use super::*;
 use crate::serial_println;
 use crate::wasm::{self, appfs_backend};
 use alloc::boxed::Box;
-use osjeff_core::appinstall;
-use osjeff_core::appmanifest::{Abi, Manifest};
-use osjeff_core::t;
+use kitsune_core::appinstall;
+use kitsune_core::appmanifest::{Abi, Manifest};
+use kitsune_core::t;
 
 /// Pixels the window frame adds around a WASM app's content area.
 pub(crate) const FRAME_W: i32 = 28;
@@ -149,7 +149,7 @@ impl Desktop {
             Err(e) => {
                 crate::notify::notify_why(
                     crate::klog::Level::Warn,
-                    osjeff_core::tk!("notify.app_refused"),
+                    kitsune_core::tk!("notify.app_refused"),
                     |l| e.message_in(l),
                 );
                 return;
@@ -163,7 +163,7 @@ impl Desktop {
                 Err(e) => {
                     crate::notify::notify_why(
                         crate::klog::Level::Warn,
-                        osjeff_core::tk!("notify.app_refused"),
+                        kitsune_core::tk!("notify.app_refused"),
                         |l| e.message_in(l),
                     );
                     return;
@@ -341,7 +341,7 @@ impl Desktop {
         let mut rect = if open_wasm == 0 {
             base
         } else {
-            osjeff_core::winman::cascade_rect(base, open_wasm, work)
+            kitsune_core::winman::cascade_rect(base, open_wasm, work)
         };
         rect.x = rect.x.clamp(work.x, (work.right() - rect.w).max(work.x));
         rect.y = rect.y.clamp(work.y, (work.bottom() - rect.h).max(work.y));

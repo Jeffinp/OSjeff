@@ -18,13 +18,13 @@
 //! timeouts the controller is declared dead and every call fails at once (a wedged
 //! disk must not cost the compositor seconds per attempt). The ATA ports are
 //! guarded by their own [`YieldMutex`]: never two threads in the controller.
-//! Arithmetic (slicing, bounds, status decoding) lives in `osjeff_core::hw::ata`.
+//! Arithmetic (slicing, bounds, status decoding) lives in `kitsune_core::hw::ata`.
 
 use crate::io::{inb, inw, outb};
 use crate::sync::YieldMutex;
 use core::arch::asm;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use osjeff_core::blockdev::{BlockDevice, IoError};
+use kitsune_core::blockdev::{BlockDevice, IoError};
 
 const BASE: u16 = 0x170; // secondary channel I/O base
 const CTRL: u16 = 0x376; // secondary channel control / alternate status
@@ -54,8 +54,8 @@ pub const CHANNELS: [(u16, u16, &str); 2] = [
     (0x170, 0x376, "secundario (FS)"),
 ];
 
-pub use osjeff_core::hw::ata::DiskInfo;
-use osjeff_core::hw::ata::{
+pub use kitsune_core::hw::ata::DiskInfo;
+use kitsune_core::hw::ata::{
     SECTOR, SR_BSY, SR_DRQ, SR_ERR, Status, check_transfer, chunks, classify_status, lba28_regs,
     parse_identify, usable_sectors,
 };

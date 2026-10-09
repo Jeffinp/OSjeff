@@ -39,7 +39,7 @@ flowchart LR
     B -- upload só do damage --> F["framebuffer"]
 ```
 
-1. **A cena** (`osjeff_core::compositor::Scene`) é uma lista ordenada de **camadas**: de baixo
+1. **A cena** (`kitsune_core::compositor::Scene`) é uma lista ordenada de **camadas**: de baixo
    para cima, o papel de parede (implícito), as janelas em z-order, a barra de apps, o painel, a
    pré-visualização de encaixe e as camadas do shell (Apps, Busca, menu, popover, Alt+Tab,
    folha). Cada camada diz só o que é: um `LayerId`, o **footprint** (tudo o que ela pode
@@ -97,7 +97,7 @@ quadro é o redesenho completo, a verdade que o oráculo fotografa.
 O cursor, os toasts e o HUD **não são camadas**: vivem só no framebuffer, nunca em `BACK`
 (mover o cursor não recompõe nada). Cada um é restaurável a partir de `BACK`:
 
-- **Cursor** (`osjeff_core::cursor`, inalterado): todo quadro que renderiza algo começa
+- **Cursor** (`kitsune_core::cursor`, inalterado): todo quadro que renderiza algo começa
   apagando o sprite e termina pintando-o, depois dos uploads, dos toasts e do HUD.
 - **Toasts**: a cada quadro de trabalho restaura-se de `BACK` a área que cobriam (agora e na
   última vez) e desenham-se por cima.
@@ -151,7 +151,7 @@ virou o scratch do modo verify. O heap de 64 MiB não é tocado.
 
 ## 6. O teste diferencial
 
-`osjeff_core/src/compositor/sim/` simula uma área de trabalho (192x128): janelas com
+`kitsune_core/src/compositor/sim/` simula uma área de trabalho (192x128): janelas com
 áreas de trabalho, z-order, animações (opacidade e retângulo), três tipos de conteúdo (parado,
 "vivo" com um gráfico que muda por conta própria, "jogo" que muda tudo), painel, barra,
 popover, toast e pré-visualização de encaixe. O **pintor de modelo** desenha cada camada com um

@@ -1,6 +1,6 @@
 //! `Desktop::draw_files`: the Arquivos window. Pure drawing: the state is `FilesState` (rows
 //! already loaded: no disk access happens while painting) and the geometry is
-//! `osjeff_core::fileman::ui`, shared with the mouse handler.
+//! `kitsune_core::fileman::ui`, shared with the mouse handler.
 //!
 //! Layout: a translucent-looking sidebar (Favoritos, Locais, the disk with its usage bar), a
 //! toolbar (back and forward, the breadcrumb path bar, the view switch, sort, search and the
@@ -13,10 +13,10 @@ use super::files::{SheetKind, crumbs_of, files_sheet_kind, modified_label};
 use super::ui::ButtonKind;
 use super::*;
 use crate::text::{self, BODY, CALLOUT, CAPTION, FOOTNOTE, Weight};
-use osjeff_core::appart::{FileKind, Tool};
-use osjeff_core::fileman::ui::{self as fui, Columns, Layout, SideLayout, ViewMode};
-use osjeff_core::fileman::{self, Place, SortKey};
-use osjeff_core::{t, tp};
+use kitsune_core::appart::{FileKind, Tool};
+use kitsune_core::fileman::ui::{self as fui, Columns, Layout, SideLayout, ViewMode};
+use kitsune_core::fileman::{self, Place, SortKey};
+use kitsune_core::{t, tp};
 
 fn argb(c: Color) -> u32 {
     appui::rgb_of(c)
@@ -1158,7 +1158,7 @@ impl Desktop {
                         let label = if n > 1 {
                             tp!("files.job.copying_n", n)
                         } else {
-                            String::from(osjeff_core::i18n::tr(j.label))
+                            String::from(kitsune_core::i18n::tr(j.label))
                         };
                         (
                             label,

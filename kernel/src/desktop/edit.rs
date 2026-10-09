@@ -1,6 +1,6 @@
 //! The text editor window: `Desktop` methods around [`EditorState`].
 //!
-//! The text engine is `osjeff_core::editor2` (gap buffer, UTF-8, selection,
+//! The text engine is `kitsune_core::editor2` (gap buffer, UTF-8, selection,
 //! undo/redo, find/replace, line numbers) and the questions it does not own (the
 //! Open / Save-as picker, "save changes?") are `editor2::dialog`; all of it is
 //! tested on the host, and so is the window geometry (`editor2::ui`). This file feeds
@@ -17,18 +17,18 @@ use super::sysstore::VfsStore;
 use super::vfs;
 use super::*;
 use crate::text::{self, BODY, Weight};
-use osjeff_core::anim::{Spring, Tween, curves};
-use osjeff_core::editor2::ui::{self as eui, FindHit, FindLay, Lay, Metrics};
-use osjeff_core::editor2::{
+use kitsune_core::anim::{Spring, Tween, curves};
+use kitsune_core::editor2::ui::{self as eui, FindHit, FindLay, Lay, Metrics};
+use kitsune_core::editor2::{
     CloseAsk, CloseChoice, Editor as Ed2, Event as EdEvent, PickEvent, PickMode, PickRow, Picker,
     PromptKind,
 };
-use osjeff_core::input::{KeyCode, KeyEvent};
-use osjeff_core::settings::{FONT_MAX, FONT_MIN, font_step};
-use osjeff_core::sysif::SettingsStore;
-use osjeff_core::t;
-use osjeff_core::vfs::VfsError;
-use osjeff_core::widgets::ScrollbarFade;
+use kitsune_core::input::{KeyCode, KeyEvent};
+use kitsune_core::settings::{FONT_MAX, FONT_MIN, font_step};
+use kitsune_core::sysif::SettingsStore;
+use kitsune_core::t;
+use kitsune_core::vfs::VfsError;
+use kitsune_core::widgets::ScrollbarFade;
 
 /// Largest file the editor opens (the gap buffer, undo and a copy for saving all live in the heap).
 pub(crate) const MAX_OPEN: u64 = 16 * 1024 * 1024;

@@ -6,7 +6,7 @@
 //!
 //! The window works on a private copy (snapshot) of the ring, refreshed once a second and
 //! after any input, so drawing never touches the live ring or holds interrupts off. The
-//! filter / indexing logic is `osjeff_core::klog`; the saved file goes through the
+//! filter / indexing logic is `kitsune_core::klog`; the saved file goes through the
 //! `LogSink` trait (`/var/log/syslog.txt`).
 
 use super::kit;
@@ -14,12 +14,12 @@ use super::ui::{self, ButtonKind};
 use super::*;
 use crate::text::{self, BODY, FOOTNOTE, Weight};
 use core::cell::Cell;
-use osjeff_core::activity::{self, Glide};
-use osjeff_core::i18n;
-use osjeff_core::klog::{Filter, Level, LogView, render_text};
-use osjeff_core::sysif::{LogSink, SinkError};
-use osjeff_core::widgets::ScrollbarFade;
-use osjeff_core::{t, tk, tp};
+use kitsune_core::activity::{self, Glide};
+use kitsune_core::i18n;
+use kitsune_core::klog::{Filter, Level, LogView, render_text};
+use kitsune_core::sysif::{LogSink, SinkError};
+use kitsune_core::widgets::ScrollbarFade;
+use kitsune_core::{t, tk, tp};
 
 const ROW_H: i32 = 24;
 const HEAD_H: i32 = 28;
@@ -154,7 +154,7 @@ impl LogLayout {
         let y = body.y + 12;
         let save = Rect::new(body.right() - pad - 80, y, 80, 28);
         let clear = Rect::new(save.x - 8 - 80, y, 80, 28);
-        let follow_sw = osjeff_core::widgets::switch_rect(clear.x - 14 - 38, y + 3);
+        let follow_sw = kitsune_core::widgets::switch_rect(clear.x - 14 - 38, y + 3);
         // The widths follow the words of the language in effect.
         let follow_w = text::measure(t!("log.follow"), BODY, Weight::Regular).max(46) + 2;
         let seg_label = LEVELS
@@ -326,7 +326,7 @@ impl Desktop {
         let Some(l) = self.log_mut(id) else {
             return;
         };
-        if let Some(i) = osjeff_core::widgets::segmented_hit(lay.seg, 4, px, py) {
+        if let Some(i) = kitsune_core::widgets::segmented_hit(lay.seg, 4, px, py) {
             l.filter.min = SEG_LEVEL[i];
             l.view.rebuild(&l.snap, &l.filter, lay.rows);
             l.aim(lay.list.h);
@@ -477,7 +477,7 @@ impl Desktop {
         kit::icon_button(
             c,
             lay.clear,
-            osjeff_core::iconart::Glyph::Trash,
+            kitsune_core::iconart::Glyph::Trash,
             t!("log.clear"),
             ButtonKind::Secondary,
             kit::control_state(key == H_CLEAR, down, true),
@@ -485,7 +485,7 @@ impl Desktop {
         kit::icon_button(
             c,
             lay.save,
-            osjeff_core::iconart::Glyph::Save,
+            kitsune_core::iconart::Glyph::Save,
             t!("log.save"),
             ButtonKind::Secondary,
             kit::control_state(key == H_SAVE, down, true),
@@ -627,7 +627,7 @@ impl Desktop {
         );
 
         // Status line: counts on the left, the last action on the right.
-        let total = osjeff_core::klog::records(&l.snap).count();
+        let total = kitsune_core::klog::records(&l.snap).count();
         let counts = if l.view.len() == total {
             tp!("log.count", total)
         } else {

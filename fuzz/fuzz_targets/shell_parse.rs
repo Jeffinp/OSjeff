@@ -1,4 +1,4 @@
-//! Fuzz target: the shell engine (`osjeff_core::shell`).
+//! Fuzz target: the shell engine (`kitsune_core::shell`).
 //!
 //! Arbitrary bytes (decoded lossily, so invalid UTF-8 becomes U+FFFD) go through
 //! four layers:
@@ -19,11 +19,11 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::input::{KeyCode, KeyEvent, Mods};
-use osjeff_core::shell::fs::{MemFs, ShellFs};
-use osjeff_core::shell::line::{LineEditor, ShellCompleter};
-use osjeff_core::shell::sys::HttpResponse;
-use osjeff_core::shell::{Host, Limits, MockSys, Screen, Shell, Term, TermAction};
+use kitsune_core::input::{KeyCode, KeyEvent, Mods};
+use kitsune_core::shell::fs::{MemFs, ShellFs};
+use kitsune_core::shell::line::{LineEditor, ShellCompleter};
+use kitsune_core::shell::sys::HttpResponse;
+use kitsune_core::shell::{Host, Limits, MockSys, Screen, Shell, Term, TermAction};
 
 const MAX_INPUT: usize = 4096;
 
@@ -107,15 +107,15 @@ fuzz_target!(|data: &[u8]| {
     // The messages follow the language in effect: let the input pick it, so both catalogs are
     // exercised (the fuzzer runs one input at a time).
     let lang = if data.first().is_some_and(|b| b & 1 == 1) {
-        osjeff_core::i18n::Lang::En
+        kitsune_core::i18n::Lang::En
     } else {
-        osjeff_core::i18n::Lang::Pt
+        kitsune_core::i18n::Lang::Pt
     };
-    osjeff_core::i18n::set_lang(lang);
+    kitsune_core::i18n::set_lang(lang);
     let text = String::from_utf8_lossy(data).into_owned();
 
     // 1. Parser only.
-    if let Err(e) = osjeff_core::shell::parse::parse(&text) {
+    if let Err(e) = kitsune_core::shell::parse::parse(&text) {
         // The error must point inside the input and describe itself.
         assert!(e.pos <= text.len());
         assert!(!e.message().is_empty());

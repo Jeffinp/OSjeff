@@ -8,7 +8,7 @@
 //!
 //! One job today: the **boot-time flush**. The compositor calls
 //! [`request_boot_flush`] after the first desktop frame (so the log holds the whole
-//! boot); `logd` renders the ring ([`osjeff_core::klog::dump_bounded`], at most
+//! boot); `logd` renders the ring ([`kitsune_core::klog::dump_bounded`], at most
 //! [`BOOT_LOG_MAX`] bytes, newest lines win) and writes `/var/log/boot.log` through
 //! the same `LogSink` the log viewer's "Salvar" uses (`/var/log/syslog.txt`).
 //! Each boot replaces the previous file. With no disk volume (the RAM fallback) the
@@ -21,7 +21,7 @@
 use crate::desktop::{VfsSink, vfs};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use osjeff_core::sysif::{LogSink, SinkError};
+use kitsune_core::sysif::{LogSink, SinkError};
 
 /// Largest `boot.log` written (the ring holds 64 KiB of records; with the
 /// timestamp, level and thread prefixes the text can reach about 100 KiB).
@@ -67,7 +67,7 @@ fn flush_boot_log() {
     }
     let mut snap = Vec::new();
     crate::klog::snapshot(&mut snap);
-    let (text, cut) = osjeff_core::klog::dump_bounded(
+    let (text, cut) = kitsune_core::klog::dump_bounded(
         &snap,
         |o| crate::sched::thread_name(o as usize),
         BOOT_LOG_MAX,

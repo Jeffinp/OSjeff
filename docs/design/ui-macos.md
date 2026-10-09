@@ -8,7 +8,7 @@ Tarefas, Registro, Ajustes, Calculadora, notificações). The rest of wave 2 re-
 
 Status: wave 1 (foundation, system chrome, the toolkit). Wave 2 re-skins each app's
 content on top of the toolkit described here. The visual values are tokens that live in
-one place (`kernel/src/theme.rs`, backed by the pure tables in `osjeff_core::style`);
+one place (`kernel/src/theme.rs`, backed by the pure tables in `kitsune_core::style`);
 the code paths named below are the stable API.
 
 The file keeps its original name (`ui-macos.md`) because the brief called the target
@@ -25,7 +25,7 @@ geometry, soft shadows, springy motion, generous spacing) and has its own identi
 | Mark | a bold prompt chevron `>` (white) on a flat indigo rounded square; the panel version is the bare chevron. No fruit, no wordmark borrowed from anyone |
 | Names | **Apps** (the grid, replaces the start panel), **Busca** (one field for apps, files and sums), **Barra de tarefas** (the floating bar), **Configurações rápidas** (network, appearance, switches), **Arquivos**, **Tarefas**, **Monitor**, **Registro**, **Imagens**, **Componentes** (the widget gallery) |
 | Accent | indigo `5B5CF6` by default; eight choices (Indigo, Turquesa, Violeta, Rosa, Coral, Âmbar, Verde, Grafite) |
-| Icon language | a thick white glyph on a flat saturated rounded-square tile (22 % radius) with one highlight facet across the top-left corner and a 1 px bevel, no gradient and no gloss; every glyph is drawn from our own vector paths (`osjeff_core::iconart`), none is a traced system icon |
+| Icon language | a thick white glyph on a flat saturated rounded-square tile (22 % radius) with one highlight facet across the top-left corner and a 1 px bevel, no gradient and no gloss; every glyph is drawn from our own vector paths (`kitsune_core::iconart`), none is a traced system icon |
 | Wallpaper | six original presets (*Crepúsculo*: a dusk gradient with soft geometric facets, pale by day and deep indigo at night; *Aurora*, *Mono*, *Papel*, *Turquesa* with rolling hills, *Pôr do sol* with bands) or an image; none is a wave |
 | Motion | short and springy: windows pop in from 92 %, taskbar icons lift and slide on a spring each, launches hop twice; everything eases out and is interruptible |
 | Language | Portuguese, plain: nothing in the UI talks about how the system is built; apps need no explanation |
@@ -39,12 +39,12 @@ geometry, soft shadows, springy motion, generous spacing) and has its own identi
 | Damage tracking, cached static layer (`STATIC`), scene signature, drag and resize paths must stay correct | new visuals are layers inside the existing compositor paths (section 5), not a new compositor |
 | An idle desktop must cost ~0 | every animation reports "active" only while it moves; springs and tweens snap to rest; nothing polls |
 | 64 MiB heap, shared | caches are bounded and logged (section 9) |
-| `osjeff_core` is `no_std`, `forbid(unsafe_code)`, host tested | geometry, easing, text measuring, rasterisation, shapes, blur, settings, search are pure and tested on the host; the kernel owns the framebuffer and the glue |
+| `kitsune_core` is `no_std`, `forbid(unsafe_code)`, host tested | geometry, easing, text measuring, rasterisation, shapes, blur, settings, search are pure and tested on the host; the kernel owns the framebuffer and the glue |
 
 ## 2. Tokens
 
 All sizes are logical pixels on a 4 px grid; there is no HiDPI scaling. Colours are
-`0xAARRGGBB` in `osjeff_core::style::{LIGHT, DARK}` and read through `theme::pal()`,
+`0xAARRGGBB` in `kitsune_core::style::{LIGHT, DARK}` and read through `theme::pal()`,
 which follows the appearance in effect.
 
 ### 2.1 Colour (light | dark)
@@ -69,7 +69,7 @@ applied live from Controles or Ajustes. Contrast on `window_bg`: body text 15.6:
 
 `window` 8 (0 when maximised) · `popover` 10 · `menu` 8 · `control` 6 · `taskbar` 12 · `tooltip` 6 ·
 icon tile 22 % of its side (circular corners). Corners are anti-aliased from cached
-coverage masks (`osjeff_core::raster::CornerMasks`), identical for fills, strokes and the
+coverage masks (`kitsune_core::raster::CornerMasks`), identical for fills, strokes and the
 window-corner repair.
 
 ### 2.3 Spacing and sizes
@@ -98,7 +98,7 @@ bitmap font only survives in the crash screen.
 
 ### 2.5 Shadows
 
-Separable analytic profiles (`osjeff_core::raster::shadow_profile`), two layers per window:
+Separable analytic profiles (`kitsune_core::raster::shadow_profile`), two layers per window:
 focused (blur 20, dy 14, 29 %) + (6, 3, 24 %); unfocused (14, 8, 17 %) + (4, 2, 15 %); menus
 and popovers (12 to 14, dy 8, 31 %); the bar (12, dy 6, 24 %); banners (14, dy 8, 31 %). A
 window being dragged keeps only the ambient layer.
@@ -106,7 +106,7 @@ window being dragged keeps only the ambient layer.
 ### 2.6 Motion
 
 Driven by real time (`dt` = timer ticks / 250), interruptible, and gated by the *reduce
-motion* switch (`osjeff_core::anim::set_reduce_motion`; with it on every transition lands on
+motion* switch (`kitsune_core::anim::set_reduce_motion`; with it on every transition lands on
 its end in the next frame).
 
 | Transition | Model | Time |
@@ -130,8 +130,8 @@ its end in the next frame).
 ## 3. The toolkit (the API for wave 2)
 
 Drawing lives in `kernel/src/desktop/ui.rs` (over `Canvas`, reading the current palette);
-geometry, hit testing and state are pure and tested in `osjeff_core::widgets` and
-`osjeff_core::chrome`. Draw functions take the interaction state as an argument, and the
+geometry, hit testing and state are pure and tested in `kitsune_core::widgets` and
+`kitsune_core::chrome`. Draw functions take the interaction state as an argument, and the
 caller derives `Control::Hover` / `Pressed` from the pointer.
 
 | Widget | Draw | Geometry and state |
@@ -146,14 +146,14 @@ caller derives `Control::Hover` / `Pressed` from the pointer.
 | overlay scrollbar (fades) | `ui::overlay_scrollbar` | `widgets::ScrollbarFade`, `scroll_thumb` |
 | menu row, tooltip | `ui::menu_item`, `ui::tooltip` | `chrome::menu_geom` |
 | line graph, usage bar (dark-panel, byte-string versions) | `ui::graph`, `ui::usage_bar` | |
-| smooth history chart with a hover value | `kit::chart(c, r, &Chart)` (curves, axis labels, scroll progress, hovered sample) | `kit::plot_of`, `osjeff_core::activity::{slice_at, sample_under, smooth121}` |
+| smooth history chart with a hover value | `kit::chart(c, r, &Chart)` (curves, axis labels, scroll progress, hovered sample) | `kit::plot_of`, `kitsune_core::activity::{slice_at, sample_under, smooth121}` |
 | usage bar, pressure gauge, chip, card, stat and key/value rows | `kit::{bar, pressure_gauge, chip, card, stat, kv}` | |
 | search field, button with a glyph, sort arrow | `kit::{search_field, icon_button, sort_arrow}` | |
 | hover and press for a whole window | `Desktop::live_hover` (a key per control; the window repaints only when it changes), `live_step`, `live_busy` | `desktop/live.rs` |
 | glass panel (blurred backdrop, tint, edge, shadow) | `glass::panel`, `BackdropSlot` | |
-| text | `text::draw`, `draw_centered`, `draw_left`, `draw_right`, `draw_ellipsis`, `measure`, `wrap`, `draw_mono` | `osjeff_core::textlayout` |
-| icons and glyphs | `icons::blit(c, Icon, x, y, size, opacity)`, `ui::draw_glyph(c, Glyph, x, y, size, argb)` | `osjeff_core::iconart` |
-| colours | `theme::{pal, text, text_muted, window_body, toolbar, sidebar, surface, zebra, line, button_bg, tool_bg, ink, ink_dim, danger, ok, selection, accent}` | `osjeff_core::style` |
+| text | `text::draw`, `draw_centered`, `draw_left`, `draw_right`, `draw_ellipsis`, `measure`, `wrap`, `draw_mono` | `kitsune_core::textlayout` |
+| icons and glyphs | `icons::blit(c, Icon, x, y, size, opacity)`, `ui::draw_glyph(c, Glyph, x, y, size, argb)` | `kitsune_core::iconart` |
+| colours | `theme::{pal, text, text_muted, window_body, toolbar, sidebar, surface, zebra, line, button_bg, tool_bg, ink, ink_dim, danger, ok, selection, accent}` | `kitsune_core::style` |
 
 The **gallery** (`Ctrl+Alt+G`, also in the system menu) shows all of it live in four tabs
 (controls, type, colours, icons) and is the reference for app authors. `desktop/kit.rs` holds
@@ -208,14 +208,14 @@ the real font.
   search field on top of the content, a **Recentes** row (the last five apps launched, on *Todos*
   with an empty search) and the grid of every app (system and installed). Type to filter (a search
   looks at every category), arrows move, `Ctrl`+arrows walk the rail, Enter opens, the wheel
-  scrolls, Esc closes. Categories come from a built-in table (`osjeff_core::launcher`).
+  scrolls, Esc closes. Categories come from a built-in table (`kitsune_core::launcher`).
 * **Busca** (`Ctrl+Space`, or the bar's magnifier): apps, files of the volume (at most 600
   entries, five levels, indexed when it opens) and arithmetic (`12*(3+4)` shows `= 84`,
   Enter copies it).
 * **Sheet** for restart and shut down (Enter or the red button confirms, Esc cancels).
 * **Banners** slide in at the top right under the bar.
 * **Pointer**: arrow, pointing hand over links, I-beam over text, drawn as vector shapes
-  with an outline and a soft shadow (`osjeff_core::cursor`; one 24x28 box for all three).
+  with an outline and a soft shadow (`kitsune_core::cursor`; one 24x28 box for all three).
 * **HUD** (frame time, heap, threads) only with `Ctrl+Alt+H`.
 
 ## 5. Rendering model
@@ -258,14 +258,14 @@ blur capture, paid once.
 
 | Area | Files |
 |---|---|
-| tokens, appearance | `kernel/src/theme.rs`, `osjeff_core/src/{style,settings}.rs` |
-| text | `osjeff_core/src/{ttf,glyph,fontcache,textlayout}.rs`, `kernel/src/text.rs`, `assets/fonts/` |
-| primitives | `osjeff_core/src/{gfx,raster}.rs`, `kernel/src/fb.rs`, `kernel/src/fb/{shapes,scale}.rs` |
-| motion | `osjeff_core/src/anim.rs` |
-| chrome geometry, search, cursor, widgets | `osjeff_core/src/{window,layout,chrome,widgets,search,cursor,iconart}.rs` |
+| tokens, appearance | `kernel/src/theme.rs`, `kitsune_core/src/{style,settings}.rs` |
+| text | `kitsune_core/src/{ttf,glyph,fontcache,textlayout}.rs`, `kernel/src/text.rs`, `assets/fonts/` |
+| primitives | `kitsune_core/src/{gfx,raster}.rs`, `kernel/src/fb.rs`, `kernel/src/fb/{shapes,scale}.rs` |
+| motion | `kitsune_core/src/anim.rs` |
+| chrome geometry, search, cursor, widgets | `kitsune_core/src/{window,layout,chrome,widgets,search,cursor,iconart}.rs` |
 | chrome drawing | `kernel/src/desktop/{chrome,dock,menubar,overlays,shell,glass,cursor,render}.rs` |
 | toolkit and gallery | `kernel/src/desktop/{ui,kit,gallery}.rs` |
-| system apps (section 11) | `kernel/src/desktop/{tarefas,logview,settings_ui,calc_ui,toasts_ui,live}.rs`, `osjeff_core/src/{activity,calc,settings,notify,klog,layout}.rs` |
+| system apps (section 11) | `kernel/src/desktop/{tarefas,logview,settings_ui,calc_ui,toasts_ui,live}.rs`, `kitsune_core/src/{activity,calc,settings,notify,klog,layout}.rs` |
 | chrome drawing | `kernel/src/desktop/{chrome,dock,panel,overlays,shell,glass,cursor,render}.rs` |
 | chrome drawing | `kernel/src/desktop/{chrome,taskbar,panel,overlays,shell,glass,cursor,render}.rs` |
 | toolkit and gallery | `kernel/src/desktop/{ui,gallery}.rs` |
@@ -366,7 +366,7 @@ Captures (QEMU/UEFI, `tools/perf/scen/w25-shots.sh`): `docs/img/ui-tarefas-light
 ## 11. App interiors, wave 2a: Arquivos, Imagens, Editor, Terminal (W23)
 
 These four apps are redesigned on the toolkit above. The rules they follow: geometry, hit testing,
-filters, plans and selection models are pure and host tested in `osjeff_core`; the kernel
+filters, plans and selection models are pure and host tested in `kitsune_core`; the kernel
 only draws and routes; text is measured (`text::*`), never counted in cells, except the fixed grids
 of the editor and the terminal (`text::mono_cell_px`); no `text::legacy`; light and dark both from the
 palette; frames are requested only while something moves (each app has an `animating()` predicate
@@ -375,7 +375,7 @@ that `is_dynamic`/`has_animation` read), so an idle desktop with all four open c
 Shared pieces added for them (not in the wave-1 toolkit): `kernel/src/desktop/appui.rs` (glyph tool
 buttons and segmented control, the path-bar pill, a one-line field with selection and an eased caret,
 the window-attached sheet with dim and slide, empty states, selection colours, caret curve) and
-`kernel/src/desktop/appart.rs` (a cache over `osjeff_core::appart`: the file-type icons Pasta, Texto,
+`kernel/src/desktop/appart.rs` (a cache over `kitsune_core::appart`: the file-type icons Pasta, Texto,
 Imagem, App, Genérico, Disco, drawn in the accent, and 33 monochrome tool glyphs).
 
 | App | Content | Pure core | Kernel |
@@ -405,7 +405,7 @@ list scrolls by whole rows.
 ## 11. Browser (wave 2)
 
 The Navegador keeps the indigo accent and is drawn from the toolkit (`kernel/src/desktop/browser_ui.rs`;
-geometry in `osjeff_core::layout::BrowserChrome`, state in `desktop/browser.rs`).
+geometry in `kitsune_core::layout::BrowserChrome`, state in `desktop/browser.rs`).
 
 * **Toolbar** (48 px, same colour as the title bar): back, forward, reload (becomes stop while
   loading), a rounded omnibox (security badge, host highlighted at rest, animated star) and "+".

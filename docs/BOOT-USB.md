@@ -16,7 +16,7 @@ No Windows, na pasta do projeto:
 .\run.ps1 -Usb
 ```
 
-Isso compila o release e copia `osjeff-uefi.img` para a raiz do projeto. (Não
+Isso compila o release e copia `kitsune-uefi.img` para a raiz do projeto. (Não
 abre o QEMU.)
 
 ## 2. Gravar no pendrive
@@ -24,9 +24,9 @@ abre o QEMU.)
 A imagem é um **disco cru** (GPT + partição EFI com `EFI/BOOT/BOOTX64.EFI`).
 Grave-a **crua** num pendrive — isso **apaga o pendrive inteiro**:
 
-- **Rufus**: selecione `osjeff-uefi.img`, escolha o modo **"DD Image"**, grave.
-- **balenaEtcher**: *Flash from file* → `osjeff-uefi.img` → escolha o pendrive.
-- **Linux/WSL**: `sudo dd if=osjeff-uefi.img of=/dev/sdX bs=4M conv=fsync` (com
+- **Rufus**: selecione `kitsune-uefi.img`, escolha o modo **"DD Image"**, grave.
+- **balenaEtcher**: *Flash from file* → `kitsune-uefi.img` → escolha o pendrive.
+- **Linux/WSL**: `sudo dd if=kitsune-uefi.img of=/dev/sdX bs=4M conv=fsync` (com
   `/dev/sdX` = o pendrive certo — confira duas vezes, `dd` no disco errado destrói dados).
 
 ## 3. Bootar

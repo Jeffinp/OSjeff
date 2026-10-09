@@ -1,4 +1,4 @@
-//! Fuzz target: the compositor's damage engine (`osjeff_core::compositor`).
+//! Fuzz target: the compositor's damage engine (`kitsune_core::compositor`).
 //!
 //! The input is a script of desktop operations (open, close, move, resize, focus, minimise,
 //! restore, snap, maximise, workspace switches, popovers, toasts, animation ticks, live windows
@@ -9,7 +9,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::compositor::sim::{Bytes, Op, Sim, Source, random_op};
+use kitsune_core::compositor::sim::{Bytes, Op, Sim, Source, random_op};
 
 const MAX_FRAMES: usize = 400;
 

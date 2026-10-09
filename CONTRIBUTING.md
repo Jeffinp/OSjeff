@@ -32,7 +32,7 @@ Veja [`docs/BUILDING.md`](docs/BUILDING.md) para QEMU/OVMF e
    `refactor(core): ...`, `docs(audit): ...`. O corpo explica o *porquê* e **como foi
    verificado**.
 2. **Nada muda sem teste.**
-   - Lógica pura (parser, regras de janela, FS, rede) → `osjeff_core`, com teste
+   - Lógica pura (parser, regras de janela, FS, rede) → `kitsune_core`, com teste
      unitário que **falha antes e passa depois**.
    - Mudança no `kernel/` → `tools/verify-boot.sh` (BIOS **e** UEFI) com o desktop
      idêntico à baseline, ou um screenshot explicando a diferença intencional.
@@ -58,7 +58,7 @@ quebrou o build uma vez, ver `docs/audit/RELATORIO.md`).
 
 ## Regras de código
 
-- **`osjeff_core` é `forbid(unsafe_code)` e `no_std`.** Não adicione `std`.
+- **`kitsune_core` é `forbid(unsafe_code)` e `no_std`.** Não adicione `std`.
 - **Todo `unsafe` leva `// SAFETY:`** com a invariante *real* e por que ela vale ali.
   O kernel liga `clippy::undocumented_unsafe_blocks`; com `-D warnings` o lint falha
   sem o comentário. Se o tipo **não** garante a invariante (por exemplo uma função

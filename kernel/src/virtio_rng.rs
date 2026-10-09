@@ -13,13 +13,13 @@
 //!
 //! The device is the *host's* entropy (QEMU feeds it from `/dev/urandom` by default), so
 //! trusting it means trusting the hypervisor; `docs/SECURITY-MODEL.md` says so. Its bytes
-//! are never used raw: they go through `osjeff_core::entropy`.
+//! are never used raw: they go through `kitsune_core::entropy`.
 
 use crate::sync::RacyCell;
 use crate::virtio::{self, Common};
 use crate::{pci, serial_println};
 use core::sync::atomic::{AtomicBool, Ordering, fence};
-use osjeff_core::hw::virtio_net::{self as vn, QueueLayout};
+use kitsune_core::hw::virtio_net::{self as vn, QueueLayout};
 
 /// Bytes asked for per request (256 bits: one DRBG key).
 pub const REQ_LEN: usize = 32;

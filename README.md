@@ -80,13 +80,13 @@ variantes (DOOM) e solução de problemas: [`docs/BUILDING.md`](docs/BUILDING.md
 |---|---|---|
 | **Boot e CPU** | Boot BIOS/UEFI (`bootloader 0.11`), GDT/TSS próprias com pilha IST para #DF, IDT completa, PIC 8259, PIT 250 Hz, tratamento de todas as exceções e IRQs espúrias, tela de erro | `kernel/src/{gdt,interrupts,crash}.rs` |
 | **Scheduler** | Preemptivo por timer (troca de contexto no ISR, assembly), threads **prontas/bloqueadas**, yield por `int 0x81`, `hlt` sem perder wakeups, **pilhas com página de guarda**, **uma thread que falha morre sozinha**, CPU real por thread | `sched.rs`, `switch.s` |
-| **Memória** | Heap `GlobalAlloc` (free-list com coalescência, spin lock com IRQs desligadas), matemática de alinhamento testada no host | `allocator.rs`, `osjeff_core/src/heap.rs` |
+| **Memória** | Heap `GlobalAlloc` (free-list com coalescência, spin lock com IRQs desligadas), matemática de alinhamento testada no host | `allocator.rs`, `kitsune_core/src/heap.rs` |
 | **Gráficos** | Compositor com damage tracking, double buffer, fonte 8×8 própria, sombras alpha, animações; HUD de desempenho | `fb.rs`, `desktop/` |
-| **Apps** | Terminal (shell com ~55 comandos, pipes, scripts, scrollback, histórico, Tab, `ping`/`nslookup`/`curl`), Editor (busca/substituição, desfazer, arquivos de 16 MiB, diálogos Abrir/Salvar), Gerenciador de arquivos (copiar/mover com progresso, lixeira, Apps), Visualizador de imagens, Navegador, Tarefas (monitor de atividade), Registro, Ajustes, Calculadora, apps WebAssembly | `desktop/`, `osjeff_core` |
-| **Armazenamento** | **OJFS v3**: journal de metadados + dados *copy-on-write*, extents, CRC32, `fsck` no boot, migração automática do v2, cache de blocos, ATA com `FLUSH`; o desktop inteiro fala com o disco por uma camada VFS (com volume em RAM quando não há disco v3) | `osjeff_core/src/{fs3,vfs,blockcache}`, `ata.rs`, `storage.rs` |
-| **Sistema** | Configurações persistentes (`/etc/osjeff.conf`: cor de destaque, papel de parede, teclado ABNT2, fuso, relógio), log do kernel em anel (`/var/log`), monitor de atividade, notificações, apps instalados em `/apps` com dados em `/data/<id>` | `osjeff_core/src/{settings,klog,sysmon,notify}.rs`, `kernel/src/desktop/` |
-| **Rede** | `virtio-net` e NE2000 (trait `Nic`), ARP/IPv4/ICMP/DHCP próprios (renova o lease, responde e envia `ping`), DNS com cache e vários servidores, `smoltcp` para TCP, **TLS 1.3** (`embedded-tls`) **com cadeia de certificados verificada** (`rustls-webpki`, 46 raízes embutidas) e hora por SNTP | `nic.rs`, `virtio_net.rs`, `ne2000.rs`, `netd.rs`, `netstack.rs`, `osjeff_core/src/{net,lease,dns,icmp}.rs` |
-| **Navegador** | Parser HTML, CSS (cascata), layout, imagens PNG/BMP/PPM, formulários GET, favoritos e sugestões, busca na página, zoom, redirects, gzip/deflate, limites de recurso, indicador de conexão ("Conexao segura" só com certificado verificado); roda do mouse no sistema | `osjeff_core/src/{web,browser,redirect}`; favoritos persistentes em `/home/.bookmarks` |
+| **Apps** | Terminal (shell com ~55 comandos, pipes, scripts, scrollback, histórico, Tab, `ping`/`nslookup`/`curl`), Editor (busca/substituição, desfazer, arquivos de 16 MiB, diálogos Abrir/Salvar), Gerenciador de arquivos (copiar/mover com progresso, lixeira, Apps), Visualizador de imagens, Navegador, Tarefas (monitor de atividade), Registro, Ajustes, Calculadora, apps WebAssembly | `desktop/`, `kitsune_core` |
+| **Armazenamento** | **OJFS v3**: journal de metadados + dados *copy-on-write*, extents, CRC32, `fsck` no boot, migração automática do v2, cache de blocos, ATA com `FLUSH`; o desktop inteiro fala com o disco por uma camada VFS (com volume em RAM quando não há disco v3) | `kitsune_core/src/{fs3,vfs,blockcache}`, `ata.rs`, `storage.rs` |
+| **Sistema** | Configurações persistentes (`/etc/osjeff.conf`: cor de destaque, papel de parede, teclado ABNT2, fuso, relógio), log do kernel em anel (`/var/log`), monitor de atividade, notificações, apps instalados em `/apps` com dados em `/data/<id>` | `kitsune_core/src/{settings,klog,sysmon,notify}.rs`, `kernel/src/desktop/` |
+| **Rede** | `virtio-net` e NE2000 (trait `Nic`), ARP/IPv4/ICMP/DHCP próprios (renova o lease, responde e envia `ping`), DNS com cache e vários servidores, `smoltcp` para TCP, **TLS 1.3** (`embedded-tls`) **com cadeia de certificados verificada** (`rustls-webpki`, 46 raízes embutidas) e hora por SNTP | `nic.rs`, `virtio_net.rs`, `ne2000.rs`, `netd.rs`, `netstack.rs`, `kitsune_core/src/{net,lease,dns,icmp}.rs` |
+| **Navegador** | Parser HTML, CSS (cascata), layout, imagens PNG/BMP/PPM, formulários GET, favoritos e sugestões, busca na página, zoom, redirects, gzip/deflate, limites de recurso, indicador de conexão ("Conexao segura" só com certificado verificado); roda do mouse no sistema | `kitsune_core/src/{web,browser,redirect}`; favoritos persistentes em `/home/.bookmarks` |
 | **WebAssembly** | Runtime `wasmi` como formato nativo de apps: ABI própria + subconjunto WASI, *fuel* por chamada, 24 MiB de memória, término real do app. Roda Snake; **DOOM** via `wasi-sdk` | `kernel/src/wasm/`, `wasm-apps/` |
 | **Dispositivos** | PS/2 (teclado, mouse), RTC, PCI, virtio-gpu (2D), ATA IDENTIFY | `ps2.rs`, `pci.rs`, `virtio*.rs` |
 
@@ -95,12 +95,12 @@ variantes (DOOM) e solução de problemas: [`docs/BUILDING.md`](docs/BUILDING.md
 ## 🧪 Por que dá para confiar nele
 
 Um binário `no_std` não roda `cargo test`. A solução é estrutural: **toda decisão
-que não precisa tocar hardware mora em `osjeff_core`** (`#![forbid(unsafe_code)]`),
+que não precisa tocar hardware mora em `kitsune_core`** (`#![forbid(unsafe_code)]`),
 que compila com `std` sob teste. O kernel só liga o hardware a ela.
 
 ```mermaid
 flowchart LR
-    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2927 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["kitsune_core<br/>no_std · forbid(unsafe) · 2927 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · unsafe documentado<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>builder da imagem BIOS/UEFI"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -110,7 +110,7 @@ flowchart LR
 
 | Verificação | Estado |
 |---|---|
-| Testes unitários | **2927** no `osjeff_core`; cobertura de linhas 96,6% (bruta, inclui os módulos de teste; medida com `cargo llvm-cov`) |
+| Testes unitários | **2927** no `kitsune_core`; cobertura de linhas 96,6% (bruta, inclui os módulos de teste; medida com `cargo llvm-cov`) |
 | Fuzzing | 17 alvos (rede, discos OJFS v2/v3, HTML/CSS/imagens/formulários, shell, editor, certificados X.509, manifesto e sandbox de apps); bugs achados são corrigidos com entrada mínima e teste de regressão |
 | `unsafe` | **100%** dos blocos do kernel com `// SAFETY:`, imposto por `clippy::undocumented_unsafe_blocks` |
 | Boot em QEMU | BIOS **e** UEFI em todo commit de kernel, desktop comparado pixel a pixel com a baseline (`tools/verify-boot.sh`) |
@@ -183,7 +183,7 @@ Lista priorizada do que vem a seguir: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ```
 OSjeff/
-├── osjeff_core/   # lógica pura no_std, testada no host (forbid(unsafe_code))
+├── kitsune_core/   # lógica pura no_std, testada no host (forbid(unsafe_code))
 ├── kernel/        # bare-metal x86_64-unknown-none: drivers, scheduler, compositor, wasm
 ├── os/            # builder: embute o kernel e gera as imagens BIOS/UEFI
 ├── fuzz/          # cargo-fuzz: 17 alvos (entropia, rede, OJFS, web, shell, editor, X.509, apps) + regressões

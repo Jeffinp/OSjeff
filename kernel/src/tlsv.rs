@@ -3,7 +3,7 @@
 //! `embedded-tls` asks its [`CryptoProvider`] for a [`TlsVerifier`]; the stock
 //! `UnsecureProvider` has none, which the library treats as "skip verification".
 //! [`Provider`] always has one: [`Verifier`], whose checks live in
-//! `osjeff_core::tlsverify` (chain building and validation by `rustls-webpki`,
+//! `kitsune_core::tlsverify` (chain building and validation by `rustls-webpki`,
 //! against the embedded trust store, at the *trusted* time from `clock`):
 //!
 //! 1. `verify_certificate`: the server's whole chain is validated for the host
@@ -26,7 +26,7 @@ use embedded_tls::blocking::{
     Aes128GcmSha256, CertificateEntryRef, CertificateRef, CertificateVerifyRef, CryptoProvider,
     TlsCipherSuite, TlsVerifier,
 };
-use osjeff_core::tlsverify::{self, CertError, TrustStore, Verified};
+use kitsune_core::tlsverify::{self, CertError, TrustStore, Verified};
 use rand_core::CryptoRngCore;
 use sha2::Digest;
 

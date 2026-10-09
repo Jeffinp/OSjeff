@@ -6,7 +6,7 @@
 //! copies it needs (taskbar, Apps, menus). Small monochrome UI glyphs (search, network,
 //! chevrons, ...) are drawn at the size asked, in the colour asked.
 //!
-//! Pure and host tested; `cargo test -p osjeff_core -- --ignored dump_icons` with
+//! Pure and host tested; `cargo test -p kitsune_core -- --ignored dump_icons` with
 //! `ICON_SHEET=/tmp/icons.ppm` writes a contact sheet to look at.
 
 use crate::glyph::Path;

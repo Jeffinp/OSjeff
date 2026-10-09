@@ -1,8 +1,8 @@
 //! Calculadora: a rounded keypad with the accent on the operator column, a large display
 //! whose text shrinks to fit, the pending expression and the last results above it, and a
-//! copy button. The arithmetic is `osjeff_core::calc` (immediate execution, percent, sign,
+//! copy button. The arithmetic is `kitsune_core::calc` (immediate execution, percent, sign,
 //! one memory register, history); the key layout and its hit testing are
-//! `osjeff_core::layout::{CALC_KEYS, calc_geom, calc_hit}`.
+//! `kitsune_core::layout::{CALC_KEYS, calc_geom, calc_hit}`.
 
 use super::kit;
 use super::ui;
@@ -10,9 +10,9 @@ use super::*;
 use crate::text::{self, FOOTNOTE, Weight};
 use core::cell::Cell;
 use core::ops::{Deref, DerefMut};
-use osjeff_core::calc::pretty;
-use osjeff_core::iconart::Glyph;
-use osjeff_core::layout::{CALC_KEYS, CalcHit, calc_geom, calc_hit};
+use kitsune_core::calc::pretty;
+use kitsune_core::iconart::Glyph;
+use kitsune_core::layout::{CALC_KEYS, CalcHit, calc_geom, calc_hit};
 
 /// Milliseconds a key stays lit after a keyboard press, and the "Copiado" note stays up.
 const FLASH_MS: u32 = 140;
@@ -91,7 +91,7 @@ fn label(k: u8) -> &'static str {
         b'=' => "=",
         b'n' => "±",
         b'.' => {
-            if osjeff_core::i18n::locale::decimal_sep(osjeff_core::i18n::lang()) == ',' {
+            if kitsune_core::i18n::locale::decimal_sep(kitsune_core::i18n::lang()) == ',' {
                 ","
             } else {
                 "."
@@ -284,7 +284,7 @@ impl Desktop {
             text::draw_right(
                 c,
                 Rect::new(g.history.x, g.copy.y, g.copy.x - g.history.x - 6, g.copy.h),
-                osjeff_core::t!("calc.copied"),
+                kitsune_core::t!("calc.copied"),
                 FOOTNOTE,
                 Weight::Medium,
                 theme::accent(),

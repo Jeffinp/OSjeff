@@ -1,6 +1,6 @@
 //! The painter: turns the engine's steps into pixels in the back buffer.
 //!
-//! Contract with the engine (`osjeff_core::compositor::Layer`): painting a layer with a clip gives,
+//! Contract with the engine (`kitsune_core::compositor::Layer`): painting a layer with a clip gives,
 //! inside the clip, the pixels a full paint would give; nothing is drawn outside the footprint
 //! `layers.rs` declared. Everything here goes through [`Canvas`] primitives, which honour the clip
 //! rectangle, so a layer paints only the part the engine asked for. Reading what is under a layer
@@ -10,7 +10,7 @@ use super::super::*;
 use super::layers::{Slot, slot_of};
 use crate::desktop::widgets::copy_region;
 use bootloader_api::info::FrameBufferInfo;
-use osjeff_core::compositor::{LayerId, Painter};
+use kitsune_core::compositor::{LayerId, Painter};
 
 /// Paints layers of `desk` into `back`.
 pub(super) struct DeskPainter<'a> {

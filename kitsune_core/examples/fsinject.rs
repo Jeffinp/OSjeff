@@ -2,7 +2,7 @@
 //! has no other way to receive a file, and a v2 file is at most 1024 bytes).
 //!
 //! ```text
-//! cargo run -p osjeff_core --example fsinject -- IMG [FOLDER/]NAME FILE
+//! cargo run -p kitsune_core --example fsinject -- IMG [FOLDER/]NAME FILE
 //! ```
 //!
 //! `IMG` is the raw disk QEMU attaches as the second IDE disk
@@ -11,7 +11,7 @@
 //! optional one-level folder, created if missing). The settings app's wallpaper
 //! picker then finds it by that path, e.g. `papel.png` or `fotos/praia.png`.
 
-use osjeff_core::fs;
+use kitsune_core::fs;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {

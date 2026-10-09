@@ -6,15 +6,15 @@
 //! compositor changes the back buffer only inside the plan's damage and uploads exactly that, so
 //! the two cannot drift apart. The framebuffer-only things follow a protocol that makes each
 //! restorable from the back buffer:
-//! - the cursor is erased first and painted last (`osjeff_core::cursor`);
+//! - the cursor is erased first and painted last (`kitsune_core::cursor`);
 //! - after an upload that touched the HUD's or a toast's rectangle, that thing is drawn again.
 
 use super::super::*;
 use crate::perf::Perf;
 use crate::trace;
 use bootloader_api::info::FrameBufferInfo;
-use osjeff_core::compositor::Region;
-use osjeff_core::cursor::CursorTrack;
+use kitsune_core::compositor::Region;
+use kitsune_core::cursor::CursorTrack;
 
 /// The three buffers of a frame and their shared layout.
 pub struct Screen<'a> {

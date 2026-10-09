@@ -3,11 +3,11 @@
 //! The RTC holds UTC. [`now`] returns local time of day, shifted by the zone
 //! offset the settings app chose ([`set_tz_minutes`], default -3 h = Brasilia);
 //! the date, which only the settings app needs, comes from [`read_utc`] and
-//! [`set_utc`]. The BCD / 12-hour / century logic is `osjeff_core::hw::rtc`.
+//! [`set_utc`]. The BCD / 12-hour / century logic is `kitsune_core::hw::rtc`.
 
 use crate::io::{inb, outb};
 use core::sync::atomic::{AtomicI32, Ordering};
-use osjeff_core::hw::rtc::{DateTime, RawRtc, decode, decode_datetime, encode_datetime};
+use kitsune_core::hw::rtc::{DateTime, RawRtc, decode, decode_datetime, encode_datetime};
 
 const ADDR: u16 = 0x70;
 const DATA: u16 = 0x71;
@@ -42,7 +42,7 @@ fn update_in_progress() -> bool {
     read_reg(0x0A) & 0x80 != 0
 }
 
-pub use osjeff_core::hw::rtc::Time;
+pub use kitsune_core::hw::rtc::Time;
 
 /// Reads (hours, minutes, seconds) of local time. Handles BCD and 12h formats per RTC reg B.
 pub fn now() -> Time {
@@ -51,7 +51,7 @@ pub fn now() -> Time {
     let m = read_reg(0x02);
     let h = read_reg(0x04);
     let regb = read_reg(0x0B);
-    osjeff_core::hw::rtc::shift_time_of_day(decode(s, m, h, regb, 0), tz_minutes())
+    kitsune_core::hw::rtc::shift_time_of_day(decode(s, m, h, regb, 0), tz_minutes())
 }
 
 /// Read the date and time registers as UTC. A coherent snapshot: if the RTC
@@ -101,7 +101,7 @@ pub fn set_utc(utc: &DateTime) {
 /// rollover between them cannot produce a torn value. Returns 0 if the RTC holds
 /// an impossible date (dead battery, unset clock).
 pub fn now_unix() -> u64 {
-    use osjeff_core::hw::rtc::{RawDateTime, decode_unix};
+    use kitsune_core::hw::rtc::{RawDateTime, decode_unix};
     let read = || {
         // The update flag is set for ~2 ms once a second; bounded so a stuck
         // register cannot hang the caller.

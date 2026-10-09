@@ -8,11 +8,11 @@
 //! [`NetConfig`] that `netd` obtained over DHCP (or its static fallback, QEMU's
 //! user-mode/SLIRP defaults 10.0.2.15/24, gateway 10.0.2.2, DNS 10.0.2.3) and
 //! changes through [`Net::reconfigure`] when the lease is renewed with different
-//! parameters or lost. The DHCP client is `osjeff_core::lease` run by `netd`;
+//! parameters or lost. The DHCP client is `kitsune_core::lease` run by `netd`;
 //! smoltcp's own DHCP socket is deliberately not used, so there is a single owner
 //! of the IP address.
 //!
-//! Names are resolved by `osjeff_core::dns` (not smoltcp's one-server DNS socket):
+//! Names are resolved by `kitsune_core::dns` (not smoltcp's one-server DNS socket):
 //! a TTL cache, every DHCP-supplied server, and failover with a timeout, over a
 //! plain smoltcp UDP socket.
 
@@ -24,15 +24,15 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 use embedded_tls::blocking::*;
-use osjeff_core::browser::{Conn, FailReason, append_capped};
+use kitsune_core::browser::{Conn, FailReason, append_capped};
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
 use smoltcp::socket::{tcp, udp};
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint};
 
-use osjeff_core::dns::{self, Cached, Outcome, Resolver, Step};
-use osjeff_core::net::{DnsServers, Ipv4, NetConfig, parse_ipv4};
+use kitsune_core::dns::{self, Cached, Outcome, Resolver, Step};
+use kitsune_core::net::{DnsServers, Ipv4, NetConfig, parse_ipv4};
 
 /// smoltcp `Instant` from the monotonic timer tick (TIMER_HZ).
 fn now() -> Instant {
@@ -46,7 +46,7 @@ pub struct Fetched {
     /// The response was cut at [`MAX_RESPONSE_BYTES`]; the rest was discarded.
     pub truncated: bool,
     /// The server certificate of an https response (what the browser's popover shows).
-    pub cert: Option<osjeff_core::browser::CertInfo>,
+    pub cert: Option<kitsune_core::browser::CertInfo>,
 }
 
 // ---- a Port as a smoltcp phy::Device ----
@@ -108,7 +108,7 @@ pub struct Net {
     resolver: Resolver,
     /// An app is fetching: a name (or literal) that resolves to a local, private or
     /// reserved address is refused after resolution, whatever the app's URL said
-    /// (`osjeff_core::appnet::ipv4_allowed`).
+    /// (`kitsune_core::appnet::ipv4_allowed`).
     public_only: bool,
 }
 
@@ -211,7 +211,7 @@ impl Net {
     /// Resolve `host` to an IPv4 address (bounded). A dotted-quad literal is its
     /// own answer and never goes to the network; otherwise the TTL cache is
     /// consulted, then the DHCP-supplied servers are asked in turn (rotating on
-    /// timeout or SERVFAIL, see `osjeff_core::dns::Resolve`).
+    /// timeout or SERVFAIL, see `kitsune_core::dns::Resolve`).
     pub(crate) fn resolve(&mut self, host: &str) -> Option<IpAddress> {
         if let Some(ip) = parse_ipv4(host.as_bytes()) {
             return Some(IpAddress::Ipv4(ip.0.into()));
@@ -327,7 +327,7 @@ impl Net {
     fn resolve_or_fail(&mut self, host: &str) -> Result<IpAddress, FailReason> {
         let ip = self.resolve(host).ok_or(FailReason::Dns)?;
         let IpAddress::Ipv4(a) = ip;
-        if self.public_only && !osjeff_core::appnet::ipv4_allowed(a.octets()) {
+        if self.public_only && !kitsune_core::appnet::ipv4_allowed(a.octets()) {
             crate::serial_println!(
                 "net: {} resolves to {}, a non-public address: refused",
                 host,
@@ -476,7 +476,8 @@ impl Net {
         let mut verifier = crate::tlsv::Verifier::new(allow_insecure);
         HS_DEADLINE.store(
             interrupts::ticks()
-                + osjeff_core::tlsverify::MAX_HANDSHAKE_MS * u64::from(interrupts::TIMER_HZ) / 1000,
+                + kitsune_core::tlsverify::MAX_HANDSHAKE_MS * u64::from(interrupts::TIMER_HZ)
+                    / 1000,
             Ordering::Relaxed,
         );
         let hs_start = now_ms();
@@ -572,7 +573,7 @@ impl Net {
         if out.is_empty() {
             Err(FailReason::Network)
         } else {
-            let cert = osjeff_core::browser::CertInfo::from_leaf(
+            let cert = kitsune_core::browser::CertInfo::from_leaf(
                 verifier.leaf_der(),
                 host,
                 chain_len,
@@ -595,8 +596,8 @@ impl Net {
         &mut self,
         server: IpAddress,
         timeout_ms: u64,
-    ) -> Option<osjeff_core::sntp::Measurement> {
-        use osjeff_core::sntp;
+    ) -> Option<kitsune_core::sntp::Measurement> {
+        use kitsune_core::sntp;
         let mut r = [0u8; 4];
         crate::rng::fill(&mut r);
         let local_port = 32768 + (u16::from_le_bytes([r[0], r[1]]) % 28000);
@@ -674,9 +675,16 @@ impl Net {
 }
 
 /// Build an HTTP/1.1 GET request asking for the language of the interface (the request itself
-/// is `osjeff_core::browser::build_get_request`; shared by the plain and TLS paths).
+/// is `kitsune_core::browser::build_get_request`; shared by the plain and TLS paths).
 fn build_request(req: &mut Vec<u8>, host: &str, path: &str, port: u16, tls: bool) {
-    osjeff_core::browser::build_get_request(req, osjeff_core::i18n::lang(), host, path, port, tls);
+    kitsune_core::browser::build_get_request(
+        req,
+        kitsune_core::i18n::lang(),
+        host,
+        path,
+        port,
+        tls,
+    );
 }
 
 // ---- TLS plumbing: an embedded-io stream over the smoltcp socket + an RNG ----

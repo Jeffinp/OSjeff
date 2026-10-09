@@ -34,7 +34,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
-$img = Join-Path $PSScriptRoot 'osjeff-bios.img'
+$img = Join-Path $PSScriptRoot 'kitsune-bios.img'
 
 # Build the project's `os` package (release) inside WSL. Returns nothing; throws
 # on failure. Factored out so both the QEMU and USB paths share it.
@@ -70,10 +70,10 @@ if ($Usb) {
     # it can be flashed RAW to a USB stick. No QEMU involved.
     Build-OSjeff
     $built = Get-ChildItem -Path (Join-Path $PSScriptRoot 'target\release\build') `
-        -Recurse -Filter 'osjeff-uefi.img' -ErrorAction SilentlyContinue |
+        -Recurse -Filter 'kitsune-uefi.img' -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime | Select-Object -Last 1
-    if (-not $built) { throw "osjeff-uefi.img nao encontrada apos o build" }
-    $usbImg = Join-Path $PSScriptRoot 'osjeff-uefi.img'
+    if (-not $built) { throw "kitsune-uefi.img nao encontrada apos o build" }
+    $usbImg = Join-Path $PSScriptRoot 'kitsune-uefi.img'
     Copy-Item $built.FullName $usbImg -Force
     Write-Host ""
     Write-Host "Imagem UEFI pronta: $usbImg" -ForegroundColor Green
@@ -92,9 +92,9 @@ if (-not $SkipBuild) {
 
     # Copy the freshest generated image to the project root.
     $built = Get-ChildItem -Path (Join-Path $PSScriptRoot 'target\release\build') `
-        -Recurse -Filter 'osjeff-bios.img' -ErrorAction SilentlyContinue |
+        -Recurse -Filter 'kitsune-bios.img' -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime | Select-Object -Last 1
-    if (-not $built) { throw "imagem osjeff-bios.img nao encontrada apos o build" }
+    if (-not $built) { throw "imagem kitsune-bios.img nao encontrada apos o build" }
     Copy-Item $built.FullName $img -Force
     Write-Host "Imagem pronta: $img" -ForegroundColor Green
 }
@@ -103,7 +103,7 @@ if (-not (Test-Path $img)) { throw "Imagem nao existe: $img (rode sem -SkipBuild
 
 # Persistent filesystem disk (secondary IDE master). Created blank on first run;
 # the kernel formats it on first boot and persists files there across reboots.
-$fsImg = Join-Path $PSScriptRoot 'osjeff-fs.img'
+$fsImg = Join-Path $PSScriptRoot 'kitsune-fs.img'
 if (-not (Test-Path $fsImg)) {
     # 64 MiB sparse-ish file (OJFS v3 needs >= 1 MiB). An older 64 KiB disk still
     # boots: the kernel stays on OJFS v2 ("disk too small for OJFS v3" on the serial).
@@ -113,7 +113,7 @@ if (-not (Test-Path $fsImg)) {
     Write-Host "Disco de arquivos criado: $fsImg" -ForegroundColor Green
 }
 
-$pcap = Join-Path $PSScriptRoot 'osjeff-net.pcap'
+$pcap = Join-Path $PSScriptRoot 'kitsune-net.pcap'
 # DOOM grows its wasm guest memory well past the default; give it more RAM.
 $mem = if ($Doom) { '512M' } else { '256M' }
 $qargs = @('-m', $mem, '-drive', "format=raw,file=$img",

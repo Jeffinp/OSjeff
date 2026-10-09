@@ -1,4 +1,4 @@
-//! Fuzz target: the v2 text editor (`osjeff_core::editor2`).
+//! Fuzz target: the v2 text editor (`kitsune_core::editor2`).
 //!
 //! The input is an initial document (arbitrary bytes, so invalid UTF-8 and
 //! stray `\r` are covered) and a sequence of arbitrary operations: typing,
@@ -15,9 +15,9 @@
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::clipboard::Clipboard;
-use osjeff_core::editor2::Editor;
-use osjeff_core::input::{KeyCode, KeyEvent, Mods};
+use kitsune_core::clipboard::Clipboard;
+use kitsune_core::editor2::Editor;
+use kitsune_core::input::{KeyCode, KeyEvent, Mods};
 
 /// Keep the document and the work per input bounded.
 const MAX_DOC: usize = 1 << 18;

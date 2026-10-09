@@ -20,9 +20,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup show # installs the nightly pinned in rust-toolchain.toml
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p osjeff_core
+      - run: cargo test -p kitsune_core
       # Proves the core really is no_std / bare-metal clean.
-      - run: cargo build -p osjeff_core --target x86_64-unknown-none
+      - run: cargo build -p kitsune_core --target x86_64-unknown-none
 
   lint:
     runs-on: ubuntu-latest
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy -p osjeff_core --all-targets -- -D warnings
+      - run: cargo clippy -p kitsune_core --all-targets -- -D warnings
       - run: cargo clippy -p kernel --target x86_64-unknown-none -- -D warnings
       - run: cargo fmt --all -- --check
 
@@ -44,7 +44,7 @@ jobs:
       - run: cargo build -p os --release # kernel + bootloader + BIOS/UEFI images
       - uses: actions/upload-artifact@v4
         with:
-          name: osjeff-images
+          name: kitsune-images
           path: target/release/build/os-*/out/*.img
           if-no-files-found: warn
 
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup show
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov -p osjeff_core --branch --fail-under-lines 90 --summary-only
+      - run: cargo llvm-cov -p kitsune_core --branch --fail-under-lines 90 --summary-only
 
   # Replays every minimised crash input (fuzz/regressions) through the fuzz targets
   # with overflow checks on. A fixed bug that comes back fails here.

@@ -1,6 +1,6 @@
 //! The desktop described as a compositor scene: which layers exist, where they can draw, what is
 //! opaque and what their look is. Nothing here paints and nothing here says what to repaint: the
-//! engine (`osjeff_core::compositor`) diffs this description with the previous frame's.
+//! engine (`kitsune_core::compositor`) diffs this description with the previous frame's.
 //!
 //! Bottom to top: wallpaper (implicit), windows in stacking order, the app bar, the panel, the
 //! snap preview, then the shell layers (Apps, Busca, menu, popover, Alt+Tab, sheet). The cursor,
@@ -13,8 +13,8 @@
 //! look that changes whenever its pixels do; then a branch in `paint.rs`.
 
 use super::super::*;
-use osjeff_core::compositor::{Layer, LayerId, Look, Scene};
-use osjeff_core::style::R_WINDOW;
+use kitsune_core::compositor::{Layer, LayerId, Look, Scene};
+use kitsune_core::style::R_WINDOW;
 
 pub(super) const PANEL: LayerId = LayerId(0xF000_0001);
 pub(super) const DOCK: LayerId = LayerId(0xF000_0002);
@@ -225,7 +225,7 @@ impl Desktop {
             scene.push(l);
         }
         if let Some(s) = &sh.search {
-            let g = osjeff_core::chrome::spotlight_geom(self.sw, self.sh, s.hits.len());
+            let g = kitsune_core::chrome::spotlight_geom(self.sw, self.sh, s.hits.len());
             scene.push(Layer::new(SEARCH, g.panel.inflated(40)).with_look(ep.overlay));
         }
         if let Some(m) = &sh.menu {

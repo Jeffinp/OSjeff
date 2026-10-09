@@ -1,4 +1,4 @@
-//! Host checks over the catalogs and the sources (`cargo test -p osjeff_core i18n`).
+//! Host checks over the catalogs and the sources (`cargo test -p kitsune_core i18n`).
 //!
 //! * the two catalogs define exactly the same keys with the same placeholders, and plural
 //!   families are complete;
@@ -8,7 +8,7 @@
 //! * no text names the implementation language or toolchain;
 //! * both fonts have a glyph for every character of both catalogs.
 //!
-//! `cargo test -p osjeff_core i18n_report -- --ignored --nocapture` prints, for the whole tree,
+//! `cargo test -p kitsune_core i18n_report -- --ignored --nocapture` prints, for the whole tree,
 //! the literals that look like Portuguese without accents (the migration backlog).
 
 use super::{Lang, placeholders};
@@ -376,14 +376,14 @@ fn source_files() -> Vec<(String, String)> {
     let root = repo_root();
     let skip = ["audit.rs"];
     let mut out = Vec::new();
-    for dir in ["kernel/src", "osjeff_core/src"] {
+    for dir in ["kernel/src", "kitsune_core/src"] {
         for p in rs_files(&root.join(dir)) {
             let rel = p
                 .strip_prefix(&root)
                 .unwrap()
                 .to_string_lossy()
                 .replace('\\', "/");
-            if rel.starts_with("osjeff_core/src/i18n/")
+            if rel.starts_with("kitsune_core/src/i18n/")
                 && skip.contains(&p.file_name().unwrap().to_str().unwrap())
             {
                 continue;
@@ -771,33 +771,33 @@ const ACCENT_STRICT: &[&str] = &[
     "kernel/src/desktop/shell.rs",
     "kernel/src/desktop/toasts_ui.rs",
     "kernel/src/desktop/chrome.rs",
-    "osjeff_core/src/launcher.rs",
+    "kitsune_core/src/launcher.rs",
     // w30: Arquivos, Imagens, Editor.
     "kernel/src/desktop/files.rs",
     "kernel/src/desktop/files_ui.rs",
     "kernel/src/desktop/sysstore.rs",
     "kernel/src/desktop/vfs.rs",
-    "osjeff_core/src/fileman.rs",
-    "osjeff_core/src/fileman/apps.rs",
-    "osjeff_core/src/fileman/ui.rs",
-    "osjeff_core/src/vfs.rs",
+    "kitsune_core/src/fileman.rs",
+    "kitsune_core/src/fileman/apps.rs",
+    "kitsune_core/src/fileman/ui.rs",
+    "kitsune_core/src/vfs.rs",
     // w31: Terminal, Tarefas, Registro, Calculadora
     "kernel/src/desktop/term.rs",
     "kernel/src/desktop/shellhost.rs",
     "kernel/src/desktop/tarefas.rs",
     "kernel/src/desktop/logview.rs",
     "kernel/src/desktop/calc_ui.rs",
-    "osjeff_core/src/activity.rs",
-    "osjeff_core/src/calc.rs",
-    "osjeff_core/src/shell/builtins.rs",
-    "osjeff_core/src/shell/exec.rs",
-    "osjeff_core/src/shell/fs.rs",
-    "osjeff_core/src/shell/glob.rs",
-    "osjeff_core/src/shell/line.rs",
-    "osjeff_core/src/shell/netcmds.rs",
-    "osjeff_core/src/shell/parse.rs",
-    "osjeff_core/src/shell/regex.rs",
-    "osjeff_core/src/shell/sys.rs",
+    "kitsune_core/src/activity.rs",
+    "kitsune_core/src/calc.rs",
+    "kitsune_core/src/shell/builtins.rs",
+    "kitsune_core/src/shell/exec.rs",
+    "kitsune_core/src/shell/fs.rs",
+    "kitsune_core/src/shell/glob.rs",
+    "kitsune_core/src/shell/line.rs",
+    "kitsune_core/src/shell/netcmds.rs",
+    "kitsune_core/src/shell/parse.rs",
+    "kitsune_core/src/shell/regex.rs",
+    "kitsune_core/src/shell/sys.rs",
 ];
 
 /// Files migrated in W32 (Navegador, Ajustes, apps WASM, Kit de componentes): same rule.
@@ -813,20 +813,20 @@ const ACCENT_STRICT_W32: &[&str] = &[
     "kernel/src/wasm/manager.rs",
     "kernel/src/wasm/manager/runtime.rs",
     "kernel/src/wasm/mod.rs",
-    "osjeff_core/src/appfs/mod.rs",
-    "osjeff_core/src/appinstall.rs",
-    "osjeff_core/src/appmanifest.rs",
-    "osjeff_core/src/browser.rs",
-    "osjeff_core/src/browser/cert.rs",
-    "osjeff_core/src/browser/errors.rs",
-    "osjeff_core/src/browser/pages.rs",
-    "osjeff_core/src/browser/tabs.rs",
-    "osjeff_core/src/settings.rs",
-    "osjeff_core/src/tlsverify.rs",
-    "osjeff_core/src/wallpaper.rs",
-    "osjeff_core/src/wasmsec.rs",
-    "osjeff_core/src/web/form.rs",
-    "osjeff_core/src/web/imgcache.rs",
+    "kitsune_core/src/appfs/mod.rs",
+    "kitsune_core/src/appinstall.rs",
+    "kitsune_core/src/appmanifest.rs",
+    "kitsune_core/src/browser.rs",
+    "kitsune_core/src/browser/cert.rs",
+    "kitsune_core/src/browser/errors.rs",
+    "kitsune_core/src/browser/pages.rs",
+    "kitsune_core/src/browser/tabs.rs",
+    "kitsune_core/src/settings.rs",
+    "kitsune_core/src/tlsverify.rs",
+    "kitsune_core/src/wallpaper.rs",
+    "kitsune_core/src/wasmsec.rs",
+    "kitsune_core/src/web/form.rs",
+    "kitsune_core/src/web/imgcache.rs",
 ];
 
 fn unaccented_literals(file: &str, src: &str, a: &Accents) -> Vec<String> {
@@ -873,7 +873,7 @@ fn migrated_sources_have_accents() {
 
 /// The whole tree: literals that look like unaccented Portuguese. Not a pass/fail check.
 #[test]
-#[ignore = "prints the migration backlog: cargo test -p osjeff_core i18n_report -- --ignored --nocapture"]
+#[ignore = "prints the migration backlog: cargo test -p kitsune_core i18n_report -- --ignored --nocapture"]
 fn i18n_report() {
     let a = accents();
     let mut n = 0;

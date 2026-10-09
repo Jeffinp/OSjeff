@@ -3,7 +3,7 @@
 //! (a long pill for the focused app, a dot for the others), a tooltip, the launch hop, a context
 //! menu with the app's windows, and a *Mostrar área de trabalho* sliver at the right end.
 //!
-//! Geometry and rules are pure (`osjeff_core::taskbar`). The bar is a plain translucent surface
+//! Geometry and rules are pure (`kitsune_core::taskbar`). The bar is a plain translucent surface
 //! (nothing is blurred) painted live over the cached scene; icons are cached scaled surfaces.
 //! There is no magnification: an icon lifts a little under the pointer (a spring per icon) and a
 //! dragged icon makes its neighbours slide (a spring per icon too).
@@ -11,9 +11,9 @@
 use super::shell::*;
 use super::*;
 use crate::text::FOOTNOTE;
-use osjeff_core::anim::{self, Spring, Tween, curves};
-use osjeff_core::style::R_TASKBAR;
-use osjeff_core::taskbar::{self as tb, Click, Hit, Indicator};
+use kitsune_core::anim::{self, Spring, Tween, curves};
+use kitsune_core::style::R_TASKBAR;
+use kitsune_core::taskbar::{self as tb, Click, Hit, Indicator};
 
 /// Seconds the pointer must rest on an icon before its label shows.
 const TIP_DELAY: f32 = 0.35;
@@ -200,7 +200,7 @@ impl Desktop {
         let snap = d.count != kinds.len();
         d.count = kinds.len();
         let mut busy = false;
-        let reduce = osjeff_core::anim::reduce_motion();
+        let reduce = kitsune_core::anim::reduce_motion();
         for (i, k) in kinds.iter().enumerate() {
             // Where this icon wants to be (dragging makes room for the dragged one).
             let slot = match &d.drag {
@@ -408,7 +408,7 @@ impl Desktop {
         }
         if wins.is_empty() {
             entries.push(Entry::item(
-                osjeff_core::t!("common.open"),
+                kitsune_core::t!("common.open"),
                 "",
                 Cmd::Launch(k),
             ));
@@ -416,20 +416,20 @@ impl Desktop {
         entries.push(Entry::sep());
         if k.multi() {
             entries.push(Entry::item(
-                osjeff_core::t!("taskbar.menu.new_window"),
+                kitsune_core::t!("taskbar.menu.new_window"),
                 "",
                 Cmd::NewOf(k),
             ));
         }
         if self.shell.task.pinned.contains(&k) {
             entries.push(Entry::item(
-                osjeff_core::t!("taskbar.menu.unpin"),
+                kitsune_core::t!("taskbar.menu.unpin"),
                 "",
                 Cmd::Unpin(k),
             ));
         } else if k.pinnable() {
             entries.push(Entry::item(
-                osjeff_core::t!("taskbar.menu.pin"),
+                kitsune_core::t!("taskbar.menu.pin"),
                 "",
                 Cmd::Pin(k),
             ));
@@ -438,9 +438,9 @@ impl Desktop {
             entries.push(Entry::sep());
             entries.push(Entry::item(
                 if wins.len() > 1 {
-                    osjeff_core::t!("taskbar.menu.close_all")
+                    kitsune_core::t!("taskbar.menu.close_all")
                 } else {
-                    osjeff_core::t!("taskbar.menu.close_window")
+                    kitsune_core::t!("taskbar.menu.close_window")
                 },
                 "",
                 Cmd::QuitOf(k),
@@ -582,7 +582,7 @@ impl Desktop {
                         c,
                         l.apps.x + l.apps.w / 2,
                         panel.y - 6,
-                        osjeff_core::t!("taskbar.apps"),
+                        kitsune_core::t!("taskbar.apps"),
                     );
                 }
                 Some(Hit::Sliver) => {
@@ -590,7 +590,7 @@ impl Desktop {
                         c,
                         l.sliver.x + l.sliver.w / 2,
                         panel.y - 6,
-                        osjeff_core::t!("taskbar.show_desktop"),
+                        kitsune_core::t!("taskbar.show_desktop"),
                     );
                 }
                 _ => {
@@ -602,7 +602,7 @@ impl Desktop {
                             .filter(|w| w.app.kind() == k && !w.is_closing())
                             .count();
                         let label = if n > 1 {
-                            osjeff_core::tp!("taskbar.tip", n, name = k.label())
+                            kitsune_core::tp!("taskbar.tip", n, name = k.label())
                         } else {
                             String::from(k.label())
                         };

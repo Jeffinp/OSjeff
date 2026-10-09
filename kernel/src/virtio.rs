@@ -30,11 +30,11 @@ pub fn virt_to_phys(virt: u64, phys_offset: u64) -> Option<u64> {
         .map(|p| p.as_u64())
 }
 
-pub use osjeff_core::hw::virtio::{
+pub use kitsune_core::hw::virtio::{
     CapLoc, S_ACK, S_DRIVER, S_DRIVER_OK, S_FAILED, S_FEATURES_OK, VirtioCaps, discover, negotiate,
     negotiate_features, notify_doorbell_offset, validate_queue_size,
 };
-use osjeff_core::hw::virtio::{CapSpace, CommonCfg};
+use kitsune_core::hw::virtio::{CapSpace, CommonCfg};
 
 impl CapSpace for PciDevice {
     fn cap_list(&self) -> Option<u8> {
@@ -184,12 +184,12 @@ impl CommonCfg for Common {
 pub fn bar_base(dev: &PciDevice, bar: u8) -> Option<u64> {
     let lo = dev.bar(bar);
     // 64-bit memory BAR: the high half is in the next BAR slot.
-    let hi = if osjeff_core::hw::pci::bar_is_64bit(lo) {
+    let hi = if kitsune_core::hw::pci::bar_is_64bit(lo) {
         dev.bar(bar.saturating_add(1))
     } else {
         0
     };
-    osjeff_core::hw::pci::memory_bar_base(bar, lo, hi)
+    kitsune_core::hw::pci::memory_bar_base(bar, lo, hi)
 }
 
 /// Virtual address (through the physical-memory map) of the start of a

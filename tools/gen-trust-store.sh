@@ -5,8 +5,8 @@
 #
 # Reads tools/trust-store.list (Mozilla bundle file names, in order), converts each
 # root to DER and writes
-#   osjeff_core/data/trust-store.bin     "OJTS1\0", u16 count, then (u16 len, DER)*
-#   osjeff_core/data/trust-store.sha256  "<sha256 of the DER>  <name>" per root
+#   kitsune_core/data/trust-store.bin     "OJTS1\0", u16 count, then (u16 len, DER)*
+#   kitsune_core/data/trust-store.sha256  "<sha256 of the DER>  <name>" per root
 # The manifest is compiled into the core and a unit test checks that every root in
 # the blob hashes to the line documented here, so a silent change of the data
 # cannot pass the tests. Output is deterministic: same inputs, same bytes.
@@ -21,8 +21,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ca_dir=${1:-/usr/share/ca-certificates/mozilla}
 list=tools/trust-store.list
-out_bin=osjeff_core/data/trust-store.bin
-out_sum=osjeff_core/data/trust-store.sha256
+out_bin=kitsune_core/data/trust-store.bin
+out_sum=kitsune_core/data/trust-store.sha256
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 

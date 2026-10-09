@@ -11,7 +11,7 @@ $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 $root = Split-Path $PSScriptRoot   # tools\ -> project root
 Set-Location $root
 
-$fs = Join-Path $root 'osjeff-fs.img'
+$fs = Join-Path $root 'kitsune-fs.img'
 if (-not (Test-Path $fs)) { $f = [IO.File]::Create($fs); $f.SetLength(64MB); $f.Close() }
 $shots = Join-Path $root '.shots'
 New-Item -ItemType Directory -Force -Path $shots | Out-Null
@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Force -Path $shots | Out-Null
 $serialLog = Join-Path $shots 'serial.log'
 $qargs = @(
     '-accel', 'whpx', '-m', '256M',
-    '-drive', "format=raw,file=$(Join-Path $root 'osjeff-bios.img')",
+    '-drive', "format=raw,file=$(Join-Path $root 'kitsune-bios.img')",
     '-drive', "format=raw,file=$fs,if=ide,index=2",
     '-netdev', 'user,id=n0',
     '-device', 'ne2k_isa,netdev=n0,mac=52:54:00:12:34:56',

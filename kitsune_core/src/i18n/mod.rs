@@ -15,7 +15,7 @@
 //!   (`key.one` / `key.other`) chosen by the language's rule ([`plural`]).
 //! * **Macros** for call sites: `t!("key")` is a `&str`; `t!("key", n = 3)` a `String`;
 //!   `tp!("key", count)` picks the plural; `tk!("key")` marks a key in a table without
-//!   looking it up. The host tests (`cargo test -p osjeff_core i18n`) scan the sources for
+//!   looking it up. The host tests (`cargo test -p kitsune_core i18n`) scan the sources for
 //!   these literals and fail on a key that is missing, unused, or that differs between
 //!   the catalogs.
 //!

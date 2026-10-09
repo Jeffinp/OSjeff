@@ -1,5 +1,5 @@
 //! `Desktop` methods: the image viewer (Kind `Viewer`, "Imagens"). Decoding, zoom and pan decisions
-//! are `osjeff_core::image` / `osjeff_core::viewer` (and `viewer::ui` for the window geometry, the
+//! are `kitsune_core::image` / `kitsune_core::viewer` (and `viewer::ui` for the window geometry, the
 //! filmstrip maths, pan inertia, the slideshow clock and the rotation sampler); this module loads the
 //! file through the VFS, keeps the window's state, animates it and paints the pixels.
 //!
@@ -13,14 +13,14 @@ use super::appui::{self, level};
 use super::ui::ButtonKind;
 use super::*;
 use crate::text::{self, CALLOUT, FOOTNOTE, Weight};
-use osjeff_core::anim::{Tween, curves};
-use osjeff_core::appart::Tool;
-use osjeff_core::fileman::TextInput;
-use osjeff_core::image::{self, Filter, Format, Image};
-use osjeff_core::raster::Surface;
-use osjeff_core::t;
-use osjeff_core::viewer as vw;
-use osjeff_core::viewer::ui::{self as vui, FitMode, Hit, Layout};
+use kitsune_core::anim::{Tween, curves};
+use kitsune_core::appart::Tool;
+use kitsune_core::fileman::TextInput;
+use kitsune_core::image::{self, Filter, Format, Image};
+use kitsune_core::raster::Surface;
+use kitsune_core::t;
+use kitsune_core::viewer as vw;
+use kitsune_core::viewer::ui::{self as vui, FitMode, Hit, Layout};
 
 /// Largest file the viewer reads (the decoder bounds the pixels on its own; the kernel
 /// heap is 64 MiB, so the file and the decoded pixels must both fit).
@@ -1250,7 +1250,7 @@ impl Desktop {
             if fade >= 256 {
                 px
             } else {
-                osjeff_core::raster::lerp(bgpx, px, fade) | 0xFF00_0000
+                kitsune_core::raster::lerp(bgpx, px, fade) | 0xFF00_0000
             }
         };
         if angle != 0 {
@@ -1353,7 +1353,7 @@ fn make_thumb(path: &[u8]) -> Thumb {
     };
     let mut s = Surface::new(side, side);
     for (d, &p) in s.px.iter_mut().zip(sq.pixels()) {
-        *d = osjeff_core::raster::premul(p);
+        *d = kitsune_core::raster::premul(p);
     }
     s.mask_rrect(8, Corner::Circle, crate::fb::masks());
     Thumb::Ready(s)

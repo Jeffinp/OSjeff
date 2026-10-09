@@ -16,7 +16,7 @@
 //! editor, terminal commands), which also builds the RAM fallback when this module
 //! leaves the disk alone. Sectors 0..127 are never written by this module (the v3
 //! library guarantees it), so a v2 image there stays byte-for-byte as it was. The
-//! welcome files come from `osjeff_core::vfs::seed_welcome`, the only copy.
+//! welcome files come from `kitsune_core::vfs::seed_welcome`, the only copy.
 //!
 //! API: [`with_fs`] (run a closure on the mounted [`Fs3`]), [`is_v3`], [`state`]
 //! and [`now`] (Unix seconds, UTC, for the timestamps v3 wants). The filesystem
@@ -26,8 +26,8 @@
 use crate::ata::AtaDisk;
 use crate::sync::YieldMutex;
 use core::sync::atomic::{AtomicU8, Ordering};
-use osjeff_core::blockdev::BlockDevice;
-use osjeff_core::fs3::{
+use kitsune_core::blockdev::BlockDevice;
+use kitsune_core::fs3::{
     self, Detected, FormatOptions, Fs3, FsError, MIN_DISK_SECTORS, MigrateError,
 };
 
@@ -255,7 +255,7 @@ fn format_and_seed(dev: AtaDisk) {
             return;
         }
     };
-    match osjeff_core::vfs::seed_welcome(&mut fs, now) {
+    match kitsune_core::vfs::seed_welcome(&mut fs, now) {
         Ok(()) => {
             crate::serial_println!("storage: blank disk, formatted OJFS v3 with 3 welcome files")
         }

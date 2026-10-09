@@ -4,7 +4,7 @@
 
 use super::shell::Cmd;
 use super::*;
-use osjeff_core::window::TitleBtn;
+use kitsune_core::window::TitleBtn;
 
 /// Keys the [`Keymap`] has no `Key` for; read from the raw scancode.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -51,12 +51,12 @@ impl Desktop {
     /// PageUp, PageDown and F3 for a terminal (scrollback) or an editor.
     fn text_special(&mut self, id: WindowId, kind: Kind, sp: Special) -> bool {
         let code = match sp {
-            Special::PageUp => osjeff_core::input::KeyCode::PageUp,
-            Special::PageDown => osjeff_core::input::KeyCode::PageDown,
-            Special::F3 => osjeff_core::input::KeyCode::F(3),
+            Special::PageUp => kitsune_core::input::KeyCode::PageUp,
+            Special::PageDown => kitsune_core::input::KeyCode::PageDown,
+            Special::F3 => kitsune_core::input::KeyCode::F(3),
             _ => return false,
         };
-        let ev = osjeff_core::input::KeyEvent::new(code, self.mods());
+        let ev = kitsune_core::input::KeyEvent::new(code, self.mods());
         if kind == Kind::Terminal {
             self.term_event(id, ev);
         } else {
@@ -180,7 +180,7 @@ impl Desktop {
                     if self.switcher.is_some() {
                         return true;
                     }
-                    use osjeff_core::snap::Arrow;
+                    use kitsune_core::snap::Arrow;
                     let shift = self.keymap.shift();
                     if let Some(f) = self.focused()
                         && !shift
@@ -567,7 +567,7 @@ impl Desktop {
     }
 
     /// Tile window `id` to `zone` of the work area (animated).
-    pub(crate) fn snap_window(&mut self, id: WindowId, zone: osjeff_core::snap::SnapZone) {
+    pub(crate) fn snap_window(&mut self, id: WindowId, zone: kitsune_core::snap::SnapZone) {
         let work = self.work_area();
         if self.wm.snap_to(id, zone, work) {
             self.geometry_changed(id);
@@ -575,8 +575,8 @@ impl Desktop {
     }
 
     /// `Alt+arrow` on the focused window. `true` when there was a window to act on.
-    fn snap_key(&mut self, arrow: osjeff_core::snap::Arrow) -> bool {
-        use osjeff_core::snap::{SnapAct, key_action};
+    fn snap_key(&mut self, arrow: kitsune_core::snap::Arrow) -> bool {
+        use kitsune_core::snap::{SnapAct, key_action};
         let Some(id) = self.focused() else {
             return false;
         };

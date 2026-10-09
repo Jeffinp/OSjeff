@@ -1,12 +1,12 @@
-//! Cache of the app-interior art (`osjeff_core::appart`): the coloured file icons of
+//! Cache of the app-interior art (`kitsune_core::appart`): the coloured file icons of
 //! Arquivos and the monochrome tool glyphs of the toolbars. Each (kind, size, colour) is
 //! drawn once and then blitted; the cache is bounded and used only by the compositor thread.
 
 use crate::fb::Canvas;
 use crate::sync::RacyCell;
 use alloc::vec::Vec;
-use osjeff_core::appart::{self, FileKind, Tool};
-use osjeff_core::raster::Surface;
+use kitsune_core::appart::{self, FileKind, Tool};
+use kitsune_core::raster::Surface;
 
 const MAX_FILE: usize = 48;
 const MAX_TOOL: usize = 160;

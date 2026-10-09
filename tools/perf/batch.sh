@@ -8,7 +8,7 @@ for sc in "$@"; do
     out=runs/$label/${mode}_${sc}_$n
     mkdir -p runs/$label
     if [ "$ic" = 1 ]; then export QEMU_EXTRA="-icount shift=0"; else unset QEMU_EXTRA; fi
-    ./run.sh "$imgdir/osjeff-$mode.img" "$mode" "$out" 150 "scen/$sc.sh"
+    ./run.sh "$imgdir/kitsune-$mode.img" "$mode" "$out" 150 "scen/$sc.sh"
     echo "done $out"
   done
 done

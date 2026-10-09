@@ -1,4 +1,4 @@
-//! Fuzz target: the entropy subsystem (`osjeff_core::entropy`).
+//! Fuzz target: the entropy subsystem (`kitsune_core::entropy`).
 //!
 //! The input is a script of operations on one `Entropy`: add bytes from any source id
 //! with any claimed bit count, feed timestamps, request output of any size, trigger
@@ -13,7 +13,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::entropy::{Entropy, MAX_SOURCES, Quality, source};
+use kitsune_core::entropy::{Entropy, MAX_SOURCES, Quality, source};
 
 const MAX_OUT: usize = 4096;
 const MAX_ADD: usize = 256;

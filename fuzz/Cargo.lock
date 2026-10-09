@@ -313,16 +313,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "osjeff-fuzz"
+name = "kitsune-fuzz"
 version = "0.0.0"
 dependencies = [
  "arbitrary",
  "libfuzzer-sys",
- "osjeff_core",
+ "kitsune_core",
 ]
 
 [[package]]
-name = "osjeff_core"
+name = "kitsune_core"
 version = "0.1.0"
 dependencies = [
  "p256",

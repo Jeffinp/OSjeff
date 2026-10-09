@@ -18,10 +18,10 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::browser::{self, PageNote};
-use osjeff_core::deflate::{deflate_fixed, zlib_compress};
-use osjeff_core::gzip::MAX_DECODED_BYTES;
-use osjeff_core::inflate::{self, Inflater};
+use kitsune_core::browser::{self, PageNote};
+use kitsune_core::deflate::{deflate_fixed, zlib_compress};
+use kitsune_core::gzip::MAX_DECODED_BYTES;
+use kitsune_core::inflate::{self, Inflater};
 
 fn gzip(plain: &[u8]) -> Vec<u8> {
     let mut v = vec![0x1F, 0x8B, 8, 0, 0, 0, 0, 0, 0, 3];
@@ -65,7 +65,7 @@ fuzz_target!(|data: &[u8]| {
         assert!(p.body.len() <= MAX_DECODED_BYTES.max(256));
         let _ = browser::body_bytes(resp);
         let _ = browser::body_partial(resp, flagged_cut);
-        let _ = osjeff_core::appnet::app_response(resp, 1 << 16);
+        let _ = kitsune_core::appnet::app_response(resp, 1 << 16);
     };
     check(bytes);
     for h in [

@@ -98,8 +98,8 @@ pub(crate) struct AppFault(pub &'static str);
 impl core::fmt::Display for AppFault {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // The log is English; the window asks the catalog again in the language of the moment.
-        f.write_str(osjeff_core::i18n::tr_in(
-            osjeff_core::i18n::Lang::En,
+        f.write_str(kitsune_core::i18n::tr_in(
+            kitsune_core::i18n::Lang::En,
             self.0,
         ))
     }
@@ -129,22 +129,22 @@ impl Why {
         }
     }
 
-    fn render(&self, l: osjeff_core::i18n::Lang) -> alloc::string::String {
-        osjeff_core::i18n::tr_fmt_in(
+    fn render(&self, l: kitsune_core::i18n::Lang) -> alloc::string::String {
+        kitsune_core::i18n::tr_fmt_in(
             l,
             self.key,
-            &[("x", osjeff_core::i18n::Arg::Str(self.arg.as_str()))],
+            &[("x", kitsune_core::i18n::Arg::Str(self.arg.as_str()))],
         )
     }
 
     /// In the language in effect.
     pub(crate) fn text(&self) -> alloc::string::String {
-        self.render(osjeff_core::i18n::lang())
+        self.render(kitsune_core::i18n::lang())
     }
 
     /// In English, for the log.
     pub(crate) fn log(&self) -> alloc::string::String {
-        self.render(osjeff_core::i18n::Lang::En)
+        self.render(kitsune_core::i18n::Lang::En)
     }
 }
 
@@ -456,7 +456,7 @@ fn run(bytes: &[u8], entry: &str, state: HostState) -> Result<(), &'static str> 
 
 /// Why a guest call failed, in words for the window (and, in English, for the log).
 pub(crate) fn describe(e: &wasmi::Error) -> Why {
-    use osjeff_core::tk;
+    use kitsune_core::tk;
     if e.as_trap_code() == Some(wasmi::TrapCode::OutOfFuel) {
         return Why::new(tk!("apps.why.out_of_fuel"));
     }

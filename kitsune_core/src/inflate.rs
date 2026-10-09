@@ -475,7 +475,7 @@ enum Table {
 /// A resumable DEFLATE / zlib decoder over a complete input slice.
 ///
 /// ```
-/// use osjeff_core::inflate::Inflater;
+/// use kitsune_core::inflate::Inflater;
 /// // zlib stream of "hi" stored in one block.
 /// let z = [0x78, 0x01, 0x01, 0x02, 0x00, 0xFD, 0xFF, b'h', b'i', 0x01, 0x3B, 0x00, 0xD2];
 /// let mut inf = Inflater::new_zlib(&z, 16).unwrap();

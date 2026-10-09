@@ -2,8 +2,8 @@
 //! de apps, Teclado, Data e hora, Rede, Disco, Energia, Sobre) and a page of grouped controls
 //! built from the toolkit.
 //!
-//! The model (`osjeff_core::settings::Settings`), its text form, the wallpaper presets, the
-//! time-zone table and the clock arithmetic are pure and tested in `osjeff_core`. This file is
+//! The model (`kitsune_core::settings::Settings`), its text form, the wallpaper presets, the
+//! time-zone table and the clock arithmetic are pure and tested in `kitsune_core`. This file is
 //! the window. Each page is written once, as a function of a [`Ui`]; the same code draws the
 //! page, finds what a click hit and what the pointer is over, so the three can never disagree
 //! about where a control is. [`Desktop::settings_apply`] makes a new `Settings` take effect
@@ -15,19 +15,19 @@ use super::ui::{self, ButtonKind};
 use super::*;
 use crate::text::{self, BODY, CALLOUT, CAPTION, FOOTNOTE, TITLE1, TITLE2, Weight};
 use core::cell::Cell;
-use osjeff_core::activity::{self, Glide};
-use osjeff_core::hw::rtc::{DateTime, Field, local_to_utc, utc_to_local};
-use osjeff_core::i18n::{self, Arg, Civil, DateStyle, Lang};
-use osjeff_core::iconart::Glyph;
-use osjeff_core::keymap::Layout;
-use osjeff_core::settings::{
+use kitsune_core::activity::{self, Glide};
+use kitsune_core::hw::rtc::{DateTime, Field, local_to_utc, utc_to_local};
+use kitsune_core::i18n::{self, Arg, Civil, DateStyle, Lang};
+use kitsune_core::iconart::Glyph;
+use kitsune_core::keymap::Layout;
+use kitsune_core::settings::{
     ACCENTS, DOCK_ZOOM_MAX, PATH_CAP, Settings, TIMEZONES, TOAST_SECS_MAX, TOAST_SECS_MIN,
     WallpaperChoice, accent_name, city_name, search_timezones, utc_label,
 };
-use osjeff_core::sysif::{DiskUsage, SettingsStore};
-use osjeff_core::wallpaper::{self, PRESETS, Style};
-use osjeff_core::widgets as wg;
-use osjeff_core::{t, tk};
+use kitsune_core::sysif::{DiskUsage, SettingsStore};
+use kitsune_core::wallpaper::{self, PRESETS, Style};
+use kitsune_core::widgets as wg;
+use kitsune_core::{t, tk};
 
 const SIDE_W: i32 = 208;
 const ROW: i32 = 48;
@@ -458,7 +458,7 @@ fn page(ui: &mut Ui<'_, '_>, d: &Desktop) {
 }
 
 fn page_appearance(ui: &mut Ui<'_, '_>) {
-    use osjeff_core::style::AppearanceSetting as A;
+    use kitsune_core::style::AppearanceSetting as A;
     let s = ui.s;
     ui.title(t!("settings.sec.appearance"));
     ui.header(t!("settings.theme"));
@@ -1017,7 +1017,7 @@ fn kv_row(ui: &mut Ui<'_, '_>, card: Rect, i: i32, name: &str, value: &str) {
 }
 
 fn page_network(ui: &mut Ui<'_, '_>, d: &Desktop) {
-    use osjeff_core::netstats::NicKind;
+    use kitsune_core::netstats::NicKind;
     ui.title(t!("settings.sec.network"));
     let snap = crate::netd::stats();
     let has_nic = snap.nic != NicKind::None;
@@ -1094,7 +1094,7 @@ fn page_network(ui: &mut Ui<'_, '_>, d: &Desktop) {
                 dns.push_str(&alloc::format!("{x}"));
             }
         }
-        lease = if cfg == osjeff_core::net::NetConfig::STATIC_FALLBACK {
+        lease = if cfg == kitsune_core::net::NetConfig::STATIC_FALLBACK {
             String::from(t!("settings.net.static"))
         } else if let Some(ms) = snap.lease_remaining_ms {
             t!(
@@ -1332,9 +1332,9 @@ fn page_about(ui: &mut Ui<'_, '_>, d: &Desktop) {
     });
     kv_row(ui, card, 4, t!("settings.about.boot"), &boot);
     let sec = match crate::rng::quality() {
-        osjeff_core::entropy::Quality::Strong => t!("settings.about.rng_strong"),
-        osjeff_core::entropy::Quality::Mixed => t!("settings.about.rng_mixed"),
-        osjeff_core::entropy::Quality::Weak => t!("settings.about.rng_weak"),
+        kitsune_core::entropy::Quality::Strong => t!("settings.about.rng_strong"),
+        kitsune_core::entropy::Quality::Mixed => t!("settings.about.rng_mixed"),
+        kitsune_core::entropy::Quality::Weak => t!("settings.about.rng_weak"),
     };
     kv_row(ui, card, 5, t!("settings.about.security"), sec);
 }
@@ -1351,7 +1351,7 @@ fn preview(c: &mut Canvas, r: Rect, pr: &wallpaper::Preset) {
     }
     if pr.style == Style::Glow {
         let saved = kit::clip_to(c, r.inflated(-1));
-        let lut = osjeff_core::raster::glow_lut();
+        let lut = kitsune_core::raster::glow_lut();
         for b in sc.blobs.iter().filter(|b| b.alpha > 0 && b.r > 0) {
             let cx = r.x + (r.w as i64 * b.x as i64 / 1000) as i32;
             let cy = r.y + (r.h as i64 * b.y as i64 / 1000) as i32;
@@ -1392,7 +1392,7 @@ impl Desktop {
     pub(crate) fn settings_apply(
         &mut self,
         new: Settings,
-    ) -> Result<(), osjeff_core::sysif::SinkError> {
+    ) -> Result<(), kitsune_core::sysif::SinkError> {
         self.settings_apply_live(new);
         VfsStore.save(&new.to_text())
     }
@@ -1670,7 +1670,7 @@ impl Desktop {
                 return;
             }
             h if (A_THEME..A_THEME + 3).contains(&h) => {
-                use osjeff_core::style::AppearanceSetting as A;
+                use kitsune_core::style::AppearanceSetting as A;
                 s.appearance = [A::Auto, A::Light, A::Dark][(h - A_THEME) as usize];
             }
             h if (A_SWATCH..A_SWATCH + 8).contains(&h) => s.accent = (h - A_SWATCH) as u8,

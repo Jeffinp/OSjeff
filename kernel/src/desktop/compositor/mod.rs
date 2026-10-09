@@ -26,8 +26,8 @@ mod verify;
 use super::*;
 use crate::perf::Perf;
 use crate::trace;
+use kitsune_core::compositor::{Engine, Plan};
 use layers::Epochs;
-use osjeff_core::compositor::{Engine, Plan};
 use present::FbPasses;
 pub use present::Screen;
 
@@ -128,7 +128,7 @@ impl Compositor {
         let frame_start = crate::io::rdtsc();
         let cpu_start = trace::cpu_now();
 
-        // CURSOR INVARIANT (see `osjeff_core::cursor`): the sprite lives only in the
+        // CURSOR INVARIANT (see `kitsune_core::cursor`): the sprite lives only in the
         // framebuffer, never in `back`. Every frame that renders anything first erases it,
         // does its own uploads, toasts and HUD, and paints it again as the very last step.
         let mut erased_hud = false;

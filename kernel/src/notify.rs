@@ -9,14 +9,14 @@
 //! without being a warning. The compositor drains the queue every loop pass; with
 //! nothing queued that costs one atomic load.
 //!
-//! The overlay itself (stacking, timing, drawing) is `osjeff_core::notify` and
+//! The overlay itself (stacking, timing, drawing) is `kitsune_core::notify` and
 //! `desktop/toasts_ui.rs`.
 
 use crate::klog::{self, Level};
 use crate::sync::RacyCell;
 use core::fmt::{self, Write as _};
 use core::sync::atomic::{AtomicUsize, Ordering};
-use osjeff_core::klog::FixedBuf;
+use kitsune_core::klog::FixedBuf;
 
 const CAP: usize = 8;
 const TEXT: usize = 64;
@@ -47,7 +47,7 @@ pub fn notify(level: Level, args: fmt::Arguments<'_>) {
 /// of the interface. The log gets the English text at the same level, and its record is
 /// marked so the log watcher does not show it a second time in English. Unlike [`notify`]
 /// this allocates: call it from the desktop, not from an interrupt handler.
-pub fn notify_key(level: Level, key: &'static str, args: osjeff_core::i18n::Args<'_>) {
+pub fn notify_key(level: Level, key: &'static str, args: kitsune_core::i18n::Args<'_>) {
     notify_with(level, key, |_| alloc::string::String::new(), args);
 }
 
@@ -56,7 +56,7 @@ pub fn notify_key(level: Level, key: &'static str, args: osjeff_core::i18n::Args
 pub fn notify_why(
     level: Level,
     key: &'static str,
-    why: impl Fn(osjeff_core::i18n::Lang) -> alloc::string::String,
+    why: impl Fn(kitsune_core::i18n::Lang) -> alloc::string::String,
 ) {
     notify_with(level, key, why, &[]);
 }
@@ -64,10 +64,10 @@ pub fn notify_why(
 fn notify_with(
     level: Level,
     key: &'static str,
-    why: impl Fn(osjeff_core::i18n::Lang) -> alloc::string::String,
-    args: osjeff_core::i18n::Args<'_>,
+    why: impl Fn(kitsune_core::i18n::Lang) -> alloc::string::String,
+    args: kitsune_core::i18n::Args<'_>,
 ) {
-    use osjeff_core::i18n::{Arg, Lang, lang, tr_fmt_in};
+    use kitsune_core::i18n::{Arg, Lang, lang, tr_fmt_in};
     let say = |l: Lang| {
         let w = why(l);
         let mut all: alloc::vec::Vec<(&str, Arg<'_>)> = alloc::vec::Vec::from(args);

@@ -1,4 +1,4 @@
-//! Fuzz target: the app package reader (`osjeff_core::{wasmsec, appmanifest}`).
+//! Fuzz target: the app package reader (`kitsune_core::{wasmsec, appmanifest}`).
 //!
 //! The first input byte picks how the rest is presented:
 //!
@@ -14,11 +14,11 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use osjeff_core::appmanifest::{
+use kitsune_core::appmanifest::{
     self, MAX_FDS, MAX_FUEL_FRAME, MAX_MEM_MIB, MAX_NET_HOSTS, MAX_NET_HOSTS_LEN, Manifest,
 };
-use osjeff_core::appnet;
-use osjeff_core::wasmsec;
+use kitsune_core::appnet;
+use kitsune_core::wasmsec;
 
 const MIN: &[u8] = b"id=fz\nname=Fz\nversion=1.0.0\n";
 

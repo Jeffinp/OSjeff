@@ -2,7 +2,7 @@
 # run.sh <img> <bios|uefi> <outdir> <maxsecs> [scenario-script]
 #
 # Headless QEMU run of a built image (`cargo build --release -p os [--features
-# perf-trace]`; images are under target/release/build/os/*/out/osjeff-*.img).
+# perf-trace]`; images are under target/release/build/os/*/out/kitsune-*.img).
 # Serial goes to <outdir>/serial.log. The optional scenario script
 # (tools/perf/scen/*.sh; gets $OUT and $MODE) drives the QEMU monitor (mouse/keys)
 # in the background and touches $OUT/done when finished; then we screendump to

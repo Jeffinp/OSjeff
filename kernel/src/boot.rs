@@ -4,8 +4,8 @@
 use crate::fb::{Canvas, Color, Corner};
 use crate::text::{self, BODY, Weight};
 use crate::theme;
-use osjeff_core::Rect;
-use osjeff_core::wallpaper::{PRESETS, lerp_rgb};
+use kitsune_core::Rect;
+use kitsune_core::wallpaper::{PRESETS, lerp_rgb};
 
 fn rgb24(v: u32) -> Color {
     Color::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
@@ -22,7 +22,7 @@ pub fn draw_splash(c: &mut Canvas, progress: f32) {
         let t = ((y * 255) / h.max(1)) as u32;
         c.fill_rect(0, y, w, 1, rgb24(lerp_rgb(sc.top, sc.bottom, t)));
     }
-    let lut = osjeff_core::raster::glow_lut();
+    let lut = kitsune_core::raster::glow_lut();
     for b in sc.blobs.iter().filter(|b| b.alpha > 0 && b.r > 0) {
         let cx = (w as i64 * b.x as i64 / 1000) as i32;
         let cy = (h as i64 * b.y as i64 / 1000) as i32;

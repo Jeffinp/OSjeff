@@ -3,7 +3,7 @@
 # `no_std`, no dependencies. Apps depend on it by path (`../sdk`); see
 # docs/BUILDING.md ("Como criar um app") and docs/design/apps.md.
 [package]
-name = "osjeff-sdk"
+name = "kitsune-sdk"
 version = "0.1.0"
 edition = "2021"
 publish = false

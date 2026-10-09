@@ -1,7 +1,7 @@
-//! Hot pure-logic functions of `osjeff_core`, on the host.
+//! Hot pure-logic functions of `kitsune_core`, on the host.
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use osjeff_core::heap::{adjust_request, fit_region};
-use osjeff_core::{Calc, Editor, Key, Keymap, Terminal, Time, browser, fs, net, web};
+use kitsune_core::heap::{adjust_request, fit_region};
+use kitsune_core::{Calc, Editor, Key, Keymap, Terminal, Time, browser, fs, net, web};
 
 /// First-fit scan over a sorted free list of `n` small holes with the big
 /// region last — the worst case of the kernel allocator's `find_region`.

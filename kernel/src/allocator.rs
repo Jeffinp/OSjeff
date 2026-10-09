@@ -1,6 +1,6 @@
 //! Kernel heap: a linked-list free allocator behind a spin lock, exposed as the
 //! global allocator so `alloc` (Vec/String/Box) works. The fiddly alignment and
-//! region-fit math is in `osjeff_core::heap` (unit-tested); this file is the
+//! region-fit math is in `kitsune_core::heap` (unit-tested); this file is the
 //! thin `unsafe` glue that threads free nodes through the heap memory.
 
 use core::alloc::{GlobalAlloc, Layout};
@@ -8,7 +8,7 @@ use core::cell::UnsafeCell;
 use core::mem;
 use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
-use osjeff_core::heap::{adjust_request, fit_region_split, regions_adjacent};
+use kitsune_core::heap::{adjust_request, fit_region_split, regions_adjacent};
 
 // ---- minimal spin lock ----
 
@@ -140,7 +140,7 @@ impl LinkedListAllocator {
     /// tail of a region just unlinked by `find_region`, or a block being freed), 8-aligned,
     /// `size >= 16`, not on the list, and the caller must have exclusive access to `self`.
     unsafe fn add_free_region(&mut self, addr: usize, size: usize) {
-        debug_assert_eq!(osjeff_core::heap::align_up(addr, node_align()), addr);
+        debug_assert_eq!(kitsune_core::heap::align_up(addr, node_align()), addr);
         debug_assert!(size >= node_size());
 
         // SAFETY: by this fn's contract `addr..addr+size` is free, aligned and unlinked, so the node

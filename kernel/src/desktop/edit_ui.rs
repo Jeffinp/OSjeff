@@ -1,5 +1,5 @@
 //! `Desktop::draw_editor`: the pixels of the editor window. State is `EditorState`, the geometry
-//! is `osjeff_core::editor2::ui` (the same rectangles the mouse handler uses).
+//! is `kitsune_core::editor2::ui` (the same rectangles the mouse handler uses).
 //!
 //! Layout: the text on the content colour with a quiet gutter of line numbers on the left, the
 //! current line washed with the accent, optional indent guides, an overlay scrollbar, a slim
@@ -14,12 +14,12 @@ use super::edit::{
 use super::ui::ButtonKind;
 use super::{ui, vfs, *};
 use crate::text::{self, BODY, CALLOUT, CAPTION, FOOTNOTE, Weight};
-use osjeff_core::appart::{FileKind, Tool};
-use osjeff_core::editor2::ui::{self as eui, FindHit, FindLay, Lay};
-use osjeff_core::editor2::{CloseAsk, CloseChoice, Notice, Picker, PromptKind, status_bar};
-use osjeff_core::fileman;
-use osjeff_core::fileman::ui as fui;
-use osjeff_core::{t, tp};
+use kitsune_core::appart::{FileKind, Tool};
+use kitsune_core::editor2::ui::{self as eui, FindHit, FindLay, Lay};
+use kitsune_core::editor2::{CloseAsk, CloseChoice, Notice, Picker, PromptKind, status_bar};
+use kitsune_core::fileman;
+use kitsune_core::fileman::ui as fui;
+use kitsune_core::{t, tp};
 
 fn tertiary() -> Color {
     theme::solid(theme::pal().text_tertiary)
@@ -419,7 +419,7 @@ impl Desktop {
     }
 
     fn draw_picker_sheet(&self, c: &mut Canvas, r: Rect, e: &EditorState, p: &Picker, title: &str) {
-        let save = p.mode == osjeff_core::editor2::PickMode::SaveAs;
+        let save = p.mode == kitsune_core::editor2::PickMode::SaveAs;
         let size = eui::picker_size(r, save);
         let panel = appui::sheet(c, r, size, level(&e.sheet_t));
         let saved = c.set_clip(

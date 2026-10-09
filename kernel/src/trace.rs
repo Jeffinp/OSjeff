@@ -700,8 +700,8 @@ fn best_fn() -> impl Fn(&mut dyn FnMut()) -> u64 {
 fn bench_ui(c: &mut crate::fb::Canvas, best: impl Fn(&mut dyn FnMut()) -> u64, khz: u64) {
     use crate::fb::{Color, Corner, Shadow};
     use crate::text::{self, Weight};
-    use osjeff_core::Rect;
-    use osjeff_core::raster::{self, Paint, Surface};
+    use kitsune_core::Rect;
+    use kitsune_core::raster::{self, Paint, Surface};
     let col = Color::rgb(0x20, 0x40, 0x80);
     let col2 = Color::rgb(0xF0, 0xF4, 0xFF);
     let rect = Rect::new(100, 100, 512, 320);

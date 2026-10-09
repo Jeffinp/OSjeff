@@ -12,7 +12,7 @@
 //! buffers up front and every completed buffer is re-posted at once; the transmit
 //! queue copies each frame into a free buffer slot and posts it, reclaiming
 //! completed slots lazily. Everything arithmetic (ring offsets, index wrap, header,
-//! length rules) is in `osjeff_core::hw::virtio_net`, unit-tested on the host.
+//! length rules) is in `kitsune_core::hw::virtio_net`, unit-tested on the host.
 //!
 //! Features negotiated: `VERSION_1`, `MAC` and `STATUS` only (no checksum or GSO
 //! offload, no mergeable buffers, no multiqueue), so each received frame is exactly
@@ -23,11 +23,11 @@ use crate::sync::RacyCell;
 use crate::virtio::{self, Common};
 use crate::{pci, serial_println};
 use core::sync::atomic::{AtomicBool, Ordering, fence};
-use osjeff_core::hw::virtio_net::{
+use kitsune_core::hw::virtio_net::{
     self as vn, BUF_LEN, HDR_LEN, NetHdr, QueueLayout, Rx, SlotSet, WANTED_FEATURES_LO,
 };
-use osjeff_core::net::Mac;
-use osjeff_core::netstats::NicKind;
+use kitsune_core::net::Mac;
+use kitsune_core::netstats::NicKind;
 
 /// Entries per queue (and DMA buffers per direction) the driver provides.
 const QN: usize = 16;

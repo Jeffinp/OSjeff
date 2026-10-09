@@ -1,6 +1,6 @@
 # OSjeff messages (English).
 # One `key = value` per line; see docs/design/i18n.md. Keep this file and the other
-# language file on exactly the same keys and placeholders (cargo test -p osjeff_core i18n).
+# language file on exactly the same keys and placeholders (cargo test -p kitsune_core i18n).
 
 
 # Language metadata and formats. Every language file defines these.

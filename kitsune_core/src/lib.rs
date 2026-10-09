@@ -1,4 +1,4 @@
-//! `osjeff_core` — pure, allocation-free OS logic shared by the kernel.
+//! `kitsune_core` — pure, allocation-free OS logic shared by the kernel.
 //!
 //! Everything here is `no_std` in production but compiles against `std` under
 //! `cargo test`, so the entire module tree is unit-testable on the host. The

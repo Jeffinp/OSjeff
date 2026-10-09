@@ -6,15 +6,15 @@ thread `wasmapp`, janela de tamanho fixo, sem arquivos nem rede) em uma platafor
 **pacote**, **manifesto**, **permissões**, **quotas**, **ABI v2**, **vários apps ao mesmo
 tempo**, **instalação** e **lançador**.
 
-A lógica de decisão fica em `osjeff_core` (puro, `no_std`, `forbid(unsafe_code)`, testado no
+A lógica de decisão fica em `kitsune_core` (puro, `no_std`, `forbid(unsafe_code)`, testado no
 host e fuzzado). O kernel só liga: instâncias `wasmi`, threads, pixels.
 
 ```
-osjeff_core::wasmsec      leitor seguro de seções do binário .wasm (nunca panica)
-osjeff_core::appmanifest  manifesto `osjeff.manifest` + ícone `osjeff.icon` + política de quotas
-osjeff_core::appfs        caminhos, trait AppFs, MemFs (testes), VolumeFs (o volume OJFS v3), Sandbox (raiz por app, descritores, cota)
-osjeff_core::appnet       política de rede: URL, filtro de destinos, limites
-osjeff_core::appabi       constantes da ABI v2 (erros, flags), validação de ponteiros do guest
+kitsune_core::wasmsec      leitor seguro de seções do binário .wasm (nunca panica)
+kitsune_core::appmanifest  manifesto `osjeff.manifest` + ícone `osjeff.icon` + política de quotas
+kitsune_core::appfs        caminhos, trait AppFs, MemFs (testes), VolumeFs (o volume OJFS v3), Sandbox (raiz por app, descritores, cota)
+kitsune_core::appnet       política de rede: URL, filtro de destinos, limites
+kitsune_core::appabi       constantes da ABI v2 (erros, flags), validação de ponteiros do guest
 kernel/src/wasm/          AppManager (instâncias, appd, host functions `osj.*`, `host.*` v1)
 wasm-apps/sdk             crate `no_std` para wasm32: wrappers seguros da ABI v2 + macro de manifesto
 ```
@@ -27,7 +27,7 @@ qualquer runtime ignora:
 | Seção | Conteúdo | Obrigatória |
 |---|---|---|
 | `osjeff.manifest` | texto UTF-8, `chave=valor` por linha | sim (para instalar) |
-| `osjeff.icon` | um PNG (até 64x64, RGBA/paleta/cinza; decodificado com `osjeff_core::image`) | não |
+| `osjeff.icon` | um PNG (até 64x64, RGBA/paleta/cinza; decodificado com `kitsune_core::image`) | não |
 
 Sem JSON nem serde. O leitor de seções (`wasmsec`) é a única porta de entrada do binário
 não confiável antes do `wasmi`: confere o cabeçalho (`\0asm` + versão 1), caminha pelas seções
@@ -124,7 +124,7 @@ combustível não vê é cobrado (ver §6) e tem teto.
 | desenho | `fill_rect(x,y,w,h,rgb)` | coordenadas do conteúdo, recorte à superfície |
 | | `draw_text(x,y,ptr,len,rgb,scale)` | <= 4096 B, UTF-8 (acentos; bytes que não são UTF-8 valem como Latin-1), uma célula de `6*scale` por caractere, recorte glifo a glifo |
 | | `blit_rgba(ptr,w,h,dx,dy)` | 1:1, <= 2^20 px, cobra 1 de combustível por 8 px |
-| | `draw_image_png(ptr,len,x,y) -> i32` | decodifica no host (`osjeff_core::png`), <= 512x512, devolve `w<<16\|h` ou erro; cobra combustível por pixel |
+| | `draw_image_png(ptr,len,x,y) -> i32` | decodifica no host (`kitsune_core::png`), <= 512x512, devolve `w<<16\|h` ou erro; cobra combustível por pixel |
 | entrada (exports do guest) | `on_key(code, mods)` | `mods`: bit0 Shift, bit1 Ctrl, bit2 Alt; `code`: ASCII, 10 Enter, 27 Esc, 8 Backspace, 127 Del, 0x100.. setas/Home/End/PgUp/PgDn |
 | | `on_text(cp)` | caractere já traduzido pelo mapa de teclado |
 | | `on_pointer(x,y,buttons)` | coordenadas do conteúdo; `buttons` bit0 esq., bit1 dir.; chamado em mudança de posição/botão |
@@ -154,7 +154,7 @@ consome CPU). Um app **v1** (sem `on_*` v2) mantém o laço contínuo atual (`re
 
 ## 5. Arquivos: raiz por app, sandbox, descritores, cota
 
-A decisão é toda de `osjeff_core::appfs`:
+A decisão é toda de `kitsune_core::appfs`:
 
 * **`AppFs`** é um trait puro e sem estado de descritor (operações por caminho absoluto já
   normalizado: `stat`, `read_at`, `write_at`, `truncate`, `create`, `mkdir`, `remove`,
@@ -239,7 +239,7 @@ protegida por um trinco de uma palavra; sem quadro torto. O dock e o desktop do 
 
 ## 7. Rede (`net=http`)
 
-`osjeff_core::appnet` decide, o kernel só transporta:
+`kitsune_core::appnet` decide, o kernel só transporta:
 
 * esquemas `http` e `https`; porta 1..=65535; URL <= 512 B, ASCII, sem espaços/controles, sem
   `user@`;
