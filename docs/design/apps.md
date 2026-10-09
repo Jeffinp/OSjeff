@@ -111,18 +111,18 @@ Convenção: tudo `i32` salvo indicação; resultado `>= 0` é sucesso (contagem
 **Ponteiros e tamanhos do guest são validados por toda função** (`appabi::check_range`):
 `ptr + len` com aritmética sem estouro e dentro da memória linear *atual*. Fora da memória
 é uma **falta do guest**: a função devolve um trap e **só aquele app** encerra com o motivo
-"ponteiro invalido" (um SDK correto nunca produz isso; é bug ou ataque). Tamanho acima do teto
+"ponteiro inválido" (um SDK correto nunca produz isso; é bug ou ataque). Tamanho acima do teto
 da função (ex.: `log` > 512 B, `fs_read` > 64 KiB por chamada, caminho > 256 B) é `ERR_INVAL`
 (sem trap; leituras/escritas grandes são divididas pelo SDK). Todo laço do host que o
 combustível não vê é cobrado (ver §6) e tem teto.
 
 | Grupo | Função | Notas |
 |---|---|---|
-| janela | `set_title(ptr,len)` | <= 48 B ASCII |
+| janela | `set_title(ptr,len)` | <= 48 B, UTF-8. Os apps que acompanham o sistema não chamam: a janela mostra o nome do manifesto no idioma em uso |
 | | `get_size() -> i64` | `(w << 32) \| h` da área de conteúdo |
 | | `request_redraw()` | agenda um `render` |
 | desenho | `fill_rect(x,y,w,h,rgb)` | coordenadas do conteúdo, recorte à superfície |
-| | `draw_text(x,y,ptr,len,rgb,scale)` | <= 4096 B, recorte glifo a glifo |
+| | `draw_text(x,y,ptr,len,rgb,scale)` | <= 4096 B, UTF-8 (acentos; bytes que não são UTF-8 valem como Latin-1), uma célula de `6*scale` por caractere, recorte glifo a glifo |
 | | `blit_rgba(ptr,w,h,dx,dy)` | 1:1, <= 2^20 px, cobra 1 de combustível por 8 px |
 | | `draw_image_png(ptr,len,x,y) -> i32` | decodifica no host (`osjeff_core::png`), <= 512x512, devolve `w<<16\|h` ou erro; cobra combustível por pixel |
 | entrada (exports do guest) | `on_key(code, mods)` | `mods`: bit0 Shift, bit1 Ctrl, bit2 Alt; `code`: ASCII, 10 Enter, 27 Esc, 8 Backspace, 127 Del, 0x100.. setas/Home/End/PgUp/PgDn |
@@ -136,7 +136,8 @@ combustível não vê é cobrado (ver §6) e tem teto.
 | tempo | `now_ms() -> i64` | relógio de parede em ms (RTC) |
 | | `monotonic_ms() -> i64` | ms desde o boot |
 | | `random() -> i32` | xorshift por app, semente do relógio; **não criptográfico** |
-| sistema | `log(ptr,len)` | <= 512 B por chamada; prefixo `[app <id>]`; 16 KiB por execução, depois descartado |
+| sistema | `lang() -> i32` | idioma da interface: 0 português do Brasil, 1 inglês (outros no futuro); pergunte de novo a cada `render`, o idioma muda com o app aberto. O SDK: `lang()` e `tr(pt, en)` |
+| | `log(ptr,len)` | <= 512 B por chamada; prefixo `[app <id>]`; 16 KiB por execução, depois descartado |
 | | `exit(code)` | encerramento limpo (estado `Encerrado`, sem erro) |
 | clipboard | `clip_get(ptr,cap) -> len`, `clip_set(ptr,len)` | `clipboard=rw`; <= 256 B (o clipboard do SO) |
 | arquivos | `fs_open(path,plen,flags) -> fd` | fd >= 1; flags: 1 READ, 2 WRITE, 4 CREATE, 8 TRUNC, 16 APPEND |

@@ -67,6 +67,17 @@ Só os testes da troca global de idioma usam `set_lang` com `LANG_LOCK`. O shell
 mensagens nos dois idiomas, mesmo script com saída e status idênticos). No QEMU, `tools/perf/scen/w31-term.sh`
 (Terminal) e `w31-apps.sh` (Tarefas em todas as abas, Registro, Calculadora) rodam em português, trocam em Ajustes
 e repetem em inglês (`QEMU_MEM=512M tools/perf/run.sh <img> uefi <saida> 240 <cenário>`, UEFI 1280x800).
+No QEMU (UEFI, 1280x800), cada app migrado na W32 tem um cenário que fotografa os dois idiomas, com a troca
+feita ao vivo em Ajustes: `w32-settings.sh` (as dez páginas de Ajustes), `w32-web.sh` (página inicial,
+`osjeff://sobre|favoritos|historico`, abas, busca, menu, erro de certificado, conexão recusada; precisa de
+`tools/nettest-server.py` e de uma página na porta 8080 que registre o `Accept-Language`, e de
+`QEMU_NETDEV="user,id=n0,net=203.0.113.0/24,host=203.0.113.5,dhcpstart=203.0.113.15,dns=203.0.113.3"`),
+`w32-apps.sh` (Apps com os nomes localizados, janelas de apps, lugar Apps de Arquivos, galeria de componentes)
+e `w32-toast.sh` (avisos com texto do catálogo; precisa de um gancho temporário na construção, nunca
+commitado, que chama `notify::notify_key` uma vez por idioma). Conferido nos dois idiomas: o cabeçalho
+`Accept-Language` chega como `pt-BR,pt;q=0.9,en;q=0.8` e como `en;q=1`; a página de erro, as páginas internas e
+o menu de contexto aparecem no idioma novo logo após a troca; os títulos das janelas dos apps WASM trocam
+(`Relógio` para `Clock`).
 
 ## 2. Fuzzing
 
