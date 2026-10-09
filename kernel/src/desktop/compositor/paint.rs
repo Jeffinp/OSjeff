@@ -8,7 +8,7 @@
 
 use super::super::*;
 use super::layers::{Slot, slot_of};
-use crate::desktop::widgets::copy_region;
+use crate::desktop::kit::widgets::copy_region;
 use bootloader_api::info::FrameBufferInfo;
 use kitsune_core::compositor::{LayerId, Painter};
 

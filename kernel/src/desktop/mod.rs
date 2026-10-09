@@ -112,7 +112,7 @@ pub struct Desktop {
     /// Menus, popovers, sheets, the Apps and Busca overlays and the app bar.
     shell: shell::Shell,
     /// Per-window focus transitions (title bar and shadow cross-fade).
-    focus_mix: core::cell::RefCell<Vec<chrome::FocusMix>>,
+    focus_mix: core::cell::RefCell<Vec<windows::chrome::FocusMix>>,
     /// Local date `(year, month, day)` and weekday (0 = Sunday), refreshed each second.
     today: core::cell::Cell<(i32, u8, u8)>,
     weekday: core::cell::Cell<u8>,
@@ -542,54 +542,26 @@ impl Desktop {
     }
 }
 
-mod appart;
 mod apps;
-mod appui;
-mod browser;
-mod browser_input;
-mod browser_paint;
-mod browser_ui;
-pub(crate) mod calc_ui;
-mod chrome;
 mod compositor;
-mod cursor;
-mod edit;
-mod edit_ui;
-mod files;
-mod files_ui;
-mod gallery;
-mod glass;
 mod input;
-mod instance;
 mod kit;
-mod lang;
-mod live;
-mod logview;
-mod overlays;
-mod panel;
-mod settings_ui;
+mod services;
 mod shell;
-mod shellhost;
-mod sysstore;
-mod tarefas;
-mod taskbar;
-mod term;
-mod toasts_ui;
-mod ui;
-pub(crate) mod vfs;
-mod viewer;
-mod wasmwin;
-mod widgets;
+mod windows;
+
+pub(crate) use apps::ajustes::SettingsState;
+pub(crate) use apps::editor::EditorState;
+pub(crate) use apps::registro::LogState;
+pub use apps::tarefas::SysInputs;
+pub(crate) use apps::tarefas::{SysMon, TarefasState};
+pub(crate) use apps::terminal::TermState;
+pub(crate) use apps::wasm::*;
 pub use compositor::{Compositor, FrameIn, Screen};
-pub(crate) use edit::EditorState;
 pub(crate) use input::Special;
-pub(crate) use instance::*;
-pub(crate) use logview::LogState;
-pub(crate) use settings_ui::SettingsState;
-pub use shellhost::{worker as shell_worker, worker2 as shell_worker2};
-pub(crate) use sysstore::*;
-pub use tarefas::SysInputs;
-pub(crate) use tarefas::{SysMon, TarefasState};
-pub(crate) use term::TermState;
-pub(crate) use wasmwin::*;
-pub(crate) use widgets::*;
+pub(crate) use kit::widgets::*;
+use kit::{appui, ui};
+pub use services::shellhost::{worker as shell_worker, worker2 as shell_worker2};
+pub(crate) use services::sysstore::*;
+pub(crate) use services::vfs;
+pub(crate) use windows::instance::*;
