@@ -373,7 +373,7 @@ impl<D: BlockDevice> Fs3<D> {
         let mut budget = (self.geo.inode_count as u64) * 4 + 16;
         while let Some((dir, parent, dname)) = stack.last().cloned() {
             if budget == 0 {
-                return Err(FsError::Corrupt("directory tree does not terminate"));
+                return Err(FsError::Corrupt("directory tree never ends"));
             }
             budget -= 1;
             let entries = self.dir_list(dir)?;

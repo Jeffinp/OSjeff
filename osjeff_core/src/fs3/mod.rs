@@ -532,7 +532,7 @@ impl<D: BlockDevice> Fs3<D> {
         if bits::next_free(&bbits, 0, geo.data_start).is_some()
             || !bits::get(&bbits, geo.backup_sb())
         {
-            return Err(FsError::Corrupt("bitmap does not cover the metadata"));
+            return Err(FsError::Corrupt("bitmap leaves the metadata uncovered"));
         }
         if !bits::get(&ibits, ROOT_INO - 1) || !bits::get(&ibits, TRASH_INO - 1) {
             return Err(FsError::Corrupt("root/trash inode not allocated"));

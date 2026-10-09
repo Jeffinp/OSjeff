@@ -213,7 +213,7 @@ impl<D: BlockDevice> Fs3<D> {
                 let in_trash_dir = dir_ino == TRASH_INO;
                 let flagged = child.flags & FLAG_TRASHED != 0;
                 if in_trash_dir != flagged {
-                    rep.add("trash flag does not match location", ino, 0);
+                    rep.add("trash flag disagrees with the location", ino, 0);
                 }
                 if flagged && child.trash_name.is_empty() {
                     rep.add("trashed entry lacks its original name", ino, 0);

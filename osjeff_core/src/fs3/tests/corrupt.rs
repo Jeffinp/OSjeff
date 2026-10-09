@@ -500,7 +500,11 @@ fn trash_flag_and_location_must_agree() {
         n.flags = 0;
         fs.write_inode(ino, &n)
     });
-    assert!(fs.fsck().unwrap().has("trash flag does not match location"));
+    assert!(
+        fs.fsck()
+            .unwrap()
+            .has("trash flag disagrees with the location")
+    );
 }
 
 #[test]
