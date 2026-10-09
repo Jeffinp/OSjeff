@@ -72,6 +72,33 @@ tem releases versionadas; as seções são marcos na `master`.
   levam a janela focada, o painel mostra pontos clicáveis e o menu da janela tem "Mover para a área de
   trabalho N"; ativar uma janela de outra área (barra de tarefas, `Alt+Tab`) traz a área dela.
   Lógica em `osjeff_core::winman` (`switch_workspace`, `move_to_workspace`, `visible_workspaces`).
+## 2026-10 — Arquivos, Imagens, Editor e Terminal (W23)
+
+- **Arquivos** no estilo do Finder: barra lateral (Favoritos, Locais, disco com barra de uso),
+  barra de ferramentas com voltar/avançar, caminho clicável, vistas em lista e em ícones, busca que
+  filtra a pasta, ordenação pelo cabeçalho, painel de pré-visualização (Espaço), seleção por
+  retângulo, arrastar e soltar entre pastas, barra lateral, migalhas e Lixeira (com destaque do
+  alvo), renomear no lugar, menus de contexto no estilo novo, rolagem com inércia e barra de
+  rolagem sobreposta, cópia com folha de progresso e cancelamento, estados vazios. Lista
+  virtualizada: 2000 arquivos rolam sem custo extra por arquivo.
+- **Imagens**: faixa de miniaturas, ajustar/preencher/100 % com zoom por mola, arrasto com inércia,
+  giro animado, painel de informações translúcido, apresentação (Espaço e setas), xadrez sob a
+  transparência, folha de salvar, mensagens de erro em português.
+- **Editor**: margem com números de linha, linha atual destacada, guias de indentação, cursor que
+  desliza e pisca suave, seleção que aparece, barra de buscar/substituir fina (não modal) com botões,
+  barra de estado (Ln/Col, codificação, fim de linha, tamanho), título `Editor — nome •`, a pergunta
+  de salvar e os diálogos Abrir/Salvar como folhas presas à janela com o visual do Arquivos.
+- **Terminal**: faixa com a aba e a pasta, prompt colorido, seleção com o mouse (duplo clique pega a
+  palavra, triplo a linha) e cópia com Ctrl+Shift+C, barra de rolagem sobreposta, cursor em bloco ou
+  barra. Cores ANSI ficaram de fora.
+- **Ctrl + / Ctrl - / Ctrl 0** mudam o tamanho do texto do editor e do terminal; os valores
+  (`editor_font`, `terminal_font`) ficam em `/etc/osjeff.conf` (leitor total, com limites).
+- Geometria, acerto do mouse, arrastar e soltar, filtro, pré-visualização, miniaturas, inércia,
+  apresentação, seleção do terminal e as folhas são lógica pura no `osjeff_core`
+  (`fileman::ui`, `viewer::ui`, `editor2::ui`, `termui`, `appart`), testada no host; o kernel só
+  desenha. Nenhum `text::legacy` restou nesses apps.
+- Testes: 2590 no `osjeff_core` (eram 2497); custo de quadro e capturas em `docs/TESTING.md` e
+  `docs/design/ui-macos.md`.
 
 ## 2026-10 — Nova interface (W22)
 

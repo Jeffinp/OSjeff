@@ -20,7 +20,7 @@ e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espa�
 endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
 o `#![forbid(unsafe_code)]` do crate `osjeff_core`, não hardware.
 
-- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2532 testes
+- **Dois crates de código.** `osjeff_core` (dezenas de milhares de linhas com testes, 2590 testes
   passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
 - **Multitarefa preemptiva** a 250 Hz, com bloqueio. Cinco threads: `compositor`,
@@ -725,17 +725,25 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   histórico, Ctrl+R, Tab, Ctrl+C/L/D) sobre um `Shell` de 52 comandos cujo sistema de arquivos é o VFS
   (`VfsFs`, diretório corrente por terminal, `rm` vai para a lixeira) e cujas informações do sistema
   (`KSys`) são relógio (SNTP/RTC), uptime, heap, processos e threads, discos, `ping` (`netd`),
-  `nslookup`/`curl`/`wget` (`fetch::run_job`) e `ifconfig`. A grade é o que cabe na janela (escala 2:
-  maximizar mostra mais texto). As linhas rodam em duas threads `shelld` (fila única, resultado
+  `nslookup`/`curl`/`wget` (`fetch::run_job`) e `ifconfig`. A grade é o que cabe na janela (fonte monoespaçada de 11 a 24 px, Ctrl +/−/0, guardada em
+  `terminal_font`; maximizar mostra mais texto). A faixa sob o título mostra a aba com a pasta, o prompt
+  tem o caminho em destaque e o símbolo discreto, o mouse seleciona (duplo clique a palavra, triplo a
+  linha) e Ctrl+Shift+C copia; cursor em bloco no fim da linha e em barra entre caracteres, barra de
+  rolagem sobreposta. Geometria, seleção e extração são `osjeff_core::termui` (testado no host). Sem
+  cores ANSI. As linhas rodam em duas threads `shelld` (fila única, resultado
   recolhido em `step_shell_jobs` a cada tick), então um comando que espera nunca congela o desktop; Ctrl+C
   cancela. `edit`, `files`, `tasks`, `calc`, `reboot` e `shutdown` pedem ao compositor por uma fila.
 - **Editor** (`desktop/edit.rs`): `osjeff_core::editor2` (UTF-8, desfazer/refazer, buscar/substituir,
   números de linha, mouse, roda, arquivos de até 16 MiB inteiros) com abrir/salvar como pelo VFS
   (`Picker`, Ctrl+O, Ctrl+S, Ctrl+Shift+S) e a pergunta **Salvar / Descartar / Cancelar** em toda forma de
   fechar uma janela com alterações (`request_close`: botão, Ctrl+Q, Tarefas, `kill`, Reiniciar/
-  Desligar). Cada janela tem seu buffer e seu caminho (`EditorState::path`, `None` = sem nome); o título
-  mostra `nome *` enquanto há alterações. A grade acompanha a janela (`sync_editor`) e nada é desenhado
-  fora dela.
+  Desligar), agora como folha presa à janela (o Abrir e o Salvar como reusam o visual do Arquivos: barra
+  lateral de lugares, ícones de arquivo, barra de rolagem). Cada janela tem seu buffer e seu caminho
+  (`EditorState::path`, `None` = sem nome); o título é `Editor — nome`, com ` •` enquanto há alterações. A
+  grade acompanha a janela (`sync_editor`) e nada é desenhado fora dela. A janela é descrita por
+  `osjeff_core::editor2::ui` (margem de números, linha atual, guias de indentação, barra de buscar fina e
+  clicável, barra de estado, folhas) e desenhada em `desktop/edit_ui.rs`; o cursor desliza na linha e
+  pisca suave por 12 s depois da última tecla, Ctrl +/−/0 mudam o tamanho (`editor_font`).
 - **Calculadora:** quatro operações, entrada de até 16 caracteres, formatador decimal sem
   intrínsecos de `f64` do `std`. As teclas se esticam com a janela (`calc_layout`).
 - **Gerenciador de arquivos (v2):** navegação por **caminho** sobre o OJFS v3, uma
@@ -745,7 +753,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   colunas Nome/Tamanho/Modificado (clique no cabeçalho ordena; pastas sempre primeiro; ordem
   natural: `f2` antes de `f10`), seleção múltipla (Shift/Ctrl+clique, Shift+setas, Ctrl+A),
   rolagem (roda, PageUp/PageDown, barra) com até 20 000 linhas, nomes UTF-8 de até 255 bytes
-  (desenhados dobrados para ASCII: a fonte 5x7 não tem acentos). Operações: `F` novo arquivo,
+  (acentos e UTF-8 desenhados como são). Operações: `F` novo arquivo,
   `N` nova pasta, F2 renomear (campo de nome em linha), Ctrl+C/X/V (área de transferência de
   **caminhos** compartilhada entre janelas: recortar+colar é um `rename`, instantâneo; copiar
   vira um `CopyJob` que avança 128 KiB por quadro com barra de progresso, Esc cancela e apaga o
@@ -766,9 +774,16 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   de 100 % a imagem é reduzida uma vez por mudança de zoom (filtro de caixa, em cache); a 100 %
   ou mais a amostragem é por vizinho mais próximo direto da origem. Lógica pura em
   `osjeff_core::viewer` (zoom, pan, caixa de ajuste, lista da pasta, texto de informações).
-  Está no overlay Apps e na Busca. Capturas:
-  `docs/img/files-list.png`, `files-copy-progress.png`, `files-trash-confirm.png`,
-  `viewer-photo.png`, `viewer-transparency.png`, `viewer-error.png`.
+  Está no overlay Apps e na Busca. Capturas: `docs/img/w23-files-*.png`, `w23-viewer-*.png`.
+  **Interface (W23):** o Arquivos tem barra lateral translúcida (Favoritos, Locais, disco), barra de
+  ferramentas com caminho clicável, vistas em lista e em ícones, busca que filtra, ordenação pelo
+  cabeçalho, painel de pré-visualização (Espaço), seleção por retângulo, arrastar e soltar (destino
+  destacado, Lixeira incluída), renomear no lugar, folhas de cópia/confirmação/propriedades, rolagem
+  com inércia e barra sobreposta, lista virtualizada. O Visualizador tem faixa de miniaturas (feitas
+  uma por vez), ajustar/preencher/real com zoom por mola, arrasto com inércia, giro animado, painel de
+  informações e apresentação. Geometria, acerto, plano de soltar, filtro, miniaturas, inércia e os
+  glifos são lógica pura (`fileman::ui`, `viewer::ui`, `appart`), `desktop/{files,files_ui,viewer,appui,
+  appart}.rs` desenham e roteiam. Os quadros só são pedidos enquanto algo se move (`animating()`).
 - **Navegador:** a barra de endereço e a área de conteúdo seguem a janela, e a página é
   **diagramada de novo** para a nova largura ao terminar de redimensionar (o corpo HTML
   fica guardado na instância). Fechar a janela descarta página e estado.

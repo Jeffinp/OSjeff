@@ -361,3 +361,42 @@ costs nothing unless something lights up.
 Captures (QEMU/UEFI, `tools/perf/scen/w25-shots.sh`): `docs/img/ui-tarefas-light.png` (CPU),
 `ui-tarefas-procs-dark.png`, `ui-ajustes-dark.png`, `ui-calc-light.png`, `ui-registro-dark.png`,
 `ui-toast-dark.png`.
+## 11. App interiors, wave 2a: Arquivos, Imagens, Editor, Terminal (W23)
+
+These four apps are redesigned on the toolkit above. The rules they follow: geometry, hit testing,
+filters, plans and selection models are pure and host tested in `osjeff_core`; the kernel
+only draws and routes; text is measured (`text::*`), never counted in cells, except the fixed grids
+of the editor and the terminal (`text::mono_cell_px`); no `text::legacy`; light and dark both from the
+palette; frames are requested only while something moves (each app has an `animating()` predicate
+that `is_dynamic`/`has_animation` read), so an idle desktop with all four open costs no frames.
+
+Shared pieces added for them (not in the wave-1 toolkit): `kernel/src/desktop/appui.rs` (glyph tool
+buttons and segmented control, the path-bar pill, a one-line field with selection and an eased caret,
+the window-attached sheet with dim and slide, empty states, selection colours, caret curve) and
+`kernel/src/desktop/appart.rs` (a cache over `osjeff_core::appart`: the file-type icons Pasta, Texto,
+Imagem, App, Genérico, Disco, drawn in the accent, and 33 monochrome tool glyphs).
+
+| App | Content | Pure core | Kernel |
+|---|---|---|---|
+| Arquivos | sidebar (Favoritos, Locais, the disk with its usage bar) on an accent-tinted vertical gradient, toolbar (back, forward, clickable path bar, list/icon switch, sort, search, preview), header with sort arrows, rows or icon cells, preview pane (Espaço), status bar, sheets (copy progress with cancel, confirmations, properties), rubber band, drag and drop with highlighted targets and a ghost, inline rename, context menus, inertial scroll and overlay scrollbar, empty states | `fileman::ui` (layout, columns, crumbs, hit, item geometry, band, drop plan, `Scroller`, search keys, preview kind, text preview), `appart` | `files.rs`, `files_ui.rs` |
+| Imagens | glass toolbar, canvas with fit / fill / actual and spring zoom, pan with inertia, animated rotation, checkerboard under transparency, translucent info inspector, filmstrip with lazily made thumbnails, slideshow, save sheet, friendly errors | `viewer::ui` (layout, filmstrip maths, `Inertia`, `Slideshow`, `RotMap`), `viewer` (fit, `info_rows`, messages) | `viewer.rs` |
+| Editor | gutter, current line, indent guides, selection runs and fade, eased gliding caret, overlay scrollbar, slim find / replace bar with buttons, status bar, title dot, close question and Open / Save as sheets (sidebar, icons), Ctrl +/-/0 | `editor2::ui` (layout, cell mapping, selection runs, guides, sheet and bar geometry, `FindLay::hit`), `editor2::dialog::status_bar` | `edit.rs`, `edit_ui.rs` |
+| Terminal | strip with the tab and folder, prompt colours, selection (drag, word, line) and copy, overlay scrollbar, block / bar cursor, running pill, Ctrl +/-/0 | `termui` (layout, `Grid::cell_at`, `Selection`, `word_bounds`, `extract`, `split_prompt`) | `term.rs` |
+
+Text size: `editor_font` and `terminal_font` in the settings file (11 to 24 px, default 15; a value
+out of range is ignored; the default size is not written), changed with
+Ctrl +, Ctrl - and Ctrl 0 and applied to every window of the app at once.
+
+Caret blink: solid for half a second after input, then an eased 1.06 s blink, solid again after 12 s
+(`appui::caret_alpha`); only the focused window asks for frames while it blinks.
+
+Screenshots (every one reviewed in light and dark, `tools/perf/scen/w23-*.sh`): `docs/img/w23-files-*.png`,
+`w23-viewer-*.png`, `w23-editor-*.png`, `w23-terminal-*.png`.
+
+Known gaps: the Arquivos sidebar is a tinted gradient, not a live blur of what is behind the window
+(a window is composited opaque, there is no backdrop under it); there is no column view; the
+terminal selection is relative to the visible rows and ends at the next key, output or scroll; the
+terminal draws one colour (escape sequences are dropped, not interpreted); the editor's
+caret glides only along a row (a jump to another row or a scroll is immediate); the Open / Save as
+list scrolls by whole rows.
+

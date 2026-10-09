@@ -9,7 +9,7 @@
 ![Rust](https://img.shields.io/badge/Rust-nightly--2026--10--05-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Arch](https://img.shields.io/badge/arch-x86__64-blue?style=for-the-badge)
 ![no_std](https://img.shields.io/badge/no__std-bare%20metal-orange?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-2532%20passing-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-2590%20passing-success?style=for-the-badge)
 ![Fuzz](https://img.shields.io/badge/fuzz-15%20targets-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
@@ -41,8 +41,8 @@ estão corrigidos ou documentados.
 | <img src="docs/img/ui-desktop-dark.png" width="420"> | <img src="docs/img/ui-desktop-light.png" width="420"> |
 | **Apps (todos os aplicativos, com busca)** | **Busca: apps, arquivos e contas (`Ctrl+Space`)** |
 | <img src="docs/img/ui-apps-dark.png" width="420"> | <img src="docs/img/ui-busca-light.png" width="420"> |
-| **Gerenciador de arquivos (pastas, lixeira, persistente)** | **Navegador (HTTPS verificado: "Conexão segura")** |
-| <img src="docs/img/ui-files-dark.png" width="420"> | <img src="docs/img/ui-browser-light.png" width="420"> |
+| **Arquivos (barra lateral, ícones, pré-visualização, lixeira, persistente)** | **Navegador (HTTPS verificado: "Conexão segura")** |
+| <img src="docs/img/w23-files-dark.png" width="420"> | <img src="docs/img/ui-browser-light.png" width="420"> |
 | **Ajustes (aparência, destaque, notificações)** | **Controles (rede, aparência, destaque)** |
 | <img src="docs/img/ui-ajustes-dark.png" width="420"> | <img src="docs/img/ui-controls-dark.png" width="420"> |
 | **Tarefas (CPU, memória, disco, rede, processos)** | **Componentes (`Ctrl+Alt+G`): a vitrine do toolkit** |
@@ -97,7 +97,7 @@ que compila com `std` sob teste. O kernel só liga o hardware a ela.
 
 ```mermaid
 flowchart LR
-    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2532 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
+    CORE["osjeff_core<br/>no_std · forbid(unsafe) · 2590 testes<br/>fs · net · web · browser · hw · wm · gfx · heap"]
     KERNEL["kernel<br/>bare-metal · unsafe documentado<br/>drivers · sched · compositor · wasm"]
     OS["os<br/>builder da imagem BIOS/UEFI"]
     FUZZ["fuzz/<br/>net · ojfs · web"]
@@ -107,7 +107,7 @@ flowchart LR
 
 | Verificação | Estado |
 |---|---|
-| Testes unitários | **2532** no `osjeff_core`; cobertura de linhas 96,6% (bruta, inclui os módulos de teste; medida com `cargo llvm-cov`) |
+| Testes unitários | **2590** no `osjeff_core`; cobertura de linhas 96,6% (bruta, inclui os módulos de teste; medida com `cargo llvm-cov`) |
 | Fuzzing | 15 alvos (rede, discos OJFS v2/v3, HTML/CSS/imagens/formulários, shell, editor, certificados X.509, manifesto e sandbox de apps); bugs achados são corrigidos com entrada mínima e teste de regressão |
 | `unsafe` | **100%** dos blocos do kernel com `// SAFETY:`, imposto por `clippy::undocumented_unsafe_blocks` |
 | Boot em QEMU | BIOS **e** UEFI em todo commit de kernel, desktop comparado pixel a pixel com a baseline (`tools/verify-boot.sh`) |
