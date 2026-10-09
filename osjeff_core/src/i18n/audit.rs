@@ -800,6 +800,35 @@ const ACCENT_STRICT: &[&str] = &[
     "osjeff_core/src/shell/sys.rs",
 ];
 
+/// Files migrated in W32 (Navegador, Ajustes, apps WASM, Kit de componentes): same rule.
+const ACCENT_STRICT_W32: &[&str] = &[
+    "kernel/src/desktop/browser.rs",
+    "kernel/src/desktop/browser_input.rs",
+    "kernel/src/desktop/browser_paint.rs",
+    "kernel/src/desktop/browser_ui.rs",
+    "kernel/src/desktop/gallery.rs",
+    "kernel/src/desktop/settings_ui.rs",
+    "kernel/src/desktop/wasmwin.rs",
+    "kernel/src/wasm/abi2.rs",
+    "kernel/src/wasm/manager.rs",
+    "kernel/src/wasm/manager/runtime.rs",
+    "kernel/src/wasm/mod.rs",
+    "osjeff_core/src/appfs/mod.rs",
+    "osjeff_core/src/appinstall.rs",
+    "osjeff_core/src/appmanifest.rs",
+    "osjeff_core/src/browser.rs",
+    "osjeff_core/src/browser/cert.rs",
+    "osjeff_core/src/browser/errors.rs",
+    "osjeff_core/src/browser/pages.rs",
+    "osjeff_core/src/browser/tabs.rs",
+    "osjeff_core/src/settings.rs",
+    "osjeff_core/src/tlsverify.rs",
+    "osjeff_core/src/wallpaper.rs",
+    "osjeff_core/src/wasmsec.rs",
+    "osjeff_core/src/web/form.rs",
+    "osjeff_core/src/web/imgcache.rs",
+];
+
 fn unaccented_literals(file: &str, src: &str, a: &Accents) -> Vec<String> {
     let mut out = Vec::new();
     for (t, line) in tokenize(src) {
@@ -827,13 +856,17 @@ fn migrated_sources_have_accents() {
     let mut bad = Vec::new();
     let mut seen = 0;
     for (file, src) in &files {
-        if ACCENT_STRICT.contains(&file.as_str()) {
+        if ACCENT_STRICT.contains(&file.as_str()) || ACCENT_STRICT_W32.contains(&file.as_str()) {
             seen += 1;
             bad.extend(unaccented_literals(file, src, &a));
         }
     }
     if files.iter().any(|(f, _)| f.starts_with("kernel/")) {
-        assert_eq!(seen, ACCENT_STRICT.len(), "a strict file is missing");
+        assert_eq!(
+            seen,
+            ACCENT_STRICT.len() + ACCENT_STRICT_W32.len(),
+            "a strict file is missing"
+        );
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
