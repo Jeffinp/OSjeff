@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Kitsune">
+  <title>Kitsune</title>
+  <rect width="128" height="128" rx="28" fill="#2A2A5C"/> <!-- tile -->
+  <polygon fill="#F76B2A" points="23.25,11 51.5,38.25 50,47.5 31.25,63.75 25.25,61.5"/> <!-- ear outer -->
+  <polygon fill="#F76B2A" points="102.75,61.5 96.75,63.75 78,47.5 76.5,38.25 104.75,11"/> <!-- ear outer -->
+  <polygon fill="#B7371A" points="23.25,11 42.5,46.25 37.5,58.75 25.25,61.5"/> <!-- ear inner -->
+  <polygon fill="#B7371A" points="102.75,61.5 90.5,58.75 85.5,46.25 104.75,11"/> <!-- ear inner -->
+  <polygon fill="#FFF3E6" points="16.25,81 34.25,69.5 57.25,96.25 64,102.5 70.75,96.25 93.75,69.5 111.75,81 64,117"/> <!-- muzzle -->
+  <polygon fill="#C94F1C" points="25.25,61.5 34.25,65.5 34.25,73.5 16.25,81"/> <!-- shade face -->
+  <polygon fill="#C94F1C" points="111.75,81 93.75,73.5 93.75,65.5 102.75,61.5"/> <!-- shade face -->
+  <polygon fill="#FF7A33" points="51.5,38.25 64,38.25 64,105 57.25,100 34.25,73.5 25.25,61.5"/> <!-- light face -->
+  <polygon fill="#C94F1C" points="102.75,61.5 93.75,73.5 70.75,100 64,105 64,38.25 76.5,38.25"/> <!-- shade face -->
+  <polygon fill="#1A1A3A" points="41.25,70 47.5,69.25 51.5,71.75 54,77.75 48.5,78 44,75.25 41.75,72.25"/> <!-- eye -->
+  <polygon fill="#1A1A3A" points="86.25,72.25 84,75.25 79.5,78 74,77.75 76.5,71.75 80.5,69.25 86.75,70"/> <!-- eye -->
+  <polygon fill="#1A1A3A" points="57.25,100 64,97.75 70.75,100 64,108.5"/> <!-- nose -->
+</svg>

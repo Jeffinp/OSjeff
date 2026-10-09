@@ -25,6 +25,7 @@ pub mod base64;
 pub mod blockcache;
 pub mod blockdev;
 pub mod bmp;
+pub mod brand;
 pub mod browser;
 pub mod calc;
 pub mod chrome;
