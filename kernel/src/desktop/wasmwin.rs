@@ -12,6 +12,7 @@ use crate::wasm::{self, appfs_backend};
 use alloc::boxed::Box;
 use osjeff_core::appinstall;
 use osjeff_core::appmanifest::{Abi, Manifest};
+use osjeff_core::t;
 
 /// Pixels the window frame adds around a WASM app's content area.
 pub(crate) const FRAME_W: i32 = 28;
@@ -73,7 +74,7 @@ impl Desktop {
             .into_iter()
             .map(|c| AppEntry {
                 id: c.manifest.id.clone(),
-                name: c.manifest.name.clone(),
+                name: String::from(c.manifest.display_name()),
                 icon: c.icon.as_deref().map(argb_to_rgba),
                 manifest: c.manifest,
             })
@@ -112,9 +113,10 @@ impl Desktop {
             if let Ok(m) = appinstall::check(pkg)
                 && !rows.iter().any(|r| r.id == m.id)
             {
+                let name = String::from(m.display_name());
                 rows.push(AppRow {
                     id: m.id,
-                    name: m.name,
+                    name,
                     installed: false,
                     size: pkg.len() as u64,
                 });
@@ -169,13 +171,13 @@ impl Desktop {
         let pkg = wasm::BUNDLED
             .iter()
             .find(|p| appinstall::check(p).is_ok_and(|m| m.id == id))
-            .ok_or_else(|| String::from("pacote nao encontrado"))?;
+            .ok_or_else(|| String::from(t!("apps.err.not_bundled")))?;
         let r = appfs_backend::try_with(|fs| appinstall::install(fs, pkg));
         match r {
             Ok(m) => serial_println!("apps: installed `{}` {}", m.id, m.version),
             Err(e) => {
                 serial_println!("apps: install of `{}` refused: {}", id, e);
-                return Err(alloc::format!("{e}"));
+                return Err(e.message());
             }
         }
         self.refresh_catalog();
@@ -187,10 +189,36 @@ impl Desktop {
         let r = appfs_backend::try_with(|fs| appinstall::remove(fs, id));
         match r {
             Ok(()) => serial_println!("apps: removed `{}`", id),
-            Err(e) => return Err(alloc::format!("{e}")),
+            Err(e) => return Err(e.message()),
         }
         self.refresh_catalog();
         Ok(())
+    }
+
+    /// The language changed: a window of an installed app shows the name its manifest gives
+    /// in the new language (call after [`Self::refresh_catalog`]).
+    pub(crate) fn retitle_wasm_windows(&mut self) {
+        let mut renamed: Vec<(WindowId, String)> = Vec::new();
+        for w in self.wm.windows() {
+            if let App::Wasm(ww) = &w.app.app
+                && let Some(e) = self.apps.iter().find(|e| e.id == ww.app_id)
+            {
+                let mut t = String::from(e.manifest.display_name());
+                if w.app.index > 1 {
+                    let mut tmp = [0u8; 16];
+                    let k = numbered_name("", w.app.index, &mut tmp);
+                    t.push_str(core::str::from_utf8(&tmp[..k]).unwrap_or(""));
+                }
+                if t != w.app.title {
+                    renamed.push((w.id, t));
+                }
+            }
+        }
+        for (id, t) in renamed {
+            if let Some(w) = self.wm.get_mut(id) {
+                w.app.title = t;
+            }
+        }
     }
 
     // ---- windows ----
@@ -249,7 +277,7 @@ impl Desktop {
             self.wm.activate(id);
             return Some(id);
         }
-        let manifest = Manifest::legacy("app", "Aplicativo");
+        let manifest = Manifest::legacy("app", t!("app.wasm_title"));
         self.open_wasm(manifest, wasm::LEGACY_APP.to_vec())
     }
 
@@ -258,7 +286,7 @@ impl Desktop {
         if wasm::LEGACY_APP.is_empty() {
             return self.open_wasm_app(wasm::DEFAULT_APP);
         }
-        let manifest = Manifest::legacy("app", "Aplicativo");
+        let manifest = Manifest::legacy("app", t!("app.wasm_title"));
         self.open_wasm(manifest, wasm::LEGACY_APP.to_vec())
     }
 
@@ -274,7 +302,7 @@ impl Desktop {
             manifest.win_min_h as i32 + FRAME_H,
         );
         let resizable = manifest.resizable;
-        let title = manifest.name.to_ascii_uppercase();
+        let title = String::from(manifest.display_name());
         let handle = match wasm::launch(bytes, manifest, v1, cw, ch) {
             Ok(h) => h,
             Err(e) => {
@@ -357,7 +385,7 @@ impl Desktop {
             if let App::Wasm(ww) = &w.app.app {
                 let c = wasm_content(w.rect);
                 if let Some(t) = wasm::sync_window(ww.id, c.w, c.h, w.shown()) {
-                    let mut t = t.to_ascii_uppercase();
+                    let mut t = t;
                     if w.app.index > 1 {
                         let mut tmp = [0u8; 16];
                         let k = numbered_name("", w.app.index, &mut tmp);

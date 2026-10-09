@@ -11,7 +11,7 @@ use core::fmt::Write;
 use osjeff_sdk::*;
 
 manifest!(
-    "id=clock\nname=Relogio\nversion=1.0.0\nabi=2\ntick_ms=1000\nwin_w=300\nwin_h=320\nwin_min_w=200\nwin_min_h=240\nmem_mib=2\n"
+    "id=clock\nname=Clock\nname.pt=Relógio\nname.en=Clock\nversion=1.0.0\nabi=2\ntick_ms=1000\nwin_w=300\nwin_h=320\nwin_min_w=200\nwin_min_h=240\nmem_mib=2\n"
 );
 icon!(include_bytes!("../icon.png"));
 
@@ -52,7 +52,6 @@ impl Clock {
 
 impl App for Clock {
     fn new() -> Self {
-        let _ = set_title("Relogio");
         Clock {
             secs: (now_ms() / 1000) as i32,
         }

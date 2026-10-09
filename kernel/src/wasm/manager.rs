@@ -30,7 +30,7 @@
 //! spot and the slot keeps the reason, which the window shows.
 
 use super::{
-    AppFault, FRAME_FUEL, HostState, INIT_FUEL, abi2, describe, guest_engine, guest_limits,
+    AppFault, FRAME_FUEL, HostState, INIT_FUEL, Why, abi2, describe, guest_engine, guest_limits,
     install_all,
 };
 use crate::sync::RacyCell;
@@ -44,6 +44,7 @@ use bootloader_api::info::FrameBufferInfo;
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use osjeff_core::appfs::Sandbox;
 use osjeff_core::appmanifest::{Manifest, Quotas};
+use osjeff_core::{t, tk};
 use wasmi::{Instance, Linker, Memory, Module, Store, Val};
 
 /// Handle of a running app (never reused).
@@ -90,7 +91,7 @@ struct Slot {
     v1: bool,
     wasm: Arc<[u8]>,
     state: State,
-    reason: String,
+    reason: Why,
     events: VecDeque<Ev>,
     want_redraw: bool,
     visible: bool,
@@ -231,7 +232,7 @@ pub fn launch(
         v1,
         wasm: Arc::from(wasm),
         state: State::Starting,
-        reason: String::new(),
+        reason: Why::default(),
         events: VecDeque::new(),
         want_redraw: true,
         visible: true,
@@ -508,19 +509,19 @@ enum Snap {
 pub fn blit(id: AppId, c: &mut crate::fb::Canvas, cx: i32, cy: i32, cw: i32, ch: i32) {
     let snap = with(|slots| {
         let Some(s) = slot_of(slots, id) else {
-            return Snap::Message(String::from("App nao encontrado"), true);
+            return Snap::Message(String::from(t!("apps.win.not_found")), true);
         };
         match s.state {
             State::Crashed => {
-                return Snap::Message(alloc::format!("O app encerrou: {}", s.reason), true);
+                return Snap::Message(t!("apps.win.ended", why = &s.reason.text()), true);
             }
             State::Exited => {
-                return Snap::Message(alloc::format!("O app encerrou: {}", s.reason), false);
+                return Snap::Message(t!("apps.win.ended", why = &s.reason.text()), false);
             }
             _ => {}
         }
         if !s.ready || s.surf[s.front].is_empty() {
-            return Snap::Message(String::from("Carregando app..."), false);
+            return Snap::Message(String::from(t!("apps.win.loading")), false);
         }
         s.reading = Some(s.front);
         let f = &s.surf[s.front];
@@ -758,7 +759,7 @@ fn housekeeping() {
                 with(|slots| {
                     if let Some(s) = slots[i].as_mut() {
                         s.state = State::Starting;
-                        s.reason.clear();
+                        s.reason = Why::default();
                         s.events.clear();
                         s.want_redraw = true;
                         s.ready = false;
@@ -775,7 +776,7 @@ fn housekeeping() {
 }
 
 /// End the app in slot `i`: drop its runtime now, remember why.
-fn finish(i: usize, state: State, reason: String) {
+fn finish(i: usize, state: State, reason: Why) {
     rts()[i] = None;
     with(|slots| {
         if let Some(s) = slots[i].as_mut() {
@@ -787,7 +788,7 @@ fn finish(i: usize, state: State, reason: String) {
                 } else {
                     "exited"
                 },
-                reason
+                reason.log()
             );
             s.state = state;
             s.reason = reason;
@@ -875,7 +876,11 @@ fn run_slice(i: usize) -> bool {
     if let Some((w, h)) = job.resize
         && !resize_surfaces(i, w, h)
     {
-        finish(i, State::Crashed, String::from("sem memoria para a janela"));
+        finish(
+            i,
+            State::Crashed,
+            Why::new(tk!("apps.why.no_window_memory")),
+        );
         return true;
     }
 

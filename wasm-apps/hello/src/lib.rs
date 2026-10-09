@@ -7,7 +7,7 @@ use core::fmt::Write;
 use osjeff_sdk::*;
 
 manifest!(
-    "id=hello\nname=Ola\nversion=1.0.0\nabi=2\nwin_w=380\nwin_h=240\nwin_min_w=260\nwin_min_h=160\nmem_mib=2\n"
+    "id=hello\nname=Hello\nname.pt=Olá\nname.en=Hello\nversion=1.0.0\nabi=2\nwin_w=380\nwin_h=240\nwin_min_w=260\nwin_min_h=160\nmem_mib=2\n"
 );
 icon!(include_bytes!("../icon.png"));
 
@@ -20,7 +20,6 @@ struct Hello {
 
 impl App for Hello {
     fn new() -> Self {
-        let _ = set_title("Ola, OSjeff");
         log!("hello: started");
         Hello {
             keys: 0,

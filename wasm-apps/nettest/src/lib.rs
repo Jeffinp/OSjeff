@@ -14,7 +14,7 @@ use core::fmt::Write;
 use osjeff_sdk::*;
 
 manifest!(
-    "id=nettest\nname=Teste de rede\nversion=1.0.0\nabi=2\nnet=http\nnet_hosts=203.0.113.5,*.nip.io\nwin_w=520\nwin_h=300\nmem_mib=2\n"
+    "id=nettest\nname=Network test\nname.pt=Teste de rede\nname.en=Network test\nversion=1.0.0\nabi=2\nnet=http\nnet_hosts=203.0.113.5,*.nip.io\nwin_w=520\nwin_h=300\nmem_mib=2\n"
 );
 
 const URLS: [&str; 10] = [
@@ -38,7 +38,6 @@ struct NetTest {
 
 impl App for NetTest {
     fn new() -> Self {
-        let _ = set_title("Teste de rede");
         NetTest {
             last: StrBuf::new(),
             body: StrBuf::new(),

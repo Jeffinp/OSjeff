@@ -8,7 +8,9 @@
 
 use crate::appfs::{AppFs, FsError, Kind};
 use crate::appmanifest::{self, Manifest, PackageError, valid_id};
+use crate::i18n::{self, Arg, Lang};
 use crate::image::{Filter, Image};
+use crate::tk;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
@@ -39,6 +41,34 @@ pub enum InstallError {
 impl From<FsError> for InstallError {
     fn from(e: FsError) -> Self {
         InstallError::Fs(e)
+    }
+}
+
+impl InstallError {
+    /// The reason in `lang`, in words for the person (the [`Display`](fmt::Display) text is for
+    /// the log).
+    pub fn message_in(&self, lang: Lang) -> String {
+        let key = match self {
+            InstallError::Package(e) => return e.message_in(lang),
+            InstallError::TooLarge => tk!("apps.err.too_large"),
+            InstallError::Duplicate => tk!("apps.err.duplicate"),
+            InstallError::NotInstalled => tk!("apps.err.not_installed"),
+            InstallError::BadId => tk!("apps.err.bad_id"),
+            InstallError::Full => tk!("apps.err.full"),
+            InstallError::Fs(e) => {
+                return i18n::tr_fmt_in(
+                    lang,
+                    tk!("apps.err.fs"),
+                    &[("why", Arg::Str(i18n::tr_in(lang, e.key())))],
+                );
+            }
+        };
+        String::from(i18n::tr_in(lang, key))
+    }
+
+    /// The reason in the language in effect.
+    pub fn message(&self) -> String {
+        self.message_in(i18n::lang())
     }
 }
 
@@ -205,6 +235,11 @@ pub fn launcher_icon(img: &Image) -> Option<Vec<u32>> {
 /// no longer validate, or whose manifest id differs from the file name, are
 /// skipped (never trusted just because they sit in `/apps`).
 pub fn load_catalog(fs: &mut dyn AppFs) -> Vec<CatalogEntry> {
+    load_catalog_in(fs, i18n::lang())
+}
+
+/// [`load_catalog`] sorted by the names in `lang`.
+pub fn load_catalog_in(fs: &mut dyn AppFs, lang: Lang) -> Vec<CatalogEntry> {
     let mut out = Vec::new();
     let Ok(ids) = installed_ids(fs) else {
         return out;
@@ -225,12 +260,8 @@ pub fn load_catalog(fs: &mut dyn AppFs) -> Vec<CatalogEntry> {
             icon,
         });
     }
-    out.sort_by(|a, b| {
-        a.manifest
-            .name
-            .to_ascii_lowercase()
-            .cmp(&b.manifest.name.to_ascii_lowercase())
-    });
+    // By the name the launcher shows, accents and case ignored.
+    out.sort_by_cached_key(|c| crate::search::fold(c.manifest.name_in(lang)));
     out
 }
 

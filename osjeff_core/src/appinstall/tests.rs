@@ -351,3 +351,68 @@ fn the_seed_marker_is_not_an_app_and_survives_catalog_walks() {
     assert_eq!(load_catalog(&mut f).len(), 1);
     assert_eq!(f.stat("/apps/.seeded").unwrap().kind, Kind::File);
 }
+
+#[test]
+fn the_catalog_sorts_by_the_name_of_the_language() {
+    let mut f = fs();
+    install(
+        &mut f,
+        &pkg("id=clock\nname=Clock\nname.pt=Relógio\nversion=1.0.0\n"),
+    )
+    .unwrap();
+    install(
+        &mut f,
+        &pkg("id=notes\nname=Notes\nname.pt=Notas\nversion=1.0.0\n"),
+    )
+    .unwrap();
+    install(
+        &mut f,
+        &pkg("id=paint\nname=Paint\nname.pt=Pintura\nversion=1.0.0\n"),
+    )
+    .unwrap();
+    let mut ids = |l| -> Vec<String> {
+        load_catalog_in(&mut f, l)
+            .iter()
+            .map(|c| c.manifest.id.clone())
+            .collect()
+    };
+    assert_eq!(ids(Lang::Pt), ["notes", "paint", "clock"]);
+    assert_eq!(ids(Lang::En), ["clock", "notes", "paint"]);
+}
+
+#[test]
+fn install_errors_read_in_both_languages() {
+    let errs = [
+        InstallError::TooLarge,
+        InstallError::Duplicate,
+        InstallError::NotInstalled,
+        InstallError::BadId,
+        InstallError::Full,
+        InstallError::Fs(FsError::NoSpace),
+        InstallError::Package(PackageError::NoManifest),
+        InstallError::Package(PackageError::Manifest(ManifestError::Missing("name"))),
+    ];
+    for e in &errs {
+        let (pt, en) = (e.message_in(Lang::Pt), e.message_in(Lang::En));
+        assert!(!pt.is_empty() && !en.is_empty() && pt != en, "{e:?}");
+        assert!(!pt.contains("apps.") && !en.contains("apps."), "{e:?}");
+        assert!(!pt.contains('{') && !en.contains('{'), "{e:?}");
+    }
+    assert_eq!(
+        InstallError::Duplicate.message_in(Lang::Pt),
+        "Já existe um app instalado com este identificador"
+    );
+    assert_eq!(
+        InstallError::Fs(FsError::NoSpace).message_in(Lang::En),
+        "File system error: no space left (quota)"
+    );
+    assert_eq!(
+        InstallError::Fs(FsError::NoSpace).message_in(Lang::Pt),
+        "Erro no sistema de arquivos: sem espaço (cota)"
+    );
+    // The log text stays English.
+    assert_eq!(
+        alloc::format!("{}", InstallError::Duplicate),
+        "an app with this id is already installed"
+    );
+}

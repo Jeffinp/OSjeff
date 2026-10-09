@@ -40,6 +40,7 @@ impl Desktop {
         self.browser_language_changed();
         // App names come from the manifests: ask them again in the new language.
         self.refresh_catalog();
+        self.retitle_wasm_windows();
         // Transient layers hold strings: drop them (they are cheap to open again).
         let sh = &mut self.shell;
         sh.menu = None;

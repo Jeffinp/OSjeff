@@ -12,8 +12,10 @@
 //! Nothing here allocates without a bound: the manifest is at most
 //! [`MAX_MANIFEST_BYTES`], the icon at most [`MAX_ICON_BYTES`] / 64x64.
 
+use crate::i18n::{self, Arg, Lang};
 use crate::image::{self, Image};
 use crate::png;
+use crate::tk;
 use crate::wasmsec::{self, WasmError};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -115,7 +117,11 @@ impl fmt::Display for Version {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
     pub id: String,
+    /// The name in any language that has no `name.<lang>` of its own (plain ASCII).
     pub name: String,
+    /// `name.<lang>=` lines: a language tag as written (`pt`, `pt-br`, `en`) and the name in it.
+    /// Read them with [`Manifest::name_in`] or [`Manifest::display_name`].
+    pub names: Vec<(String, String)>,
     pub version: Version,
     pub abi: Abi,
     pub fs: FsPerm,
@@ -169,6 +175,24 @@ impl fmt::Display for ManifestError {
             ManifestError::BadValue(k) => write!(f, "invalid value for `{k}`"),
             ManifestError::OverLimit(k) => write!(f, "`{k}` is above the system limit"),
         }
+    }
+}
+
+impl ManifestError {
+    /// The reason in `lang`, in words for the person installing the app.
+    pub fn message_in(&self, lang: Lang) -> alloc::string::String {
+        let (key, arg) = match *self {
+            ManifestError::TooLarge => (tk!("apps.err.manifest_large"), None),
+            ManifestError::NotUtf8 => (tk!("apps.err.manifest_utf8"), None),
+            ManifestError::TooManyLines => (tk!("apps.err.manifest_lines"), None),
+            ManifestError::Syntax => (tk!("apps.err.manifest_syntax"), None),
+            ManifestError::DuplicateKey(k) => (tk!("apps.err.manifest_dup"), Some(k)),
+            ManifestError::UnknownKey => (tk!("apps.err.manifest_unknown"), None),
+            ManifestError::Missing(k) => (tk!("apps.err.manifest_missing"), Some(k)),
+            ManifestError::BadValue(k) => (tk!("apps.err.manifest_bad"), Some(k)),
+            ManifestError::OverLimit(k) => (tk!("apps.err.manifest_limit"), Some(k)),
+        };
+        i18n::tr_fmt_in(lang, key, &[("key", Arg::Str(arg.unwrap_or("")))])
     }
 }
 
@@ -277,8 +301,41 @@ fn parse_net_hosts(v: &str) -> Result<Vec<String>, ManifestError> {
 fn key_is_syntactic(k: &str) -> bool {
     !k.is_empty()
         && k.len() <= 32
-        && k.bytes()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'_' | b'-'))
+        && !k.starts_with('.')
+        && !k.ends_with('.')
+        && k.bytes().all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'_' | b'-' | b'.')
+        })
+}
+
+/// Most `name.<lang>` lines a manifest may carry.
+pub const MAX_LOCAL_NAMES: usize = 8;
+
+/// A language tag after `name.`: two or three lowercase letters, optionally `-` and two to
+/// five lowercase letters or digits (`pt`, `en`, `pt-br`).
+fn valid_lang_tag(t: &str) -> bool {
+    let (lang, rest) = match t.split_once('-') {
+        Some((l, r)) => (l, Some(r)),
+        None => (t, None),
+    };
+    (2..=3).contains(&lang.len())
+        && lang.bytes().all(|c| c.is_ascii_lowercase())
+        && rest.is_none_or(|r| {
+            (2..=5).contains(&r.len())
+                && r.bytes()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        })
+}
+
+/// A name in a language: printable text (accents and the like allowed), no leading or
+/// trailing space, at most [`MAX_NAME_LEN`] characters.
+fn valid_local_name(n: &str) -> bool {
+    let chars = n.chars().count();
+    (1..=MAX_NAME_LEN).contains(&chars)
+        && n.len() <= 4 * MAX_NAME_LEN
+        && !n.chars().any(char::is_control)
+        && !n.starts_with(' ')
+        && !n.ends_with(' ')
 }
 
 macro_rules! set_once {
@@ -300,6 +357,7 @@ impl Manifest {
 
         let mut id: Option<String> = None;
         let mut name: Option<String> = None;
+        let mut names: Vec<(String, String)> = Vec::new();
         let mut version = None;
         let mut abi = None;
         let mut fs = None;
@@ -444,6 +502,24 @@ impl Manifest {
                     };
                     set_once!(resizable, "resizable", r);
                 }
+                k if k.starts_with("name.") => {
+                    let tag = &k["name.".len()..];
+                    if !valid_lang_tag(tag) {
+                        return Err(ManifestError::UnknownKey);
+                    }
+                    if !valid_local_name(val) {
+                        return Err(ManifestError::BadValue("name.<lang>"));
+                    }
+                    if names.iter().any(|(t, _)| t == tag) {
+                        return Err(ManifestError::DuplicateKey("name.<lang>"));
+                    }
+                    // A tag for a language the system does not have is fine (kept, unused), but
+                    // not without bound.
+                    if names.len() >= MAX_LOCAL_NAMES {
+                        return Err(ManifestError::OverLimit("name.<lang>"));
+                    }
+                    names.push((String::from(tag), String::from(val)));
+                }
                 k if k.starts_with("x-") => {}
                 _ => return Err(ManifestError::UnknownKey),
             }
@@ -481,6 +557,7 @@ impl Manifest {
         Ok(Manifest {
             id,
             name,
+            names,
             version,
             abi: abi.unwrap_or(Abi::V2),
             fs,
@@ -506,6 +583,7 @@ impl Manifest {
         Manifest {
             id: String::from(id),
             name: String::from(name),
+            names: Vec::new(),
             version: Version {
                 major: 0,
                 minor: 0,
@@ -527,6 +605,25 @@ impl Manifest {
             win_min_h: 414,
             resizable: false,
         }
+    }
+
+    /// The name to show in `lang`: the `name.<lang>` of that language (the full tag, then its
+    /// primary part: `pt-br`, then `pt`), else the plain `name`.
+    pub fn name_in(&self, lang: Lang) -> &str {
+        let code = lang.code();
+        let primary = code.split('-').next().unwrap_or(code);
+        let find = |want: &str| {
+            self.names
+                .iter()
+                .find(|(t, _)| t.eq_ignore_ascii_case(want))
+                .map(|(_, n)| n.as_str())
+        };
+        find(code).or_else(|| find(primary)).unwrap_or(&self.name)
+    }
+
+    /// The name to show in the language in effect.
+    pub fn display_name(&self) -> &str {
+        self.name_in(i18n::lang())
     }
 
     /// The quotas actually granted: the request clamped to the system ceilings
@@ -571,6 +668,18 @@ pub enum IconError {
     Corrupt,
 }
 
+impl IconError {
+    /// Catalog key of the reason.
+    pub fn key(self) -> &'static str {
+        match self {
+            IconError::TooLarge => tk!("apps.err.icon_large"),
+            IconError::NotPng => tk!("apps.err.icon_png"),
+            IconError::Dimensions => tk!("apps.err.icon_size"),
+            IconError::Corrupt => tk!("apps.err.icon_corrupt"),
+        }
+    }
+}
+
 impl fmt::Display for IconError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -604,6 +713,26 @@ pub enum PackageError {
     DuplicateIcon,
     Manifest(ManifestError),
     Icon(IconError),
+}
+
+impl PackageError {
+    /// The reason in `lang`, in words for the person installing the app.
+    pub fn message_in(&self, lang: Lang) -> alloc::string::String {
+        match self {
+            PackageError::Wasm(e) => alloc::string::String::from(i18n::tr_in(lang, e.key())),
+            PackageError::NoManifest => {
+                alloc::string::String::from(i18n::tr_in(lang, tk!("apps.err.no_manifest")))
+            }
+            PackageError::DuplicateManifest => {
+                alloc::string::String::from(i18n::tr_in(lang, tk!("apps.err.two_manifests")))
+            }
+            PackageError::DuplicateIcon => {
+                alloc::string::String::from(i18n::tr_in(lang, tk!("apps.err.two_icons")))
+            }
+            PackageError::Manifest(e) => e.message_in(lang),
+            PackageError::Icon(e) => alloc::string::String::from(i18n::tr_in(lang, e.key())),
+        }
+    }
 }
 
 impl fmt::Display for PackageError {

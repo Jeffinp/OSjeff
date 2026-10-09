@@ -49,7 +49,8 @@ extensões e ignoradas). Obrigatórias: `id`, `name`, `version`.
 | Chave | Valor | Padrão |
 |---|---|---|
 | `id` | `[a-z0-9._-]{1,32}`, começa por letra ou dígito, sem `..` | — |
-| `name` | 1 a 24 caracteres ASCII imprimíveis, sem espaço nas pontas | — |
+| `name` | 1 a 24 caracteres ASCII imprimíveis, sem espaço nas pontas. É o nome de reserva (em inglês nos apps que acompanham o sistema) | — |
+| `name.<idioma>` | o nome no idioma (`name.pt=Relógio`, `name.en=Clock`, também `name.pt-br`): 1 a 24 caracteres, com acentos, sem controle nem espaço nas pontas; até 8 linhas; um idioma que o sistema não tem é guardado e não usado. O sistema mostra o do idioma em uso (primeiro a etiqueta inteira, depois a parte principal) e, sem ele, `name` | — |
 | `version` | `N.N.N` (cada N <= 65535) | — |
 | `abi` | `1` (módulo `host`) ou `2` (módulo `osj`) | `2` |
 | `fs` | `none` \| `own` \| `home` | `none` |
@@ -314,7 +315,7 @@ compositor, o navegador e o resto do sistema seguem. Retomar a chamada de forma 
 
 `wasm-apps/sdk` (crate `no_std`, `wasm32-unknown-unknown`, workspace isolado): `sys` (imports
 `osj.*` crus), wrappers seguros (`Canvas`, `File`, `Dir`, `log!`, `Error`), o macro
-`manifest!{ id: "clock", name: "Relogio", ... }` que emite `#[link_section = "osjeff.manifest"]`
+`manifest!("id=clock\nname=Clock\nname.pt=Relógio\n...")` que emite `#[link_section = "osjeff.manifest"]`
 (e `icon!(include_bytes!(...))`), e o `panic_handler`. Apps: `hello`, `clock`, `notes`
 (arquivos em `/`, ou seja `/data/notes/`), `paint` (mouse; salva BMP pelo host? não: o guest
 escreve um BMP de 24 bits direto com `fs_write`, formato trivial), mais `snake` e `plasma`

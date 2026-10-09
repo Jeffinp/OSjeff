@@ -69,6 +69,25 @@ impl From<PathError> for FsError {
     }
 }
 
+impl FsError {
+    /// Catalog key of the reason, in words for the person.
+    pub fn key(self) -> &'static str {
+        match self {
+            FsError::NotFound => crate::tk!("apps.fs.not_found"),
+            FsError::Exists => crate::tk!("apps.fs.exists"),
+            FsError::NotDir => crate::tk!("apps.fs.not_dir"),
+            FsError::IsDir => crate::tk!("apps.fs.is_dir"),
+            FsError::NotEmpty => crate::tk!("apps.fs.not_empty"),
+            FsError::NoSpace => crate::tk!("apps.fs.no_space"),
+            FsError::Invalid => crate::tk!("apps.fs.invalid"),
+            FsError::Perm => crate::tk!("apps.fs.denied"),
+            FsError::BadFd => crate::tk!("apps.fs.bad_fd"),
+            FsError::TooManyFds => crate::tk!("apps.fs.too_many"),
+            FsError::Io => crate::tk!("apps.fs.io"),
+        }
+    }
+}
+
 impl fmt::Display for FsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {

@@ -97,7 +97,60 @@ pub(crate) struct AppFault(pub &'static str);
 
 impl core::fmt::Display for AppFault {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(self.0)
+        // The log is English; the window asks the catalog again in the language of the moment.
+        f.write_str(osjeff_core::i18n::tr_in(
+            osjeff_core::i18n::Lang::En,
+            self.0,
+        ))
+    }
+}
+
+/// Why an app stopped: a catalog key (`apps.why.*`) and the one value it names (an exit code,
+/// the text of a load error, always `{x}`). The window shows [`Why::text`] in the language in
+/// effect when it is drawn; the serial log gets the English [`Why::log`].
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Why {
+    key: &'static str,
+    arg: alloc::string::String,
+}
+
+impl Why {
+    pub(crate) fn new(key: &'static str) -> Why {
+        Why {
+            key,
+            arg: alloc::string::String::new(),
+        }
+    }
+
+    pub(crate) fn with(key: &'static str, arg: impl Into<alloc::string::String>) -> Why {
+        Why {
+            key,
+            arg: arg.into(),
+        }
+    }
+
+    fn render(&self, l: osjeff_core::i18n::Lang) -> alloc::string::String {
+        osjeff_core::i18n::tr_fmt_in(
+            l,
+            self.key,
+            &[("x", osjeff_core::i18n::Arg::Str(self.arg.as_str()))],
+        )
+    }
+
+    /// In the language in effect.
+    pub(crate) fn text(&self) -> alloc::string::String {
+        self.render(osjeff_core::i18n::lang())
+    }
+
+    /// In English, for the log.
+    pub(crate) fn log(&self) -> alloc::string::String {
+        self.render(osjeff_core::i18n::Lang::En)
+    }
+}
+
+impl core::fmt::Display for Why {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(&self.log())
     }
 }
 
@@ -401,28 +454,28 @@ fn run(bytes: &[u8], entry: &str, state: HostState) -> Result<(), &'static str> 
     Ok(())
 }
 
-/// Why a guest call failed, in words for the log and the window.
-pub(crate) fn describe(e: &wasmi::Error) -> alloc::string::String {
-    use alloc::string::String;
+/// Why a guest call failed, in words for the window (and, in English, for the log).
+pub(crate) fn describe(e: &wasmi::Error) -> Why {
+    use osjeff_core::tk;
     if e.as_trap_code() == Some(wasmi::TrapCode::OutOfFuel) {
-        return String::from("falta de combustivel (laco infinito?)");
+        return Why::new(tk!("apps.why.out_of_fuel"));
     }
     if let Some(code) = e.i32_exit_status() {
-        return alloc::format!("saiu com codigo {code}");
+        return Why::with(tk!("apps.why.exit_code"), alloc::format!("{code}"));
     }
     if let Some(f) = e.downcast_ref::<AppFault>() {
-        return String::from(f.0);
+        return Why::new(f.0);
     }
-    match e.as_trap_code() {
-        Some(wasmi::TrapCode::MemoryOutOfBounds) => String::from("acesso fora da memoria"),
-        Some(wasmi::TrapCode::UnreachableCodeReached) => String::from("panico (unreachable)"),
-        Some(wasmi::TrapCode::StackOverflow) => String::from("estouro de pilha"),
-        Some(wasmi::TrapCode::IntegerDivisionByZero) => String::from("divisao por zero"),
-        Some(wasmi::TrapCode::IndirectCallToNull) => String::from("chamada indireta nula"),
-        Some(wasmi::TrapCode::BadSignature) => String::from("assinatura de chamada invalida"),
-        Some(_) => String::from("trap"),
-        None => String::from("erro do guest"),
-    }
+    Why::new(match e.as_trap_code() {
+        Some(wasmi::TrapCode::MemoryOutOfBounds) => tk!("apps.why.out_of_bounds"),
+        Some(wasmi::TrapCode::UnreachableCodeReached) => tk!("apps.why.unreachable"),
+        Some(wasmi::TrapCode::StackOverflow) => tk!("apps.why.stack_overflow"),
+        Some(wasmi::TrapCode::IntegerDivisionByZero) => tk!("apps.why.div_zero"),
+        Some(wasmi::TrapCode::IndirectCallToNull) => tk!("apps.why.null_call"),
+        Some(wasmi::TrapCode::BadSignature) => tk!("apps.why.bad_signature"),
+        Some(_) => tk!("apps.why.trap"),
+        None => tk!("apps.why.guest"),
+    })
 }
 
 /// The guest's exported linear memory. WAT modules here export it as `mem`;

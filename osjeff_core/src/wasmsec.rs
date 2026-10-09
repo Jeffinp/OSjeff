@@ -43,6 +43,21 @@ pub enum WasmError {
     TooManySections,
 }
 
+impl WasmError {
+    /// Catalog key of the reason, in words for the person installing the app.
+    pub fn key(self) -> &'static str {
+        match self {
+            WasmError::TooShort => crate::tk!("apps.err.wasm_short"),
+            WasmError::BadMagic => crate::tk!("apps.err.wasm_magic"),
+            WasmError::BadVersion => crate::tk!("apps.err.wasm_version"),
+            WasmError::BadLeb => crate::tk!("apps.err.wasm_leb"),
+            WasmError::Truncated => crate::tk!("apps.err.wasm_section_end"),
+            WasmError::BadSectionId => crate::tk!("apps.err.wasm_section_id"),
+            WasmError::TooManySections => crate::tk!("apps.err.wasm_sections"),
+        }
+    }
+}
+
 impl fmt::Display for WasmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {

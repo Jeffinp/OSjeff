@@ -3,6 +3,7 @@
 //! `appd` thread only.
 
 use super::*;
+use osjeff_core::tk;
 
 /// Wall clock in ms since local midnight (the RTC has no date or sub-second part).
 fn wall_ms() -> u64 {
@@ -10,19 +11,19 @@ fn wall_ms() -> u64 {
     (t.h as u64 * 3600 + t.m as u64 * 60 + t.s as u64) * 1000
 }
 
-pub(super) fn build_runtime(i: usize) -> Result<Box<Runtime>, String> {
+pub(super) fn build_runtime(i: usize) -> Result<Box<Runtime>, Why> {
     let (wasm, manifest, v1, quotas) = with(|slots| {
         slots[i]
             .as_ref()
             .map(|s| (s.wasm.clone(), s.manifest.clone(), s.v1, s.quotas))
     })
-    .ok_or_else(|| String::from("instancia inexistente"))?;
+    .ok_or_else(|| Why::new(tk!("apps.why.no_instance")))?;
     let engine = guest_engine();
-    let module =
-        Module::new(&engine, &wasm[..]).map_err(|e| alloc::format!("modulo invalido: {e}"))?;
+    let module = Module::new(&engine, &wasm[..])
+        .map_err(|e| Why::with(tk!("apps.why.bad_module"), alloc::format!("{e}")))?;
     let mut state = HostState::with_limits(guest_limits(quotas.mem_bytes));
     let sandbox = Sandbox::new(manifest.fs, &manifest.id, quotas.disk_bytes, quotas.max_fds)
-        .ok_or_else(|| String::from("id de app invalido"))?;
+        .ok_or_else(|| Why::new(tk!("apps.why.bad_id")))?;
     let mono = crate::interrupts::ticks() * 4;
     state.v2 = Some(Box::new(abi2::V2::new(
         &manifest.id,
@@ -42,18 +43,18 @@ pub(super) fn build_runtime(i: usize) -> Result<Box<Runtime>, String> {
     };
     store
         .set_fuel(init_fuel)
-        .map_err(|_| String::from("combustivel"))?;
+        .map_err(|_| Why::new(tk!("apps.why.no_fuel_slot")))?;
     let mut linker = <Linker<HostState>>::new(&engine);
-    install_all(&mut linker).map_err(String::from)?;
+    install_all(&mut linker).map_err(|e| Why::with(tk!("apps.why.link_failed"), e))?;
     let instance = linker
         .instantiate_and_start(&mut store, &module)
-        .map_err(|e| alloc::format!("instanciacao falhou: {}", describe_load(&e)))?;
+        .map_err(|e| Why::with(tk!("apps.why.start_failed"), describe_load(&e)))?;
     // A WASI "reactor" module (clang -mexec-model=reactor, e.g. DOOM) exposes
     // `_initialize`, which must run once before any other export is called.
     if let Ok(init) = instance.get_typed_func::<(), ()>(&store, "_initialize")
         && let Err(e) = init.call(&mut store, ())
     {
-        return Err(alloc::format!("_initialize: {}", describe(&e)));
+        return Err(Why::with(tk!("apps.why.init_failed"), describe(&e).log()));
     }
     let memory = instance
         .get_memory(&store, "memory")
@@ -153,7 +154,9 @@ fn call_export(rt: &mut Runtime, name: &str, args: &[i32], fuel: u64) -> Result<
 /// Run one slice of the guest. `Ok(true)` when it rendered (publish the surface).
 pub(super) fn run_guest(i: usize, job: &Job) -> Result<bool, wasmi::Error> {
     let fault = |what: &'static str| wasmi::Error::host(AppFault(what));
-    let rt = rts()[i].as_mut().ok_or_else(|| fault("sem runtime"))?;
+    let rt = rts()[i]
+        .as_mut()
+        .ok_or_else(|| fault(tk!("apps.why.no_runtime")))?;
     // The surface to draw into: the one the compositor is not reading.
     let mut spins = 0;
     let (back, ptr, len, w, h, had_front) = loop {
@@ -173,18 +176,18 @@ pub(super) fn run_guest(i: usize, job: &Job) -> Result<bool, wasmi::Error> {
             )))
         });
         match r {
-            None => return Err(fault("instancia removida")),
+            None => return Err(fault(tk!("apps.why.removed"))),
             Some(Some(x)) => break x,
             Some(None) => {
                 spins += 1;
                 if spins > 10_000 {
-                    return Err(fault("superficie ocupada"));
+                    return Err(fault(tk!("apps.why.surface_busy")));
                 }
                 crate::sched::yield_now();
             }
         }
     };
-    let info = surface_info(w, h).ok_or_else(|| fault("sem framebuffer"))?;
+    let info = surface_info(w, h).ok_or_else(|| fault(tk!("apps.why.no_display")))?;
     // Packaged (v2) apps may draw incrementally: start from the last published frame.
     if !job.v1 && had_front {
         with(|slots| {

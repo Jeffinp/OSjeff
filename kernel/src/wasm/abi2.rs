@@ -86,21 +86,22 @@ fn v2<'a>(c: &'a mut Caller<'_, HostState>) -> R<&'a mut V2> {
     c.data_mut()
         .v2
         .as_deref_mut()
-        .ok_or_else(|| fault("sem ABI v2"))
+        .ok_or_else(|| fault(osjeff_core::tk!("apps.why.no_abi2")))
 }
 
 /// Memory + validated range. A bad range is a fault (the app dies).
 fn range(c: &C, ptr: i32, len: i32) -> R<(Memory, Range<usize>)> {
-    let mem = guest_mem(c).ok_or_else(|| fault("sem memoria exportada"))?;
-    let r = check_range(mem.data_size(c), ptr, len).map_err(|_| fault("ponteiro invalido"))?;
+    let mem = guest_mem(c).ok_or_else(|| fault(osjeff_core::tk!("apps.why.no_memory")))?;
+    let r = check_range(mem.data_size(c), ptr, len)
+        .map_err(|_| fault(osjeff_core::tk!("apps.why.bad_pointer")))?;
     Ok((mem, r))
 }
 
 /// Copy `[ptr, ptr+len)` out of guest memory. `Ok(Err(code))` when `len > cap`.
 fn read_capped(c: &C, ptr: i32, len: i32, cap: usize) -> R<Result<Vec<u8>, i32>> {
-    let mem = guest_mem(c).ok_or_else(|| fault("sem memoria exportada"))?;
-    let r =
-        check_capped(mem.data_size(c), ptr, len, cap).map_err(|_| fault("ponteiro invalido"))?;
+    let mem = guest_mem(c).ok_or_else(|| fault(osjeff_core::tk!("apps.why.no_memory")))?;
+    let r = check_capped(mem.data_size(c), ptr, len, cap)
+        .map_err(|_| fault(osjeff_core::tk!("apps.why.bad_pointer")))?;
     Ok(r.map(|r| mem.data(c)[r].to_vec()))
 }
 
@@ -130,7 +131,7 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
             return Ok(ERR_INVAL);
         }
         let st = v2(&mut c)?;
-        st.title = bytes.iter().map(|&b| b as char).collect();
+        st.title = alloc::string::String::from_utf8_lossy(&bytes).into_owned();
         st.title_dirty = true;
         Ok(0)
     });
@@ -313,13 +314,13 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
                         len: i32|
      -> R<i32> {
         if len < 0 {
-            return Err(fault("ponteiro invalido"));
+            return Err(fault(osjeff_core::tk!("apps.why.bad_pointer")));
         }
         let want = (len as usize).min(MAX_IO);
         let (mem, r) = range(&c, ptr, want as i32)?;
         let (data, st) = mem.data_and_store_mut(&mut c);
         let Some(v) = st.v2.as_deref_mut() else {
-            return Err(fault("sem ABI v2"));
+            return Err(fault(osjeff_core::tk!("apps.why.no_abi2")));
         };
         let out = appfs_backend::try_with(|fs| v.sandbox.read(fs, fd, &mut data[r]));
         let code = res(out.map(|n| n as i32));
@@ -332,13 +333,13 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
                          len: i32|
      -> R<i32> {
         if len < 0 {
-            return Err(fault("ponteiro invalido"));
+            return Err(fault(osjeff_core::tk!("apps.why.bad_pointer")));
         }
         let want = (len as usize).min(MAX_IO);
         let (mem, r) = range(&c, ptr, want as i32)?;
         let (data, st) = mem.data_and_store_mut(&mut c);
         let Some(v) = st.v2.as_deref_mut() else {
-            return Err(fault("sem ABI v2"));
+            return Err(fault(osjeff_core::tk!("apps.why.no_abi2")));
         };
         let out = appfs_backend::try_with(|fs| v.sandbox.write(fs, fd, &data[r]));
         let code = res(out.map(|n| n as i32));
