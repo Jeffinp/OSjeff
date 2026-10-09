@@ -42,7 +42,7 @@ fixed or documented. (Audit documents are in Portuguese.)
 | **Apps (every application, with search)** | **Search: apps, files and sums (`Ctrl+Space`)** |
 | <img src="docs/img/ui-apps-dark.png" width="420"> | <img src="docs/img/ui-busca-light.png" width="420"> |
 | **File manager (folders, trash, persistent)** | **Browser (verified HTTPS: "Conexão segura")** |
-| <img src="docs/img/w23-files-dark.png" width="420"> | <img src="docs/img/ui-browser-light.png" width="420"> |
+| <img src="docs/img/w23-files-dark.png" width="420"> | <img src="docs/img/browser-w24-pagina-light.png" width="420"> |
 | **Settings (appearance, accent, notifications)** | **Controls (network, appearance, accent)** |
 | <img src="docs/img/ui-ajustes-dark.png" width="420"> | <img src="docs/img/ui-controls-dark.png" width="420"> |
 | **Activity monitor (CPU, memory, disk, network, processes)** | **Components (`Ctrl+Alt+G`): the toolkit showcase** |

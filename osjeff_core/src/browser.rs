@@ -74,7 +74,7 @@ impl Security {
     pub fn label(self) -> Option<&'static str> {
         match self {
             Security::None => None,
-            Security::Http => Some("Nao seguro"),
+            Security::Http => Some("Não seguro"),
             Security::HttpsVerified => Some("Conexão segura"),
             Security::HttpsInvalid => Some("Certificado inválido"),
         }
@@ -120,20 +120,20 @@ pub enum FailReason {
 }
 
 impl FailReason {
-    /// One-line message for the page area (ASCII only).
+    /// One-line message for the page area.
     pub fn message(self) -> &'static str {
         match self {
-            FailReason::Network => "Falha ao carregar a pagina.",
-            FailReason::Dns => "Nome nao encontrado: confira o endereco (DNS).",
+            FailReason::Network => "Falha ao carregar a página.",
+            FailReason::Dns => "Nome não encontrado: confira o endereço (DNS).",
             FailReason::Refused => "Conexão recusada pelo servidor.",
-            FailReason::Timeout => "Tempo esgotado: o servidor nao respondeu.",
-            FailReason::Tls => "Falha na negociacao TLS (conexao segura).",
+            FailReason::Timeout => "Tempo esgotado: o servidor não respondeu.",
+            FailReason::Tls => "Falha na negociação TLS (conexão segura).",
             FailReason::Cert(e) => e.page_message(),
             FailReason::RedirectDowngrade => "Bloqueado: redirecionamento de HTTPS para HTTP.",
-            FailReason::RedirectInvalid => "Redirecionamento invalido.",
+            FailReason::RedirectInvalid => "Redirecionamento inválido.",
             FailReason::RedirectLoop => "Redirecionamento em ciclo.",
             FailReason::TooManyRedirects => "Redirecionamentos demais.",
-            FailReason::WorkerDied => "O carregador de paginas falhou (thread encerrada).",
+            FailReason::WorkerDied => "O carregador de páginas falhou (thread encerrada).",
         }
     }
 
@@ -524,12 +524,13 @@ pub fn page_body_partial(resp: &[u8], cut: bool) -> PageBody {
         Err(e) => {
             let msg: &[u8] = match e {
                 crate::gzip::EncodingError::TooLarge => {
-                    b"<p>Pagina descompactada grande demais.</p>"
+                    "<p>Página descompactada grande demais.</p>".as_bytes()
                 }
                 _ if content_encodings(resp).contains(&crate::gzip::Encoding::Unsupported) => {
-                    b"<p>Codificacao de conteudo nao suportada.</p>"
+                    "<p>Codificação de conteúdo não suportada.</p>".as_bytes()
                 }
-                _ => b"<p>Falha ao descompactar a pagina (dados corrompidos ou cortados).</p>",
+                _ => "<p>Falha ao descompactar a página (dados corrompidos ou cortados).</p>"
+                    .as_bytes(),
             };
             PageBody {
                 body: msg.to_vec(),
@@ -2065,7 +2066,7 @@ mod tests {
         // Plain http says so.
         b.open(b"http://example.com");
         assert_eq!(b.security(), Security::Http);
-        assert_eq!(b.security().label(), Some("Nao seguro"));
+        assert_eq!(b.security().label(), Some("Não seguro"));
     }
 
     #[test]
@@ -2244,7 +2245,7 @@ mod tests {
     }
 
     #[test]
-    fn worker_died_is_a_distinct_ascii_failure() {
+    fn worker_died_is_a_distinct_failure() {
         let mut b = Browser::new();
         b.open(b"example.com");
         let _ = b.take_request();
@@ -2252,7 +2253,7 @@ mod tests {
         assert_eq!(b.status(), Status::Error);
         assert_eq!(b.fail_reason(), FailReason::WorkerDied);
         assert_ne!(FailReason::WorkerDied, FailReason::Network);
-        assert!(FailReason::WorkerDied.message().is_ascii());
+        assert!(!FailReason::WorkerDied.message().is_empty());
         // The next navigation starts clean.
         b.open(b"example.org");
         assert_eq!(b.status(), Status::Loading);
@@ -2298,7 +2299,7 @@ mod tests {
         let body = page_body(resp);
         assert!(String::from_utf8_lossy(&body).contains("Falha ao descompactar"));
         let resp = b"HTTP/1.1 200 OK\r\nContent-Encoding: br\r\n\r\n\x01\x02";
-        assert!(String::from_utf8_lossy(&page_body(resp)).contains("nao suportada"));
+        assert!(String::from_utf8_lossy(&page_body(resp)).contains("não suportada"));
         // identity is a no-op
         let resp = b"HTTP/1.1 200 OK\r\nContent-Encoding: identity\r\n\r\n<p>x</p>";
         assert_eq!(page_body(resp), b"<p>x</p>");

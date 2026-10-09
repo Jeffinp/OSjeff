@@ -473,6 +473,38 @@ compartilhada, então cada cenário rodou duas vezes; antes = `bc31f5e`, mesmo d
 O cursor que pisca pede quadros só na janela em foco, por 12 s depois da última tecla ou clique; uma
 janela que nunca recebeu entrada não pisca e não pede quadros (corrigido durante o trabalho: o
 terminal aberto no boot fazia cerca de cem quadros por segundo nos primeiros 12 s).
+### Navegador na W24: testes, fuzz e custo
+
+Testes novos no `osjeff_core` (todos no host): `web::layout_tests` (quebra por largura medida,
+zoom 50 a 300, tabelas, estilos aninhados, palavras longas, texto vazio, páginas enormes,
+alinhamento vertical, colunas com largura em px), `web::css` (índice de regras), `browser::tabs`,
+`browser::{cert,errors,motion,pages}`, `browser::ui_tests` (abas compartilham favoritos,
+recarregar, parar, recentes), `layout` (geometria da moldura, balão, busca, erro, nova aba).
+Total: 2631 no `osjeff_core` (eram 2497).
+
+Fuzz: `web_parse` (agora também tabelas, seletores, vários zooms e métricas hostis),
+`html_img_form` (formas de tabela, estilo, listas, abas, páginas `osjeff://`) e `x509_parse`
+(resumo de certificado para o balão). Execuções: `web_parse` 361 s (1178 execuções, entradas pesadas), `html_img_form` 331 s (10 798) e `x509_parse` 121 s (1,46 milhão), sem falha restante; `html_img_form` achou um marcador de lista fora da página (corrigido, `fuzz/regressions/html_img_form/w24-list-marker-off-page`).
+
+Custo (QEMU `-icount shift=0`, determinístico, 1 GHz virtual; mesmo cenário e mesma página de
+2000 nós; antes = base `bc31f5e` com os mesmos ganchos `[trace] browser ...`):
+
+| Medida | antes | depois |
+|---|---|---|
+| análise (46 KB, `/big?n=2000`) | 8,9 ms | 20,6 ms (35 ms antes das otimizações) |
+| layout da página de 2000 nós | 15,5 ms (5679 comandos, fonte fixa) | 25,4 ms (2019 comandos; 62,7 ms antes das otimizações) |
+| página pequena (`/type`): carga até o primeiro quadro | 10 ms | 19 ms |
+| página grande: carga até o primeiro quadro | 33,5 ms | 61 ms (116 ms antes das otimizações) |
+| quadro de rolagem (roda, setas) | 14 a 21 ms (recompõe a área de trabalho) | 5,2 a 6,3 ms (só a área do cliente) |
+| salto de página (PgDn) numa página grande | 14 a 21 ms | 11 ms |
+| navegador aberto e ocioso | 0 quadros | 0 quadros (só o tique do relógio) |
+
+O texto proporcional custa mais que a fonte fixa na carga (cada palavra é medida na fonte
+real); o cache de glifos e kerning, o índice de regras e menos alocações cortaram o layout
+pela metade. Cenários: `w24-pages.sh`, `w24-chrome.sh`, `w24-chrome2.sh`, `w24-errors.sh`,
+`w24-internal.sh`, `w24-overlap.sh`, `w24-perf.sh` (+ `tools/perf/w24-perf.py`), `w24-readme.sh`;
+servidores: `tools/w24-site.py` (:8079) e `tools/nettest-server.py` (HTTPS autoassinado :8078).
+Os números de tempo real do TCG variam com a carga do hospedeiro; use `-icount` para comparar.
 
 ## 5. Lint e supply chain
 

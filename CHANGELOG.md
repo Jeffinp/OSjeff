@@ -99,6 +99,23 @@ tem releases versionadas; as seções são marcos na `master`.
   desenha. Nenhum `text::legacy` restou nesses apps.
 - Testes: 2590 no `osjeff_core` (eram 2497); custo de quadro e capturas em `docs/TESTING.md` e
   `docs/design/ui-macos.md`.
+## 2026-10 — Navegador novo (W24)
+
+- **Páginas com texto proporcional.** O layout mede cada palavra na fonte real (Inter, JetBrains
+  Mono em `pre`/`code`), com tamanhos, negrito, itálico (inclinação sintetizada), quebra pela
+  largura medida, alinhamento, altura de linha, listas, citações, tabelas, caixas em linha,
+  formulários no estilo do sistema e os estilos de fonte, cor, fundo, margem, borda e `display`.
+- **Moldura nova:** barra única (voltar, avançar, recarregar/parar, campo com indicador de
+  segurança e estrela, progresso), balão do certificado (host, emissor, validade), sugestões em
+  vidro, **abas** (até 8, Ctrl+T/W/Tab/1..9), tela de **Nova aba**, páginas de erro com
+  "Tentar novamente", busca na página, pílula de zoom, rolagem com inércia, menu de contexto.
+- `osjeff://favoritos`, `historico` e `sobre` viraram HTML e CSS pelo mesmo motor.
+- Rolar, passar o mouse e digitar no navegador repintam só a área do cliente; o layout de uma
+  página de 2000 nós caiu de 62,7 para 25,4 ms (cache de glifos, índice de regras, menos alocações).
+- Corrigido: a palavra de mais de 4096 caracteres contava entre palavras e cortava palavras
+  comuns de textos longos; células de tabela deslocavam as vizinhas; bordas recolhidas perdiam
+  o topo das linhas.
+- Testes: 2631 no `osjeff_core` (eram 2497).
 
 ## 2026-10 — Nova interface (W22)
 

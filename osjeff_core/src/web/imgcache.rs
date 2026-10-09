@@ -65,11 +65,11 @@ pub enum ImgState {
 
 impl ImgState {
     /// The line shown under the alt text of a box that has no picture
-    /// (ASCII: the bitmap font has no accents). `None` for pending / ready.
+    /// `None` for pending / ready.
     pub fn message(self) -> Option<&'static str> {
         match self {
             ImgState::Pending | ImgState::Ready { .. } => None,
-            ImgState::Unsupported => Some("formato nao suportado"),
+            ImgState::Unsupported => Some("formato não suportado"),
             ImgState::Failed => Some("falha ao carregar"),
             ImgState::TooBig => Some("imagem grande demais"),
             ImgState::TooMany => Some("limite de imagens"),
@@ -771,12 +771,12 @@ mod tests {
     }
 
     #[test]
-    fn messages_are_ascii_and_only_for_failures() {
+    fn messages_exist_only_for_failures() {
         assert_eq!(ImgState::Pending.message(), None);
         assert_eq!(ImgState::Ready { w: 1, h: 1 }.message(), None);
         assert_eq!(
             ImgState::Unsupported.message(),
-            Some("formato nao suportado")
+            Some("formato não suportado")
         );
         for s in [
             ImgState::Unsupported,
@@ -784,7 +784,7 @@ mod tests {
             ImgState::TooBig,
             ImgState::TooMany,
         ] {
-            assert!(s.message().unwrap().is_ascii());
+            assert!(!s.message().unwrap().is_empty());
         }
     }
 

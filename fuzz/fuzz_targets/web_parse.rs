@@ -20,6 +20,62 @@
 use libfuzzer_sys::fuzz_target;
 use osjeff_core::browser;
 use osjeff_core::web;
+use osjeff_core::web::imgcache::NoImages;
+use osjeff_core::web::{Doc, FixedAdvance, Font, Layout, TextMetrics};
+
+/// Metrics that misbehave (zero, negative, huge): layout must stay bounded whatever they say.
+struct Weird(u8);
+
+impl TextMetrics for Weird {
+    fn width(&self, t: &str, f: Font) -> i32 {
+        let n = t.chars().count() as i32;
+        match self.0 % 5 {
+            0 => 0,
+            1 => n.saturating_mul(1_000_000),
+            2 => i32::MAX,
+            3 => n * i32::from(f.size) / 3,
+            _ => -n,
+        }
+    }
+    fn line_height(&self, f: Font) -> i32 {
+        match self.0 % 3 {
+            0 => 0,
+            1 => -5,
+            _ => i32::from(f.size) * 100_000,
+        }
+    }
+    fn ascent(&self, f: Font) -> i32 {
+        match self.0 % 3 {
+            0 => 0,
+            1 => i32::MIN,
+            _ => i32::from(f.size) * 50,
+        }
+    }
+}
+
+/// Lay `html` out at the zoom steps with sane and with hostile metrics; the display list
+/// stays inside the engine's ceilings.
+fn layout_all(html: &[u8], viewport: i32, mode: u8) {
+    let doc = Doc::parse(html);
+    let _ = doc.title();
+    let zooms: &[u16] = if html.len() > 32 * 1024 { &[100] } else { &[50, 100, 300] };
+    for &zoom in zooms {
+        let p = doc.layout(&Layout {
+            width: viewport,
+            zoom,
+            images: &NoImages,
+            metrics: &FixedAdvance,
+        });
+        assert!(p.cmds.len() <= 150_000);
+        assert!(p.height >= 0 && p.height <= 1 << 24);
+    }
+    let _ = doc.layout(&Layout {
+        width: viewport,
+        zoom: 100,
+        images: &NoImages,
+        metrics: &Weird(mode),
+    });
+}
 
 const STACK: usize = 512 * 1024;
 
@@ -27,6 +83,18 @@ fn render_all(viewport: i32, body: Vec<u8>, mode: u8) {
     let page = browser::page_body(&body); // includes chunked decoding
     let _ = web::render(&body, viewport);
     let _ = web::render(&page, viewport);
+    layout_all(&page, viewport, mode);
+    // Tables, inline boxes and selectors built out of the bytes.
+    let mut t = Vec::from(&b"<style>"[..]);
+    t.extend_from_slice(&body[..body.len().min(2000)]);
+    t.extend_from_slice(b"{color:red;display:block}td>b.a{margin:3px}</style><table border=1><tr><td colspan=2>");
+    t.extend_from_slice(&body);
+    t.extend_from_slice(b"</td><td rowspan=2><table><tr><td>");
+    t.extend_from_slice(&body[..body.len().min(500)]);
+    t.extend_from_slice(b"</td></tr></table></td></tr><tr><th><b class=a>x</b></th></tr></table>");
+    if t.len() < 64 * 1024 {
+        layout_all(&t, viewport, mode);
+    }
     if mode & 1 != 0 {
         let mut html = Vec::from(&b"<style>p{"[..]);
         html.extend_from_slice(&body);

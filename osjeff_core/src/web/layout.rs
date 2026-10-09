@@ -1138,7 +1138,7 @@ fn emit_marker(p: &mut Painter, mk: &Marker, baseline: i32, f: Font) {
             let w = (wq(p, &mk.text, f) + Q - 1) / Q;
             let nat = p.nat(f);
             p.push_cmd(Cmd::Text {
-                x: mk.right - w,
+                x: (mk.right - w).max(0),
                 y: baseline - p.asc(f),
                 w,
                 h: nat,
@@ -1152,8 +1152,9 @@ fn emit_marker(p: &mut Painter, mk: &Marker, baseline: i32, f: Font) {
         MarkerKind::Bullet(style) => {
             let d = (i32::from(f.size) * 3 / 10).max(3);
             let right = mk.right - p.z(2);
-            let x = right - d;
-            let y = baseline - i32::from(f.size) * 3 / 8 - d / 2;
+            // A list with no left padding would put its marker off the page.
+            let x = (right - d).max(0);
+            let y = (baseline - i32::from(f.size) * 3 / 8 - d / 2).max(0);
             match style {
                 ListStyle::Circle => p.push_cmd(Cmd::Border {
                     x,

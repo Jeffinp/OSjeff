@@ -1347,3 +1347,17 @@ fn a_long_paragraph_of_short_words_keeps_its_words_whole() {
     assert!(joined.split(' ').all(|w| w == "palavra"), "{joined:.80}");
     assert_eq!(joined.split(' ').count(), 1200);
 }
+
+#[test]
+fn markers_of_a_list_without_padding_stay_on_the_page() {
+    let p = lay(
+        "<style>ul,ol{padding:0;margin:0}</style><ul><li>a</li></ul><ol><li>b</li></ol>",
+        300,
+    );
+    for c in &p.cmds {
+        match c {
+            Cmd::Rect { x, y, .. } | Cmd::Text { x, y, .. } => assert!(*x >= 0 && *y >= 0),
+            _ => {}
+        }
+    }
+}

@@ -42,7 +42,7 @@ estão corrigidos ou documentados.
 | **Apps (todos os aplicativos, com busca)** | **Busca: apps, arquivos e contas (`Ctrl+Space`)** |
 | <img src="docs/img/ui-apps-dark.png" width="420"> | <img src="docs/img/ui-busca-light.png" width="420"> |
 | **Arquivos (barra lateral, ícones, pré-visualização, lixeira, persistente)** | **Navegador (HTTPS verificado: "Conexão segura")** |
-| <img src="docs/img/w23-files-dark.png" width="420"> | <img src="docs/img/ui-browser-light.png" width="420"> |
+| <img src="docs/img/w23-files-dark.png" width="420"> | <img src="docs/img/browser-w24-pagina-light.png" width="420"> |
 | **Ajustes (aparência, destaque, notificações)** | **Controles (rede, aparência, destaque)** |
 | <img src="docs/img/ui-ajustes-dark.png" width="420"> | <img src="docs/img/ui-controls-dark.png" width="420"> |
 | **Tarefas (CPU, memória, disco, rede, processos)** | **Componentes (`Ctrl+Alt+G`): a vitrine do toolkit** |

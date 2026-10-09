@@ -116,7 +116,7 @@ A barra de endereço mostra o estado da **conexão atual**:
 |---|---|
 | `https://` com cadeia válida | "Conexão segura" (verde) |
 | `https://` aberto com "continuar mesmo assim" | "Certificado inválido" (vermelho) |
-| `http://` | "Nao seguro" (vermelho claro) |
+| `http://` | "Não seguro" (vermelho claro) |
 | carregando `https://` ou página inicial | nada |
 
 `Security` não tem variante "seguro" sem verificação: `HttpsVerified` só sai de
@@ -194,7 +194,7 @@ idêntico à baseline (`tools/verify-boot.sh`: 0 pixels, BIOS e UEFI).
 
 - **Navegador** (depois da W17): formulários `POST`, `<select>`, `<textarea>`, caixas de
   seleção e botões de rádio; JPEG, GIF, WebP e SVG (a imagem vira uma caixa com o `alt` e
-  "formato nao suportado"); JavaScript, cookies, `float`/flexbox; reuso de conexão (cada
+  "formato não suportado"); JavaScript, cookies, `float`/flexbox; reuso de conexão (cada
   imagem abre uma conexão e, em HTTPS, um handshake); persistência dos favoritos (a
   interface `BookmarkStore` e o ponto único de troca existem, o armazenamento é em
   memória); seleção por caractere (é por palavra); a área de transferência tem 256 bytes
@@ -227,7 +227,7 @@ O fluxo, sem travar a interface:
    guarda o DOM) e a rolagem é preservada.
 
 JPEG/GIF/WebP/SVG, falha de rede, status diferente de 200, imagem grande demais e a nona
-imagem viram uma caixa com o texto `alt` e o motivo ("formato nao suportado", "falha ao
+imagem viram uma caixa com o texto `alt` e o motivo ("formato não suportado", "falha ao
 carregar", "imagem grande demais", "limite de imagens"). `data:image/...;base64,` é decodificada
 no próprio navegador (decodificador base64 puro, 64 KiB), sem rede. `<a><img></a>` é
 clicável. `src` relativo resolve contra a URL da página; **https para http (conteúdo misto)
@@ -242,13 +242,15 @@ durante a decodificação da imagem de 1,26 Mpx.
 Tab/Shift+Tab, caret, Backspace/Delete/setas/Home/End, Ctrl+V; Enter ou botão envia:
 `action?nome=valor&...` com `application/x-www-form-urlencoded` sobre os bytes UTF-8 (a query
 do `action` é trocada, o botão só entra se foi o apertado, no máximo 380 bytes). **`method=post`
-mostra "formularios POST nao suportados"** e não navega. `textarea`, `select`, caixas de seleção
-e rádios não são desenhados. Como o teclado é US, as teclas `'` `` ` `` `~` `^` `"` são
+mostra "formulários POST não suportados"** e não navega. `textarea` e `select` não são desenhados
+(caixas de seleção e rádios existem desde a W24, §9). Como o teclado é US, as teclas `'` `` ` `` `~` `^` `"` são
 *teclas mortas* nos campos (estilo US-Internacional): `'` e `c` dão `ç`, `~` e `a` dão `ã`; `'`
 e espaço dão o apóstrofo; antes de outra letra saem as duas. Prova: digitar `a'c~ao` e `Jos'e`
 envia `q=caf%C3%A9+a%C3%A7%C3%A3o&nome=Jos%C3%A9` e o servidor decodifica `café ação`/`José`.
 
 ### 8.3 Barra, atalhos e páginas internas
+
+> A interface da barra, os botões e as abas desta tabela foram refeitos na W24; vale o §9.
 
 | Item | Comportamento |
 |---|---|
@@ -277,7 +279,7 @@ move o cursor 3 linhas; Terminal e Calculadora não têm o que rolar.
 
 | Cenário | Evidência |
 |---|---|
-| página local com PNG pequeno e grande (1400x900, reduzido para 864x555), PNG sem atributos, BMP, JPEG (caixa "formato nao suportado"), `data:`, imagem como link e uma quebrada (404) | serial `img: ... -> 1400x900 (shown 864x555)`, `img: ... failed: Unsupported`; `docs/img/browser-images.png`, `browser-images-errors.png` |
+| página local com PNG pequeno e grande (1400x900, reduzido para 864x555), PNG sem atributos, BMP, JPEG (caixa "formato não suportado"), `data:`, imagem como link e uma quebrada (404) | serial `img: ... -> 1400x900 (shown 864x555)`, `img: ... failed: Unsupported`; `docs/img/browser-images.png`, `browser-images-errors.png` |
 | formulário GET com acentos, campo oculto e um formulário POST | o servidor recebe `q=caf%C3%A9+a%C3%A7%C3%A3o&nome=Jos%C3%A9&origem=osjeff%2F%C3%A7%C3%A3o` e responde `q = [café ação] (12 bytes UTF-8)`; `browser-form.png`, `browser-form-result.png` |
 | roda: `mouse_move 0 0 -1` repetido | o navegador rola; sobre uma janela **não focada** rola ela e o foco fica onde estava; Task Manager e Arquivos movem a seleção; com a negociação desligada (gancho temporário) a serial diz `id 0` e o mouse continua movendo e clicando, sem roda |
 | favoritos, sugestões, busca na página, zoom, seleção e cópia | `browser-suggest.png`, `browser-find.png` |
@@ -293,3 +295,102 @@ arquivo em `fuzz/regressions/html_img_form/`: `set_page_title` cortava em 80 byt
 caractere de vários bytes (pânico). Nenhum teto anterior mudou (corpo HTML 256 KiB, 8000 nós,
 1000 regras, profundidade 40); a URL do navegador subiu de 220 para 480 bytes para caber a query
 de um formulário.
+
+## 9. Navegador na W24: texto proporcional, abas e nova interface
+
+### 9.1 Layout com a fonte de verdade
+
+O motor `web` não conhece fontes: mede por um *trait* (`web::metrics::TextMetrics`:
+`width`, `width_q8`, `line_height`, `ascent`, `has_glyph`, sobre `Font { size, bold, italic, mono }`).
+O kernel o implementa sobre `text::measure_q8` (Inter Regular e Semibold; JetBrains Mono para
+`pre`, `code`, `kbd`, `samp` e `font-family: monospace`); o host testa com `FixedAdvance`, um
+relógio determinístico (avanço = tamanho/2). As larguras entram no layout em 1/256 de pixel.
+As respostas das métricas são saneadas (limitadas) antes de virar geometria: métricas hostis
+(zero, negativas, `i32::MAX`) não estouram nem passam dos tetos.
+
+| Item | Como é |
+|---|---|
+| Tamanhos | os reais da folha do agente (`h1` 2em ... `small`, `big`, `sub`/`sup`) e de `font-size` (`px`, `pt`, `em`, `rem`, `%`, palavras-chave), arredondados a pixel inteiro, vezes o zoom (50 a 300%) |
+| Negrito | a face Semibold da Inter |
+| Itálico | **sintetizado**: não há face itálica embarcada; `text::draw_slanted` inclina os glifos 12 graus |
+| Quebra | gulosa pela largura medida; palavra mais larga que a linha é cortada por `fit_prefix`; CJK, emoji e outros alfabetos podem quebrar em qualquer ponto |
+| Sem glifo | a fonte embarcada cobre Latim-1 e pontuação: o resto vira um quadro oco do tamanho do caractere (`has_glyph`), nunca um `?` |
+| Alinhamento e linhas | `text-align`, `line-height` (normal, número, px, %), linha de base por trecho (`vertical-align`, `sub`, `sup`) e fusão de trechos vizinhos de mesmo estilo em um único `Cmd::Text` |
+| Blocos | margens colapsam, `padding`, `border` (`solid` e afins, com `border-radius`), `background`, `width`, `max-width`, `min-height`, `display` (`flex` e `grid` degradam para bloco; `inline-block` vira em linha) |
+| Listas, citações, `hr`, `pre` | marcadores `disc`/`circle`/`square`, `decimal`, alfa e romano, aninhados; `blockquote`, `hr`; `pre` e `code` em mono |
+| Tabelas | colunas pelo conteúdo, `width` fixo ou em %, `colspan`, `cellspacing`/`cellpadding`, `border-collapse`, `valign`, tabelas aninhadas, legenda; sem `rowspan` (a célula vira uma linha só) |
+| Formulários | caixa de texto, senha, caixa de seleção, rádio, botão de envio e `<button>`, alinhados à linha de base e desenhados no estilo do toolkit; `textarea` e `select` não existem |
+| Seletores | tipo, `.classe`, `#id`, atributo (`[a]`, `=`, `~=`, `^=`, `$=`, `*=`), combinadores de descendente e filho, listas com vírgula, especificidade real; `:hover` e irmãos nunca casam (não restilizam a coisa errada). Regras indexadas pelo nome do elemento |
+| Origem | folha do agente, atributos de apresentação (`bgcolor`, `align`, `width`, `border`, `cellpadding`...) e folha do autor, nesta ordem; `!important` por origem |
+
+Tetos, nenhum mudou para pior: 8000 nós, profundidade 40, 1000 regras e 2000 seletores,
+1 milhão de caracteres, 150 mil comandos, palavra de 4096 caracteres, altura 2^24, e agora um
+orçamento de 4 milhões de passos de ancestral por camada de estilo.
+
+### 9.2 Barra e indicador de segurança
+
+A barra é uma só: voltar, avançar, recarregar (que **vira parar** enquanto carrega), campo
+arredondado com o indicador, a estrela de favorito (anima ao marcar) e "+" (nova aba). Uma linha
+de progresso corre sob o campo. **O cadeado e "Conexão segura" só aparecem com TLS verificado**
+(`Security::HttpsVerified`); HTTP e TLS aceito sem verificação mostram um triângulo de aviso
+("Não seguro", "Certificado inválido"). O clique no indicador abre um balão com o host, o emissor,
+a validade e o estado da verificação. Os dados vêm de `browser::CertInfo`, resumida da folha do
+certificado (`x509::issuer_cn/issuer_org`, texto limpo de controles) pelo `fetcher` e levada junto
+da resposta (`Fetched.cert`, `Loaded.cert`, `browser_load`). Em repouso o campo realça o host e
+apaga o resto do endereço; as páginas `osjeff://` mostram o esquema.
+
+Sugestões: painel de vidro sob o campo, linha sob o ponteiro e linha selecionada com estados
+próprios. Atalhos: Ctrl+L (endereço), Ctrl+D (favorito), Ctrl+F (busca), Ctrl+R, Ctrl +/-/0
+(zoom, com uma pílula no canto), Alt+←/→, Esc (fecha ou para). Enter entrega o teclado à página.
+
+### 9.3 Abas
+
+Ctrl+T, Ctrl+W, Ctrl+Tab e Ctrl+PageUp/PageDown, Ctrl+1 a 8 e Ctrl+9 (a última); **no máximo 8**,
+a nova abre depois da ativa e ao fechar vai para a vizinha da direita, senão da esquerda. Cada
+aba tem **histórico, documento, rolagem, formulários, busca e zoom próprios**; favoritos e os
+hosts liberados com "continuar mesmo assim" são da janela (`Browser::sibling`, `Rc<RefCell>`). A
+faixa aparece com a segunda aba e some ao voltar a uma só (a página desliza), os títulos são cortados
+com reticências, o emblema é a primeira letra do host (ou do título, para um IP) e abrir e fechar
+animam (largura por *tween*, aba que sai fica um "fantasma" até acabar).
+
+**Um só buscador.** A thread `fetcher` continua única. O desktop mantém a fila no próprio
+estado: `browser_take_request` serve primeiro a aba ativa e depois as outras, **em ordem**, e
+guarda o id da aba atendida (`req_tab`); o resultado volta para esse id, nunca para a aba que
+estiver ativa quando chega. Parar uma aba marca o pedido em voo como cancelado e a resposta é
+descartada. Imagens são baixadas só para a aba ativa (`img_inflight: (aba, chave)`) e o cache de
+imagens é compartilhado e reregistrado ao trocar de aba. **Abas em segundo plano guardam só o DOM**:
+a lista de desenho é descartada e refeita ao voltar.
+
+### 9.4 Nova aba, erros, busca, menu, rolagem
+
+* **Nova aba**: campo de busca grande, grade de favoritos com um quadrado de letra (sem
+  favoritos, quatro sugestões) e os endereços recentes de todas as abas; claro e escuro.
+* **Erros** (`browser::errors`): sem rede, nome não encontrado, conexão recusada, tempo
+  esgotado, certificado (com a causa: de si mesmo, expirado, nome errado, emissor desconhecido,
+  hora), falha de TLS, página grande demais ou cortada; cada um com título, uma frase, um glifo e
+  **Tentar novamente** (recarrega o endereço navegado, não o que foi digitado depois). Erro de
+  certificado mantém o "continuar mesmo assim (inseguro)", por site e por sessão.
+* **Busca na página**: barra de vidro fina com contagem e anterior/próximo; destaque da seleção
+  na cor de destaque do sistema.
+* **Menu de contexto**: Copiar, Abrir link, Copiar endereço do link, Voltar, Recarregar e
+  Adicionar/Remover dos favoritos (os que não se aplicam ficam apagados).
+* **Rolagem**: roda com inércia (mola), barra que aparece ao rolar, páginas sempre claras: **a
+  área da página nunca é invertida no escuro**, só a moldura segue a aparência do sistema.
+* **Páginas `osjeff://`** (`browser::pages`): `favoritos`, `historico` e `sobre` são HTML e CSS
+  diagramados pelo mesmo motor (sempre claros); `inicio` é a tela de nova aba nativa, que precisa
+  de um campo de texto de verdade.
+
+### 9.5 Provas
+
+| O quê | Evidência |
+|---|---|
+| Moldura, abas, balão, sugestões, busca, menu, zoom e páginas internas, claro e escuro | `tools/perf/scen/w24-chrome.sh`, `w24-chrome2.sh`, `w24-internal.sh`; capturas em `docs/img/browser-w24-*.png` |
+| Erros (certificado, nome, tempo esgotado) e "continuar mesmo assim" com o balão do certificado | `w24-errors.sh` (precisa de `tools/nettest-server.py` para o HTTPS autoassinado), `browser-w24-erro-cert-*.png` |
+| Janela na frente da página continua na frente enquanto a página rola | `w24-overlap.sh` |
+| Páginas de teste (tipografia, listas, tabelas, formulários, imagens, palavras longas, idiomas, estilos, citações, 2000 nós) | `tools/w24-site.py` e `w24-pages.sh` |
+| Custo | `tools/perf/scen/w24-perf.sh` e `tools/perf/w24-perf.py` (`docs/TESTING.md`, "Navegador na W24") |
+
+Limites conhecidos: sem JavaScript; sem `float`, `flex`, `grid` (degradam para bloco); sem
+`rowspan`, `textarea` ou `select`; sem rolagem horizontal (`pre` quebra); alfabetos fora do Latim-1
+(cirílico, grego, CJK, emoji) e escrita da direita para a esquerda aparecem como quadros; sem
+cookies nem *cache* de HTTP; o itálico é uma inclinação do negrito/regular, não uma face.

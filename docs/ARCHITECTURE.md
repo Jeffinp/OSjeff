@@ -1087,7 +1087,7 @@ ganha `https://`. A tela inicial
 tem 4 atalhos (Bing, Wikipedia, Cloudflare, Exemplo), escolhidos por aceitarem o
 handshake P-256 do cliente.
 
-**Rótulo de segurança.** O enum `Security` tem `None`, `Http` ("Nao seguro"),
+**Rótulo de segurança.** O enum `Security` tem `None`, `Http` ("Não seguro"),
 `HttpsVerified` ("Conexão segura") e `HttpsInvalid` ("Certificado inválido", só depois do
 "continuar mesmo assim"). **"Seguro" só existe como `HttpsVerified`**, que só sai de
 `Browser::loaded_with(Conn::Verified, ..)`: o `fetcher` devolve `Conn::Verified` apenas
@@ -1116,6 +1116,16 @@ testados; `browser::` ganhou favoritos (`BookmarkStore`), sugestões e páginas 
 Detalhes e provas em [`design/tls-browser.md`](design/tls-browser.md) §8. A roda do mouse é
 do sistema todo: `hw::ps2` decodifica pacotes de 3 e 4 bytes e `Desktop::handle_wheel` entrega
 a rolagem à janela sob o ponteiro.
+
+**W24: texto proporcional e abas.** O layout mede por `web::metrics::TextMetrics` (o kernel usa
+Inter e JetBrains Mono; o host usa `FixedAdvance`), com tabelas (`web/layout/table.rs`), caixas em
+linha, estilos de `font-size` a `display` e regras indexadas pelo nome do elemento. A janela do
+navegador tem uma `TabList` (até 8) com histórico, DOM, rolagem e formulários por aba; o `fetcher`
+segue único: `browser_take_request` serve a aba ativa e depois as outras e devolve o resultado ao
+id que pediu. `CertInfo` (emissor, validade) viaja com a resposta para o balão de segurança.
+Um scroll, hover ou tecla que só muda a área do cliente repinta só ela
+(`Desktop::client_dirty`, `render_client_only`). Detalhes em
+[`design/tls-browser.md`](design/tls-browser.md) §9.
 
 ## 10. WebAssembly
 

@@ -210,7 +210,7 @@ fn unsupported_image_shows_alt_and_the_message() {
     );
     let t = texts(&p);
     assert!(t.iter().any(|s| s.contains("Foto da praia")), "{t:?}");
-    assert!(t.iter().any(|s| s == "formato nao suportado"), "{t:?}");
+    assert!(t.iter().any(|s| s == "formato não suportado"), "{t:?}");
 }
 
 #[test]

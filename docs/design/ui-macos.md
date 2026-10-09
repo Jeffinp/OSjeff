@@ -294,6 +294,8 @@ the overlay is open. Building the atlas takes about 34 ms at boot (logged).
 * The system apps (section 11) are redesigned; Imagens, the file list, the editor, the terminal
   and the browser page layout are the other half of wave 2 (fixed-pitch measurements remain
   there).
+* App interiors are token-driven but not redesigned: Tarefas, Imagens, the file list and
+  the log still use the old layouts and fixed-pitch measurements in places; Wave 2 moves each app to the widgets above.
 * No right-to-left or complex text; kerning is pair kerning only; no LCD text.
 * The pointer ghost left by a frame that both repaints a region and moves the pointer is
   owned by another change (`main.rs` cursor path) and untouched here.
@@ -400,3 +402,26 @@ terminal draws one colour (escape sequences are dropped, not interpreted); the e
 caret glides only along a row (a jump to another row or a scroll is immediate); the Open / Save as
 list scrolls by whole rows.
 
+## 11. Browser (wave 2)
+
+The Navegador keeps the indigo accent and is drawn from the toolkit (`kernel/src/desktop/browser_ui.rs`;
+geometry in `osjeff_core::layout::BrowserChrome`, state in `desktop/browser.rs`).
+
+* **Toolbar** (48 px, same colour as the title bar): back, forward, reload (becomes stop while
+  loading), a rounded omnibox (security badge, host highlighted at rest, animated star) and "+".
+  A 2 px progress line runs under the omnibox. Lock and "Conexão segura" only for verified TLS; a
+  warning triangle for HTTP or an accepted certificate; a click opens a glass popover (host,
+  issuer, validity, verification).
+* **Tabs** (36 px strip, up to 8, shown from the second tab): rounded pills, letter badge,
+  ellipsised title, close button, open and close animated with tweens (ghost entry for a closing tab).
+* **Page area**: always light (never dark-inverted); proportional text from the real font
+  (italic is a 12 degree slant), tables, forms in the toolkit look. Overlay scrollbar, inertial wheel,
+  zoom pill, accent selection, slim glass find bar, context menu.
+* **Start page** and **error pages** use the chrome's palette (light and dark) and one primary button.
+* **Cost**: a scroll, hover or key in the browser repaints only its client area
+  (`Desktop::client_dirty`, `render_client_only`, `client_only_frame`); a window in front, the app bar
+  reaching the window, a drag, an overlay or a title change fall back to the full frame. An idle
+  browser window costs no frames. Numbers in `docs/TESTING.md`.
+* Toolkit additions made for it: eight `iconart::Glyph` variants (ChevronLeft, Reload, Lock,
+  Warning, Star, StarFill, Globe, Home), `text::{measure_q8, has_glyph, draw_slanted}`,
+  `fontcache::TextEngine::has_glyph`, glyph and kerning caches in `ttf::Font`.

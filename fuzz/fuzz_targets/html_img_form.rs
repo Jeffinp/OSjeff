@@ -91,7 +91,7 @@ fn check_page(p: &Page) {
                 assert!(*w >= 1 && *h >= 1 && *x >= 0 && *y >= 0);
                 assert!(*idx < p.images.len());
             }
-            Cmd::Rect { x, y, w, h, .. } => assert!(*x >= 0 && *y >= 0 && *w >= 0 && *h >= 0),
+            Cmd::Rect { x, y, w, h, .. } => assert!(*x >= 0 && *y >= 0 && *w >= 0 && *h >= 0, "rect {x} {y} {w} {h}"),
             Cmd::Border { w, h, .. } => assert!(*w >= 0 && *h >= 0),
             Cmd::Text { x, y, .. } => assert!(*x >= 0 && *y >= 0),
         }
@@ -136,6 +136,17 @@ fn exercise(data: &[u8]) {
             let b64 = base64::encode(raw);
             format!("<img src='data:image/png;base64,{b64}' alt='x'><img src='data:image/png;base64,{esc}'>")
         }
+    };
+
+    // Shapes that reach the table, list, style-box and cascade code with the same bytes.
+    let html = match data[3] >> 5 {
+        1 => format!("<table border=1><tr><td>{html}</td><td colspan=3>{esc}</td></tr><tr><td rowspan=2>x</td></tr></table>"),
+        2 => format!("<table><tr><td><table><tr><td><table><tr><td>{html}</td></tr></table></td></tr></table></td></tr></table>"),
+        3 => format!("<style>{esc}{{color:red;margin:1em auto;border:1px solid}} .a>b,p+p{{padding:2px}}</style>{html}"),
+        4 => format!("<div style=\"{esc}\"><span style=\"background:#f00;padding:0 4px;border-radius:3px\">{html}</span></div>"),
+        5 => format!("<ul><li>{html}<ol><li>{html}</li></ol></li></ul><pre>{esc}\n  x</pre><blockquote>{html}</blockquote>"),
+        6 => format!("<b><i><u><s><a href=x><code><small><big><sub><sup>{html}</sup></sub></big></small></code></a></s></u></i></b>"),
+        _ => html,
     };
 
     let state = state_from(mode >> 2, raw.first().copied().unwrap_or(0), raw.get(1).copied().unwrap_or(0));
@@ -265,6 +276,57 @@ fn exercise(data: &[u8]) {
         base: b"http://h.test/",
     };
     let _ = pi.lookup(&text);
+
+    // ---- tabs, tab text and the browser's own pages ----
+    {
+        use osjeff_core::browser::{Bookmark, pages, tabs};
+        let (hs, he) = tabs::host_range(&text);
+        assert!(hs <= he && he <= text.len() && text.is_char_boundary(hs) && text.is_char_boundary(he));
+        let _ = tabs::host_of(&text);
+        let _ = tabs::tab_title(&text, &text);
+        let _ = tabs::tab_badge(&text, &text);
+        let mut list = tabs::TabList::new(0usize);
+        for (i, &b) in raw.iter().take(64).enumerate() {
+            match b % 9 {
+                0 | 1 => {
+                    let _ = list.open(i);
+                }
+                2 => {
+                    let _ = list.close(usize::from(b) % 10);
+                }
+                3 => {
+                    let _ = list.select(usize::from(b) % 10);
+                }
+                4 => list.next(),
+                5 => list.prev(),
+                6 => {
+                    let _ = list.select_number(usize::from(b) % 11);
+                }
+                _ => {
+                    let _ = list.move_active(b & 1 == 0);
+                }
+            }
+            assert!(list.len() >= 1 && list.len() <= tabs::MAX_TABS);
+            assert!(list.active_index() < list.len());
+        }
+        let bm = [
+            Bookmark { url: text.clone(), title: text.clone() },
+            Bookmark { url: esc.clone(), title: String::new() },
+        ];
+        for html in [
+            pages::bookmarks(&bm),
+            pages::bookmarks(&[]),
+            pages::history(&[raw.to_vec(), text.clone().into_bytes(), b"osjeff://sobre".to_vec()]),
+            pages::about(),
+        ] {
+            check_page(&Doc::parse(&html).layout(&Layout {
+                width: viewport,
+                zoom: 100,
+                images: &NoImages,
+                metrics: &FixedAdvance,
+            }));
+        }
+    }
 
     // ---- the browser model: address bar, history, favourites, suggestions, internal pages ----
     let mut br = Browser::new();
