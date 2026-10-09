@@ -22,6 +22,7 @@ geometry, soft shadows, springy motion, generous spacing) and has its own identi
 |---|---|
 | Mark | a bold prompt chevron `>` (white) on an indigo squircle; the menu-bar version is the bare chevron. No fruit, no wordmark borrowed from anyone |
 | Names | **Apps** (the grid, replaces the start panel), **Busca** (one field for apps, files and sums), **Barra de apps** (the floating bar), **Controles** (network, appearance, switches), **Arquivos**, **Tarefas** (the activity monitor: CPU, Memória, Disco, Rede, Processos), **Registro** (the log), **Ajustes** (preferences), **Calculadora**, **Imagens**, **Componentes** (the widget gallery) |
+| Names | **Apps** (the grid, replaces the start panel), **Busca** (one field for apps, files and sums), **Barra de tarefas** (the floating bar), **Configurações rápidas** (network, appearance, switches), **Arquivos**, **Tarefas**, **Monitor**, **Registro**, **Imagens**, **Componentes** (the widget gallery) |
 | Accent | indigo `5B5CF6` by default; eight choices (Indigo, Turquesa, Violeta, Rosa, Coral, Âmbar, Verde, Grafite) |
 | Icon language | a thick white glyph on a saturated vertical-gradient squircle with a faint top gloss; every glyph is drawn from our own vector paths (`osjeff_core::iconart`), none is a traced system icon |
 | Wallpaper | "Dinâmico": pale lilac and sky by day, deep indigo by night, with soft colour glows; four more presets or an image |
@@ -54,7 +55,7 @@ which follows the appearance in effect.
 | `sidebar_bg` | `EDEDF1` | `262629` | sidebars |
 | `separator` | black 10 % | white 10 % | hairlines |
 | `text` / `text_secondary` / `text_tertiary` | `1D1D1F` / `6E6E73` / `A1A1A6` | `F5F5F7` / `A1A1A6` / `6E6E73` | text |
-| `menubar_tint`, `dock_tint`, `menu_tint` | pale veils (70 %, 30 %, 80 %) | dark veils (62 %, 46 %, 80 %) | over the blurred backdrops |
+| `menubar_tint` (the panel), `dock_tint` (the taskbar), `menu_tint` | pale veils (70 %, 82 %, 80 %) | dark veils (62 %, 82 %, 80 %) | over the lightly blurred panel strip, the plain taskbar and the popover backdrops |
 | `field_bg`, `control_bg`, `control_border` | white, white, black 14 % | white 8 %, 12 %, white 14 % | fields and buttons |
 | `danger` | `FF453A` | `FF453A` | destructive buttons, errors |
 | lights | close `FF6B63`, minimise `FFC24A`, zoom `3FD07C`; unfocused grey `D1D1D6` / `4A4A4E` | | window controls |
@@ -65,15 +66,14 @@ applied live from Controles or Ajustes. Contrast on `window_bg`: body text 15.6:
 
 ### 2.2 Radii
 
-`window` 12 (0 when zoomed) · `popover` 12 · `menu` 8 · `control` 6 · `dock` 22 · `tooltip` 6 ·
+`window` 12 (0 when zoomed) · `popover` 12 · `menu` 8 · `control` 6 · `taskbar` 12 · `tooltip` 6 ·
 icon tile 22.5 % of its side (superellipse, n = 4). Corners are anti-aliased from cached
 coverage masks (`osjeff_core::raster::CornerMasks`), identical for fills, strokes and the
 window-corner repair.
 
 ### 2.3 Spacing and sizes
 
-`4 8 12 16 20 24 32`. Panel 30 · title bar 32 (`window::TITLE_H`) · title buttons 40x32, menu button 32 · menu row 24, separator 9 · bar icon 48 (magnified up to 76 over a
-bump of 104 px), gap 8, padding 12/8, 8 from the bottom · Apps cell 136x128, icon 72 ·
+`4 8 12 16 20 24 32`. Panel 30 · title bar 32 (`window::TITLE_H`) · title buttons 40x32, menu button 32 · menu row 24, separator 9 · taskbar icon 40, gap 6, padding 10/8, 8 from the bottom · Apps cell 136x128, icon 72 ·
 Busca 640 wide, field 56, rows 40 · banners 344x68.
 
 ### 2.4 Type
@@ -114,7 +114,7 @@ its end in the next frame).
 | minimise / restore | scale and move to / from the app's icon in the bar | 300 ms |
 | zoom | spring on the rectangle, content clipped live (never a squeezed bitmap) | ~280 ms |
 | focus change | title bar and shadow cross-fade | 120 ms |
-| bar magnification | one spring per icon (stiffness 420, damping 30) | ~200 ms |
+| taskbar icon lift and reorder slide | one spring per icon (stiffness 420, damping 30) | ~200 ms |
 | launch | two damped hops, 18 px | 640 ms |
 | menu, popover, sheet, Busca | fade + 6 px slide | 140 ms |
 | Apps | fade, icons rise 14 px | 220 ms |
@@ -194,10 +194,14 @@ the real font.
   corners, hairline, two-layer shadow, focus cross-fade, double click on the title zooms, resize
   edges and minimum sizes as before. Dragging a title to an edge snaps (see `ui-identity.md`);
   zoom fills the work area between the panel and the bar.
-* **Barra de apps**: floating glass panel centred at the bottom, an Apps button, a
-  separator and the apps; magnification, running dots, tooltips, launch hop, a context
-  menu per icon (Abrir / Nova janela / Encerrar). The backdrop is blurred once when the
-  wallpaper is painted; a window under the panel makes it a plain translucent tint.
+* **Barra de tarefas**: a floating rounded bar (radius 12) centred at the bottom: the Apps
+  button, a separator, the pinned apps, the apps that run without being pinned, a separator and a
+  *Mostrar área de trabalho* sliver. No magnification: an icon lifts 3 px under the pointer and a
+  tooltip follows after 350 ms. A pill under the icon marks the focused app, a dot the others (dimmer
+  when all their windows are minimised). A click focuses, restores or (when it already has the focus)
+  minimises; Shift+click opens a new window; dragging a pinned icon reorders it (the others slide);
+  a right click lists the app's windows with *Nova janela*, *Fixar / Desafixar* and *Fechar*.
+  The surface is a plain translucent tint (nothing is blurred). `Ctrl+Alt+D` also shows the desktop.
 * **Apps** (`Apps` button): the wallpaper and windows blurred behind a grid of every app
   (system and installed) with a search field; type to filter, arrows move, Enter opens,
   the wheel scrolls, Esc closes.
@@ -214,9 +218,9 @@ the real font.
 
 Bottom to top, in every compose path:
 
-1. the wallpaper with the panel strip and the bar's blurred strip (cached in `BG`);
+1. the wallpaper with the panel strip (cached in `BG`);
 2. windows in z-order, each with its shadow (the static ones cached in `STATIC`);
-3. the bar (live: its icons magnify; excluded from `STATIC`);
+3. the taskbar (live: icons lift and slide; excluded from `STATIC`);
 4. the panel content (Apps, Busca, clock, status pill);
 5. overlays: menus, popovers, Apps, Busca, sheet, Alt+Tab;
 6. banners, then the pointer, straight onto the framebuffer.
@@ -259,6 +263,7 @@ blur capture, paid once.
 | toolkit and gallery | `kernel/src/desktop/{ui,kit,gallery}.rs` |
 | system apps (section 11) | `kernel/src/desktop/{tarefas,logview,settings_ui,calc_ui,toasts_ui,live}.rs`, `osjeff_core/src/{activity,calc,settings,notify,klog,layout}.rs` |
 | chrome drawing | `kernel/src/desktop/{chrome,dock,panel,overlays,shell,glass,cursor,render}.rs` |
+| chrome drawing | `kernel/src/desktop/{chrome,taskbar,panel,overlays,shell,glass,cursor,render}.rs` |
 | toolkit and gallery | `kernel/src/desktop/{ui,gallery}.rs` |
 | icons, glyphs | `kernel/src/{icons,glyphs}.rs` |
 
@@ -277,8 +282,7 @@ blur capture, paid once.
 
 After the first frame (logged as `[trace] ui: memory ...`): glyph atlas about 62 KiB for 917
 glyphs (grows as new sizes and characters are used), icon cache a few hundred KiB (128 px
-sources plus the scaled copies; flushed when it passes 160 entries), the bar's blurred strip about
-0.3 MiB, fonts 120 KiB embedded. The Apps backdrop (3.6 MiB at 1280x720) exists only while
+sources plus the scaled copies; flushed when it passes 160 entries), fonts 120 KiB embedded. The Apps backdrop (3.6 MiB at 1280x720) exists only while
 the overlay is open. Building the atlas takes about 34 ms at boot (logged).
 
 ## 10. Known gaps

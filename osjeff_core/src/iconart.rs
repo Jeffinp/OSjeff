@@ -672,15 +672,6 @@ pub fn glyph(g: Glyph, px: usize, c: u32) -> Surface {
             p.ellipse_hole(u(11), u(6), u(4) + 128, u(4) + 128);
             s.fill_path(&p, Paint::Solid(c));
         }
-        Glyph::Power => {
-            // A ring open at the top with the bar through the gap.
-            let pts: Vec<(i32, i32)> = (40..=320)
-                .step_by(20)
-                .map(|d| rot(u(8), u(9), 0, -(u(5) + 64), d))
-                .collect();
-            s.fill_path(&stroke_path(&pts, w(2) - 32, true), Paint::Solid(c));
-            stroke(&mut s, &[(8, 2), (8, 8)], 2);
-        }
         Glyph::Bell => {
             let mut pts = quad_points(pt(4, 11), pt(4, 3), pt(8, 3), 8);
             pts.extend(quad_points(pt(8, 3), pt(12, 3), pt(12, 11), 8));
@@ -696,13 +687,6 @@ pub fn glyph(g: Glyph, px: usize, c: u32) -> Surface {
             let mut pts = quad_points(pt(1, 8), pt(4, 2), pt(8, 8), 8);
             pts.extend(quad_points(pt(8, 8), pt(12, 14), pt(15, 8), 8));
             s.fill_path(&stroke_path(&pts, w(2) - 32, true), Paint::Solid(c));
-        }
-        Glyph::Clock => {
-            let mut ring = Path::new();
-            ring.ellipse(u(8), u(8), u(7), u(7));
-            ring.ellipse_hole(u(8), u(8), u(7) - 96, u(7) - 96);
-            s.fill_path(&ring, Paint::Solid(c));
-            stroke(&mut s, &[(8, 4), (8, 8), (11, 10)], 2);
         }
         Glyph::Info => {
             let mut p = Path::new();

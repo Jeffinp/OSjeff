@@ -46,7 +46,7 @@ repaint() {
 }
 
 wait_first_frame
-dock 559; click; sleep 2          # the editor opens on top of the shell
+dock_icon editor; click; sleep 2   # the editor opens on top of the shell
 mon "sendkey alt-tab 700"; sleep 4  # the shell is focused again (state S for every shot below)
 shot setup
 for round in 1 2 3; do

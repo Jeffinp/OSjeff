@@ -990,6 +990,7 @@ impl Desktop {
         let entries = alloc::vec![
             Entry::item("Mostrar apps", "", Cmd::ShowApps),
             Entry::item("Buscar", "Ctrl+Espaço", Cmd::ShowSearch),
+            Entry::item("Mostrar área de trabalho", "Ctrl+Alt+D", Cmd::ShowDesktop),
             Entry::sep(),
             Entry::item("Abrir Arquivos", "", Cmd::Launch(Kind::Files)),
             Entry::item("Abrir Terminal", "", Cmd::Launch(Kind::Terminal)),

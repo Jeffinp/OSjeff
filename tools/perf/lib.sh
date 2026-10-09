@@ -24,20 +24,18 @@ key() { mon "sendkey $1"; }
 CX=640
 if [ "$MODE" = uefi ]; then CY=400; H=800; else CY=360; H=720; fi
 goto() { move $(( $1 - CX )) $(( $2 - CY )); CX=$1; CY=$2; sleep 0.3; }
-DOCKY=$(( H - 40 )); DY=$(( DOCKY - CY ))
-# The app bar (floating, centred): 9 icons of 48 px, 8 px gap, 12 px padding, a 12 px
-# separator after the first. Slots: apps files browser terminal editor calc viewer tasks
-# settings (`monitor` is the old name of `tasks`). `dock_icon <name>` moves the pointer onto an icon's centre.
-DOCK_Y_CENTER=$(( H - 40 ))
+DOCKY=$(( H - 36 )); DY=$(( DOCKY - CY ))
+# The taskbar (floating, centred, no magnification): the Apps button, a separator, nine pinned apps
+# and the show-desktop sliver. 40 px icons, 6 px gap, 10 px padding, 14 px separators; the icon
+# centres are 417 (Apps), then 471 + 46 * slot. Slots: files browser terminal editor calc viewer
+# tasks monitor settings. `dock_icon <name>` moves the pointer onto an icon's centre.
+DOCK_Y_CENTER=$(( H - 36 ))
 dock_x() {
-  local i
   case "$1" in
-    apps) i=0 ;; files) i=1 ;; browser) i=2 ;; terminal) i=3 ;; editor) i=4 ;;
-    calc) i=5 ;; viewer) i=6 ;; tasks|monitor) i=7 ;; settings) i=8 ;; *) i=0 ;;
+    apps) echo 417 ;; files) echo 471 ;; browser) echo 517 ;; terminal) echo 563 ;; editor) echo 609 ;;
+    calc) echo 655 ;; viewer) echo 701 ;; tasks) echo 747 ;; monitor) echo 793 ;; settings) echo 839 ;;
+    desktop) echo 880 ;; *) echo 417 ;;
   esac
-  local x0=$(( 640 - (9 * 48 + 8 * 8 + 12 + 24) / 2 + 12 ))
-  local extra=0; [ "$i" -ge 1 ] && extra=12
-  echo $(( x0 + i * 56 + extra + 24 ))
 }
 dock_icon() { goto "$(dock_x "$1")" "$DOCK_Y_CENTER"; }
 dock() { goto "$1" "$DOCKY"; }

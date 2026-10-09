@@ -71,6 +71,7 @@ pub mod sntp;
 pub mod style;
 pub mod sysif;
 pub mod sysmon;
+pub mod taskbar;
 #[cfg(test)]
 pub(crate) mod testutil;
 pub mod textlayout;

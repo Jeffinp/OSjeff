@@ -13,25 +13,11 @@ pub(crate) const SWITCH_ROW_H: i32 = 38;
 /// Most rows shown at once (the list scrolls with the selection).
 pub(crate) const SWITCH_ROWS: usize = 8;
 
-/// Backdrop of the app bar (dock): the wallpaper under its resting zone, blurred, taken
-/// when the wallpaper is painted so the bar never blurs anything per frame.
-static DOCK_BACKDROP: RacyCell<Option<super::glass::Backdrop>> = RacyCell::new(None);
-
-/// Draw the blurred wallpaper behind the dock `panel` (rounded by `radius`).
-pub(crate) fn dock_glass(c: &mut Canvas, panel: Rect, radius: i32) {
-    // SAFETY: only the compositor thread reads or replaces the backdrop; the borrow ends here.
-    // NOTE: not guaranteed by the type: the cell hands out a raw pointer.
-    let slot = unsafe { &*DOCK_BACKDROP.get() };
-    if let Some(b) = slot {
-        b.draw(c, panel, radius, 256);
-    }
-}
-
 /// Paint the wallpaper into `c` (the cached background) and bake what depends only on
-/// it: the top panel and the blurred strip behind the app bar.
+/// it: the top panel.
 pub fn paint_background(c: &mut Canvas) {
     paint_wallpaper(c, &crate::settings::get());
-    let (w, h) = (c.width() as i32, c.height() as i32);
+    let w = c.width() as i32;
     let p = theme::pal();
 
     // Panel: a lightly blurred wallpaper strip under a mostly opaque tint and a hairline, so it
@@ -46,14 +32,6 @@ pub fn paint_background(c: &mut Canvas) {
     // A faint light line over the hairline: the panel's inner highlight.
     let (gc, ga) = theme::tint(p.glass_edge);
     c.blend_rect(Rect::new(0, PANEL_H - 2, w, 1), gc, ga / 3);
-
-    // App bar backdrop: a blurred copy of the wallpaper around its resting position.
-    let (rest, _) = osjeff_core::chrome::dock_rest(w, h, shell::DOCK_ITEMS.len(), Some(0));
-    let zone = Rect::new(rest.x - 140, rest.y - 4, rest.w + 280, rest.h + 12).clamped_to(w, h);
-    let backdrop = super::glass::Backdrop::capture(c, zone, 16);
-    // SAFETY: compositor thread only; no reference to the old value is live.
-    // NOTE: not guaranteed by the type: the cell hands out a raw pointer.
-    unsafe { *DOCK_BACKDROP.get() = Some(backdrop) };
 }
 
 /// 24-bit `0xRRGGBB` to a framebuffer colour.

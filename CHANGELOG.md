@@ -47,6 +47,14 @@ tem releases versionadas; as seções são marcos na `master`.
   Reiniciar / Desligar. Isso substitui a barra de menus e o popover de Controles. Botão direito em
   *Apps*: menu do sistema.
 
+- **Barra de tarefas no lugar do dock com ampliação.** Barra flutuante arredondada no centro de
+  baixo: botão Apps, apps fixados, apps abertos sem fixar e a faixa *Mostrar área de trabalho*
+  (também `Ctrl+Alt+D`). Sem ampliação: o ícone sobe um pouco sob o ponteiro e mostra uma dica;
+  uma pílula marca o app em foco e um ponto os demais; clicar foca, restaura ou minimiza,
+  `Shift`+clique abre outra janela, arrastar um ícone fixado reordena (os vizinhos deslizam com
+  mola) e o botão direito lista as janelas do app com *Fixar* e *Fechar*. Geometria e regras
+  puras em `osjeff_core::taskbar` (layout, hit test, indicador, clique, reordenação).
+
 ## 2026-10 — Nova interface (W22)
 
 - **Visual novo, claro e escuro.** Barra de menus com menu do sistema, nome e menus do app em

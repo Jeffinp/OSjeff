@@ -109,6 +109,11 @@ impl Desktop {
                     self.execute(Cmd::Gallery);
                     return true;
                 }
+                // Ctrl+Alt+D: show the desktop (or bring the windows back).
+                Key::Char(b'd' | b'D') if alt_now => {
+                    self.execute(Cmd::ShowDesktop);
+                    return true;
+                }
                 // Ctrl+Space: Busca.
                 Key::Char(b' ') if !alt_now => {
                     self.open_search();
@@ -1002,9 +1007,9 @@ impl Desktop {
                 self.close_transients();
                 self.panel_context(item);
                 scene = true;
-            } else if let Some(i) = self.dock_item_at(cx, cy).filter(|_| !self.modal_open()) {
+            } else if let Some(h) = self.dock_item_at(cx, cy).filter(|_| !self.modal_open()) {
                 self.close_transients();
-                self.dock_context(i, cx, cy);
+                self.dock_context(h, cx, cy);
                 scene = true;
             } else if self.overlay_open() {
                 self.close_transients();
@@ -1033,8 +1038,8 @@ impl Desktop {
                 self.toast_dirty = true;
             } else if self.shell_click(cx, cy) {
                 scene = true;
-            } else if let Some(i) = self.dock_item_at(cx, cy) {
-                self.dock_click(i);
+            } else if let Some(h) = self.dock_item_at(cx, cy) {
+                self.dock_press(h, cx, cy);
                 scene = true;
             } else if let Some(w) = self.topmost_at(cx, cy) {
                 self.click_window(w, cx, cy);
@@ -1042,6 +1047,9 @@ impl Desktop {
             }
         }
 
+        if released {
+            self.dock_release(cx, cy);
+        }
         if released && let Some(d) = self.drag.take() {
             if matches!(d.mode, DragMode::Ui) {
                 self.live_drop(d.win);

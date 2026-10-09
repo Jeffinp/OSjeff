@@ -117,7 +117,7 @@ pub const LIGHT: Palette = Palette {
     text_secondary: 0xFF6E_6E73,
     text_tertiary: 0xFFA1_A1A6,
     menubar_tint: 0xB2F6_F6F8,
-    dock_tint: 0x4DFF_FFFF,
+    dock_tint: 0xD1F6_F6F8,
     glass_edge: 0x66FF_FFFF,
     menu_tint: 0xCCF2_F2F5,
     field_bg: 0xFFFF_FFFF,
@@ -141,7 +141,7 @@ pub const DARK: Palette = Palette {
     text_secondary: 0xFFA1_A1A6,
     text_tertiary: 0xFF6E_6E73,
     menubar_tint: 0x9E1E_1E20,
-    dock_tint: 0x751E_1E22,
+    dock_tint: 0xD11E_1E22,
     glass_edge: 0x1FFF_FFFF,
     menu_tint: 0xCC2A_2A2E,
     field_bg: 0x14FF_FFFF,
@@ -180,7 +180,7 @@ pub const R_WINDOW: i32 = 12;
 pub const R_POPOVER: i32 = 12;
 pub const R_MENU: i32 = 8;
 pub const R_CONTROL: i32 = 6;
-pub const R_DOCK: i32 = 22;
+pub const R_TASKBAR: i32 = 12;
 pub const R_TOOLTIP: i32 = 6;
 /// Tile radius of an app icon of side `s`: 22.5 %.
 pub const fn tile_radius(s: i32) -> i32 {

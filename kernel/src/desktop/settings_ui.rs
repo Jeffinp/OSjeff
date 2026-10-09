@@ -639,51 +639,22 @@ fn page_wallpaper(ui: &mut Ui<'_, '_>) {
 }
 
 fn page_dock(ui: &mut Ui<'_, '_>) {
-    let s = ui.s;
     ui.title("Barra de apps");
-    ui.header("Ampliação");
-    let card = ui.card(ROW);
-    let v = alloc::format!("{}%", s.dock_zoom);
-    ui.row_slider(
-        card,
-        0,
-        "Ampliação dos ícones",
-        s.dock_zoom as i32,
-        (0, DOCK_ZOOM_MAX as i32),
-        &v,
-        true,
-        A_ZOOM,
-    );
-    // A preview: the bar's icons under a pointer in the middle.
-    ui.header("Pré-visualização");
-    let card = ui.card(128);
-    if let Some(c) = ui.c.as_deref_mut()
-        && ui.view.intersection(&card).is_some()
+    ui.header("Uso");
+    let card = ui.card(3 * ROW);
+    for (i, (name, sub)) in [
+        ("Reordenar", "Arraste um ícone fixado para outra posição"),
+        (
+            "Fixar e desafixar",
+            "Botão direito no ícone, em Fixar ou Desafixar",
+        ),
+        ("Nova janela", "Shift + clique no ícone do app"),
+    ]
+    .into_iter()
+    .enumerate()
     {
-        let n = 7usize;
-        let rest: Vec<Rect> = (0..n as i32)
-            .map(|i| Rect::new(card.x + card.w / 2 - 190 + i * 56, 0, 48, 48))
-            .collect();
-        let mid = rest[n / 2].x + 24 + 20;
-        let sizes = osjeff_core::chrome::dock_magnify_scaled(&rest, Some(mid), s.dock_zoom);
-        let kinds = [
-            Kind::Files,
-            Kind::Browser,
-            Kind::Terminal,
-            Kind::Editor,
-            Kind::Calculator,
-            Kind::Viewer,
-            Kind::Settings,
-        ];
-        let base = card.bottom() - 18;
-        // Pack the magnified icons side by side so the row stays centred.
-        let total: i32 = sizes.iter().map(|&z| z as i32 + 8).sum::<i32>() - 8;
-        let mut x = card.x + (card.w - total) / 2;
-        for (i, z) in sizes.iter().enumerate() {
-            let sz = *z as i32;
-            icons::blit(c, kinds[i].icon(), x, base - sz, sz, 256);
-            x += sz + 8;
-        }
+        let r = ui.row(card, i as i32);
+        ui.label(r, name, sub, true);
     }
 }
 

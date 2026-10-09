@@ -15,8 +15,9 @@
 //!    `input.rs`. Everything else — z-order, focus, minimize / maximize / resize,
 //!    Alt+Tab, the dock indicator, the process entry (`name`, `name 2`, ...) and
 //!    teardown on close — is generic and needs no change.
-//! 4. Give it an app-bar slot (`shell::DOCK_ITEMS`) if it should live there; every app
-//!    appears in the Apps overlay and in Busca on its own.
+//! 4. Add it to `taskbar::DEFAULT_PINNED` if it should start pinned to the taskbar; every app
+//!    appears in the Apps overlay and in Busca on its own, and while it runs the taskbar
+//!    shows it.
 //!
 //! Instance state is plain data; nothing here allocates per frame. The
 //! per-instance heap objects (`Box`, `Vec`, `String`) are created when the window

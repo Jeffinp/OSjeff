@@ -187,13 +187,13 @@ pub fn browser_home_layout(content: Rect) -> (Rect, [Rect; 4]) {
 
 // ------------------------------------------------------------- work area & fit
 
-/// Gap kept between the work area and the floating dock panel.
+/// Gap kept between the work area and the floating taskbar.
 pub const WORK_DOCK_GAP: i32 = 8;
 
-/// The rectangle windows maximize into: the screen below the menu bar, edge to
-/// edge, down to the dock panel (plus a small gap).
+/// The rectangle windows maximize and snap into: the screen below the top panel, edge to edge,
+/// down to the taskbar (plus a small gap).
 pub fn work_area(sw: i32, sh: i32) -> Rect {
-    let dock_top = sh - crate::chrome::DOCK_BOTTOM - crate::chrome::DOCK_H;
+    let dock_top = sh - crate::taskbar::BOTTOM - crate::taskbar::H;
     let top = crate::window::MENUBAR_H;
     Rect::new(0, top, sw.max(0), (dock_top - WORK_DOCK_GAP - top).max(0))
 }
@@ -270,11 +270,11 @@ mod tests {
     // ---- work area & fit ----
 
     #[test]
-    fn work_area_sits_between_the_menu_bar_and_the_dock() {
+    fn work_area_sits_between_the_panel_and_the_taskbar() {
         let w = work_area(SW, SH);
-        let (dock, _) = crate::chrome::dock_rest(SW, SH, 9, None);
-        assert_eq!(w.y, crate::window::MENUBAR_H);
-        assert!(w.bottom() + WORK_DOCK_GAP <= dock.y);
+        let bar = crate::taskbar::layout(SW, SH, 9).panel;
+        assert_eq!(w.y, crate::style::PANEL_H);
+        assert_eq!(w.bottom() + WORK_DOCK_GAP, bar.y);
         assert_eq!((w.x, w.right()), (0, SW));
         // BIOS 1280x720 too.
         let b = work_area(1280, 720);

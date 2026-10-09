@@ -508,9 +508,9 @@ arquivos do kernel (grep). Isso torna o `unsafe` **justificado e fiscalizado**, 
 ### 6.1 Buffers
 
 `BG` guarda o wallpaper (gradiente e *glows* do esquema claro ou escuro, a faixa de vidro da
-barra de menus já assada e o fundo borrado da barra de apps), pintado **uma vez** (e de novo
+painel superior já assado), pintado **uma vez** (e de novo
 quando o wallpaper, o destaque ou a aparência mudam); `BACK` é o alvo de composição; `STATIC`
-é "tudo menos as janelas dinâmicas e a barra de apps", composto uma vez por animação ou
+é "tudo menos as janelas dinâmicas e a barra de tarefas", composto uma vez por animação ou
 arrasto; uma textura de 3,5 MiB (`TEXTURE`) guarda a janela que abre, fecha, minimiza ou
 restaura enquanto ela é reamostrada; o framebuffer só recebe retângulos ou um blit completo.
 Tamanhos em §2.3.
@@ -569,7 +569,7 @@ flowchart TD
   apagado os toca, eles são redesenhados antes do cursor. **Ao portar o desenho para outra
   estrutura, mantenha só isto:** `erase` antes de qualquer escrita no framebuffer do quadro,
   `paint` depois da última, e `CURSOR_W/H` (= `osjeff_core::pointer::{W, H}`, a caixa de todos os sprites) cobrindo todo sprite. Prova no QEMU: `tools/perf/scen/w20-cursor.sh` (rajadas rápidas sobre bordas,
-  dock e cantos) + `tools/perf/w20-cursor-check.sh` (0 pixels diferentes entre a tela em
+  barra de tarefas e cantos) + `tools/perf/w20-cursor-check.sh` (0 pixels diferentes entre a tela em
   repouso e a mesma tela depois de um repaint completo forçado).
   **Relógio:** o tique de 1 s repinta só o texto do relógio na barra de
   menus (e as janelas vivas: Tarefas, Registro, Ajustes, se abertas), em vez de subir ~8 MiB. **Sombra:** não é misturada sob o corpo opaco da janela
@@ -587,7 +587,7 @@ bit-idêntica a `mix256` (testes no core). O texto da interface é vetorial (§6
 
 ### 6.4 HUD e `perf-trace`
 
-O HUD (canto superior esquerdo, sob a barra de menus; escondido: **Ctrl+Alt+H**) mostra ms por quadro, fps possível, `draws/s`, pior
+O HUD (canto superior esquerdo, sob o painel; escondido: **Ctrl+Alt+H**) mostra ms por quadro, fps possível, `draws/s`, pior
 quadro do segundo, uso do heap e `thr N`. Atualiza a cada 25 ticks (100 ms) **direto no
 framebuffer**, depois de restaurar a área a partir de `BACK`, fora da janela cronometrada.
 `trace.rs` tem **marcos de boot** (sempre compilados) e **estatísticas por segundo**
@@ -619,13 +619,13 @@ quadro (algumas dezenas de valores).
   por tempo real e reporta se ainda se move, e é isso que decide se o laço fica no caminho de
   animação (`has_animation`) ou volta a custar zero.
 - **Cromo e shell** (`chrome`, `widgets`, `style`, `search`, `iconart`): geometria do painel
-  superior (itens à esquerda, relógio centralizado, pílula de status), dos menus, da barra de apps
-  (disposição e curva de ampliação), do Apps, da Busca, dos popovers (Configurações rápidas,
+  superior (itens à esquerda, relógio centralizado, pílula de status), dos menus, da barra de tarefas
+  (`taskbar`: disposição, hit test, indicadores, reordenação), do Apps, da Busca, dos popovers (Configurações rápidas,
   calendário com centro de notificações) e dos banners; paletas clara e escura; o ranqueamento e a calculadora da Busca; os
   ícones e glifos vetoriais.
 
 No kernel: `desktop/shell.rs` guarda o estado (menus, popovers, folha, Apps, Busca, barra de
-apps) e executa os comandos (`Cmd`), `panel.rs`, `dock.rs`, `overlays.rs`, `chrome.rs` e
+apps) e executa os comandos (`Cmd`), `panel.rs`, `taskbar.rs`, `overlays.rs`, `chrome.rs` e
 `cursor.rs` desenham e tratam entrada, `glass.rs` captura o fundo borrado **uma vez** quando uma
 superfície abre, e `ui.rs`/`gallery.rs` são o toolkit e sua vitrine. A janela do Alt+Tab, os
 banners e o HUD usam o mesmo vidro. Aparência (automática pelo relógio, clara, escura), cor de
@@ -665,15 +665,17 @@ O desktop é um **window manager dinâmico**. A lógica pura vive em `osjeff_cor
   maximizar/restaurar e fechar (células de 40x32; o pixel do canto é o fechar; sem botão de
   maximizar numa janela fixa), `Rect::title_layout`/`title_button_at`, faixa de
   redimensionar de 5 px em volta da janela (cantos de 14 px), `Rect::resized`, `layout::work_area`
-  (a tela abaixo da barra de menus de 28 px, até a barra de apps) e `winman::cascade_rect`
-  (novas instâncias descem 28 px por índice, com volta a cada 8). Nenhuma janela cobre a barra
-  de menus (`clamped_pos`, `resized`).
-- **Barra de apps e menus.** O ícone da barra **foca** (ou restaura) a janela mais recente do app;
-  só abre outra quando não há nenhuma. Um ponto sob o ícone marca os apps abertos. **Nova
-  instância:** `Ctrl+N` na janela focada (Terminal, Editor, Arquivos, Calculadora; Navegador
-  apenas foca), o menu Arquivo do app ou o botão direito no ícone, "Nova janela". O overlay
-  **Apps**, a **Busca** (`Ctrl+Space`) e o menu de contexto da área de trabalho usam a mesma
-  regra de foco. `Ctrl+W` fecha e `Ctrl+M` minimiza a janela focada.
+  (a tela abaixo do painel de 30 px, até a barra de tarefas) e `winman::cascade_rect`
+  (novas instâncias descem 28 px por índice, com volta a cada 8). Nenhuma janela cobre o painel
+  (`clamped_pos`, `resized`).
+- **Barra de tarefas e menus.** O ícone da barra **foca** (ou restaura) a janela mais recente do
+  app, **minimiza** se ele já tem o foco, e só abre outra quando não há nenhuma (`taskbar::click_action`);
+  uma pílula sob o ícone marca o app em foco e um ponto os abertos. **Nova instância:** `Ctrl+N` na
+  janela focada (Terminal, Editor, Arquivos, Calculadora; Navegador apenas foca), `Shift`+clique
+  no ícone, o botão de menu da janela ou o botão direito no ícone, "Nova janela". Os ícones fixados
+  reordenam por arrasto; os apps abertos sem fixar aparecem no fim. O overlay **Apps**, a
+  **Busca** (`Ctrl+Space`) e o menu de contexto da área de trabalho usam a mesma regra de foco.
+  `Ctrl+W` fecha, `Ctrl+M` minimiza e `Ctrl+Alt+D` mostra a área de trabalho.
 - **Mouse.** Botões de glifo plano (desbotados na janela sem foco, preenchimento suave ao passar,
   vermelho no fechar); duplo clique na barra de título alterna o zoom (`ClickTracker`, 500 ms);
   arrastar a barra move, e arrastar uma janela maximizada ou encaixada a solta sob o ponteiro
@@ -781,8 +783,8 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
    (estado por janela, criado em `App::new`).
 2. `desktop/render.rs` (`draw_window`) e `apps.rs`: desenhar dentro do `Rect` da janela
    (nunca fora dele); `input.rs`: teclas (`handle_key`) e cliques (`click_window`).
-3. Barra de apps (opcional): uma entrada em `shell::DOCK_ITEMS`. Todo `Kind` de `Kind::ALL`
-   aparece sozinho no overlay Apps e na Busca; quem não está na barra não ganha ícone nem ponto.
+3. Barra de tarefas (opcional): uma entrada em `taskbar::DEFAULT_PINNED`. Todo `Kind` de `Kind::ALL`
+   aparece sozinho no overlay Apps e na Busca; enquanto roda, a barra mostra o app mesmo sem fixar.
 
 Foco, z-order, minimizar/maximizar/redimensionar, Alt+Tab, processo (`nome`, `nome 2`...),
 ponto de minimizada, menu "Nova janela" e o encerramento ao fechar não pedem nenhuma mudança.
@@ -796,7 +798,7 @@ Cenários em `tools/perf/scen/w8-*.sh` (QEMU BIOS e UEFI), saída em `docs/img/w
 | `wm-instances.png` | 3 terminais (cada um com seu `echo`) e 2 editores com textos diferentes, cada instância com o seu estado |
 | `wm-taskmgr.png` | processos `shell`, `shell 2`, `shell 3`, `editor`, `editor 2`; `DEL` em `shell 3` fecha a janela |
 | `wm-maximized.png` | editor maximizado: texto na escala 3, barra de status presa à borda |
-| `wm-minimized.png` | terminal minimizado: ponto sob o ícone do dock |
+| `wm-minimized.png` | terminal minimizado: indicador sob o ícone da barra de tarefas |
 | `wm-alttab.png` | seletor Alt+Tab em ordem de uso recente |
 | `wm-many.png` | 32 janelas (31 terminais + Tarefas, o teto da tabela) sem pânico |
 
@@ -1119,7 +1121,7 @@ um `.wasm` instalando-o e executando-o. O manifesto aceita `net_hosts` (lista de
 `kernel/build.rs` compila `wasm-apps/{hello,clock,notes,paint,snake,plasma}` (Rust,
 `wasm32-unknown-unknown`, workspaces isolados, SDK em `wasm-apps/sdk`) e os embute. Um módulo
 **sem** manifesto (DOOM com `DOOM=1 WASI_SDK_PATH=...`, `cdemo` com `WASI_SDK_PATH=...`) roda como
-app legado (ABI v1, 692x414 fixa), aberto pelo ícone "W" do dock; sem essas variáveis o ícone
+app legado (ABI v1, 692x414 fixa), aberto pelo ícone "W" da barra de tarefas; sem essas variáveis o ícone
 abre o `snake` empacotado. DOOM continua sem ser reproduzível do checkout puro (precisa de
 `wasi-sdk`, rede para clonar o upstream GPLv2 e um WAD).
 

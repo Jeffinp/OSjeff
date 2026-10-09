@@ -8,7 +8,7 @@
 use super::glass::BackdropSlot;
 use super::*;
 use core::cell::Cell;
-use osjeff_core::anim::{Spring, Tween, curves};
+use osjeff_core::anim::{Tween, curves};
 use osjeff_core::chrome::{MenuGeom, MenuRow};
 use osjeff_core::raster::Surface;
 use osjeff_core::snap::SnapZone;
@@ -44,8 +44,13 @@ pub(crate) enum Cmd {
     BrowserZoomReset,
     /// Tile the focused window to a half or a quarter of the work area.
     Snap(SnapZone),
-    /// Open one more window of an app (app-bar menu).
+    /// Open one more window of an app (taskbar menu).
     NewOf(Kind),
+    /// Pin an app to the taskbar / take it off.
+    Pin(Kind),
+    Unpin(Kind),
+    /// Minimise every window, or bring back the ones that command hid.
+    ShowDesktop,
     /// Close every window of an app (app-bar menu).
     QuitOf(Kind),
 }
@@ -196,62 +201,6 @@ pub(crate) struct SearchView {
     pub glass: BackdropSlot,
 }
 
-/// One entry of the app bar.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum DockEntry {
-    /// The Apps button.
-    Apps,
-    App(Kind),
-}
-
-/// The app bar's items, left to right (the Apps button first, a separator after it).
-pub(crate) const DOCK_ITEMS: [DockEntry; 9] = [
-    DockEntry::Apps,
-    DockEntry::App(Kind::Files),
-    DockEntry::App(Kind::Browser),
-    DockEntry::App(Kind::Terminal),
-    DockEntry::App(Kind::Editor),
-    DockEntry::App(Kind::Calculator),
-    DockEntry::App(Kind::Viewer),
-    DockEntry::App(Kind::TaskMgr),
-    DockEntry::App(Kind::Settings),
-];
-
-/// Live state of the app bar: icon sizes (springs), hover, tooltip, launch bounces.
-pub(crate) struct DockState {
-    pub sizes: Vec<Spring>,
-    pub hover: Option<usize>,
-    /// Seconds the pointer has rested on `hover` (the tooltip waits for 0.35).
-    pub rest: f32,
-    pub tip: Tween,
-    /// Launch bounces: `(item index, seconds since the launch)`.
-    pub bounce: Vec<(usize, f32)>,
-    /// Pointer x for magnification (None when outside the zone).
-    pub pointer_x: Option<i32>,
-    /// Last painted layout (panel, icons): what hit testing uses.
-    pub layout: Cell<(Rect, [Rect; 9])>,
-    /// Set when something changed that needs a repaint even without motion.
-    pub dirty: bool,
-}
-
-impl DockState {
-    pub(crate) fn new() -> DockState {
-        let sizes = (0..DOCK_ITEMS.len())
-            .map(|_| Spring::pixels(osjeff_core::chrome::DOCK_ICON as f32, 420.0, 30.0))
-            .collect();
-        DockState {
-            sizes,
-            hover: None,
-            rest: 0.0,
-            tip: Tween::at(0.0),
-            bounce: Vec::new(),
-            pointer_x: None,
-            layout: Cell::new((Rect::new(0, 0, 0, 0), [Rect::new(0, 0, 0, 0); 9])),
-            dirty: true,
-        }
-    }
-}
-
 /// The outline previewing where a dragged window snaps: it travels from the window's rectangle
 /// to the zone's while it fades in.
 pub(crate) struct SnapPreview {
@@ -270,7 +219,7 @@ pub(crate) struct Shell {
     pub dialog: Option<Dialog>,
     pub apps: Option<AppsView>,
     pub search: Option<SearchView>,
-    pub dock: DockState,
+    pub task: super::taskbar::TaskbarState,
     /// Panel item under the pointer (highlight).
     pub panel_hover: Option<PanelItem>,
     /// The notification centre's history (oldest first), the log cursor that feeds it and how
@@ -299,7 +248,7 @@ impl Shell {
             dialog: None,
             apps: None,
             search: None,
-            dock: DockState::new(),
+            task: super::taskbar::TaskbarState::new(),
             panel_hover: None,
             notifs: Vec::new(),
             notif_seen: crate::klog::seq(),
@@ -553,6 +502,9 @@ impl Desktop {
             Cmd::Gallery => {
                 self.launch(Kind::Gallery);
             }
+            Cmd::Pin(k) => self.set_pinned(k, true),
+            Cmd::Unpin(k) => self.set_pinned(k, false),
+            Cmd::ShowDesktop => self.show_desktop(),
             Cmd::Snap(zone) => {
                 if let Some((id, _)) = target {
                     self.snap_window(id, zone);
