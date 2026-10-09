@@ -21,9 +21,9 @@ key end; sleep 1.5
 shot m5-end
 key home; sleep 1.5
 # Drag the scrollbar thumb.
-goto 1068 300
+goto 1068 232
 mon "mouse_button 1"; sleep 0.2
-goto 1068 400; goto 1068 520; sleep 0.5
+goto 1068 340; goto 1068 470; sleep 0.5
 shot m6-thumb
 mon "mouse_button 0"; sleep 0.5
 echo "[scen] wheel end $(date +%s.%N)" >> "$OUT/scen.log"

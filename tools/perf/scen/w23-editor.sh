@@ -41,7 +41,7 @@ typestr "x"; sleep 0.3
 key ctrl-q; sleep 1.2
 shot e08-close
 key esc; sleep 0.6
-key ctrl-o; sleep 1; for i in 1 2 3 4 5 6 7; do key down; done; key ret; sleep 1.8
+key ctrl-o; sleep 1; for i in 1 2 3 4 5 6 7 8; do key down; done; key ret; sleep 1.8
 shot e09-opened
 flush_snaps
 finish

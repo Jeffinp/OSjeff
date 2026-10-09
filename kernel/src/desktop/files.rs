@@ -500,6 +500,13 @@ impl Desktop {
         {
             f.search.focused = false;
         }
+        // The scrollbar sits over the right edge of the rows and wins the press there.
+        if !right
+            && matches!(hit, ui::Hit::Item(_) | ui::Hit::Blank)
+            && self.files_scrollbar_press(id, &lay, px, py)
+        {
+            return;
+        }
         let now = appui::ticks();
         match hit {
             ui::Hit::Back => self.files_history(id, 0),
