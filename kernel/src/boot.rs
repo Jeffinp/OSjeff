@@ -45,7 +45,7 @@ pub fn draw_splash(c: &mut Canvas, progress: f32) {
     text::draw_centered(
         c,
         name,
-        "OSjeff",
+        "Kitsune",
         40,
         Weight::Semibold,
         Color::rgb(255, 255, 255),

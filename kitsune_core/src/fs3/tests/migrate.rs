@@ -7,14 +7,14 @@ use crate::fs as v2;
 use crate::fs3::{Detected, MigrateError, detect, migrate_v2, read_v2_image};
 use alloc::collections::BTreeMap;
 
-const LEIAME: &[u8] = b"Bem-vindo ao OSjeff.\nGerenciador de arquivos:\n setas   navegam\n Del     manda pra lixeira\n Tab     alterna arquivos/lixeira\n Enter   abre\n";
+const LEIAME: &[u8] = b"Bem-vindo ao Kitsune.\nGerenciador de arquivos:\n setas   navegam\n Del     manda pra lixeira\n Tab     alterna arquivos/lixeira\n Enter   abre\n";
 
 /// The image the kernel seeds on a blank disk (see `desktop/mod.rs`).
 fn seeded() -> Vec<u8> {
     let mut img = alloc::vec![0u8; v2::IMAGE_SIZE];
     v2::format(&mut img);
     v2::write(&mut img, b"leiame.txt", LEIAME).unwrap();
-    v2::write(&mut img, b"notas.txt", b"Arquivo de exemplo do OSjeff.").unwrap();
+    v2::write(&mut img, b"notas.txt", b"Arquivo de exemplo do Kitsune.").unwrap();
     let d = v2::mkdir(&mut img, v2::ROOT, b"Documentos").unwrap();
     v2::write_in(
         &mut img,
@@ -112,7 +112,7 @@ fn migrates_the_kernel_seeded_image() {
         (rep.files, rep.dirs, rep.trashed, rep.renamed, rep.orphans),
         (3, 1, 0, 0, 0)
     );
-    assert_eq!(rep.bytes, (LEIAME.len() + 29 + 28) as u64);
+    assert_eq!(rep.bytes, (LEIAME.len() + 30 + 28) as u64);
     // The reserved area is byte-for-byte untouched and never written.
     assert_eq!(&disk.as_bytes()[..128 * 512], &before_reserved[..]);
     assert!(disk.min_written_lba().unwrap() >= 128);
@@ -121,7 +121,7 @@ fn migrates_the_kernel_seeded_image() {
     assert_eq!(fs.read_file("/leiame.txt").unwrap(), LEIAME);
     assert_eq!(
         fs.read_file("/notas.txt").unwrap(),
-        b"Arquivo de exemplo do OSjeff."
+        b"Arquivo de exemplo do Kitsune."
     );
     assert_eq!(
         fs.read_file("/Documentos/projeto.txt").unwrap(),
@@ -156,7 +156,7 @@ fn migration_with_a_disk_larger_than_the_minimum() {
     assert!(fs.statfs().total_blocks > 16_000);
     assert_eq!(
         fs.read_file("/notas.txt").unwrap(),
-        b"Arquivo de exemplo do OSjeff."
+        b"Arquivo de exemplo do Kitsune."
     );
 }
 
@@ -321,7 +321,7 @@ fn trash_state_is_preserved() {
             ("/leiame.txt", Some(LEIAME)),
             ("/Documentos", None),
             ("/.trash/projeto.txt", Some(b"Arquivo dentro de uma pasta.")),
-            ("/.trash/notas.txt", Some(b"Arquivo de exemplo do OSjeff.")),
+            ("/.trash/notas.txt", Some(b"Arquivo de exemplo do Kitsune.")),
             ("/.trash/lixo", None),
             ("/.trash/lixo/dentro.txt", Some(b"x")),
         ])
@@ -568,7 +568,7 @@ fn power_cut_migration(
 fn seeded_tree() -> BTreeMap<Vec<u8>, Option<Vec<u8>>> {
     expect(&[
         ("/leiame.txt", Some(LEIAME)),
-        ("/notas.txt", Some(b"Arquivo de exemplo do OSjeff.")),
+        ("/notas.txt", Some(b"Arquivo de exemplo do Kitsune.")),
         ("/Documentos", None),
         (
             "/Documentos/projeto.txt",

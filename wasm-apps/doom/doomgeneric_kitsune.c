@@ -1,6 +1,6 @@
-/* OSjeff platform layer for doomgeneric: maps DOOM's display/input/timing onto
- * the OSjeff WASM host ABI. Compiled to wasm32-wasi with wasi-sdk and run by the
- * OSjeff WASM app engine. `render` runs one game tick (driven by the OS frame
+/* Kitsune platform layer for doomgeneric: maps DOOM's display/input/timing onto
+ * the Kitsune WASM host ABI. Compiled to wasm32-wasi with wasi-sdk and run by the
+ * Kitsune WASM app engine. `render` runs one game tick (driven by the OS frame
  * pump); `on_key` queues input. */
 
 #include "doomgeneric.h"

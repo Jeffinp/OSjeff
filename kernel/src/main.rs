@@ -107,7 +107,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // missing, so driver bring-up is observable without the screen.
     serial::init();
     trace::mark("kernel entry");
-    klog!(Info, "OSjeff boot: kernel entry");
+    klog!(Info, "Kitsune boot: kernel entry");
 
     // Capture the physical-memory offset before `boot_info` is borrowed for the
     // framebuffer. Needed for DMA (virtio-gpu addresses memory physically).
@@ -190,14 +190,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // First run through the native WebAssembly app engine: prove the OS can load
     // and execute a `.wasm` program (its native app format) end to end. Output
     // lands on serial. The graphics/input ABI (windowed apps) builds on this.
-    klog!(Info, "OSjeff boot: running native WASM demo");
+    klog!(Info, "Kitsune boot: running native WASM demo");
     wasm::run_demo();
     trace::mark("wasm demo done");
 
     // Enumerate the PCI bus — groundwork for the virtio-gpu driver: locate the
     // device and, when present, enable bus mastering so a later DMA-capable
     // driver can use it. QEMU captures the log via `-serial file:...`.
-    klog!(Info, "OSjeff boot: enumerating PCI bus 0");
+    klog!(Info, "Kitsune boot: enumerating PCI bus 0");
     pci::for_each(|d| {
         klog!(
             Info,

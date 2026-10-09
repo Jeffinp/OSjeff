@@ -97,12 +97,12 @@ fn leb_errors() {
 
 #[test]
 fn walks_regular_and_custom_sections() {
-    let c = custom("osjeff.manifest", b"id=x");
+    let c = custom("kitsune.manifest", b"id=x");
     let m = module(&[(1, &[0, 1, 2]), (0, &c), (10, &[9])]);
     let v: Vec<_> = Sections::new(&m).unwrap().map(|s| s.unwrap()).collect();
     assert_eq!(v.len(), 3);
     assert_eq!((v[0].id, v[0].data), (1, &[0u8, 1, 2][..]));
-    assert_eq!(v[1].name, b"osjeff.manifest");
+    assert_eq!(v[1].name, b"kitsune.manifest");
     assert_eq!(v[1].data, b"id=x");
     assert_eq!(v[2].id, 10);
 }
@@ -194,10 +194,10 @@ fn too_many_sections() {
 
 #[test]
 fn find_custom_counts_duplicates() {
-    let a = custom("osjeff.manifest", b"one");
-    let b = custom("osjeff.manifest", b"two");
+    let a = custom("kitsune.manifest", b"one");
+    let b = custom("kitsune.manifest", b"two");
     let m = module(&[(0, &a), (0, &b)]);
-    let (n, first) = find_custom(&m, b"osjeff.manifest").unwrap();
+    let (n, first) = find_custom(&m, b"kitsune.manifest").unwrap();
     assert_eq!(n, 2);
     assert_eq!(first, Some(&b"one"[..]));
     assert_eq!(find_custom(&m, b"nope").unwrap(), (0, None));
@@ -205,25 +205,25 @@ fn find_custom_counts_duplicates() {
 
 #[test]
 fn find_custom_reports_malformed_tail() {
-    let a = custom("osjeff.manifest", b"one");
+    let a = custom("kitsune.manifest", b"one");
     let mut m = module(&[(0, &a)]);
     m.extend_from_slice(&[1, 9]);
     assert_eq!(
-        find_custom(&m, b"osjeff.manifest"),
+        find_custom(&m, b"kitsune.manifest"),
         Err(WasmError::Truncated)
     );
 }
 
 #[test]
 fn lookalike_inside_another_section_is_not_matched() {
-    let c = custom("osjeff.manifest", b"id=x");
+    let c = custom("kitsune.manifest", b"id=x");
     let m = module(&[(1, &c)]);
-    assert_eq!(find_custom(&m, b"osjeff.manifest").unwrap().0, 0);
+    assert_eq!(find_custom(&m, b"kitsune.manifest").unwrap().0, 0);
 }
 
 #[test]
 fn every_prefix_of_a_valid_module_is_handled() {
-    let c = custom("osjeff.manifest", b"id=hello\nname=Hi\nversion=1.0.0\n");
+    let c = custom("kitsune.manifest", b"id=hello\nname=Hi\nversion=1.0.0\n");
     let m = module(&[(1, &[1, 2, 3]), (0, &c), (10, &[7, 7, 7])]);
     for n in 0..=m.len() {
         if let Ok(it) = Sections::new(&m[..n]) {
@@ -236,7 +236,7 @@ fn every_prefix_of_a_valid_module_is_handled() {
 
 #[test]
 fn single_byte_corruptions_never_panic() {
-    let c = custom("osjeff.manifest", b"id=hello\n");
+    let c = custom("kitsune.manifest", b"id=hello\n");
     let m = module(&[(1, &[1, 2, 3]), (0, &c), (10, &[7])]);
     for i in 0..m.len() {
         for b in [0x00u8, 0x7F, 0x80, 0xFF, 0x0F, 0x01] {

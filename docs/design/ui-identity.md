@@ -1,4 +1,4 @@
-# OSjeff shell: identity
+# Kitsune shell: identity
 
 Status: this document replaces the "macOS-like" brief of `ui-macos.md` (which keeps the
 token tables, the toolkit and the rendering rules, and is cross-linked from here). The owner
@@ -30,7 +30,7 @@ the Quick Settings tile grid; KDE the launcher with a category rail.
 
 ## 1. Comparison and decisions
 
-| Aspect | macOS | Windows 11 | GNOME | KDE Plasma | Cinnamon / elementary | **OSjeff decision** and why |
+| Aspect | macOS | Windows 11 | GNOME | KDE Plasma | Cinnamon / elementary | **Kitsune decision** and why |
 |---|---|---|---|---|---|---|
 | Window controls | three coloured dots, left | flat glyph buttons, right, 46x32, red close on hover | round glyph buttons, right (close only by default) | flat glyphs, right | flat glyphs, right | **Right, flat glyphs, 40x32 hit areas** (corner pixel hits close: Fitts), a 36x26 rounded hover fill, red fill and white glyph on close, dimmed when inactive. No dots, nothing on the left: this is the single biggest macOS tell |
 | Title bar | centred title, no icon | left title, app icon | centred, headerbar | left title, app icon | left | **Small app tile + left-aligned Medium title**, a **menu button** next to the controls; a thin accent line on the focused bar (ours: a quiet signature, none of the others has it) |

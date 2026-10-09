@@ -11,7 +11,7 @@
 //! `&mut dyn AppFs`. This adapter adds the backend's own defense in depth ("backends
 //! never trust their caller"): canonical paths only, and only the three trees the
 //! apps platform owns ([`ROOTS`]) are reachable at all, so a sandbox bug could still
-//! not touch `/etc/osjeff.conf`, `/var/log` or `/.trash`.
+//! not touch `/etc/kitsune.conf`, `/var/log` or `/.trash`.
 //!
 //! Semantics match [`MemFs`](super::MemFs) (the test oracle: `volume_tests` runs the
 //! same operations on both and compares), except the limits that come from the real

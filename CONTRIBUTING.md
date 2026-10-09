@@ -1,4 +1,4 @@
-# Contribuindo com o OSjeff
+# Contribuindo com o Kitsune
 
 Este projeto é de um desenvolvedor só, mas trabalha como se não fosse: toda mudança
 precisa de prova. Estas regras são as que foram usadas na auditoria de desempenho

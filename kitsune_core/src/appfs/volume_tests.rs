@@ -158,7 +158,7 @@ fn same_results_as_memfs() {
 fn only_the_apps_trees_are_reachable() {
     let mut v = volume(4);
     Backend::mkdir(&mut v, b"/etc", NOW).unwrap();
-    Backend::write_file(&mut v, b"/etc/osjeff.conf", b"secret", NOW).unwrap();
+    Backend::write_file(&mut v, b"/etc/kitsune.conf", b"secret", NOW).unwrap();
     Backend::write_file(&mut v, b"/leiame.txt", b"hi", NOW).unwrap();
     Backend::write_file(&mut v, b"/home-ish", b"x", NOW).unwrap();
     Backend::write_file(&mut v, b"/apps2", b"x", NOW).unwrap();
@@ -167,7 +167,7 @@ fn only_the_apps_trees_are_reachable() {
     let mut buf = [0u8; 8];
     for p in [
         "/etc",
-        "/etc/osjeff.conf",
+        "/etc/kitsune.conf",
         "/leiame.txt",
         "/.trash",
         "/.trash/x",
@@ -194,7 +194,10 @@ fn only_the_apps_trees_are_reachable() {
     fs.mkdir_all("/data/x").unwrap();
     assert_eq!(fs.rename("/data/x", "/etc/x"), Err(FsError::Perm));
     assert_eq!(fs.rename("/data/x", "/.trash/x"), Err(FsError::Perm));
-    assert_eq!(fs.rename("/etc/osjeff.conf", "/data/c"), Err(FsError::Perm));
+    assert_eq!(
+        fs.rename("/etc/kitsune.conf", "/data/c"),
+        Err(FsError::Perm)
+    );
     // The platform's own top-level folders cannot be removed or renamed.
     for r in ["/apps", "/data", "/home"] {
         fs.mkdir_all(r).unwrap();
@@ -203,7 +206,7 @@ fn only_the_apps_trees_are_reachable() {
     }
     // None of it changed the files outside.
     assert_eq!(
-        Backend::read_file(&mut v, b"/etc/osjeff.conf").unwrap(),
+        Backend::read_file(&mut v, b"/etc/kitsune.conf").unwrap(),
         b"secret"
     );
     assert_eq!(Backend::read_file(&mut v, b"/leiame.txt").unwrap(), b"hi");

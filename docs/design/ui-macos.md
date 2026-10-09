@@ -1,4 +1,4 @@
-# OSjeff shell: design system
+# Kitsune shell: design system
 
 Status: wave 1 (foundation, system chrome, the toolkit) and, for the system apps, wave 2 (section 11:
 Tarefas, Registro, Ajustes, Calculadora, notificações). The rest of wave 2 re-skins each app's
@@ -18,7 +18,7 @@ geometry, soft shadows, springy motion, generous spacing) and has its own identi
 
 ## 0. Identity
 
-| | OSjeff |
+| | Kitsune |
 |---|---|
 | Mark | a bold prompt chevron `>` (white) on an indigo squircle; the menu-bar version is the bare chevron. No fruit, no wordmark borrowed from anyone |
 | Names | **Apps** (the grid, replaces the start panel), **Busca** (one field for apps, files and sums), **Barra de apps** (the floating bar), **Controles** (network, appearance, switches), **Arquivos**, **Tarefas** (the activity monitor: CPU, Memória, Disco, Rede, Processos), **Registro** (the log), **Ajustes** (preferences), **Calculadora**, **Imagens**, **Componentes** (the widget gallery) |
@@ -163,7 +163,7 @@ the real font.
 
 ## 4. System chrome
 
-* **Menu bar** (28 px, glass baked into the cached wallpaper): the OSjeff mark (menu: Sobre,
+* **Menu bar** (28 px, glass baked into the cached wallpaper): the Kitsune mark (menu: Sobre,
   Ajustes, Componentes, Reiniciar, Desligar, the last two behind a confirmation
   sheet), the focused app's name (Semibold; menu: Encerrar) and its menus Arquivo, Editar,
   Visualizar, Janela with real, enabled/disabled-aware entries (new window, close, minimise,
@@ -177,7 +177,7 @@ the real font.
   two-layer shadow, focus cross-fade, double click on the title zooms, resize edges and
   minimum sizes as before. Zoom fills the area between the menu bar and the bar.
 * **Top panel** (30 px, the strip is baked into the cached wallpaper under a mostly opaque tint,
-  a hairline and an inner highlight): at the left **Apps** (the OSjeff mark and the word; a right
+  a hairline and an inner highlight): at the left **Apps** (the Kitsune mark and the word; a right
   click opens the system menu: Sobre, Configurações, Componentes, Reiniciar, Desligar) and the Busca
   magnifier and the workspace dots (click one to go there); in the **centre** the day, month and time (a dot beside it when there are unread
   notifications); at the right the **status pill** (network, appearance, power) that opens Quick

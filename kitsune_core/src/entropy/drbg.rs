@@ -52,7 +52,7 @@ impl Drbg {
     /// Start from `seed` (callers pass the output of [`super::Pool::drain`]).
     pub fn new(seed: &[u8; 32]) -> Drbg {
         let mut h = Sha256::new();
-        // Domain-separation label kept from the OSjeff days: changing it would change every output.
+        // Domain-separation label kept from the Kitsune days: changing it would change every output.
         h.update(b"osjeff-drbg-v1-init");
         h.update(seed);
         Drbg {

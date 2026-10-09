@@ -88,7 +88,7 @@ impl Entry {
 /// An item of the top panel.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum PanelItem {
-    /// The OSjeff mark and "Apps": opens the launcher.
+    /// The Kitsune mark and "Apps": opens the launcher.
     Apps,
     /// Busca.
     Search,

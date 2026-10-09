@@ -7,7 +7,7 @@
 //!     `wasm32-unknown-unknown` (`../wasm-apps/<name>`, each carrying its own
 //!     manifest section), installed into `/apps` on first boot. This is the
 //!     "compile source to wasm and equip the OS" model: a genuine compiled language
-//!     becomes a native OSjeff app, no foreign OS, no emulation.
+//!     becomes a native Kitsune app, no foreign OS, no emulation.
 //!   * `app.wasm` — the optional legacy windowed app (DOOM, or the C demo when the
 //!     wasi-sdk is available; empty otherwise).
 
@@ -20,7 +20,7 @@ fn main() {
     // 1) Console demo: imports host.log(ptr,len), stores a greeting in its own
     //    linear memory, and logs it from `main`. Exercises module decode, memory
     //    export, host import resolution, and a guest→host call.
-    let msg = "Hello from WASM - .wasm running native on OSjeff";
+    let msg = "Hello from WASM - .wasm running native on Kitsune";
     let console = format!(
         r#"(module
   (import "host" "log" (func $log (param i32 i32)))

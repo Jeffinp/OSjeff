@@ -2,7 +2,7 @@
 [advisories]
 ignore = [
   # rsa "Marvin Attack": a timing side channel in RSA *private-key* operations
-  # (decryption/signing). OSjeff only verifies RSA signatures of public
+  # (decryption/signing). Kitsune only verifies RSA signatures of public
   # certificates and holds no RSA private key, so the channel is not reachable.
   # No fixed release exists.
   "RUSTSEC-2023-0071",

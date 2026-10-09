@@ -1,4 +1,5 @@
-//! ABI v2: the `osj.*` host functions.
+//! ABI v2: the `osj.*` host functions (`osj` is a historical abbreviation, kept as the
+//! import module name so already compiled apps keep linking).
 //!
 //! Every function validates what the guest hands it before touching anything
 //! (`kitsune_core::appabi::check_range`): a pointer/length outside the guest's

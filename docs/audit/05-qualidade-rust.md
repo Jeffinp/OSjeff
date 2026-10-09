@@ -1,3 +1,5 @@
+> *Written when the project was called OSjeff (renamed Kitsune in 2026-10; names and paths below are the historical ones).*
+
 # Auditoria 05 — Rust idiomático, qualidade, dependências e cobertura (Agente E)
 
 Branch `audit/performance-security`, HEAD `1c14b3d`. Toolchain `nightly-2026-10-05`

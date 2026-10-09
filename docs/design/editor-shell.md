@@ -69,7 +69,7 @@ pub trait SysInfo {
     fn interrupted(&self) -> bool { false }   // Ctrl+C: o executor consulta a cada comando e iteração
     fn sleep_ms(&mut self, ms: u64) {}        // sleep (o shell já limita o valor)
     fn clear_screen(&mut self) {}             // clear
-    fn hostname(&self) -> String { "osjeff".into() }                      // prompt
+    fn hostname(&self) -> String { "kitsune".into() }                      // prompt
 }
 ```
 
@@ -198,7 +198,7 @@ tecla ─► Desktop::dispatch_key ─┬─► Terminal: Term::key ─► TermA
   nome/caminho com Tab, Backspace sobe uma pasta, mouse, substituir pergunta antes). Ctrl+O sobre um
   documento já em uso abre o arquivo **em outra janela** (ou na que já o mostra): nada é substituído.
   A janela de um arquivo aberto pelo Arquivos (`open_path`) e por `edit` é a mesma coisa.
-* **Alterações não salvas:** título `OSJEFF EDIT - nome *`; fechar a janela (botão da barra, Ctrl+Q,
+* **Alterações não salvas:** título `KITSUNE EDIT - nome *`; fechar a janela (botão da barra, Ctrl+Q,
   Tarefas, `kill`, Reiniciar/Desligar) mostra "Salvar alterações?" com **Salvar / Descartar /
   Cancelar** (S, D, C, setas+Enter, clique; Esc cancela). Salvar sem nome abre "Salvar como" e só fecha
   se gravar; erro de gravação mantém a janela aberta com a mensagem.

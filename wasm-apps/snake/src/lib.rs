@@ -1,5 +1,5 @@
 //! `snake` — a playable game, written in Rust and compiled to WebAssembly, run
-//! natively by OSjeff's WASM app engine.
+//! natively by Kitsune's WASM app engine.
 //!
 //! The whole game lives in the guest's linear memory and runs off the OS's
 //! continuous frame pump: `render` advances the simulation on its own clock
@@ -211,8 +211,8 @@ pub extern "C" fn render() {
 
 // Package manifest (a custom wasm section, see docs/design/apps.md): one file = one app.
 #[used]
-#[link_section = "osjeff.manifest"]
+#[link_section = "kitsune.manifest"]
 static MANIFEST: [u8; 133] = *b"id=snake\nname=Snake\nname.pt=Cobrinha\nname.en=Snake\nversion=1.0.0\nabi=1\nmem_mib=4\nfuel_frame=20000000\nwin_w=692\nwin_h=414\nresizable=0\n";
 #[used]
-#[link_section = "osjeff.icon"]
+#[link_section = "kitsune.icon"]
 static ICON: [u8; include_bytes!("../icon.png").len()] = *include_bytes!("../icon.png");

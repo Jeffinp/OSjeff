@@ -122,7 +122,7 @@ ao zero** (`wrapping_delta`, `Rate`), carga média, nível de pressão, tabela o
 `Settings` (`kitsune_core::settings`) é um `Copy` com texto `chave=valor`:
 
 ```
-# OSjeff settings
+# Kitsune settings
 version=1
 wallpaper=2                # preset 0..4, ou "image"
 wallpaper_path=papel.png   # com wallpaper=image
@@ -178,8 +178,8 @@ acha o hover pelo mesmo código. Um controle deslizante aplica ao vivo e **grava
 valem os padrões. O arquivo é escrito quando o usuário muda algo (por isso o boot padrão não
 muda). **Persistência** (provada em dois boots no mesmo disco, `w18-settings-{1,2}.sh`: papel de
 parede por imagem `/papel.png`, destaque violeta, relógio 12 h, fuso UTC-02:00 e teclado ABNT2
-voltam sem tocar nas Configurações; `settings: loaded 120 bytes from osjeff.conf`): trait
-`SettingsStore`, hoje `VfsStore` (`/etc/osjeff.conf` no volume do desktop). O caminho do papel
+voltam sem tocar nas Configurações; `settings: loaded 120 bytes from kitsune.conf`): trait
+`SettingsStore`, hoje `VfsStore` (`/etc/kitsune.conf` no volume do desktop). O caminho do papel
 de parede pode ser um nome simples (`papel.png`, como o FS plano antigo guardava): vale
 `/papel.png` (`settings::absolute_path`).
 
@@ -226,7 +226,7 @@ hoje; a frente que trouxer algo melhor só implementa o trait e troca o objeto.
 | `NetStats` (`counters() -> Option<NetCounters>`) | `KernelNetStats` sobre `netd::stats()` (os contadores de `nic::STATS`, alimentados por **todos** os drivers; a página Rede das Configurações lê o mesmo `Snapshot`) | `NetCounters` pode ganhar campos (descartes, erros) |
 | `NetControl` (`renew_dhcp()`) | `NoNetControl` (sempre `Unsupported`) | renovação DHCP (a W25 tirou o botão até existir uma API) |
 | `LogSink` (`write_file(nome, dados)`) | `VfsSink`: `/var/log/<nome>` no volume; mantém as últimas linhas inteiras que cabem em 256 KiB (`SinkError::Truncated`) | rotação de logs |
-| `SettingsStore` (`load`/`save`) | `VfsStore`: `/etc/osjeff.conf` no volume | — |
+| `SettingsStore` (`load`/`save`) | `VfsStore`: `/etc/kitsune.conf` no volume | — |
 
 Outros pontos de integração: `klog!`/`notify!` já podem ser usados em qualquer módulo
 (`netstack`, `fetch`, `ata`, `wasm` seguem com `serial_println!`, espelhado no log como INFO
@@ -253,7 +253,7 @@ configurações usa `FS_IMG=` com um disco que tem `papel.png`, preparado por
 | `w25-settings.sh`, `w25-calc.sh` | todas as seções dos Ajustes em claro e escuro com as interações; teclado e mouse na Calculadora |
 | `w14-set.sh`, `w14-pages.sh` | papel de parede (gradiente e PNG), destaque, 12 h, fuso, data/hora, ABNT2, páginas Rede/Armazenamento/Energia/Sobre |
 | `w14-toast.sh` (com gancho) | toast WARN, expira em 4 s, toast ERROR, clique fecha |
-| `w18-settings-1.sh` / `-2.sh` | W18: configurações (imagem, destaque, 12 h, fuso, ABNT2) e log salvo no boot 1; tudo de volta no boot 2 com o mesmo disco; `/var/log/{boot,syslog}.log` e `/etc/osjeff.conf` no disco (`fs3_inject --ls`) |
+| `w18-settings-1.sh` / `-2.sh` | W18: configurações (imagem, destaque, 12 h, fuso, ABNT2) e log salvo no boot 1; tudo de volta no boot 2 com o mesmo disco; `/var/log/{boot,syslog}.log` e `/etc/kitsune.conf` no disco (`fs3_inject --ls`) |
 
 Os ganchos de carga e de eventos são **temporários** (não estão no repositório): uma thread
 que gira 6 s e dorme 6 s, uma onda de heap e de tráfego DHCP por segundo, `klog!(Warn)`

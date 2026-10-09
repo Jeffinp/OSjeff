@@ -1,6 +1,6 @@
 # Avisos e componentes de terceiros
 
-O código do OSjeff é de Jeferson Reis Almeida e está sob a [PolyForm Strict 1.0.0](LICENSE) (veja
+O código do Kitsune é de Jeferson Reis Almeida e está sob a [PolyForm Strict 1.0.0](LICENSE) (veja
 também [LICENSE-CONTRIBUTORS.md](LICENSE-CONTRIBUTORS.md)). Os componentes abaixo **não** são do
 Titular e mantêm as licenças originais, que são permissivas e permitem a inclusão no sistema.
 

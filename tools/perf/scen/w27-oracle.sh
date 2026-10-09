@@ -134,7 +134,7 @@ set_b() {
 }
 # Set C: the browser (W24) next to other windows. Its page area repaints on its own while it
 # scrolls, hovers or types (a dirty rectangle of its layer); a window that overlaps it, its shadow
-# and the title bar around the page must come out exactly as in a full redraw. `osjeff://sobre`
+# and the title bar around the page must come out exactly as in a full redraw. `kitsune://sobre`
 # is a long internal page, so no network is needed. Also drags inside Arquivos (a rubber band) and
 # Ajustes (a slider), which do not move their windows.
 set_c() {
@@ -144,7 +144,7 @@ set_c() {
   dock_icon editor; click; sleep 1.8              # editor (610,110,560,350)
   dock_icon browser; click; sleep 3               # browser (150,60,916,560) over it
   goto 600 100; click; sleep 0.4                  # the address bar
-  key ctrl-a; typestr "osjeff://sobre"; key ret; sleep 3
+  key ctrl-a; typestr "kitsune://sobre"; key ret; sleep 3
   pair                                            # 1: the page
   goto 500 300; click; sleep 0.4
   for i in 1 2 3; do key pgdn; sleep 0.5; done

@@ -1,4 +1,4 @@
-# The smallest OSjeff app: a greeting that counts key presses. Starting point for
+# The smallest Kitsune app: a greeting that counts key presses. Starting point for
 # new apps (see docs/BUILDING.md, "Como criar um app").
 [package]
 name = "hello"

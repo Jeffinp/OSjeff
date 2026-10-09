@@ -1,4 +1,4 @@
-# Boot 2 of w19-bookmark.sh: the favourite saved in boot 1 is listed at osjeff://favoritos.
+# Boot 2 of w19-bookmark.sh: the favourite saved in boot 1 is listed at kitsune://favoritos.
 source "$(dirname "$0")/../lib.sh"
 wait_first_frame
 dock 721; click; sleep 3

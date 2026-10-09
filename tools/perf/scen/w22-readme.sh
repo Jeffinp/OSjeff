@@ -19,7 +19,7 @@ key ctrl-alt-g; sleep 1.0; goto 900 700; shot "$t-gallery"; key ctrl-w; sleep 0.
 dock_icon terminal; click; sleep 0.9
 typestr "ls"; key ret; sleep 0.3
 dock_icon editor; click; sleep 0.9
-typestr "OSjeff"; key ret; typestr "um desktop de verdade"; sleep 0.3
+typestr "Kitsune"; key ret; typestr "um desktop de verdade"; sleep 0.3
 dock_icon calc; click; sleep 0.9
 typestr "7*6"; key ret; sleep 0.5
 goto 900 600; sleep 0.4

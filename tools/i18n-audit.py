@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit of the user-visible strings of OSjeff, for the i18n migration.
+"""Audit of the user-visible strings of Kitsune, for the i18n migration.
 
     python3 -I tools/i18n-audit.py            # rewrite docs/design/i18n-audit.md
     python3 -I tools/i18n-audit.py --check    # fail if the file on disk is out of date
@@ -352,7 +352,7 @@ def looks_like_text(s):
         return False
     if not re.search(r"[^\W\d_]{2,}", s):
         return False
-    if s.startswith(("/", "http", "osjeff://", ".", "#", "<", "%", "$", "--")):
+    if s.startswith(("/", "http", "kitsune://", ".", "#", "<", "%", "$", "--")):
         return False
     if "{" in s and "}" in s and ":" in s and ";" in s:
         return False  # a style sheet: selectors such as `area` are tag names, not words
@@ -484,7 +484,7 @@ def render():
 
     L = []
     w = L.append
-    w("# Auditoria de textos do OSjeff (i18n)")
+    w("# Auditoria de textos do Kitsune (i18n)")
     w("")
     w("Gerado por `python3 -I tools/i18n-audit.py` (não edite à mão; `--check` confere se está em dia).")
     w("Lista os literais de texto visíveis ao usuário em `kernel/src` e `kitsune_core/src`, por app, para que a")

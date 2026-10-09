@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦀 OSJeff
+# 🦀 Kitsune
 
 ### Um sistema operacional x86_64 escrito **do zero em Rust**: bare metal, sem Linux por baixo.
 
@@ -15,11 +15,11 @@
 
 **🇧🇷 Português** · [🇺🇸 English](README.en.md)
 
-<img src="docs/img/demo.gif" alt="OSjeff em ação: barra de tarefas, editor, Busca, calculadora, tema claro e escuro" width="760">
+<img src="docs/img/demo.gif" alt="Kitsune em ação: barra de tarefas, editor, Busca, calculadora, tema claro e escuro" width="760">
 
 </div>
 
-OSJeff é um kernel x86_64 `no_std` que sobe direto do firmware (BIOS ou UEFI) e
+Kitsune é um kernel x86_64 `no_std` que sobe direto do firmware (BIOS ou UEFI) e
 entrega um desktop completo: scheduler preemptivo, heap próprio, interrupções,
 compositor, sistema de arquivos persistente, pilha TCP/IP com TLS, navegador
 HTML/CSS e um runtime WebAssembly para aplicativos. É um projeto de **estudo**, e
@@ -68,6 +68,9 @@ tools/run.sh                 # compila e abre o QEMU (BIOS)
 tools/run.sh uefi            # idem em UEFI
 ```
 
+> O repositório ainda se chama `OSjeff` no GitHub; a URL de clonagem pode mudar quando ele for renomeado para `Kitsune` (o GitHub redireciona a antiga).
+
+
 Windows com aceleração: `.\run.ps1`. Sem tela (CI): `tools/qemu-headless.sh bios /tmp/osj 25`.
 Pendrive e hardware real: [`docs/BOOT-USB.md`](docs/BOOT-USB.md). Guia completo,
 variantes (DOOM) e solução de problemas: [`docs/BUILDING.md`](docs/BUILDING.md).
@@ -84,7 +87,7 @@ variantes (DOOM) e solução de problemas: [`docs/BUILDING.md`](docs/BUILDING.md
 | **Gráficos** | Compositor com damage tracking, double buffer, fonte 8×8 própria, sombras alpha, animações; HUD de desempenho | `fb.rs`, `desktop/` |
 | **Apps** | Terminal (shell com ~55 comandos, pipes, scripts, scrollback, histórico, Tab, `ping`/`nslookup`/`curl`), Editor (busca/substituição, desfazer, arquivos de 16 MiB, diálogos Abrir/Salvar), Gerenciador de arquivos (copiar/mover com progresso, lixeira, Apps), Visualizador de imagens, Navegador, Tarefas (monitor de atividade), Registro, Ajustes, Calculadora, apps WebAssembly | `desktop/`, `kitsune_core` |
 | **Armazenamento** | **OJFS v3**: journal de metadados + dados *copy-on-write*, extents, CRC32, `fsck` no boot, migração automática do v2, cache de blocos, ATA com `FLUSH`; o desktop inteiro fala com o disco por uma camada VFS (com volume em RAM quando não há disco v3) | `kitsune_core/src/{fs3,vfs,blockcache}`, `ata.rs`, `storage.rs` |
-| **Sistema** | Configurações persistentes (`/etc/osjeff.conf`: cor de destaque, papel de parede, teclado ABNT2, fuso, relógio), log do kernel em anel (`/var/log`), monitor de atividade, notificações, apps instalados em `/apps` com dados em `/data/<id>` | `kitsune_core/src/{settings,klog,sysmon,notify}.rs`, `kernel/src/desktop/` |
+| **Sistema** | Configurações persistentes (`/etc/kitsune.conf`: cor de destaque, papel de parede, teclado ABNT2, fuso, relógio), log do kernel em anel (`/var/log`), monitor de atividade, notificações, apps instalados em `/apps` com dados em `/data/<id>` | `kitsune_core/src/{settings,klog,sysmon,notify}.rs`, `kernel/src/desktop/` |
 | **Rede** | `virtio-net` e NE2000 (trait `Nic`), ARP/IPv4/ICMP/DHCP próprios (renova o lease, responde e envia `ping`), DNS com cache e vários servidores, `smoltcp` para TCP, **TLS 1.3** (`embedded-tls`) **com cadeia de certificados verificada** (`rustls-webpki`, 46 raízes embutidas) e hora por SNTP | `nic.rs`, `virtio_net.rs`, `ne2000.rs`, `netd.rs`, `netstack.rs`, `kitsune_core/src/{net,lease,dns,icmp}.rs` |
 | **Navegador** | Parser HTML, CSS (cascata), layout, imagens PNG/BMP/PPM, formulários GET, favoritos e sugestões, busca na página, zoom, redirects, gzip/deflate, limites de recurso, indicador de conexão ("Conexao segura" só com certificado verificado); roda do mouse no sistema | `kitsune_core/src/{web,browser,redirect}`; favoritos persistentes em `/home/.bookmarks` |
 | **WebAssembly** | Runtime `wasmi` como formato nativo de apps: ABI própria + subconjunto WASI, *fuel* por chamada, 24 MiB de memória, término real do app. Roda Snake; **DOOM** via `wasi-sdk` | `kernel/src/wasm/`, `wasm-apps/` |
@@ -182,7 +185,7 @@ Lista priorizada do que vem a seguir: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 ## 📁 Estrutura
 
 ```
-OSjeff/
+Kitsune/
 ├── kitsune_core/   # lógica pura no_std, testada no host (forbid(unsafe_code))
 ├── kernel/        # bare-metal x86_64-unknown-none: drivers, scheduler, compositor, wasm
 ├── os/            # builder: embute o kernel e gera as imagens BIOS/UEFI

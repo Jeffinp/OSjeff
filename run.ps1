@@ -1,4 +1,4 @@
-# Build (release) + run OSjeff in QEMU on Windows.
+# Build (release) + run Kitsune in QEMU on Windows.
 #
 # The kernel is compiled inside WSL (cargo/Rust live there), the resulting
 # bootable image is copied next to this script, and QEMU runs on Windows.
@@ -38,7 +38,7 @@ $img = Join-Path $PSScriptRoot 'kitsune-bios.img'
 
 # Build the project's `os` package (release) inside WSL. Returns nothing; throws
 # on failure. Factored out so both the QEMU and USB paths share it.
-function Build-OSjeff {
+function Build-Kitsune {
     # Native Windows build when asked for, or when cargo is on the Windows PATH
     # (and -Wsl did not force WSL). DOOM needs wasi-sdk, which only the WSL path supports.
     $useNative = $Native -or ((Get-Command cargo -ErrorAction SilentlyContinue) -and -not $Wsl -and -not $Doom)
@@ -46,7 +46,7 @@ function Build-OSjeff {
         if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
             throw "cargo nao encontrado no Windows. Instale o Rust: https://rustup.rs (rustup-init.exe)"
         }
-        Write-Host "Compilando OSjeff (release) no Windows ..." -ForegroundColor Cyan
+        Write-Host "Compilando Kitsune (release) no Windows ..." -ForegroundColor Cyan
         Push-Location $PSScriptRoot
         try {
             cargo build --package os --release
@@ -60,7 +60,7 @@ function Build-OSjeff {
     # -Doom builds the DOOM app variant (C→wasm32-wasi + embedded IWAD). Needs
     # wasi-sdk at ~/wasi-sdk and the IWAD at wasm-apps/doom/doom1.wad in WSL.
     $envPrefix = if ($Doom) { 'DOOM=1 WASI_SDK_PATH=$HOME/wasi-sdk ' } else { '' }
-    Write-Host "Compilando OSjeff (release) no WSL em $wslDir ..." -ForegroundColor Cyan
+    Write-Host "Compilando Kitsune (release) no WSL em $wslDir ..." -ForegroundColor Cyan
     wsl -e bash -lc "cd '$wslDir' && ${envPrefix}cargo build --package os --release"
     if ($LASTEXITCODE -ne 0) { throw "cargo build falhou (exit $LASTEXITCODE)" }
 }
@@ -68,7 +68,7 @@ function Build-OSjeff {
 if ($Usb) {
     # Real-hardware boot: build, then copy the UEFI image to the project root so
     # it can be flashed RAW to a USB stick. No QEMU involved.
-    Build-OSjeff
+    Build-Kitsune
     $built = Get-ChildItem -Path (Join-Path $PSScriptRoot 'target\release\build') `
         -Recurse -Filter 'kitsune-uefi.img' -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime | Select-Object -Last 1
@@ -88,7 +88,7 @@ if ($Usb) {
 if (-not (Test-Path $qemu)) { throw "QEMU nao encontrado em $qemu" }
 
 if (-not $SkipBuild) {
-    Build-OSjeff
+    Build-Kitsune
 
     # Copy the freshest generated image to the project root.
     $built = Get-ChildItem -Path (Join-Path $PSScriptRoot 'target\release\build') `
@@ -164,5 +164,5 @@ if (-not $SoftwareGfx) {
     }
 }
 
-Write-Host "Booting OSjeff..." -ForegroundColor Cyan
+Write-Host "Booting Kitsune..." -ForegroundColor Cyan
 & $qemu @qargs

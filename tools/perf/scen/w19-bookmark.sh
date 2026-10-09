@@ -1,5 +1,5 @@
 # Favourites persist: Ctrl+D on the start page writes /home/.bookmarks (check the disk with
-# fs3_inject --ls after the run); boot 2 (FS_IMG=<out>/fs.img) shows them at osjeff://favoritos.
+# fs3_inject --ls after the run); boot 2 (FS_IMG=<out>/fs.img) shows them at kitsune://favoritos.
 source "$(dirname "$0")/../lib.sh"
 wait_first_frame
 dock 721; click; sleep 3

@@ -1,4 +1,4 @@
-//! `hello` — the minimal OSjeff app (ABI v2): no permissions, no files, no network.
+//! `hello` — the minimal Kitsune app (ABI v2): no permissions, no files, no network.
 //! It shows a greeting, counts key presses and clicks, and echoes what it saw.
 
 #![no_std]
@@ -49,7 +49,7 @@ impl App for Hello {
         let (w, h) = c.size();
         c.clear(0x10141F);
         c.fill_rect(0, 0, w, 36, 0x1FB5A6);
-        c.text(14, 10, tr("Olá, OSjeff!", "Hello, OSjeff!"), 0xFFFFFF, 2);
+        c.text(14, 10, tr("Olá, Kitsune!", "Hello, Kitsune!"), 0xFFFFFF, 2);
         let mut b = StrBuf::<64>::new();
         let _ = match lang() {
             Lang::Pt => write!(b, "teclas: {}   cliques: {}", self.keys, self.clicks),

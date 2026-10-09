@@ -1,3 +1,5 @@
+> *Written when the project was called OSjeff (renamed Kitsune in 2026-10; names and paths below are the historical ones).*
+
 # Auditoria 01 — Memória e `unsafe`
 
 Branch `audit/performance-security`, commit base `1c14b3d`. Escopo: `kernel/src` (bare-metal) e

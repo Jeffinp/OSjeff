@@ -2,12 +2,12 @@
 
 ## Versões suportadas
 
-Só a `master`. O OSjeff não tem releases versionadas; cada commit na `master`
+Só a `master`. O Kitsune não tem releases versionadas; cada commit na `master`
 passa por testes, lint e `cargo deny` (ver [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ## O que é e o que não é uma vulnerabilidade aqui
 
-O OSjeff é um sistema operacional de estudo, **sem isolamento**: tudo roda em ring 0
+O Kitsune é um sistema operacional de estudo, **sem isolamento**: tudo roda em ring 0
 num único espaço de endereçamento (veja [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md)).
 Isso não é bug, é uma decisão de projeto documentada. Interessam, em ordem:
 

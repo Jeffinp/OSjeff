@@ -3,7 +3,7 @@
 Estado: **certificado verificado, hora confirmada por SNTP, gzip/deflate, links
 clicáveis e histórico** (W16); **imagens PNG/BMP/PPM, formulários GET, favoritos,
 sugestões na barra, busca na página, zoom, seleção e cópia de texto, páginas internas
-`osjeff://` e roda do mouse** (W17, §8). O que continua de fora está em §7.
+`kitsune://` e roda do mouse** (W17, §8). O que continua de fora está em §7.
 
 ## 1. Modelo de confiança
 
@@ -165,7 +165,7 @@ de `tools/gen-tls-proof-pki.py`, o guest alcança o host em `10.0.2.2:porta`).
 |---|---|---|
 | `example.com` (cadeia de 3, raiz extra) | `tls: chain verified for example.com (3 certs, root ...); handshake 60 ms` | `docs/img/browser-https-example.png` |
 | `www.wikipedia.org` | `... handshake 144 ms`, 24 KB | `docs/img/browser-https-wikipedia.png` |
-| cadeia local válida | `tls: chain verified for 10.0.2.2 (2 certs, root OSjeff Proof Root)` | |
+| cadeia local válida | `tls: chain verified for 10.0.2.2 (2 certs, root Kitsune Proof Root)` | |
 | expirada | `certificate check FAILED (expirado)` | `docs/img/browser-cert-expired.png` |
 | nome errado | `FAILED (nome nao confere)` | |
 | autoassinada | `FAILED (autoassinado, cadeia nao confiavel)` | |
@@ -258,7 +258,7 @@ envia `q=caf%C3%A9+a%C3%A7%C3%A3o&nome=Jos%C3%A9` e o servidor decodifica `café
 | Cursor | mão sobre link, botão de formulário, botão da barra e sugestão |
 | Endereço | Ctrl+L ou clique seleciona tudo (digitar substitui); sugestões (favoritos, depois histórico; prefixo antes de substring; até 6; ↑/↓/Enter/clique; Esc fecha) |
 | Favoritos | Ctrl+D ou a estrela; `BookmarkStore` (trait) com `MemoryBookmarks` (até 64); o ponto único de troca é `new_bookmark_store()` em `kernel/src/desktop/instance.rs` (não existe `desktop/vfs.rs` na base desta frente, então nada é gravado em `/home/.bookmarks`) |
-| Páginas internas | `osjeff://inicio` (a tela inicial), `favoritos` (com "[remover]"), `historico`, `sobre`: HTML gerado e diagramado pelo mesmo motor, sem rede |
+| Páginas internas | `kitsune://inicio` (a tela inicial), `favoritos` (com "[remover]"), `historico`, `sobre`: HTML gerado e diagramado pelo mesmo motor, sem rede |
 | Rolagem | setas, PageUp/PageDown, Home/End e Espaço/Shift+Espaço (com o foco na página; Home/End movem o caret quando o foco é a barra), roda do mouse |
 | Busca na página | Ctrl+F, destaca todas as ocorrências (a atual em laranja), Enter/Shift+Enter navega, Esc fecha |
 | Zoom | Ctrl+`+`/`-`/`0`: 50, 75, 100, 125, 150, 200, 250, 300% (aritmética inteira; escala da fonte arredondada, medidas proporcionais) |
@@ -280,7 +280,7 @@ move o cursor 3 linhas; Terminal e Calculadora não têm o que rolar.
 | Cenário | Evidência |
 |---|---|
 | página local com PNG pequeno e grande (1400x900, reduzido para 864x555), PNG sem atributos, BMP, JPEG (caixa "formato não suportado"), `data:`, imagem como link e uma quebrada (404) | serial `img: ... -> 1400x900 (shown 864x555)`, `img: ... failed: Unsupported`; `docs/img/browser-images.png`, `browser-images-errors.png` |
-| formulário GET com acentos, campo oculto e um formulário POST | o servidor recebe `q=caf%C3%A9+a%C3%A7%C3%A3o&nome=Jos%C3%A9&origem=osjeff%2F%C3%A7%C3%A3o` e responde `q = [café ação] (12 bytes UTF-8)`; `browser-form.png`, `browser-form-result.png` |
+| formulário GET com acentos, campo oculto e um formulário POST | o servidor recebe `q=caf%C3%A9+a%C3%A7%C3%A3o&nome=Jos%C3%A9&origem=kitsune%2F%C3%A7%C3%A3o` e responde `q = [café ação] (12 bytes UTF-8)`; `browser-form.png`, `browser-form-result.png` |
 | roda: `mouse_move 0 0 -1` repetido | o navegador rola; sobre uma janela **não focada** rola ela e o foco fica onde estava; Task Manager e Arquivos movem a seleção; com a negociação desligada (gancho temporário) a serial diz `id 0` e o mouse continua movendo e clicando, sem roda |
 | favoritos, sugestões, busca na página, zoom, seleção e cópia | `browser-suggest.png`, `browser-find.png` |
 | 100 navegações com imagens novas (`perf-trace`) | heap: primeiro 327 KiB, platô de 8,4 MiB, sem deriva (`tools/perf/w8-heap.sh`) |
@@ -337,7 +337,7 @@ de progresso corre sob o campo. **O cadeado e "Conexão segura" só aparecem com
 a validade e o estado da verificação. Os dados vêm de `browser::CertInfo`, resumida da folha do
 certificado (`x509::issuer_cn/issuer_org`, texto limpo de controles) pelo `fetcher` e levada junto
 da resposta (`Fetched.cert`, `Loaded.cert`, `browser_load`). Em repouso o campo realça o host e
-apaga o resto do endereço; as páginas `osjeff://` mostram o esquema.
+apaga o resto do endereço; as páginas `kitsune://` mostram o esquema.
 
 Sugestões: painel de vidro sob o campo, linha sob o ponteiro e linha selecionada com estados
 próprios. Atalhos: Ctrl+L (endereço), Ctrl+D (favorito), Ctrl+F (busca), Ctrl+R, Ctrl +/-/0
@@ -376,7 +376,7 @@ a lista de desenho é descartada e refeita ao voltar.
   Adicionar/Remover dos favoritos (os que não se aplicam ficam apagados).
 * **Rolagem**: roda com inércia (mola), barra que aparece ao rolar, páginas sempre claras: **a
   área da página nunca é invertida no escuro**, só a moldura segue a aparência do sistema.
-* **Páginas `osjeff://`** (`browser::pages`): `favoritos`, `historico` e `sobre` são HTML e CSS
+* **Páginas `kitsune://`** (`browser::pages`): `favoritos`, `historico` e `sobre` são HTML e CSS
   diagramados pelo mesmo motor (sempre claros); `inicio` é a tela de nova aba nativa, que precisa
   de um campo de texto de verdade.
 

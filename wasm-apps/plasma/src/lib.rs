@@ -1,4 +1,4 @@
-//! `plasma` — a native OSjeff app, written in Rust and compiled to WebAssembly.
+//! `plasma` — a native Kitsune app, written in Rust and compiled to WebAssembly.
 //!
 //! It computes an animated pattern into its own linear-memory framebuffer each
 //! frame and hands it to the OS with `host.blit`, the way a real game (DOOM)
@@ -94,8 +94,8 @@ pub extern "C" fn on_pointer(x: i32, _y: i32, buttons: i32) {
 
 // Package manifest (a custom wasm section, see docs/design/apps.md): one file = one app.
 #[used]
-#[link_section = "osjeff.manifest"]
+#[link_section = "kitsune.manifest"]
 static MANIFEST: [u8; 104] = *b"id=plasma\nname=Plasma\nversion=1.0.0\nabi=1\nmem_mib=4\nfuel_frame=20000000\nwin_w=692\nwin_h=414\nresizable=0\n";
 #[used]
-#[link_section = "osjeff.icon"]
+#[link_section = "kitsune.icon"]
 static ICON: [u8; include_bytes!("../icon.png").len()] = *include_bytes!("../icon.png");

@@ -113,11 +113,45 @@ impl LogSink for MemSink {
 }
 
 /// Persistence of the settings text (`key=value` lines, see
-/// [`crate::settings`]). The FS v3 front will back it with `/etc/osjeff.conf`.
+/// [`crate::settings`]). The FS v3 front will back it with `/etc/kitsune.conf`.
 pub trait SettingsStore {
     /// The stored text, if any.
     fn load(&mut self) -> Option<Vec<u8>>;
     fn save(&mut self, text: &[u8]) -> Result<(), SinkError>;
+}
+
+/// Path of the settings file.
+pub const SETTINGS_PATH: &[u8] = b"/etc/kitsune.conf";
+/// Path the settings file had when the system was called OSjeff. It is read when
+/// the new file does not exist and removed after the first successful save.
+pub const LEGACY_SETTINGS_PATH: &[u8] = b"/etc/osjeff.conf";
+
+/// The few file operations [`MigratingStore`] needs from a volume.
+pub trait ConfFiles {
+    /// The contents of the file at `path`, if it exists.
+    fn read(&mut self, path: &[u8]) -> Option<Vec<u8>>;
+    /// Creates or replaces the file at `path` (the parent directory is made if needed).
+    fn write(&mut self, path: &[u8], data: &[u8]) -> Result<(), SinkError>;
+    /// Removes the file at `path`; a missing file is not an error.
+    fn remove(&mut self, path: &[u8]);
+}
+
+/// A [`SettingsStore`] over [`SETTINGS_PATH`] that still understands the old
+/// `/etc/osjeff.conf`: `load` falls back to it, and the first `save` writes the new
+/// file and then drops the old one (never before the new one is safely written).
+pub struct MigratingStore<F: ConfFiles>(pub F);
+
+impl<F: ConfFiles> SettingsStore for MigratingStore<F> {
+    fn load(&mut self) -> Option<Vec<u8>> {
+        self.0
+            .read(SETTINGS_PATH)
+            .or_else(|| self.0.read(LEGACY_SETTINGS_PATH))
+    }
+    fn save(&mut self, text: &[u8]) -> Result<(), SinkError> {
+        self.0.write(SETTINGS_PATH, text)?;
+        self.0.remove(LEGACY_SETTINGS_PATH);
+        Ok(())
+    }
 }
 
 /// A `SettingsStore` in RAM (used when no disk is writable, and in tests).
@@ -139,6 +173,45 @@ impl SettingsStore for MemStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct FakeVol(alloc::collections::BTreeMap<Vec<u8>, Vec<u8>>);
+    impl ConfFiles for FakeVol {
+        fn read(&mut self, p: &[u8]) -> Option<Vec<u8>> {
+            self.0.get(p).cloned()
+        }
+        fn write(&mut self, p: &[u8], d: &[u8]) -> Result<(), SinkError> {
+            self.0.insert(p.to_vec(), d.to_vec());
+            Ok(())
+        }
+        fn remove(&mut self, p: &[u8]) {
+            self.0.remove(p);
+        }
+    }
+
+    #[test]
+    fn settings_fall_back_to_the_old_file_and_migrate_on_save() {
+        let mut v = FakeVol::default();
+        v.0.insert(
+            LEGACY_SETTINGS_PATH.to_vec(),
+            b"# OSjeff settings\nversion=1\n".to_vec(),
+        );
+        let mut st = MigratingStore(v);
+        assert_eq!(st.load().unwrap(), b"# OSjeff settings\nversion=1\n");
+        st.save(b"new").unwrap();
+        assert_eq!(st.0.0.get(SETTINGS_PATH).unwrap(), b"new");
+        assert!(!st.0.0.contains_key(LEGACY_SETTINGS_PATH));
+        assert_eq!(st.load().unwrap(), b"new");
+    }
+
+    #[test]
+    fn settings_new_file_wins_over_the_old_one() {
+        let mut v = FakeVol::default();
+        v.0.insert(LEGACY_SETTINGS_PATH.to_vec(), b"old".to_vec());
+        v.0.insert(SETTINGS_PATH.to_vec(), b"new".to_vec());
+        assert_eq!(MigratingStore(v).load().unwrap(), b"new");
+        assert_eq!(MigratingStore(FakeVol::default()).load(), None);
+    }
 
     #[test]
     fn permille() {

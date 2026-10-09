@@ -4,7 +4,7 @@
 //! and the settings app edits. It is stored as text, one `key=value` per line:
 //!
 //! ```text
-//! # OSjeff settings
+//! # Kitsune settings
 //! version=1
 //! wallpaper=2
 //! wallpaper_path=fotos/praia.png
@@ -182,8 +182,8 @@ pub const VERSION: u32 = 1;
 /// Longest wallpaper file path (bytes).
 pub const PATH_CAP: usize = 40;
 /// Name of the settings file in the FS (the FS v3 front maps it to
-/// `/etc/osjeff.conf`).
-pub const FILE_NAME: &[u8] = b"osjeff.conf";
+/// `/etc/kitsune.conf`).
+pub const FILE_NAME: &[u8] = b"kitsune.conf";
 
 /// Smallest, largest and default size of the terminal and editor text, in pixels.
 pub const FONT_MIN: u8 = 11;
@@ -477,7 +477,7 @@ impl Settings {
     /// The text form (see the module docs).
     pub fn to_text(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(200);
-        out.extend_from_slice(b"# OSjeff settings\n");
+        out.extend_from_slice(b"# Kitsune settings\n");
         push_kv(&mut out, b"version", VERSION);
         match self.wallpaper {
             WallpaperChoice::Preset(n) => push_kv(&mut out, b"wallpaper", n as u32),
@@ -710,7 +710,7 @@ mod tests {
         let text = s.to_text();
         assert_eq!(Settings::parse(&text), s);
         assert!(text.len() < 240, "{}", text.len());
-        assert!(text.starts_with(b"# OSjeff settings\nversion=1\n"));
+        assert!(text.starts_with(b"# Kitsune settings\nversion=1\n"));
     }
 
     #[test]
@@ -836,7 +836,7 @@ mod tests {
         assert!(!old.reduce_motion);
         assert!(
             old.to_text()
-                .starts_with(b"# OSjeff settings\nversion=1\nwallpaper=2\n")
+                .starts_with(b"# Kitsune settings\nversion=1\nwallpaper=2\n")
         );
         assert_eq!(old.toast_secs, TOAST_SECS_DEFAULT);
         assert_eq!(old.dock_zoom, DOCK_ZOOM_MAX);

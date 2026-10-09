@@ -1,4 +1,5 @@
-//! Raw `osj.*` imports (ABI v2). Prefer the safe wrappers in the crate root.
+//! Raw `osj.*` imports (ABI v2). `osj` is a historical abbreviation kept as the import
+//! module name for compatibility. Prefer the safe wrappers in the crate root.
 //! On non-wasm targets the functions are stubs so the crate type-checks anywhere.
 
 #[cfg(target_arch = "wasm32")]

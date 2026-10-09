@@ -1,3 +1,5 @@
+> *Written when the project was called OSjeff (renamed Kitsune in 2026-10; names and paths below are the historical ones).*
+
 # ADR: Isolamento e privilégio — paginação + ring 3 ou WebAssembly como sandbox?
 
 | | |

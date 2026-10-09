@@ -156,18 +156,18 @@ pub fn host_of(url: &str) -> &str {
 
 /// Byte range of the host in an address typed or shown in the omnibox: after a scheme
 /// (`https://`, `http://`) up to the first `/`, `?` or `#`. When there is no scheme the range
-/// starts at 0. Shown highlighted while the rest is dimmed. The browser's own `osjeff://` pages
+/// starts at 0. Shown highlighted while the rest is dimmed. The browser's own `kitsune://` pages
 /// keep their scheme in the highlighted part.
 pub fn host_range(url: &str) -> (usize, usize) {
-    let own = url.starts_with("osjeff://");
-    let start = if own {
-        0
-    } else {
-        url.find("://").map_or(0, |i| i + 3)
+    let own = super::internal_prefix_len(url);
+    let start = match own {
+        Some(_) => 0,
+        None => url.find("://").map_or(0, |i| i + 3),
     };
-    let end = url[start + if own { 9 } else { 0 }..]
+    let skip = own.unwrap_or(0);
+    let end = url[start + skip..]
         .find(['/', '?', '#'])
-        .map_or(url.len(), |i| start + if own { 9 } else { 0 } + i);
+        .map_or(url.len(), |i| start + skip + i);
     (start, end)
 }
 
@@ -184,8 +184,8 @@ pub fn tab_title_in(lang: Lang, title: &str, url: &str) -> String {
         return String::from(t);
     }
     let u = url.trim();
-    if u.starts_with("osjeff://") {
-        return match u.trim_start_matches("osjeff://").trim_end_matches('/') {
+    if let Some(n) = super::internal_prefix_len(u) {
+        return match u[n..].trim_end_matches('/') {
             "favoritos" => String::from(i18n::tr_in(lang, tk!("web.tab.bookmarks"))),
             "historico" => String::from(i18n::tr_in(lang, tk!("web.tab.history"))),
             "sobre" => String::from(i18n::tr_in(lang, tk!("web.tab.about"))),
@@ -330,16 +330,17 @@ mod tests {
         assert_eq!(pt("", "https://www.exemplo.com.br/a?b#c"), "exemplo.com.br");
         assert_eq!(pt("", "203.0.113.5:8079/x"), "203.0.113.5:8079");
         assert_eq!(pt("", ""), "Nova aba");
-        assert_eq!(pt("", "osjeff://favoritos"), "Favoritos");
+        assert_eq!(pt("", "kitsune://favoritos"), "Favoritos");
+        assert_eq!(pt("", "kitsune://historico/"), "Histórico");
+        assert_eq!(pt("", "kitsune://sobre"), "Sobre o Navegador");
+        assert_eq!(pt("", "kitsune://inicio"), "Nova aba");
         assert_eq!(pt("", "osjeff://historico/"), "Histórico");
-        assert_eq!(pt("", "osjeff://sobre"), "Sobre o Navegador");
-        assert_eq!(pt("", "osjeff://inicio"), "Nova aba");
         // The same tabs in English; a page's own title and a host never change.
         assert_eq!(en("", ""), "New tab");
-        assert_eq!(en("", "osjeff://favoritos"), "Bookmarks");
-        assert_eq!(en("", "osjeff://historico/"), "History");
-        assert_eq!(en("", "osjeff://sobre"), "About the Browser");
-        assert_eq!(en("", "osjeff://inicio"), "New tab");
+        assert_eq!(en("", "kitsune://favoritos"), "Bookmarks");
+        assert_eq!(en("", "kitsune://historico/"), "History");
+        assert_eq!(en("", "kitsune://sobre"), "About the Browser");
+        assert_eq!(en("", "kitsune://inicio"), "New tab");
         assert_eq!(en("  Olá  ", "http://a.test/x"), "Olá");
         assert_eq!(en("", "https://www.exemplo.com.br/a"), "exemplo.com.br");
     }
@@ -368,7 +369,9 @@ mod tests {
         let (a, b) = host_range(u);
         assert_eq!((&u[a..b], b), ("a.test", u.len()));
         assert_eq!(host_range(""), (0, 0));
-        let u = "osjeff://favoritos";
+        let u = "kitsune://favoritos";
+        assert_eq!(&u[host_range(u).0..host_range(u).1], "kitsune://favoritos");
+        let u = "osjeff://favoritos?rm=1";
         assert_eq!(&u[host_range(u).0..host_range(u).1], "osjeff://favoritos");
     }
 

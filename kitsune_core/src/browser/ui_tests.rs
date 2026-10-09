@@ -290,21 +290,21 @@ fn open_internal(b: &mut Browser, url: &str) -> String {
 #[test]
 fn internal_pages_load_without_the_network() {
     let mut b = Browser::new();
-    let html = open_internal(&mut b, "osjeff://sobre");
+    let html = open_internal(&mut b, "kitsune://sobre");
     assert!(html.contains("Sobre o Navegador"));
     assert!(b.take_request().is_none(), "nothing for the fetcher");
     assert_eq!(b.status(), Status::Done);
     assert!(b.is_internal());
     assert!(!b.is_home());
     assert_eq!(b.security(), Security::None);
-    assert_eq!(b.url(), b"osjeff://sobre");
+    assert_eq!(b.url(), b"kitsune://sobre");
     assert!(b.take_internal().is_none(), "delivered once");
 }
 
 #[test]
 fn typed_kitsune_url_is_not_a_search() {
     let mut b = Browser::new();
-    type_str(&mut b, "osjeff://favoritos");
+    type_str(&mut b, "kitsune://favoritos");
     b.on_key(Key::Enter);
     assert!(b.take_request().is_none());
     assert!(b.take_internal().is_some());
@@ -313,7 +313,7 @@ fn typed_kitsune_url_is_not_a_search() {
 #[test]
 fn inicio_is_the_start_page() {
     let mut b = browser_with_history(&["http://a.test/"]);
-    b.open(b"osjeff://inicio");
+    b.open(b"kitsune://inicio");
     assert!(b.is_home());
     assert!(!b.is_internal());
     assert!(b.take_internal().is_none());
@@ -324,60 +324,74 @@ fn favourites_page_lists_and_removes() {
     let mut b = browser_with_history(&["http://a.test/x?a=1&b=2"]);
     b.set_page_title("A <b>& B");
     b.toggle_bookmark();
-    let html = open_internal(&mut b, "osjeff://favoritos");
+    let html = open_internal(&mut b, "kitsune://favoritos");
     assert!(html.contains("A &lt;b&gt;&amp; B"), "{html}");
     assert!(html.contains("http://a.test/x?a=1&amp;b=2"));
-    assert!(html.contains("osjeff://favoritos?rm=0"));
+    assert!(html.contains("kitsune://favoritos?rm=0"));
     // The remove link.
-    let html = open_internal(&mut b, "osjeff://favoritos?rm=0");
+    let html = open_internal(&mut b, "kitsune://favoritos?rm=0");
     assert!(html.contains("Nenhum favorito"));
     assert!(b.bookmarks().is_empty());
-    assert_eq!(b.url(), b"osjeff://favoritos");
+    assert_eq!(b.url(), b"kitsune://favoritos");
 }
 
 #[test]
 fn removing_a_missing_favourite_is_harmless() {
     let mut b = Browser::new();
-    let html = open_internal(&mut b, "osjeff://favoritos?rm=7");
+    let html = open_internal(&mut b, "kitsune://favoritos?rm=7");
     assert!(html.contains("Nenhum favorito"));
-    let html = open_internal(&mut b, "osjeff://favoritos?rm=abc");
+    let html = open_internal(&mut b, "kitsune://favoritos?rm=abc");
     assert!(html.contains("Nenhum favorito"));
 }
 
 #[test]
 fn history_page_lists_newest_first_and_skips_internal_pages() {
     let mut b = browser_with_history(&["http://one.test/", "http://two.test/"]);
-    let html = open_internal(&mut b, "osjeff://historico");
+    let html = open_internal(&mut b, "kitsune://historico");
     let one = html.find("http://one.test/").unwrap();
     let two = html.find("http://two.test/").unwrap();
     assert!(two < one);
-    assert!(!html.contains(">osjeff://historico<"));
+    assert!(!html.contains(">kitsune://historico<"));
 }
 
 #[test]
 fn history_page_is_empty_message() {
     let mut b = Browser::new();
-    let html = open_internal(&mut b, "osjeff://historico");
+    let html = open_internal(&mut b, "kitsune://historico");
     assert!(html.contains("Nada visitado"));
 }
 
 #[test]
 fn unknown_internal_name_shows_the_about_page() {
     let mut b = Browser::new();
-    let html = open_internal(&mut b, "osjeff://nada");
-    assert!(html.contains("osjeff://favoritos"));
+    let html = open_internal(&mut b, "kitsune://nada");
+    assert!(html.contains("kitsune://favoritos"));
 }
 
 #[test]
 fn internal_scheme_is_case_insensitive() {
     let mut b = Browser::new();
-    assert!(open_internal(&mut b, "OSJEFF://SOBRE").contains("Navegador"));
+    assert!(open_internal(&mut b, "KITSUNE://SOBRE").contains("Navegador"));
+}
+
+#[test]
+fn old_osjeff_scheme_is_redirected_to_kitsune() {
+    let mut b = Browser::new();
+    let html = open_internal(&mut b, "osjeff://sobre");
+    assert!(html.contains("Sobre o Navegador"));
+    assert_eq!(b.url(), b"kitsune://sobre", "shown with the new scheme");
+    assert!(b.take_request().is_none(), "never goes to the network");
+    assert!(open_internal(&mut b, "OSJEFF://FAVORITOS").contains("Favoritos"));
+    assert_eq!(b.url(), b"kitsune://favoritos");
+    // A link with the old scheme on one of the pages works too.
+    assert!(b.open_link(b"osjeff://historico"));
+    assert_eq!(b.url(), b"kitsune://historico");
 }
 
 #[test]
 fn internal_pages_enter_the_history_and_back_replays_them() {
     let mut b = browser_with_history(&["http://a.test/"]);
-    open_internal(&mut b, "osjeff://sobre");
+    open_internal(&mut b, "kitsune://sobre");
     assert_eq!(b.history_len(), 2);
     assert!(b.can_back());
     b.back();
@@ -392,14 +406,14 @@ fn internal_pages_enter_the_history_and_back_replays_them() {
         "forward replays the internal page"
     );
     assert_eq!(b.history_len(), 2, "replayed, not recorded again");
-    assert_eq!(b.url(), b"osjeff://sobre");
+    assert_eq!(b.url(), b"kitsune://sobre");
 }
 
 #[test]
 fn links_inside_internal_pages_navigate() {
     let mut b = browser_with_history(&["http://a.test/"]);
-    open_internal(&mut b, "osjeff://sobre");
-    assert!(b.open_link(b"osjeff://favoritos"));
+    open_internal(&mut b, "kitsune://sobre");
+    assert!(b.open_link(b"kitsune://favoritos"));
     assert!(b.take_internal().is_some());
     // An absolute http link from an internal page is not an https downgrade.
     assert!(b.open_link(b"http://a.test/x"));
@@ -410,7 +424,7 @@ fn links_inside_internal_pages_navigate() {
 #[test]
 fn reload_of_an_internal_page_regenerates_it() {
     let mut b = Browser::new();
-    open_internal(&mut b, "osjeff://historico");
+    open_internal(&mut b, "kitsune://historico");
     b.reload();
     assert!(b.take_internal().is_some());
     assert!(b.take_request().is_none());
@@ -419,7 +433,7 @@ fn reload_of_an_internal_page_regenerates_it() {
 #[test]
 fn network_navigation_clears_the_internal_flag() {
     let mut b = Browser::new();
-    open_internal(&mut b, "osjeff://sobre");
+    open_internal(&mut b, "kitsune://sobre");
     b.open(b"http://a.test/");
     assert!(!b.is_internal());
     assert!(b.take_request().is_some());
@@ -428,7 +442,7 @@ fn network_navigation_clears_the_internal_flag() {
 #[test]
 fn internal_html_is_escaped() {
     let mut b = browser_with_history(&["http://a.test/\"onmouseover=\"x"]);
-    let html = open_internal(&mut b, "osjeff://historico");
+    let html = open_internal(&mut b, "kitsune://historico");
     assert!(!html.contains("\"onmouseover"), "{html}");
 }
 
@@ -582,7 +596,7 @@ fn stop_drops_a_pending_load_and_keeps_the_page() {
 #[test]
 fn recent_lists_each_address_once_newest_first_without_internal_pages() {
     let mut b = browser_with_history(&["http://a.test/", "http://b.test/", "http://a.test/"]);
-    b.open(b"osjeff://sobre");
+    b.open(b"kitsune://sobre");
     let r = b.recent(10);
     assert_eq!(r, ["http://a.test/", "http://b.test/"]);
     assert_eq!(b.recent(1), ["http://a.test/"]);
@@ -610,6 +624,11 @@ fn the_request_asks_for_the_language_of_the_interface() {
     assert!(pt.starts_with("GET /a?b=1 HTTP/1.1\r\nHost: example.com\r\n"));
     assert!(pt.contains("\r\nAccept-Language: pt-BR,pt;q=0.9,en;q=0.8\r\n"));
     assert!(pt.ends_with("Connection: close\r\n\r\n"));
+    assert!(pt.contains(concat!(
+        "\r\nUser-Agent: Kitsune/",
+        env!("CARGO_PKG_VERSION"),
+        "\r\n"
+    )));
     let en = ask(Lang::En, "example.com", 80, false);
     assert!(en.contains("\r\nAccept-Language: en;q=1\r\n"));
     assert!(!en.contains("pt-BR"));
@@ -658,7 +677,7 @@ fn labels_and_banners_have_both_languages() {
 fn an_internal_page_can_be_built_again_in_another_language() {
     let mut b = Browser::new();
     assert!(b.internal_html_in(Lang::En).is_none());
-    b.open(b"osjeff://sobre");
+    b.open(b"kitsune://sobre");
     let first = b.take_internal().unwrap();
     assert!(b.take_internal().is_none(), "delivered once");
     let en = String::from_utf8(b.internal_html_in(Lang::En).unwrap()).unwrap();

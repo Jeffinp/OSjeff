@@ -737,7 +737,7 @@ pub(crate) struct WasmWin {
     pub app_id: String,
 }
 
-/// Title-bar text of instance `index` of `kind` (`OSJEFF SHELL`, `OSJEFF SHELL 2`...).
+/// Title-bar text of instance `index` of `kind` (`KITSUNE SHELL`, `KITSUNE SHELL 2`...).
 pub(crate) fn base_title(kind: Kind, index: u8) -> String {
     base_title_in(kitsune_core::i18n::lang(), kind, index)
 }

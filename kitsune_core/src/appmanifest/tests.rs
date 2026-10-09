@@ -526,6 +526,37 @@ fn package_with_manifest_only() {
 }
 
 #[test]
+fn package_with_the_old_section_names_still_parses() {
+    let png = icon_png(32, 32);
+    let w = module(&[
+        custom(LEGACY_MANIFEST_SECTION, MIN.as_bytes()),
+        custom(LEGACY_ICON_SECTION, &png),
+    ]);
+    assert_eq!(LEGACY_MANIFEST_SECTION, "osjeff.manifest");
+    let p = parse_package(&w).unwrap();
+    assert_eq!(p.manifest.id, "hello");
+    assert_eq!(p.icon.unwrap().width(), 32);
+    // Mixed old manifest + new icon is fine too.
+    let w = module(&[
+        custom(LEGACY_MANIFEST_SECTION, MIN.as_bytes()),
+        custom(ICON_SECTION, &png),
+    ]);
+    assert!(parse_package(&w).unwrap().icon.is_some());
+}
+
+#[test]
+fn both_section_names_together_count_as_a_duplicate() {
+    let w = module(&[
+        custom(MANIFEST_SECTION, MIN.as_bytes()),
+        custom(LEGACY_MANIFEST_SECTION, MIN.as_bytes()),
+    ]);
+    assert_eq!(
+        parse_package(&w).unwrap_err(),
+        PackageError::DuplicateManifest
+    );
+}
+
+#[test]
 fn package_with_icon() {
     let png = icon_png(32, 32);
     let w = module(&[

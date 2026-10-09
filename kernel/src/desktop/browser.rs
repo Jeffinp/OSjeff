@@ -328,7 +328,7 @@ impl Desktop {
         self.browser_page_changed(id, tid);
     }
 
-    /// Lay out and show the HTML of a page the browser generated itself (`osjeff://...`), if
+    /// Lay out and show the HTML of a page the browser generated itself (`kitsune://...`), if
     /// one was just opened in any tab. Called every frame by the main loop, right next to the
     /// network hand-off.
     pub fn browser_poll_internal(&mut self) -> bool {

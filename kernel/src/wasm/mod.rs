@@ -1,6 +1,6 @@
 //! Native WebAssembly app platform.
 //!
-//! WebAssembly is OSjeff's native application format: portable programs compiled
+//! WebAssembly is Kitsune's native application format: portable programs compiled
 //! to `.wasm` run *inside* the OS through this interpreter ([`wasmi`]) — no
 //! foreign OS, no binary emulation, and sandboxed by construction (a guest can
 //! only touch its own linear memory and the host functions we explicitly grant).

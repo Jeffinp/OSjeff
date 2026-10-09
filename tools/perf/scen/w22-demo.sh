@@ -5,7 +5,7 @@ wait_first_frame
 snap d01; sleep 0.3
 dock_icon browser; sleep 0.5; snap d02
 dock_icon editor; sleep 0.3; tap; snap d03; sleep 0.12; snap d04; sleep 1.0; snap d05
-typestr "OSjeff"; key ret; typestr "um desktop de verdade"; sleep 0.4; snap d06
+typestr "Kitsune"; key ret; typestr "um desktop de verdade"; sleep 0.4; snap d06
 key ctrl-spc; sleep 0.5; typestr "cal"; sleep 0.6; snap d07
 key ret; sleep 0.18; snap d08; sleep 0.9; snap d09
 typestr "7*6"; key ret; sleep 0.4; snap d10

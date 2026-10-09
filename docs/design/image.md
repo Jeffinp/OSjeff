@@ -1,4 +1,4 @@
-# Imagens no OSjeff: `inflate`, `deflate`, `image`, `bmp`, `png`, `ppm`
+# Imagens no Kitsune: `inflate`, `deflate`, `image`, `bmp`, `png`, `ppm`
 
 Bibliotecas puras em `kitsune_core` (`no_std` + `alloc`, `forbid(unsafe_code)`,
 sem dependências novas, testadas no host) que servem de base para o visualizador

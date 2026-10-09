@@ -445,7 +445,7 @@ impl SysInfo for KSys {
     }
 
     fn hostname(&self) -> String {
-        String::from("osjeff")
+        String::from("kitsune")
     }
 }
 

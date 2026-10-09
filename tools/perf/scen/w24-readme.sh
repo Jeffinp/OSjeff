@@ -23,6 +23,6 @@ shot "$t-busca"
 key esc; sleep 0.3
 key ctrl-l; typestr "https://203.0.113.5:8078/hello"; key ret; sleep 10
 shot "$t-erro-cert"
-key ctrl-l; typestr "osjeff://favoritos"; key ret; sleep 2
+key ctrl-l; typestr "kitsune://favoritos"; key ret; sleep 2
 shot "$t-favoritos"
 finish

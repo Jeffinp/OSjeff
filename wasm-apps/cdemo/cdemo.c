@@ -1,5 +1,5 @@
 /* cdemo.c — a C program compiled to wasm32 (with wasi-sdk's clang) and run
- * natively by OSjeff's WebAssembly app engine. Freestanding: no libc, it talks
+ * natively by Kitsune's WebAssembly app engine. Freestanding: no libc, it talks
  * only to the OS host ABI. This is the C→wasm→native-app pipeline that a ported
  * C game (DOOM) will ride on. */
 

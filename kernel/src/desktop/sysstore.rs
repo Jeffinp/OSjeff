@@ -1,12 +1,13 @@
 //! Kernel implementations of the `kitsune_core::sysif` traits that the
 //! system-management apps use, backed by the desktop VFS (OJFS v3 on the disk,
 //! or the RAM volume when no v3 disk is mounted): the log goes to
-//! `/var/log/`, the settings to `/etc/osjeff.conf`, and the space accounting
+//! `/var/log/`, the settings to `/etc/kitsune.conf`, and the space accounting
 //! is the volume's `statfs`.
 
 use alloc::vec::Vec;
 use kitsune_core::sysif::{
-    DiskUsage, DiskUsageInfo, LogSink, NetCounters, NetStats, SettingsStore, SinkError,
+    ConfFiles, DiskUsage, DiskUsageInfo, LogSink, MigratingStore, NetCounters, NetStats,
+    SettingsStore, SinkError,
 };
 
 use super::vfs::{self, VfsError};
@@ -93,20 +94,38 @@ impl NetStats for KernelNetStats {
     }
 }
 
-/// Stores the settings text as `/etc/osjeff.conf`. A first boot has no file:
-/// `load` is `None`.
+/// Stores the settings text as `/etc/kitsune.conf` (an old `/etc/osjeff.conf` is read
+/// when the new file is missing and removed on the first save). A first boot has no
+/// file: `load` is `None`.
 pub(crate) struct VfsStore;
 
-const CONF_PATH: &[u8] = b"/etc/osjeff.conf";
+/// The volume operations behind [`VfsStore`].
+struct VfsFiles;
+
+impl ConfFiles for VfsFiles {
+    fn read(&mut self, path: &[u8]) -> Option<Vec<u8>> {
+        vfs::read_file(path).ok()
+    }
+
+    fn write(&mut self, path: &[u8], data: &[u8]) -> Result<(), SinkError> {
+        ensure_dir(b"/etc");
+        vfs::write_file(path, data).map_err(map_err)
+    }
+
+    fn remove(&mut self, path: &[u8]) {
+        if vfs::exists(path) {
+            let _ = vfs::purge(path);
+        }
+    }
+}
 
 impl SettingsStore for VfsStore {
     fn load(&mut self) -> Option<Vec<u8>> {
-        vfs::read_file(CONF_PATH).ok()
+        MigratingStore(VfsFiles).load()
     }
 
     fn save(&mut self, text: &[u8]) -> Result<(), SinkError> {
-        ensure_dir(b"/etc");
-        vfs::write_file(CONF_PATH, text).map_err(map_err)
+        MigratingStore(VfsFiles).save(text)
     }
 }
 

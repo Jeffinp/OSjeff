@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 // ---------------------------------------------------------------- helpers
 
-const TEXT_LEN: usize = 730;
+const TEXT_LEN: usize = 731;
 
 fn text() -> Vec<u8> {
     let mut v = Vec::new();
@@ -17,7 +17,7 @@ fn text() -> Vec<u8> {
         );
     }
     v.extend_from_slice(
-        b"OSjeff image decoder: 0123456789 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        b"Kitsune image decoder: 0123456789 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     );
     v
 }

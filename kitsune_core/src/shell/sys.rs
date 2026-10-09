@@ -207,7 +207,7 @@ pub trait SysInfo {
 
     /// Host name for the prompt.
     fn hostname(&self) -> String {
-        String::from("osjeff")
+        String::from("kitsune")
     }
 }
 
@@ -422,7 +422,7 @@ mod tests {
         assert_eq!(s.kill(1, 9), Err(SysErr::Unsupported));
         assert_eq!(s.ping("x", 1), Err(SysErr::Unsupported));
         assert!(s.procs().is_empty());
-        assert_eq!(s.hostname(), "osjeff");
+        assert_eq!(s.hostname(), "kitsune");
     }
 
     #[test]

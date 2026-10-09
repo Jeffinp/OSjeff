@@ -1,3 +1,5 @@
+> *Written when the project was called OSjeff (renamed Kitsune in 2026-10; names and paths below are the historical ones).*
+
 # OSjeff — Mapa técnico do código (auditoria 00)
 
 Branch `audit/performance-security`. Escopo: leitura do código-fonte de `kernel/`, `osjeff_core/`, `os/`, `wasm-apps/`, `tools/` e das crates do bootloader 0.11.17 em `~/.cargo/registry`. Nada em `kernel/`, `osjeff_core/` ou `os/` foi alterado.

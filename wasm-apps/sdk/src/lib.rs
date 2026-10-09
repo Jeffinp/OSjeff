@@ -1,4 +1,4 @@
-//! OSjeff app SDK (ABI v2).
+//! Kitsune app SDK (ABI v2).
 //!
 //! An app is one `.wasm` file: code + a manifest section (`manifest!`) + an
 //! optional icon (`icon!`). Implement [`App`], then `export_app!(MyApp);`.
@@ -65,7 +65,7 @@ fn check(r: i32) -> Result<i32, Errno> {
 
 // ------------------------------------------------------------------ the app trait
 
-/// An OSjeff app. Only `new` and `render` are required.
+/// A Kitsune app. Only `new` and `render` are required.
 pub trait App: Sized {
     fn new() -> Self;
     /// Key press: `code` is ASCII, 10 Enter, 27 Esc, 8 Backspace, 9 Tab, 127 Delete,
@@ -175,14 +175,14 @@ pub fn tr<'a>(pt: &'a str, en: &'a str) -> &'a str {
     }
 }
 
-/// Embeds the manifest text as the `osjeff.manifest` custom section.
+/// Embeds the manifest text as the `kitsune.manifest` custom section.
 #[macro_export]
 macro_rules! manifest {
     ($text:expr) => {
         const _: () = {
             const T: &[u8] = $text.as_bytes();
             #[used]
-            #[link_section = "osjeff.manifest"]
+            #[link_section = "kitsune.manifest"]
             static M: [u8; T.len()] = {
                 let mut a = [0u8; T.len()];
                 let mut i = 0;
@@ -196,7 +196,7 @@ macro_rules! manifest {
     };
 }
 
-/// Embeds a PNG (<= 64x64) as the `osjeff.icon` custom section:
+/// Embeds a PNG (<= 64x64) as the `kitsune.icon` custom section:
 /// `icon!(include_bytes!("icon.png"));`
 #[macro_export]
 macro_rules! icon {
@@ -204,7 +204,7 @@ macro_rules! icon {
         const _: () = {
             const B: &[u8] = $bytes;
             #[used]
-            #[link_section = "osjeff.icon"]
+            #[link_section = "kitsune.icon"]
             static I: [u8; B.len()] = {
                 let mut a = [0u8; B.len()];
                 let mut i = 0;

@@ -3,9 +3,9 @@
 //! The first input byte picks how the rest is presented:
 //!
 //! * `0`: the bytes as a whole `.wasm` file (header, section walk, LEB128 sizes);
-//! * `1`: the bytes wrapped as the payload of a well-formed `osjeff.manifest`
+//! * `1`: the bytes wrapped as the payload of a well-formed `kitsune.manifest`
 //!   custom section, so the fuzzer reaches the key/value parser directly;
-//! * `2`: the bytes wrapped as an `osjeff.icon` section next to a valid manifest
+//! * `2`: the bytes wrapped as an `kitsune.icon` section next to a valid manifest
 //!   (PNG header checks, size/dimension limits, PNG decoding);
 //! * `3`: the bytes as a bare manifest (`Manifest::parse`) and as a bare icon.
 //!

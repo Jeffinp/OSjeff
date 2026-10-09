@@ -1,3 +1,5 @@
+> *Written when the project was called OSjeff (renamed Kitsune in 2026-10; names and paths below are the historical ones).*
+
 # Auditoria 04 — Desempenho
 
 Branch: `worktree-agent-a0c586cd41464c53b` (parte de `fc89615`). Toolchain `nightly-2026-10-05`.

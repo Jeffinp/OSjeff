@@ -1,6 +1,6 @@
-# Boot do OSjeff em hardware real (pendrive UEFI)
+# Boot do Kitsune em hardware real (pendrive UEFI)
 
-O OSjeff já gera uma imagem **UEFI** booteável. Em hardware real ele desenha
+O Kitsune já gera uma imagem **UEFI** booteável. Em hardware real ele desenha
 direto no framebuffer da GPU (a Radeon integrada do Ryzen, no seu caso) — sem a
 camada de upload por software do QEMU —, então roda **muito mais liso** do que no
 emulador. Este guia mostra como gravar e bootar, e lista as limitações reais.
@@ -38,7 +38,7 @@ No PC alvo, entre no firmware (Del/F2/F10/F12 no POST) e:
 2. **Modo UEFI** (não Legacy/CSM). A imagem é UEFI.
 3. Dê boot pelo pendrive (boot menu, geralmente F12/F11/F8).
 
-Deve aparecer a splash do OSjeff e cair no desktop.
+Deve aparecer a splash do Kitsune e cair no desktop.
 
 ## 4. Limitações reais (honestas)
 

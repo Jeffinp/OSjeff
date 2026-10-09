@@ -1,8 +1,8 @@
-# Termos para contribuir com o OSjeff
+# Termos para contribuir com o Kitsune
 
-*Contributor terms for OSjeff (English summary at the end).*
+*Contributor terms for Kitsune (English summary at the end).*
 
-O OSjeff é de **Jeferson Reis Almeida** (o "Titular"). O código é público para ser lido e
+O Kitsune é de **Jeferson Reis Almeida** (o "Titular"). O código é público para ser lido e
 estudado e é licenciado sob a [PolyForm Strict 1.0.0](LICENSE): uso apenas **não comercial**, sem
 distribuição e sem trabalhos derivados. Isso vale para todo mundo, exceto para o que está
 descrito aqui.
@@ -42,7 +42,7 @@ Para registrar o aceite, todo commit deve levar a linha `Signed-off-by: Nome <em
 
 ## 3. Uso comercial e outras licenças
 
-Quer usar o OSjeff num produto, vender, distribuir uma versão própria ou criar um sistema
+Quer usar o Kitsune num produto, vender, distribuir uma versão própria ou criar um sistema
 derivado? Isso exige uma **licença comercial escrita** do Titular. Fale pelo contato em
 [SECURITY.md](SECURITY.md) ou abra uma issue pedindo contato.
 
@@ -55,7 +55,7 @@ por estes termos.
 
 ## English summary
 
-OSjeff is owned by Jeferson Reis Almeida. The source is public for reading and study under the
+Kitsune is owned by Jeferson Reis Almeida. The source is public for reading and study under the
 PolyForm Strict License 1.0.0 (noncommercial use only; no distribution; no derivative works). As an
 additional limited permission, anyone may copy and modify the code solely to prepare and submit a
 contribution to the official repository. By submitting a contribution you assign (or, where

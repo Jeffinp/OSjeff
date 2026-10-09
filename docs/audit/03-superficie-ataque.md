@@ -1,3 +1,5 @@
+> *Written when the project was called OSjeff (renamed Kitsune in 2026-10; names and paths below are the historical ones).*
+
 # 03 — Superfície de ataque: rede, disco, parsers web e fuzzing
 
 Auditoria do OSjeff (Agente C). Escopo: dado que entra no kernel vindo de fora — frames de

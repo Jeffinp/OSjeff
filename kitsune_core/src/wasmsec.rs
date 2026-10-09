@@ -12,7 +12,7 @@
 //! payload bits, as the spec requires of a `u32`); at most [`MAX_SECTIONS`]
 //! sections are walked; a custom section's name must lie inside its payload.
 //! The reader does **not** validate the module (the interpreter does that); it
-//! only finds metadata sections such as `osjeff.manifest`.
+//! only finds metadata sections such as `kitsune.manifest`.
 
 use core::fmt;
 

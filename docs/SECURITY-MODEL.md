@@ -1,6 +1,6 @@
-# Modelo de segurança do OSjeff
+# Modelo de segurança do Kitsune
 
-Este documento diz **o que o OSjeff protege, contra quem, e o que não protege**.
+Este documento diz **o que o Kitsune protege, contra quem, e o que não protege**.
 Foi escrito depois de uma auditoria completa (ver [`audit/`](audit/RELATORIO.md))
 e cada afirmação aponta para uma prova: teste, fuzzing, medição em QEMU ou o
 trecho de código. O que não foi provado está marcado como *suposição*.
@@ -95,7 +95,7 @@ O handshake **só começa** com pelo menos 128 bits de entropia creditados; sem 
 - **Pinning** e **HSTS**: nada impede um downgrade `http://` digitado pelo usuário, nem
   fixa a CA esperada de um site; Certificate Transparency não é consultada.
 - A trust store é estática: raiz removida pelo Mozilla continua confiável até a próxima
-  versão do OSjeff (atualização manual, `tools/gen-trust-store.sh`).
+  versão do Kitsune (atualização manual, `tools/gen-trust-store.sh`).
 - Ed25519 em certificados de servidor não é suportado (o handshake falha com mensagem).
 - A dependência `rsa` 0.9 tem o aviso RUSTSEC-2023-0071 (vazamento por tempo em operações
   de **chave privada**); aqui só verificamos assinaturas, não há chave privada RSA, e o
@@ -232,7 +232,7 @@ de chave sobre um pool SHA-256. Desenho completo, fontes e provas em
 | `random_get(0x7fffffff)` / `fd_write` com 2³¹ iovecs | trabalho ilimitado | `EINVAL` |
 | MITM em HTTPS | possível | **bloqueado** pela verificação de cadeia/nome/assinatura (§3.1); ainda possível com uma raiz da trust store comprometida, sem revogação, ou mentindo a hora por SNTP |
 | Servidor malicioso faz resposta de vários MiB | OOM mudo no `http_get` | truncado em 1 MiB (4 MiB já descompactado), avisado na página |
-| App tenta ler/escrever `/etc/osjeff.conf`, `/var/log`, `/.trash` ou os arquivos do usuário | (apps sem disco real) | `ERR_PERM` no `VolumeFs`, mesmo que o `Sandbox` falhasse (testes e fuzz sobre o volume) |
+| App tenta ler/escrever `/etc/kitsune.conf`, `/var/log`, `/.trash` ou os arquivos do usuário | (apps sem disco real) | `ERR_PERM` no `VolumeFs`, mesmo que o `Sandbox` falhasse (testes e fuzz sobre o volume) |
 | App pede uma URL que redireciona para `http://10.0.2.2/` ou para um nome público que resolve para `127.0.0.1` | — (`net_http_get` não transportava) | recusado no salto / depois do DNS; provado em QEMU (`w18-net.sh`) |
 | Sem `RDRAND` (QEMU com WHPX): *client random* e chave efêmera do TLS | de um misturador de 64 bits (TSC e ticks); toast `RNG: weak fallback` a cada boot | DRBG ChaCha20 semeado por virtio-rng ou, sem ele, por jitter (>= 128 bits creditados antes do handshake, senão recusa); provado em QEMU (`design/entropy.md` §5) |
 | ISN do TCP | zero (`smoltcp` com semente 0) | semente do gerador do kernel |

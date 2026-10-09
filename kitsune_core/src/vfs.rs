@@ -684,9 +684,9 @@ pub fn purge<B: Backend + ?Sized>(b: &mut B, path: &[u8]) -> Result<()> {
 pub const WELCOME_FILES: [(&str, &[u8]); 3] = [
     (
         "/leiame.txt",
-        b"Bem-vindo ao OSjeff.\nGerenciador de arquivos:\n setas   navegam\n Del     manda pra lixeira\n Tab     alterna arquivos/lixeira\n Enter   abre\n",
+        b"Bem-vindo ao Kitsune.\nGerenciador de arquivos:\n setas   navegam\n Del     manda pra lixeira\n Tab     alterna arquivos/lixeira\n Enter   abre\n",
     ),
-    ("/notas.txt", b"Arquivo de exemplo do OSjeff."),
+    ("/notas.txt", b"Arquivo de exemplo do Kitsune."),
     (
         "/Documentos/projeto.txt",
         b"Arquivo dentro de uma pasta.",

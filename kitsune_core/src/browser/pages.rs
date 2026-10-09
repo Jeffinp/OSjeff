@@ -1,4 +1,4 @@
-//! The browser's own pages (`osjeff://favoritos`, `historico`, `sobre`) as HTML + CSS that goes
+//! The browser's own pages (`kitsune://favoritos`, `historico`, `sobre`) as HTML + CSS that goes
 //! through the same engine as any site. They are always light: the page area is never
 //! dark-inverted, only the chrome follows the system appearance.
 //!
@@ -58,7 +58,7 @@ fn open(lang: Lang, title: &str, on: &str, heading: &str, sub: &str) -> String {
     ] {
         let cls = if name == on { " class=\"on\"" } else { "" };
         h.push_str(&alloc::format!(
-            "<a{cls} href=\"osjeff://{name}\">{}</a>",
+            "<a{cls} href=\"kitsune://{name}\">{}</a>",
             html_escape(tr_in(lang, key))
         ));
     }
@@ -78,7 +78,7 @@ fn close(mut h: String) -> Vec<u8> {
     h.into_bytes()
 }
 
-/// `osjeff://favoritos`: every favourite with a letter tile and a remove link.
+/// `kitsune://favoritos`: every favourite with a letter tile and a remove link.
 pub fn bookmarks(all: &[Bookmark]) -> Vec<u8> {
     bookmarks_in(i18n::lang(), all)
 }
@@ -104,7 +104,7 @@ pub fn bookmarks_in(lang: Lang, all: &[Bookmark]) -> Vec<u8> {
         h.push_str(&alloc::format!(
             "<tr><td class=\"ti\"><div class=\"tile\">{badge}</div></td>\
              <td><a class=\"t\" href=\"{u}\">{t}</a><br><span class=\"u\">{u}</span></td>\
-             <td align=\"right\"><a class=\"rm\" href=\"osjeff://favoritos?rm={i}\">{rm}</a></td></tr>",
+             <td align=\"right\"><a class=\"rm\" href=\"kitsune://favoritos?rm={i}\">{rm}</a></td></tr>",
             rm = html_escape(tr_in(lang, tk!("web.page.remove"))),
             badge = tab_badge(&b.title, &b.url),
             u = html_escape(&b.url),
@@ -115,7 +115,7 @@ pub fn bookmarks_in(lang: Lang, all: &[Bookmark]) -> Vec<u8> {
     close(h)
 }
 
-/// `osjeff://historico`: addresses visited, newest first, each once, without the browser's
+/// `kitsune://historico`: addresses visited, newest first, each once, without the browser's
 /// own pages. `urls` is in visiting order.
 pub fn history(urls: &[Vec<u8>]) -> Vec<u8> {
     history_in(i18n::lang(), urls)
@@ -126,7 +126,7 @@ pub fn history_in(lang: Lang, urls: &[Vec<u8>]) -> Vec<u8> {
     let mut seen: Vec<String> = Vec::new();
     for u in urls.iter().rev() {
         let u = String::from_utf8_lossy(u).into_owned();
-        if u.starts_with("osjeff://") || seen.contains(&u) {
+        if super::is_internal_url(&u) || seen.contains(&u) {
             continue;
         }
         seen.push(u);
@@ -159,7 +159,7 @@ pub fn history_in(lang: Lang, urls: &[Vec<u8>]) -> Vec<u8> {
     close(h)
 }
 
-/// `osjeff://sobre`: what the browser does and the shortcuts it answers to.
+/// `kitsune://sobre`: what the browser does and the shortcuts it answers to.
 pub fn about() -> Vec<u8> {
     about_in(i18n::lang())
 }
@@ -297,7 +297,7 @@ mod tests {
     fn history_is_newest_first_without_repeats_or_internal_pages() {
         let urls: Vec<Vec<u8>> = [
             "http://one.test/",
-            "osjeff://sobre",
+            "kitsune://sobre",
             "http://two.test/",
             "http://one.test/",
         ]
@@ -309,7 +309,7 @@ mod tests {
         let two = h.find(">http://two.test/<").unwrap();
         assert!(one < two);
         assert_eq!(h.matches(">http://one.test/<").count(), 1);
-        assert!(!h.contains(">osjeff://sobre<"));
+        assert!(!h.contains(">kitsune://sobre<"));
     }
 
     #[test]

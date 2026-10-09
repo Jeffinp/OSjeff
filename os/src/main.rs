@@ -1,6 +1,6 @@
 use std::process::Command;
 
-/// Boots the generated OSjeff disk image in QEMU.
+/// Boots the generated Kitsune disk image in QEMU.
 ///
 /// Default: BIOS image. Pass `uefi` as the first arg to boot the UEFI image
 /// (requires OVMF firmware installed and discoverable by QEMU).

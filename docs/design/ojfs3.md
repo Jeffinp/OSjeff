@@ -10,6 +10,11 @@
 Este documento é o contrato entre a biblioteca e quem a consome (kernel, ferramentas
 de host). Se o código divergir dele, o bug é de um dos dois: corrija na mesma mudança.
 
+> **Nome.** Para o usuário o sistema de arquivos é o *Kitsune FS (OJFS)*. A sigla **OJFS** e os
+> identificadores em disco (`OJF2`, `OJF3`, `OJJ3`, `OJD3`, `OJX3`) vêm do tempo em que o projeto se chamava
+> OSjeff e **ficam como estão por compatibilidade**: discos criados antes do renomeio montam sem conversão
+> (`fs3::tests::golden`). Uma revisão futura do formato pode trocar o nome.
+
 ## 1. Por que um formato novo
 
 O v2 (`docs/ARCHITECTURE.md` §8) é uma imagem de ~50 KiB inteira em RAM, regravada

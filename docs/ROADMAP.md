@@ -38,7 +38,7 @@ embutidas com hash documentado, cadeia/nome/`CertificateVerify` verificados com
 origem e por sessão, `x509_parse` fuzzado (5 M de execuções sem crash). Detalhes e provas
 em [`design/tls-browser.md`](design/tls-browser.md). Ainda em aberto: revogação (CRL/OCSP),
 *pinning* e HSTS. (Feito na W21: o gerador deixou de ser fraco e o HTTPS recusa, depois de esperar até 5 s, quando o pool tem menos de 128 bits creditados; ver [`design/entropy.md`](design/entropy.md).) O navegador ganhou links clicáveis, histórico (Alt+←/→), gzip/deflate, imagens PNG/BMP/PPM,
-formulários GET, favoritos persistentes, busca na página, zoom, seleção e roda do mouse (`osjeff://`);
+formulários GET, favoritos persistentes, busca na página, zoom, seleção e roda do mouse (`kitsune://`);
 ainda não tem POST, `<select>`/`<textarea>`, JPEG/GIF nem reuso de conexão.
 *Aceite (cumprido):* servidor com certificado inválido falha e a barra só diz "Conexao
 segura" para cadeias válidas.

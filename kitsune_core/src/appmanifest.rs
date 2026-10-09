@@ -1,4 +1,4 @@
-//! App packages: the `osjeff.manifest` and `osjeff.icon` custom sections of a
+//! App packages: the `kitsune.manifest` and `kitsune.icon` custom sections of a
 //! `.wasm`, parsed and validated.
 //!
 //! One file is one app. The manifest is plain text, one `key=value` per line
@@ -22,9 +22,14 @@ use alloc::vec::Vec;
 use core::fmt;
 
 /// Name of the custom section holding the manifest text.
-pub const MANIFEST_SECTION: &str = "osjeff.manifest";
+pub const MANIFEST_SECTION: &str = "kitsune.manifest";
 /// Name of the custom section holding the icon PNG.
-pub const ICON_SECTION: &str = "osjeff.icon";
+pub const ICON_SECTION: &str = "kitsune.icon";
+/// Name the manifest section had when the system was called OSjeff. Packages built
+/// with it are still accepted (compatibility); new builds use [`MANIFEST_SECTION`].
+pub const LEGACY_MANIFEST_SECTION: &str = "osjeff.manifest";
+/// Old name of [`ICON_SECTION`], accepted for the same reason.
+pub const LEGACY_ICON_SECTION: &str = "osjeff.icon";
 
 pub const MAX_MANIFEST_BYTES: usize = 4096;
 pub const MAX_MANIFEST_LINES: usize = 64;
@@ -348,7 +353,7 @@ macro_rules! set_once {
 }
 
 impl Manifest {
-    /// Parses and validates the text of an `osjeff.manifest` section.
+    /// Parses and validates the text of an `kitsune.manifest` section.
     pub fn parse(data: &[u8]) -> Result<Manifest, ManifestError> {
         if data.len() > MAX_MANIFEST_BYTES {
             return Err(ManifestError::TooLarge);
@@ -691,7 +696,7 @@ impl fmt::Display for IconError {
     }
 }
 
-/// Decodes an `osjeff.icon` payload. The size and dimensions are checked from
+/// Decodes an `kitsune.icon` payload. The size and dimensions are checked from
 /// the header **before** any pixel is decoded.
 pub fn decode_icon(data: &[u8]) -> Result<Image, IconError> {
     if data.len() > MAX_ICON_BYTES {
@@ -739,7 +744,7 @@ impl fmt::Display for PackageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PackageError::Wasm(e) => e.fmt(f),
-            PackageError::NoManifest => f.write_str("package has no osjeff.manifest section"),
+            PackageError::NoManifest => f.write_str("package has no kitsune.manifest section"),
             PackageError::DuplicateManifest => f.write_str("package has two manifests"),
             PackageError::DuplicateIcon => f.write_str("package has two icons"),
             PackageError::Manifest(e) => e.fmt(f),
@@ -755,16 +760,30 @@ pub struct Package {
     pub icon: Option<Image>,
 }
 
-/// Reads and validates the manifest and icon of `wasm`.
+/// How many custom sections are named `name` or `legacy` (together), and the payload
+/// of the first one found (the current name wins). A package that carries both names
+/// therefore counts as a duplicate.
+fn find_section<'a>(
+    wasm: &'a [u8],
+    name: &str,
+    legacy: &str,
+) -> Result<(usize, Option<&'a [u8]>), WasmError> {
+    let (n, first) = wasmsec::find_custom(wasm, name.as_bytes())?;
+    let (nl, first_legacy) = wasmsec::find_custom(wasm, legacy.as_bytes())?;
+    Ok((n + nl, first.or(first_legacy)))
+}
+
+/// Reads and validates the manifest and icon of `wasm` (sections named `kitsune.*`, or
+/// the old `osjeff.*`).
 pub fn parse_package(wasm: &[u8]) -> Result<Package, PackageError> {
-    let (n, m) =
-        wasmsec::find_custom(wasm, MANIFEST_SECTION.as_bytes()).map_err(PackageError::Wasm)?;
+    let (n, m) = find_section(wasm, MANIFEST_SECTION, LEGACY_MANIFEST_SECTION)
+        .map_err(PackageError::Wasm)?;
     if n > 1 {
         return Err(PackageError::DuplicateManifest);
     }
     let m = m.ok_or(PackageError::NoManifest)?;
     let (ni, icon) =
-        wasmsec::find_custom(wasm, ICON_SECTION.as_bytes()).map_err(PackageError::Wasm)?;
+        find_section(wasm, ICON_SECTION, LEGACY_ICON_SECTION).map_err(PackageError::Wasm)?;
     if ni > 1 {
         return Err(PackageError::DuplicateIcon);
     }

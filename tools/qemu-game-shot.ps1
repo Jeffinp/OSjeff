@@ -1,6 +1,6 @@
 # Steer the snake game with a few WASD keys via QMP, then screendump — proves
 # the Rust->wasm game runs and reacts (turns/grows) on the continuous frame pump.
-param([string]$Out = "F:\Projects\expo\OSjeff\.shots\shot.ppm")
+param([string]$Out = (Join-Path $PSScriptRoot "..\.shots\shot.ppm"))
 $ErrorActionPreference = 'Stop'
 $c = New-Object System.Net.Sockets.TcpClient
 $c.Connect('127.0.0.1', 4444)

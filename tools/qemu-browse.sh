@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drive the OSjeff browser in headless QEMU: open it from the dock, type an
+# Drive the Kitsune browser in headless QEMU: open it from the dock, type an
 # address, wait, and take screenshots. Uses the monitor socket of
 # tools/qemu-headless.sh (no display needed).
 #

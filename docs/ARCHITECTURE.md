@@ -1,4 +1,4 @@
-# Arquitetura do OSjeff
+# Arquitetura do Kitsune
 
 Documento de referência técnica. Descreve o sistema **como está no código deste
 checkout**, não como se pretende que fique. Para compilar e rodar veja
@@ -15,7 +15,7 @@ como hardware real); **[A]** medido ou provado pela auditoria e **não repetido*
 
 ## TL;DR
 
-OSjeff é um SO x86_64 `no_std` em Rust que sobe direto de um bootloader (BIOS ou UEFI)
+Kitsune é um SO x86_64 `no_std` em Rust que sobe direto de um bootloader (BIOS ou UEFI)
 e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espaço de
 endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
 o `#![forbid(unsafe_code)]` do crate `kitsune_core`, não hardware.
@@ -122,7 +122,7 @@ da pilha de boot) -> ps2::init
 -> storage::init (OJFS v3: monta, migra ou formata; sempre antes de qualquer arquivo)
 -> spawn logd
 -> splash -> Desktop::new (semeia os apps embutidos uma vez, monta o catálogo, abre o terminal)
--> load_settings (/etc/osjeff.conf, já com o volume pronto) -> wallpaper em BG
+-> load_settings (/etc/kitsune.conf, já com o volume pronto) -> wallpaper em BG
 -> laço do compositor (no 1º quadro: logd grava /var/log/boot.log)
 ```
 
@@ -787,7 +787,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   torno do cursor, arrastar com o mouse (ou setas) para mover, `R` gira (Shift+R anti-horário),
   `H`/`V` espelham, ←/→ (e PageUp/PageDown) trocam de imagem da mesma pasta, `I` painel de
   informações, `S`/Ctrl+S salva como (extensão `.png`/`.bmp`/`.ppm` escolhe o formato), `W`
-  usa a imagem como papel de parede (`Desktop::set_wallpaper_path`, que grava `/etc/osjeff.conf`). Transparência sobre fundo xadrez. Abaixo
+  usa a imagem como papel de parede (`Desktop::set_wallpaper_path`, que grava `/etc/kitsune.conf`). Transparência sobre fundo xadrez. Abaixo
   de 100 % a imagem é reduzida uma vez por mudança de zoom (filtro de caixa, em cache); a 100 %
   ou mais a amostragem é por vizinho mais próximo direto da origem. Lógica pura em
   `kitsune_core::viewer` (zoom, pan, caixa de ajuste, lista da pasta, texto de informações).
@@ -953,7 +953,7 @@ O terminal usa a mesma camada pelo `VfsFs` (`desktop/shellhost.rs`): `ShellFs` s
 absoluto por chamada e o diretório corrente guardado no próprio terminal; `rm` e `mv` por cima de um
 arquivo mandam o antigo para a lixeira. O editor lê e grava só com `vfs::read_file`/`write_file`.
 **O que mais vive no volume (W18).** O mesmo volume (disco v3 ou RAM) guarda, por convenção:
-`/etc/osjeff.conf` (configurações, `VfsStore`), `/var/log/syslog.txt` ("Salvar" do visualizador de
+`/etc/kitsune.conf` (configurações, `VfsStore`), `/var/log/syslog.txt` ("Salvar" do visualizador de
 log) e `/var/log/boot.log` (a thread `logd`, uma vez por boot, `klog::dump_bounded`), e a
 **plataforma de apps**: `/apps/<id>.wasm` (+ `/apps/.seeded`), `/data/<id>` e `/home`. Os apps não
 falam com o VFS: `kitsune_core::appfs::VolumeFs` é um adaptador `AppFs` sobre o mesmo `Backend`
@@ -1129,7 +1129,7 @@ redimensionar, mudar o zoom ou chegar uma imagem. Imagens e controles de formul�
 *objetos em linha* nas linhas de texto (alinhados à linha de base). `web::imgcache` (limites,
 decodificação para a página, cache LRU de 6 MiB), `web::form` (campos, edição, query GET, teclas
 mortas), `web::textops` (busca e seleção sobre a lista de desenho) e `web::find` são puros e
-testados; `browser::` ganhou favoritos (`BookmarkStore`), sugestões e páginas `osjeff://`.
+testados; `browser::` ganhou favoritos (`BookmarkStore`), sugestões e páginas `kitsune://`.
 Detalhes e provas em [`design/tls-browser.md`](design/tls-browser.md) §8. A roda do mouse é
 do sistema todo: `hw::ps2` decodifica pacotes de 3 e 4 bytes e `Desktop::handle_wheel` entrega
 a rolagem à janela sob o ponteiro.
@@ -1154,8 +1154,8 @@ do que existe no código.
 
 ### 10.1 Pacote, manifesto e instalação
 
-Um app é **um arquivo `.wasm`** com a seção customizada `osjeff.manifest` (texto `chave=valor`)
-e, opcionalmente, `osjeff.icon` (PNG até 64x64). O leitor de seções
+Um app é **um arquivo `.wasm`** com a seção customizada `kitsune.manifest` (texto `chave=valor`)
+e, opcionalmente, `kitsune.icon` (PNG até 64x64). O leitor de seções
 (`kitsune_core::wasmsec`, sem alocar, nunca entra em pânico) e o manifesto
 (`kitsune_core::appmanifest`: `id`, `name`, `version`, `abi`, `fs`, `net`, `clipboard`,
 `mem_mib`, `fuel_frame`, `disk_kib`, `max_fds`, `tick_ms`, janela) são puros e **fuzzados**

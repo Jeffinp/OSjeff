@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦀 OSJeff
+# 🦀 Kitsune
 
 ### An x86_64 operating system written **from scratch in Rust**: bare metal, no Linux underneath.
 
@@ -15,11 +15,11 @@
 
 [🇧🇷 Português](README.md) · **🇺🇸 English**
 
-<img src="docs/img/demo.gif" alt="OSjeff in action: the taskbar, the editor, Search, the calculator, light and dark" width="760">
+<img src="docs/img/demo.gif" alt="Kitsune in action: the taskbar, the editor, Search, the calculator, light and dark" width="760">
 
 </div>
 
-OSJeff is a `no_std` x86_64 kernel that boots straight from firmware (BIOS or UEFI)
+Kitsune is a `no_std` x86_64 kernel that boots straight from firmware (BIOS or UEFI)
 and brings up a full desktop: a preemptive scheduler, its own heap, interrupts, a
 compositor, a persistent filesystem, a TCP/IP stack with TLS, an HTML/CSS browser and
 a WebAssembly runtime for applications. It is a **study project** that has been
@@ -68,6 +68,9 @@ tools/run.sh                 # build and open QEMU (BIOS)
 tools/run.sh uefi            # same, UEFI
 ```
 
+> The repository is still named `OSjeff` on GitHub; the clone URL may change when it is renamed to `Kitsune` (GitHub redirects the old one).
+
+
 Windows with acceleration: `.\run.ps1`. Headless (CI): `tools/qemu-headless.sh bios /tmp/osj 25`.
 USB stick and real hardware: [`docs/BOOT-USB.md`](docs/BOOT-USB.md). Full guide,
 variants (DOOM) and troubleshooting: [`docs/BUILDING.md`](docs/BUILDING.md) (Portuguese).
@@ -84,7 +87,7 @@ variants (DOOM) and troubleshooting: [`docs/BUILDING.md`](docs/BUILDING.md) (Por
 | **Graphics** | Damage-tracking compositor, double buffering, own 8×8 font, alpha shadows, animations; performance HUD | `fb.rs`, `desktop/` |
 | **Apps** | Terminal (shell with ~55 commands, pipes, scripts, scrollback, history, Tab completion, `ping`/`nslookup`/`curl`), Editor (find/replace, undo, 16 MiB files, Open/Save dialogs), File manager (copy/move with progress, trash, Apps), Image viewer, Browser, Tarefas (activity monitor), Registro (log viewer), Ajustes (settings), Calculator, WebAssembly apps | `desktop/`, `kitsune_core` |
 | **Storage** | **OJFS v3**: metadata journal + copy-on-write data, extents, CRC32, `fsck` at boot, automatic v2 migration, block cache, ATA with `FLUSH`; the whole desktop reaches the disk through one VFS layer (with a RAM volume when there is no v3 disk) | `kitsune_core/src/{fs3,vfs,blockcache}`, `ata.rs`, `storage.rs` |
-| **System** | Persistent settings (`/etc/osjeff.conf`: accent colour, wallpaper, ABNT2 keyboard, time zone, clock), ring-buffer kernel log (`/var/log`), activity monitor, notifications, apps installed in `/apps` with data in `/data/<id>` | `kitsune_core/src/{settings,klog,sysmon,notify}.rs`, `kernel/src/desktop/` |
+| **System** | Persistent settings (`/etc/kitsune.conf`: accent colour, wallpaper, ABNT2 keyboard, time zone, clock), ring-buffer kernel log (`/var/log`), activity monitor, notifications, apps installed in `/apps` with data in `/data/<id>` | `kitsune_core/src/{settings,klog,sysmon,notify}.rs`, `kernel/src/desktop/` |
 | **Network** | `virtio-net` and NE2000 (`Nic` trait), own ARP/IPv4/ICMP/DHCP (renews the lease, answers and sends `ping`), DNS with a cache and several servers, `smoltcp` for TCP, **TLS 1.3** (`embedded-tls`) | `nic.rs`, `virtio_net.rs`, `ne2000.rs`, `netd.rs`, `netstack.rs`, `kitsune_core/src/{net,lease,dns,icmp}.rs` |
 | **Browser** | HTML parser, CSS (cascade), layout, PNG/BMP/PPM images, GET forms, bookmarks and suggestions, find in page, zoom, redirects, resource limits, connection indicator; mouse wheel system-wide | `kitsune_core/src/{web,browser,redirect}`; bookmarks persist in `/home/.bookmarks` |
 | **WebAssembly** | `wasmi` as the native app format: own ABI + a WASI subset, per-call *fuel*, 24 MiB memory cap, real app termination. Runs Snake; **DOOM** via `wasi-sdk` | `kernel/src/wasm/`, `wasm-apps/` |
@@ -184,7 +187,7 @@ Most documents are in Portuguese.
 ## 📁 Layout
 
 ```
-OSjeff/
+Kitsune/
 ├── kitsune_core/   # pure no_std logic, tested on the host (forbid(unsafe_code))
 ├── kernel/        # bare-metal x86_64-unknown-none: drivers, scheduler, compositor, wasm
 ├── os/            # builder: embeds the kernel and produces the BIOS/UEFI images

@@ -16,7 +16,7 @@ function Shot([string]$path) {
     Start-Sleep -Milliseconds 400
 }
 
-Shot 'F:\Projects\expo\OSjeff\.shots\frame_a.ppm'
+Shot (Join-Path $PSScriptRoot '..\.shots\frame_a.ppm')
 Start-Sleep -Seconds 4
-Shot 'F:\Projects\expo\OSjeff\.shots\frame_b.ppm'
+Shot (Join-Path $PSScriptRoot '..\.shots\frame_b.ppm')
 $c.Close()

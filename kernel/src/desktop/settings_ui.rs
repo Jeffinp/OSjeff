@@ -8,7 +8,7 @@
 //! page, finds what a click hit and what the pointer is over, so the three can never disagree
 //! about where a control is. [`Desktop::settings_apply`] makes a new `Settings` take effect
 //! at once (accent, appearance, keyboard, time zone, clock format, wallpaper, bar zoom) and
-//! stores it through the `SettingsStore` (`/etc/osjeff.conf`).
+//! stores it through the `SettingsStore` (`/etc/kitsune.conf`).
 
 use super::kit;
 use super::ui::{self, ButtonKind};
@@ -1272,7 +1272,7 @@ fn page_about(ui: &mut Ui<'_, '_>, d: &Desktop) {
         text::draw_left(
             c,
             Rect::new(head.x + 92, head.y + 6, head.w - 92, 32),
-            "OSjeff",
+            "Kitsune",
             TITLE1,
             Weight::Semibold,
             kit::ink(),
@@ -1388,7 +1388,7 @@ impl Desktop {
     /// Make `new` the settings in effect: accent, keyboard layout, time zone, clock format,
     /// bar zoom and toasts apply at once, a changed wallpaper or accent asks the compositor
     /// to repaint the background, and the text form is stored through the `SettingsStore`
-    /// (`/etc/osjeff.conf`).
+    /// (`/etc/kitsune.conf`).
     pub(crate) fn settings_apply(
         &mut self,
         new: Settings,
@@ -1434,7 +1434,7 @@ impl Desktop {
                 self.keymap.set_layout(s.layout);
                 crate::klog!(
                     Info,
-                    "settings: loaded {} bytes from osjeff.conf",
+                    "settings: loaded {} bytes from kitsune.conf",
                     text.len()
                 );
             }

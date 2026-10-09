@@ -1,3 +1,5 @@
+> *Written when the project was called OSjeff (renamed Kitsune in 2026-10; names and paths below are the historical ones).*
+
 # OSjeff — Relatório consolidado da auditoria (Fase 3, revisão independente)
 
 Branch `audit/performance-security`. Este documento consolida `00-mapa`, `01-memoria-unsafe`, `02-interrupcoes-scheduler`, `03-superficie-ataque`, `04-desempenho`, `05-qualidade-rust` e `adr-isolamento`. Escrito pelo revisor com o HEAD `50c4e16`; **atualizado depois da Fase 4** (correções do kernel e integração do 04): a coluna Status e a seção H refletem o estado final. O revisor não escreveu nenhum deles e tratou cada achado CRÍTICO/ALTO como hipótese até ver o trecho de código ou reproduzir.

@@ -4,6 +4,7 @@ mod basic;
 mod corrupt;
 mod crash;
 mod data;
+mod golden;
 mod migrate;
 mod model;
 

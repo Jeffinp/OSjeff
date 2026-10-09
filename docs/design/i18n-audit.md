@@ -1,4 +1,4 @@
-# Auditoria de textos do OSjeff (i18n)
+# Auditoria de textos do Kitsune (i18n)
 
 Gerado por `python3 -I tools/i18n-audit.py` (não edite à mão; `--check` confere se está em dia).
 Lista os literais de texto visíveis ao usuário em `kernel/src` e `kitsune_core/src`, por app, para que a
@@ -15,7 +15,7 @@ de falha ficam em inglês de propósito e não entram na conta.
 | App / área | Arquivos | Textos | Sem acento | Inglês | Misto | Já no catálogo |
 |---|---:|---:|---:|---:|---:|---:|
 | Shell (migrado nesta onda) | 3 | 6 | 0 | 0 | 0 | 106 |
-| Ajustes | 3 | 5 | 0 | 3 | 0 | 210 |
+| Ajustes | 3 | 6 | 0 | 3 | 0 | 210 |
 | Arquivos | 6 | 39 | 0 | 37 | 2 | 218 |
 | Editor | 1 | 9 | 0 | 9 | 0 | 49 |
 | Terminal | 5 | 12 | 0 | 1 | 0 | 262 |
@@ -26,9 +26,9 @@ de falha ficam em inglês de propósito e não entram na conta.
 | Navegador | 11 | 36 | 0 | 20 | 1 | 90 |
 | Apps de terceiros (WASM) | 8 | 46 | 0 | 40 | 1 | 83 |
 | Kit de componentes | 0 | 0 | 0 | 0 | 0 | 75 |
-| Sistema (logs e tela de falha: ficam em inglês) | 7 | 32 | 0 | 25 | 1 | 46 |
+| Sistema (logs e tela de falha: ficam em inglês) | 7 | 33 | 0 | 25 | 1 | 46 |
 | Outros | 4 | 12 | 0 | 5 | 1 | 63 |
-| **Total** | 54 | 247 | 0 | 173 | 16 | 1412 |
+| **Total** | 54 | 249 | 0 | 173 | 16 | 1412 |
 
 Cada app só mexe nos arquivos da sua linha; os arquivos de `Kit de componentes` e do `Shell` já
 foram tratados (Shell) ou só mudam se um app precisar de uma chave nova (use o prefixo do próprio app).
@@ -51,7 +51,7 @@ janela de Ajustes e o modelo de configurações.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `kernel/src/desktop/settings_ui.rs` | 1 | 0 | 0 | 0 |
+| `kernel/src/desktop/settings_ui.rs` | 2 | 0 | 0 | 0 |
 | `kitsune_core/src/settings.rs` | 1 | 0 | 0 | 0 |
 | `kitsune_core/src/wallpaper.rs` | 3 | 0 | 3 | 0 |
 
@@ -147,7 +147,7 @@ boot, falha grave, drivers.
 
 | Arquivo | Textos | Sem acento | Inglês | Misto |
 |---|---:|---:|---:|---:|
-| `kernel/src/boot.rs` | 1 | 0 | 0 | 0 |
+| `kernel/src/boot.rs` | 2 | 0 | 0 | 0 |
 | `kernel/src/crash.rs` | 8 | 0 | 2 | 1 |
 | `kernel/src/desktop/browser_ui.rs` | 1 | 0 | 1 | 0 |
 | `kernel/src/interrupts.rs` | 2 | 0 | 2 | 0 |
@@ -200,7 +200,7 @@ núcleo sem dono claro.
 | `kernel/src/main.rs:402` | `Desktop::new (fs load from ATA) done` | en |
 | `kernel/src/main.rs:410` | `wallpaper painted` | en |
 | `kernel/src/main.rs:722` | `the kernel panicked` | en |
-| `kernel/src/netstack.rs:700` | `tcp stream error` | en |
+| `kernel/src/netstack.rs:708` | `tcp stream error` | en |
 | `kernel/src/trace.rs:658` | `The quick brown fox jumps over the lazy dog 0123` | en |
 | `kernel/src/trace.rs:736` | `The quick brown fox jumps over the lazy dog 0123` | en |
 | `kernel/src/wasm/mod.rs:396` | `link host.draw_text` | en |
@@ -217,28 +217,28 @@ núcleo sem dono claro.
 | `kitsune_core/src/appfs/mod.rs:102` | `bad file descriptor` | en |
 | `kitsune_core/src/appfs/mod.rs:103` | `too many open files` | en |
 | `kitsune_core/src/appfs/mod.rs:104` | `i/o error` | en |
-| `kitsune_core/src/appfs/volume_tests.rs:347` | `id={id}\nname={id}\nversion=1.0.0\n{extra}` | en |
+| `kitsune_core/src/appfs/volume_tests.rs:350` | `id={id}\nname={id}\nversion=1.0.0\n{extra}` | en |
 | `kitsune_core/src/appinstall.rs:78` | `package is larger than 4 MiB` | en |
 | `kitsune_core/src/appinstall.rs:80` | `an app with this id is already installed` | en |
 | `kitsune_core/src/appinstall.rs:81` | `app is not installed` | en |
 | `kitsune_core/src/appinstall.rs:82` | `invalid app id` | en |
 | `kitsune_core/src/appinstall.rs:83` | `too many installed apps` | en |
 | `kitsune_core/src/appinstall.rs:84` | `file system: {e}` | en |
-| `kitsune_core/src/appmanifest.rs:168` | `manifest is too large` | en |
-| `kitsune_core/src/appmanifest.rs:169` | `manifest is not valid UTF-8` | en |
-| `kitsune_core/src/appmanifest.rs:170` | `manifest has too many lines` | en |
-| `kitsune_core/src/appmanifest.rs:171` | `manifest syntax error` | en |
-| `kitsune_core/src/appmanifest.rs:173` | `unknown manifest key` | en |
-| `kitsune_core/src/appmanifest.rs:174` | `manifest key '{k}' is required` | en |
-| `kitsune_core/src/appmanifest.rs:175` | `invalid value for '{k}'` | en |
-| `kitsune_core/src/appmanifest.rs:176` | `'{k}' is above the system limit` | en |
-| `kitsune_core/src/appmanifest.rs:686` | `icon is larger than 64 KiB` | en |
-| `kitsune_core/src/appmanifest.rs:687` | `icon is not a PNG` | en |
-| `kitsune_core/src/appmanifest.rs:688` | `icon is larger than 64x64` | en |
-| `kitsune_core/src/appmanifest.rs:689` | `icon PNG is corrupt` | en |
-| `kitsune_core/src/appmanifest.rs:742` | `package has no osjeff.manifest section` | misto |
-| `kitsune_core/src/appmanifest.rs:743` | `package has two manifests` | en |
-| `kitsune_core/src/appmanifest.rs:744` | `package has two icons` | en |
+| `kitsune_core/src/appmanifest.rs:173` | `manifest is too large` | en |
+| `kitsune_core/src/appmanifest.rs:174` | `manifest is not valid UTF-8` | en |
+| `kitsune_core/src/appmanifest.rs:175` | `manifest has too many lines` | en |
+| `kitsune_core/src/appmanifest.rs:176` | `manifest syntax error` | en |
+| `kitsune_core/src/appmanifest.rs:178` | `unknown manifest key` | en |
+| `kitsune_core/src/appmanifest.rs:179` | `manifest key '{k}' is required` | en |
+| `kitsune_core/src/appmanifest.rs:180` | `invalid value for '{k}'` | en |
+| `kitsune_core/src/appmanifest.rs:181` | `'{k}' is above the system limit` | en |
+| `kitsune_core/src/appmanifest.rs:691` | `icon is larger than 64 KiB` | en |
+| `kitsune_core/src/appmanifest.rs:692` | `icon is not a PNG` | en |
+| `kitsune_core/src/appmanifest.rs:693` | `icon is larger than 64x64` | en |
+| `kitsune_core/src/appmanifest.rs:694` | `icon PNG is corrupt` | en |
+| `kitsune_core/src/appmanifest.rs:747` | `package has no kitsune.manifest section` | misto |
+| `kitsune_core/src/appmanifest.rs:748` | `package has two manifests` | en |
+| `kitsune_core/src/appmanifest.rs:749` | `package has two icons` | en |
 | `kitsune_core/src/base64.rs:29` | `invalid base64 character` | en |
 | `kitsune_core/src/base64.rs:30` | `invalid base64 length` | en |
 | `kitsune_core/src/base64.rs:31` | `base64 padding before the end` | en |
@@ -397,11 +397,12 @@ decida caso a caso se vão para o catálogo.
 
 ### Ajustes
 
-**`kernel/src/desktop/settings_ui.rs`** (1)
+**`kernel/src/desktop/settings_ui.rs`** (2)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 814 | `UTC {:02}:{:02}:{:02}` | neutro | `settings.utc_02_02_02` |
+| 1275 | `Kitsune` | neutro | `settings.kitsune` |
 
 **`kitsune_core/src/settings.rs`** (1)
 
@@ -640,16 +641,16 @@ decida caso a caso se vão para o catálogo.
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 700 | `tcp stream error` | en | `web.tcp_stream_error` |
+| 708 | `tcp stream error` | en | `web.tcp_stream_error` |
 
 **`kitsune_core/src/browser.rs`** (4)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 931 | `&amp;` | neutro | `web.amp` |
-| 932 | `&lt;` | neutro | `web.lt` |
-| 933 | `&gt;` | neutro | `web.gt` |
-| 934 | `&quot;` | neutro | `web.quot` |
+| 953 | `&amp;` | neutro | `web.amp` |
+| 954 | `&lt;` | neutro | `web.lt` |
+| 955 | `&gt;` | neutro | `web.gt` |
+| 956 | `&quot;` | neutro | `web.quot` |
 
 **`kitsune_core/src/browser/body_tests.rs`** (1)
 
@@ -764,7 +765,7 @@ decida caso a caso se vão para o catálogo.
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
 | 113 | `readdir {i} => {:?}` | neutro | `apps.readdir_i` |
-| 347 | `id={id}\nname={id}\nversion=1.0.0\n{extra}` | en | `apps.id_id_name_id` |
+| 350 | `id={id}\nname={id}\nversion=1.0.0\n{extra}` | en | `apps.id_id_name_id` |
 
 **`kitsune_core/src/appinstall.rs`** (6)
 
@@ -781,22 +782,22 @@ decida caso a caso se vão para o catálogo.
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
-| 168 | `manifest is too large` | en | `apps.manifest_is_too_large` |
-| 169 | `manifest is not valid UTF-8` | en | `apps.manifest_is_not_valid` |
-| 170 | `manifest has too many lines` | en | `apps.manifest_has_too_many` |
-| 171 | `manifest syntax error` | en | `apps.manifest_syntax_error` |
-| 172 | `duplicate manifest key '{k}'` | neutro | `apps.duplicate_manifest_key_k` |
-| 173 | `unknown manifest key` | en | `apps.unknown_manifest_key` |
-| 174 | `manifest key '{k}' is required` | en | `apps.manifest_key_k_is` |
-| 175 | `invalid value for '{k}'` | en | `apps.invalid_value_for_k` |
-| 176 | `'{k}' is above the system limit` | en | `apps.k_is_above_system` |
-| 686 | `icon is larger than 64 KiB` | en | `apps.icon_is_larger_than` |
-| 687 | `icon is not a PNG` | en | `apps.icon_is_not_png` |
-| 688 | `icon is larger than 64x64` | en | `apps.icon_is_larger_than_2` |
-| 689 | `icon PNG is corrupt` | en | `apps.icon_png_is_corrupt` |
-| 742 | `package has no osjeff.manifest section` | misto | `apps.package_has_no_osjeff` |
-| 743 | `package has two manifests` | en | `apps.package_has_two_manifests` |
-| 744 | `package has two icons` | en | `apps.package_has_two_icons` |
+| 173 | `manifest is too large` | en | `apps.manifest_is_too_large` |
+| 174 | `manifest is not valid UTF-8` | en | `apps.manifest_is_not_valid` |
+| 175 | `manifest has too many lines` | en | `apps.manifest_has_too_many` |
+| 176 | `manifest syntax error` | en | `apps.manifest_syntax_error` |
+| 177 | `duplicate manifest key '{k}'` | neutro | `apps.duplicate_manifest_key_k` |
+| 178 | `unknown manifest key` | en | `apps.unknown_manifest_key` |
+| 179 | `manifest key '{k}' is required` | en | `apps.manifest_key_k_is` |
+| 180 | `invalid value for '{k}'` | en | `apps.invalid_value_for_k` |
+| 181 | `'{k}' is above the system limit` | en | `apps.k_is_above_system` |
+| 691 | `icon is larger than 64 KiB` | en | `apps.icon_is_larger_than` |
+| 692 | `icon is not a PNG` | en | `apps.icon_is_not_png` |
+| 693 | `icon is larger than 64x64` | en | `apps.icon_is_larger_than_2` |
+| 694 | `icon PNG is corrupt` | en | `apps.icon_png_is_corrupt` |
+| 747 | `package has no kitsune.manifest section` | misto | `apps.package_has_no_kitsune` |
+| 748 | `package has two manifests` | en | `apps.package_has_two_manifests` |
+| 749 | `package has two icons` | en | `apps.package_has_two_icons` |
 
 **`kitsune_core/src/wasmsec.rs`** (5)
 
@@ -810,10 +811,11 @@ decida caso a caso se vão para o catálogo.
 
 ### Sistema (logs e tela de falha: ficam em inglês)
 
-**`kernel/src/boot.rs`** (1)
+**`kernel/src/boot.rs`** (2)
 
 | Linha | Texto | Idioma | Chave proposta |
 |---:|---|---|---|
+| 48 | `Kitsune` | neutro | `sys.kitsune` |
 | 57 | `Sistema operacional` | pt | `sys.sistema_operacional` |
 
 **`kernel/src/crash.rs`** (8)

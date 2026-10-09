@@ -1001,11 +1001,11 @@ fn custom_commands_can_be_registered() {
 #[test]
 fn prompt_shows_cwd_and_home_tilde() {
     let mut t = T::with_files();
-    assert_eq!(t.sh.prompt(&t.fs, &t.sys), "user@osjeff:/$ ");
+    assert_eq!(t.sh.prompt(&t.fs, &t.sys), "user@kitsune:/$ ");
     t.run("cd d");
-    assert_eq!(t.sh.prompt(&t.fs, &t.sys), "user@osjeff:/d$ ");
+    assert_eq!(t.sh.prompt(&t.fs, &t.sys), "user@kitsune:/d$ ");
     t.sh.env.set("HOME", "/d");
-    assert_eq!(t.sh.prompt(&t.fs, &t.sys), "user@osjeff:~$ ");
+    assert_eq!(t.sh.prompt(&t.fs, &t.sys), "user@kitsune:~$ ");
     t.sh.env.set("PS1", "[\\W] \\\\ \\x ");
     assert_eq!(t.sh.prompt(&t.fs, &t.sys), "[d] \\ \\x ");
 }

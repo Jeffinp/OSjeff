@@ -316,7 +316,7 @@ fn exercise(data: &[u8]) {
         for html in [
             pages::bookmarks(&bm),
             pages::bookmarks(&[]),
-            pages::history(&[raw.to_vec(), text.clone().into_bytes(), b"osjeff://sobre".to_vec()]),
+            pages::history(&[raw.to_vec(), text.clone().into_bytes(), b"kitsune://sobre".to_vec()]),
             pages::about(),
         ] {
             check_page(&Doc::parse(&html).layout(&Layout {
@@ -347,7 +347,7 @@ fn exercise(data: &[u8]) {
             6 => br.back(),
             7 => br.forward(),
             8 => {
-                br.open(b"osjeff://historico");
+                br.open(b"kitsune://historico");
                 if let Some(h) = br.take_internal() {
                     let d = Doc::parse(&h);
                     check_page(&d.layout(&Layout {

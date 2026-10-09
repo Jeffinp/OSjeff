@@ -1,6 +1,6 @@
 # Compilar e rodar
 
-Este guia leva do `git clone` a um desktop OSjeff na tela, em Linux, WSL, macOS
+Este guia leva do `git clone` a um desktop Kitsune na tela, em Linux, WSL, macOS
 (só QEMU) ou Windows. Todos os comandos foram executados de verdade nesta árvore.
 
 ## 1. Pré-requisitos
@@ -110,8 +110,8 @@ Freedoom serve). Use 512 MB de RAM no QEMU.
 
 ### Como criar um app
 
-Um app é **um arquivo `.wasm`**: o código mais uma seção `osjeff.manifest` (e, se quiser,
-`osjeff.icon`). Passo a passo com o SDK (`wasm-apps/sdk`, `no_std`, sem dependências):
+Um app é **um arquivo `.wasm`**: o código mais uma seção `kitsune.manifest` (e, se quiser,
+`kitsune.icon`). Passo a passo com o SDK (`wasm-apps/sdk`, `no_std`, sem dependências):
 
 1. **Crie a crate** em `wasm-apps/meuapp/` (workspace isolado, como as outras):
 

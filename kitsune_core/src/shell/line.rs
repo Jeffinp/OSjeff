@@ -937,13 +937,13 @@ mod tests {
 
     #[test]
     fn display_shows_prompt_and_cursor_column() {
-        let mut e = LineEditor::new("user@osjeff:/$ ");
+        let mut e = LineEditor::new("user@kitsune:/$ ");
         type_str(&mut e, "ls");
         let (t, col) = e.display();
-        assert_eq!(t, "user@osjeff:/$ ls");
-        assert_eq!(col, 17);
+        assert_eq!(t, "user@kitsune:/$ ls");
+        assert_eq!(col, 18);
         press(&mut e, KeyCode::Left);
-        assert_eq!(e.display().1, 16);
+        assert_eq!(e.display().1, 17);
         e.set_prompt("> ");
         assert_eq!(e.display().0, "> ls");
     }

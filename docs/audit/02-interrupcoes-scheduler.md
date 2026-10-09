@@ -1,3 +1,5 @@
+> *Written when the project was called OSjeff (renamed Kitsune in 2026-10; names and paths below are the historical ones).*
+
 # Auditoria 02 — Interrupções, scheduler e troca de contexto
 
 Escopo: `kernel/src/switch.s`, `sched.rs`, `interrupts.rs`, `io.rs`, `ps2.rs`, `main.rs`, `boot.rs`, `sync.rs`

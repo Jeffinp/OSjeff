@@ -1,8 +1,8 @@
-# Launch OSjeff in QEMU with a QMP control socket, wait for boot, and grab a
+# Launch Kitsune in QEMU with a QMP control socket, wait for boot, and grab a
 # screenshot via `screendump`. Leaves QEMU running (PID in .shots/qemu.pid) so
 # further shots / input can be sent. Driven from WSL via powershell.exe.
 param(
-    [string]$Out = "F:\Projects\expo\OSjeff\.shots\desktop.ppm",
+    [string]$Out = (Join-Path $PSScriptRoot "..\.shots\desktop.ppm"),
     [int]$Delay = 10,
     [switch]$VirtioGpu   # use -device virtio-vga (for virtio-gpu driver bring-up)
 )

@@ -1,6 +1,6 @@
 # Inject mouse clicks via QMP, then screendump — used to prove the interactive
 # WASM app reacts to input. Clicks the three counter cards a few times each.
-param([string]$Out = "F:\Projects\expo\OSjeff\.shots\shot.ppm")
+param([string]$Out = (Join-Path $PSScriptRoot "..\.shots\shot.ppm"))
 $ErrorActionPreference = 'Stop'
 $c = New-Object System.Net.Sockets.TcpClient
 $c.Connect('127.0.0.1', 4444)

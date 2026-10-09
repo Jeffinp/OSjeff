@@ -1,4 +1,4 @@
-# Plataforma de apps do OSjeff (WebAssembly)
+# Plataforma de apps do Kitsune (WebAssembly)
 
 Estado: **implementado** (W13) e **ligado ao disco e à rede reais** (W18: §5, §7 e §8 dizem o
 que mudou; a seção "O que vira teste" lista o que cada parte prova). Escopo: transformar o WebAssembly (hoje: um app embutido, preso à
@@ -11,7 +11,7 @@ host e fuzzado). O kernel só liga: instâncias `wasmi`, threads, pixels.
 
 ```
 kitsune_core::wasmsec      leitor seguro de seções do binário .wasm (nunca panica)
-kitsune_core::appmanifest  manifesto `osjeff.manifest` + ícone `osjeff.icon` + política de quotas
+kitsune_core::appmanifest  manifesto `kitsune.manifest` + ícone `kitsune.icon` + política de quotas
 kitsune_core::appfs        caminhos, trait AppFs, MemFs (testes), VolumeFs (o volume OJFS v3), Sandbox (raiz por app, descritores, cota)
 kitsune_core::appnet       política de rede: URL, filtro de destinos, limites
 kitsune_core::appabi       constantes da ABI v2 (erros, flags), validação de ponteiros do guest
@@ -26,8 +26,8 @@ qualquer runtime ignora:
 
 | Seção | Conteúdo | Obrigatória |
 |---|---|---|
-| `osjeff.manifest` | texto UTF-8, `chave=valor` por linha | sim (para instalar) |
-| `osjeff.icon` | um PNG (até 64x64, RGBA/paleta/cinza; decodificado com `kitsune_core::image`) | não |
+| `kitsune.manifest` | texto UTF-8, `chave=valor` por linha | sim (para instalar) |
+| `kitsune.icon` | um PNG (até 64x64, RGBA/paleta/cinza; decodificado com `kitsune_core::image`) | não |
 
 Sem JSON nem serde. O leitor de seções (`wasmsec`) é a única porta de entrada do binário
 não confiável antes do `wasmi`: confere o cabeçalho (`\0asm` + versão 1), caminha pelas seções
@@ -87,6 +87,10 @@ decide o que fazer. Não existe permissão que dê acesso ao disco inteiro, ao F
 `/apps`, a `/data/<outro-id>` ou a memória do kernel.
 
 ## 4. ABI v2 (módulo de import `osj`)
+
+> `osj` é uma abreviação histórica (do tempo em que o sistema se chamava OSjeff) e **fica como o nome do módulo**:
+> trocá-lo quebraria todo `.wasm` já compilado. As seções de metadados passaram a se chamar `kitsune.manifest` e
+> `kitsune.icon`; o instalador ainda aceita `osjeff.manifest` e `osjeff.icon`.
 
 O módulo `host` (v1: `log`, `fill_rect`, `draw_text`, `blit`, `time_ms`, mais o subconjunto
 WASI) segue **idêntico** para snake, plasma, DOOM e `cdemo`. Um app `abi=2` importa `osj.*`;
@@ -316,7 +320,7 @@ compositor, o navegador e o resto do sistema seguem. Retomar a chamada de forma 
 
 `wasm-apps/sdk` (crate `no_std`, `wasm32-unknown-unknown`, workspace isolado): `sys` (imports
 `osj.*` crus), wrappers seguros (`Canvas`, `File`, `Dir`, `log!`, `Error`), o macro
-`manifest!("id=clock\nname=Clock\nname.pt=Relógio\n...")` que emite `#[link_section = "osjeff.manifest"]`
+`manifest!("id=clock\nname=Clock\nname.pt=Relógio\n...")` que emite `#[link_section = "kitsune.manifest"]`
 (e `icon!(include_bytes!(...))`), e o `panic_handler`. Apps: `hello`, `clock`, `notes`
 (arquivos em `/`, ou seja `/data/notes/`), `paint` (mouse; salva BMP pelo host? não: o guest
 escreve um BMP de 24 bits direto com `fs_write`, formato trivial), mais `snake` e `plasma`

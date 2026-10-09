@@ -1,6 +1,6 @@
 # W23: Arquivos (Finder-inspired file manager): list, icons, preview, search, selection, drag and
 # drop, rename, menus, sheets, empty states. Needs a prepared disk (FS_IMG) with /Imagens/*.png,
-# /Documentos, /Projetos, /big.bin, /leiame.txt and /etc/osjeff.conf (appearance=light|dark);
+# /Documentos, /Projetos, /big.bin, /leiame.txt and /etc/kitsune.conf (appearance=light|dark);
 # see docs/TESTING.md, "Arquivos e Imagens (W23)".
 #   FS_IMG=<disk.img> QEMU_MEM=256M tools/perf/run.sh <img> bios <out> 200 tools/perf/scen/w23-files.sh
 source "$(dirname "$0")/../lib.sh"

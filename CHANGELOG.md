@@ -1,7 +1,25 @@
 # Changelog
 
-Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
-tem releases versionadas; as seções são marcos na `master`.
+Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O Kitsune (antes OSjeff; veja a primeira
+seção) não tem releases versionadas; as seções são marcos na `master`. As seções anteriores ao
+renomeio mantêm o nome da época.
+
+## 2026-10 — O sistema passa a se chamar Kitsune (W33)
+
+- **Nome.** OSjeff vira **Kitsune** (a raposa de nove caudas do folclore japonês). Detalhes do nome em
+  `docs/brand/NAMING.md`.
+- **Renomeado:** o crate `osjeff_core` virou `kitsune_core` (diretório incluso), as imagens `osjeff-bios.img` e
+  `osjeff-uefi.img` viram `kitsune-bios.img` e `kitsune-uefi.img`, e os scripts, o CI, o fuzzing, os benchmarks e o SDK dos
+  apps acompanham. Todo texto visível, o `User-Agent` (`Kitsune/<versão>`), o nome de máquina padrão (`kitsune`) e os
+  catálogos de idioma usam o nome novo.
+- **Protocolos e formatos:** `osjeff://` vira `kitsune://`; `/etc/osjeff.conf` vira `/etc/kitsune.conf`; as seções
+  WASM `osjeff.manifest` e `osjeff.icon` viram `kitsune.manifest` e `kitsune.icon`.
+- **Compatibilidade mantida:** o navegador ainda entende `osjeff://` (e mostra o endereço novo); o arquivo de
+  configuração antigo é lido quando o novo não existe e some no primeiro salvamento; pacotes de apps com as seções
+  antigas continuam instalando; o módulo de importação `osj` dos apps não muda (abreviação histórica).
+- **Disco:** o formato em disco (`OJF2`, `OJF3`) não mudou, discos antigos montam como antes (teste com imagens
+  geradas pelo formatador anterior). O nome do formato, OJFS, é histórico e pode mudar numa revisão futura.
+
 
 ## 2026-10 — Terminal, Tarefas, Registro e Calculadora em dois idiomas (W31)
 
