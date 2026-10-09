@@ -129,3 +129,10 @@ path = "fuzz_targets/entropy_api.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "i18n_format"
+path = "fuzz_targets/i18n_format.rs"
+test = false
+doc = false
+bench = false

@@ -632,6 +632,15 @@ superfície abre, e `ui.rs`/`gallery.rs` são o toolkit e sua vitrine. A janela 
 banners e o HUD usam o mesmo vidro. Aparência (automática pelo relógio, clara, escura), cor de
 destaque e *reduzir movimento* vêm de `osjeff_core::settings` e valem na hora.
 
+**Idiomas (`osjeff_core::i18n`).** Todo texto do shell sai de catálogos `chave = valor`
+(`assets/i18n/pt.txt` e `en.txt`) compilados em tabelas ordenadas por uma `const fn`; a consulta
+(`t!`, `tp!`) cai do idioma atual para o inglês e depois para a própria chave, sem alocar. O idioma
+é `Settings::lang`; `Desktop::language_changed` (`desktop/lang.rs`) refaz títulos de janela e
+camadas transitórias e pede repintura total. Datas, números, tamanhos e plurais seguem o idioma.
+A tela de falha e os logs ficam em inglês. Projeto, convenções, guia de tradução e como acrescentar
+um idioma: [`docs/design/i18n.md`](design/i18n.md); o que falta migrar:
+[`docs/design/i18n-audit.md`](design/i18n-audit.md).
+
 ## 7. Apps e window manager
 
 ### 7.1 Janelas e instâncias

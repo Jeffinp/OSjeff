@@ -42,6 +42,15 @@ Leia a tabela com cuidado: a coluna **Cover** à esquerda é de *regiões*; a de
 então a cobertura de **código de produção** é menor (~88% na auditoria). O CI
 falha abaixo de 90% de linhas.
 
+### Idiomas (`cargo test -p osjeff_core i18n`)
+
+Confere os dois catálogos (mesmas chaves e marcadores, plurais completos), as chaves usadas em
+`kernel/` e `osjeff_core/` (nenhuma faltando, nenhuma sobrando), os acentos do português
+(`tools/i18n/accents.txt`, ~190 palavras e sufixos) nos catálogos e nos literais dos arquivos já migrados,
+a cobertura de glifos das quatro fontes e os formatadores (números, tamanhos, datas, plurais).
+`cargo test -p osjeff_core i18n_report -- --ignored --nocapture` lista os literais sem acento do resto da
+árvore; `python3 -I tools/i18n-audit.py --check` confere `docs/design/i18n-audit.md`.
+
 ## 2. Fuzzing
 
 Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
@@ -62,6 +71,7 @@ Alvos em `fuzz/fuzz_targets/` (crate independente, fora do workspace):
 
 | `http_body` | `[modo, corte(2 B), ...bytes]`: os bytes como resposta HTTP inteira, como corpo sob cabeçalhos hostis (`gzip, gzip, deflate`, `br`, `Content-Length` enorme...), em leitura parcial do `Inflater`, e (modo `0x10`) comprimidos por nosso codificador (gzip, zlib, deflate cru, gzip em cadeia, `chunked`), **cortados** em qualquer ponto | `browser::body_partial`/`page_body_partial`/`body_bytes`, `appnet::app_response`, `Inflater::read_partial`. Invariantes: nunca pânico, corpo <= `MAX_DECODED_BYTES`, um fluxo válido cortado decodifica para **prefixo do original** e inteiro decodifica exato e sem aviso (regressões: `fuzz/regressions/http_body/`) |
 | `app_manifest` | bytes como `.wasm` inteiro, como payload de `osjeff.manifest` ou de `osjeff.icon` (embrulhado numa seção válida), ou como manifesto/ícone soltos | `wasmsec` (cabeçalho, seções, LEB128), `appmanifest` (chaves, quotas, `net_hosts`, ícone PNG até 64x64) e as invariantes do manifesto aceito (inclui: `net_hosts` limitado, só com permissão de rede, nunca admite o que o filtro de destinos recusa) |
+| `i18n_format` | `[modo, idioma, ...bytes]`: modelos de mensagem hostis (chaves desbalanceadas, nomes enormes, índices posicionais), números/tamanhos crus, datas fora de faixa, chaves e etiquetas de idioma arbitrárias | `osjeff_core::i18n`: nunca pânico, saída limitada, números só com dígitos e separadores, todo texto do catálogo formata com argumentos hostis |
 | `entropy_api` | sequência de operações (`add` com id e crédito declarado quaisquer, timestamps, `fill` de qualquer tamanho, reseed, relógio) | `osjeff_core::entropy`: nunca pânico; crédito por fonte <= 8 bits por byte e nunca decrescente; nota nunca decrescente e timing sozinho nunca Strong; crédito na chave <= 256 por classe; nenhuma saída de 32 bytes se repete |
 | `app_sandbox` | sequência de operações com caminhos em bytes crus sobre dois apps que dividem um `MemFs` **ou** um `VolumeFs` sobre um OJFS v3 de 1 MiB em RAM (o primeiro bool escolhe; mais URLs) | `appfs` (normalização, `Sandbox`, `VolumeFs`, cota, descritores) e `appnet`: nada existe fora de `/data/<id>`, os arquivos do sistema e do usuário ficam intactos, a cota vale, `fsck` limpo, URL aceita nunca é local |
 
@@ -82,6 +92,7 @@ cargo fuzz run http_body -- -max_total_time=600 -print_final_stats=1
 
 cargo fuzz run app_manifest -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run app_sandbox -- -max_total_time=600 -print_final_stats=1
+cargo fuzz run i18n_format -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run entropy_api -- -max_total_time=600 -print_final_stats=1
 cargo fuzz run html_img_form -- -max_total_time=600 -print_final_stats=1
 ```

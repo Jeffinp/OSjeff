@@ -28,6 +28,9 @@ que vem de fora é fuzzado, e o projeto passou por uma
 [auditoria completa de segurança e desempenho](docs/audit/RELATORIO.md) cujos achados
 estão corrigidos ou documentados.
 
+**Idiomas da interface:** português do Brasil (padrão) e inglês, trocados ao vivo em *Ajustes > Idioma e região*
+(catálogos em `assets/i18n/`, projeto em [`docs/design/i18n.md`](docs/design/i18n.md)).
+
 > **Honestidade primeiro.** Tudo roda em ring 0, sem isolamento; o HTTPS **verifica a cadeia de certificado**
 > (sem revogação nem HSTS); nada foi testado em hardware real. Veja
 > a seção "Limites conhecidos" abaixo e o [modelo de segurança](docs/SECURITY-MODEL.md).

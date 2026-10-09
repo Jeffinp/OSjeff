@@ -3,6 +3,20 @@
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O OSjeff não
 tem releases versionadas; as seções são marcos na `master`.
 
+## 2026-10 — Idiomas e acentos (W28)
+
+- **Português do Brasil e inglês**, trocados ao vivo em *Ajustes > Idioma e região* (nova seção, cada opção no
+  próprio idioma, formato da hora "pelo idioma / 24 h / 12 h" e uma dica, sem troca forçada, para usar o teclado
+  ABNT2). `language=` e `clock=auto` entram no arquivo de configurações; arquivos antigos continuam valendo.
+- `osjeff_core::i18n`: catálogos `chave = valor` (`assets/i18n/`) compilados por uma `const fn`, consulta com
+  reserva (idioma, inglês, a chave) sem alocar, marcadores `{nome}` tipados, plurais (`pt`: 0 e 1 no singular),
+  números, tamanhos, datas e horas por idioma, macros `t!`/`tp!`/`tk!`. Um idioma novo é só um arquivo de texto.
+- Painel, menus, configurações rápidas, calendário, barra de apps, Apps, Busca, folha de energia, banners e a
+  lateral de Ajustes saem do catálogo. A tela de falha e os logs ficam em inglês.
+- Testes que acusam chave faltando ou sobrando, marcador diferente, plural incompleto, **palavra sem acento**
+  (lista de ~190) e glifo ausente nas fontes; alvo de fuzz `i18n_format`; `tools/i18n-audit.py` e
+  `docs/design/i18n-audit.md` listam o que falta migrar, por app.
+
 ## 2026-10 — Os apps do sistema (W25)
 
 - **Tarefas** reúne o Gerenciador de tarefas e o Monitor de recursos num monitor de atividade com

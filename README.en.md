@@ -28,6 +28,9 @@ for everything that comes from outside are fuzzed, and the project went through 
 [full security and performance audit](docs/audit/RELATORIO.md) whose findings are
 fixed or documented. (Audit documents are in Portuguese.)
 
+**Interface languages:** Brazilian Portuguese (default) and English, switched live in *Settings > Language & region*
+(catalogs in `assets/i18n/`, design in [`docs/design/i18n.md`](docs/design/i18n.md)).
+
 > **Honesty first.** Everything runs in ring 0 with no isolation; HTTPS **verifies the certificate chain**
 > (no revocation checking, no HSTS); nothing has been tested on real hardware. See
 > the "Known limits" section below and the [security model](docs/SECURITY-MODEL.md).
