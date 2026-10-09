@@ -1,5 +1,14 @@
-//! Ajustes, the settings app.
+//! Ajustes, the settings app: a sidebar of sections and an immediate-mode page per section.
+//!
+//! `state` holds the window state, `builder` the row / switch / slider widgets, `pages/` one
+//! file per group of sections, `actions` what applying a setting does, `input` the events and
+//! `paint` the window.
 
-pub(super) mod logic;
+mod actions;
+mod builder;
+mod input;
+mod pages;
+mod paint;
+mod state;
 
-pub(crate) use logic::{ABOUT, SettingsState};
+pub(crate) use state::{ABOUT, SettingsState};
