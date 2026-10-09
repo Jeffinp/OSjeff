@@ -49,6 +49,7 @@ pub mod inflate;
 pub mod input;
 pub mod keymap;
 pub mod klog;
+pub mod launcher;
 pub mod layout;
 pub mod lease;
 pub mod net;

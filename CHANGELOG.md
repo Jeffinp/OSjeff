@@ -63,6 +63,11 @@ tem releases versionadas; as seções são marcos na `master`.
   interno e sombras menores. A galeria (`Ctrl+Alt+G`) ganhou a aba *Shell* com botões de janela,
   blocos, indicadores, encaixe e ponteiros.
 
+- **Apps com trilho de categorias.** Trilho à esquerda (Todos, Sistema, Internet, Mídia,
+  Utilitários, com a contagem de cada uma), busca no topo, linha **Recentes** (os cinco últimos apps
+  abertos) e a grade; `Ctrl`+setas percorrem o trilho. Categorias numa tabela embutida e filtro,
+  ranking e recentes puros em `osjeff_core::launcher`.
+
 ## 2026-10 — Nova interface (W22)
 
 - **Visual novo, claro e escuro.** Barra de menus com menu do sistema, nome e menus do app em

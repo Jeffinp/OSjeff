@@ -203,9 +203,12 @@ the real font.
   minimises; Shift+click opens a new window; dragging a pinned icon reorders it (the others slide);
   a right click lists the app's windows with *Nova janela*, *Fixar / Desafixar* and *Fechar*.
   The surface is a plain translucent tint (nothing is blurred). `Ctrl+Alt+D` also shows the desktop.
-* **Apps** (`Apps` button): the wallpaper and windows blurred behind a grid of every app
-  (system and installed) with a search field; type to filter, arrows move, Enter opens,
-  the wheel scrolls, Esc closes.
+* **Apps** (`Apps` button in the panel or on the taskbar): the wallpaper and windows blurred behind
+  a **left category rail** (Todos, Sistema, Internet, Mídia, Utilitários, each with its count), the
+  search field on top of the content, a **Recentes** row (the last five apps launched, on *Todos*
+  with an empty search) and the grid of every app (system and installed). Type to filter (a search
+  looks at every category), arrows move, `Ctrl`+arrows walk the rail, Enter opens, the wheel
+  scrolls, Esc closes. Categories come from a built-in table (`osjeff_core::launcher`).
 * **Busca** (`Ctrl+Space`, or the bar's magnifier): apps, files of the volume (at most 600
   entries, five levels, indexed when it opens) and arithmetic (`12*(3+4)` shows `= 84`,
   Enter copies it).

@@ -620,7 +620,8 @@ quadro (algumas dezenas de valores).
   animação (`has_animation`) ou volta a custar zero.
 - **Cromo e shell** (`chrome`, `widgets`, `style`, `search`, `iconart`): geometria do painel
   superior (itens à esquerda, relógio centralizado, pílula de status), dos menus, da barra de tarefas
-  (`taskbar`: disposição, hit test, indicadores, reordenação), do Apps, da Busca, dos popovers (Configurações rápidas,
+  (`taskbar`: disposição, hit test, indicadores, reordenação), do Apps (`launcher` e
+  `chrome::launcher_grid`: trilho de categorias, recentes, filtro), da Busca, dos popovers (Configurações rápidas,
   calendário com centro de notificações) e dos banners; paletas clara e escura; o ranqueamento e a calculadora da Busca; os
   ícones e glifos vetoriais.
 

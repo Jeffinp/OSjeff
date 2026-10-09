@@ -82,6 +82,11 @@ impl TaskbarState {
 }
 
 impl Kind {
+    /// The key the launcher's *Recentes* remembers a built-in app by.
+    pub(crate) fn recent_key(self) -> String {
+        alloc::format!("sys:{}", self.proc_name())
+    }
+
     /// Can the app be pinned to the bar?
     pub(crate) fn pinnable(self) -> bool {
         !matches!(self, Kind::WasmApp | Kind::Gallery)
@@ -312,6 +317,9 @@ impl Desktop {
         }
         match tb::click_action(self.kind_running(kind), self.kind_focused(kind)) {
             Click::Launch | Click::Focus => {
+                if kind != Kind::WasmApp {
+                    self.shell.recents.note(&kind.recent_key());
+                }
                 self.launch(kind);
             }
             Click::Minimize => {

@@ -157,11 +157,17 @@ pub(crate) struct Tile {
     pub label: String,
     pub target: Target,
     pub icon: Surface,
+    /// Its category in the rail and the key *Recentes* remembers it by.
+    pub cat: osjeff_core::launcher::Category,
+    pub key: String,
 }
 
 /// The Apps overlay: every app in a grid with a search field.
 pub(crate) struct AppsView {
     pub tiles: Vec<Tile>,
+    /// The rail's selection (index into `launcher::CATEGORIES`) and the row under the pointer.
+    pub cat: usize,
+    pub rail_hover: Option<usize>,
     pub query: String,
     /// Indices into `tiles` matching `query`.
     pub shown: Vec<usize>,
@@ -227,6 +233,8 @@ pub(crate) struct Shell {
     pub notifs: Vec<super::panel::Notif>,
     pub notif_seen: u32,
     pub notif_unread: usize,
+    /// The apps launched most recently (the launcher's *Recentes* row).
+    pub recents: osjeff_core::launcher::Recents,
     /// The performance HUD (Ctrl+Alt+H).
     pub hud: bool,
     /// Region of the Apps overlay that changed since it was last painted.
@@ -253,6 +261,7 @@ impl Shell {
             notifs: Vec::new(),
             notif_seen: crate::klog::seq(),
             notif_unread: 0,
+            recents: osjeff_core::launcher::Recents::new(),
             hud: false,
             dirty: Cell::new(Rect::new(0, 0, 0, 0)),
             knobs: [Tween::at(0.0); 3],

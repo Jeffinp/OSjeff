@@ -148,64 +148,118 @@ pub fn menu_row_at(g: &MenuGeom, rows: &[MenuRow], x: i32, y: i32) -> Option<usi
         .position(|(r, k)| matches!(k, MenuRow::Item { .. }) && r.contains(x, y))
 }
 
-// ------------------------------------------------------------------ Launchpad
+// ------------------------------------------------------------------- launcher
 
 pub const LP_CELL_W: i32 = 136;
 pub const LP_CELL_H: i32 = 128;
 pub const LP_ICON: i32 = 72;
+/// The rail's width and its rows.
+pub const RAIL_W: i32 = 196;
+pub const RAIL_ROW_H: i32 = 40;
+pub const RAIL_ROWS: usize = 5;
+/// Recent apps shown in their row: a compact cell each.
+pub const RECENT_W: i32 = 120;
+pub const RECENT_H: i32 = 64;
 
-/// Launchpad: the search field and the grid cells.
+/// The Apps launcher: the category rail at the left, the search field and the *Recentes* row on
+/// top of the content, and the grid below.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LaunchGrid {
+    pub rail: Rect,
+    pub rail_rows: [Rect; RAIL_ROWS],
     pub field: Rect,
+    /// "Recentes" caption and the compact cells (empty when there is nothing to show).
+    pub recents_label: Rect,
+    pub recents: Vec<Rect>,
     /// One rectangle per item, row-major, already shifted by the scroll.
     pub cells: Vec<Rect>,
     pub cols: usize,
+    /// Top of the grid area and the left edge of the content.
+    pub top: i32,
+    pub left: i32,
     /// Rows the screen shows at once.
     pub visible_rows: usize,
     /// Rows needed for all the items.
     pub total_rows: usize,
 }
 
-/// Lay `n` items out on a `sw x sh` screen, `scroll` rows scrolled off the top.
-pub fn launchpad_grid(sw: i32, sh: i32, n: usize, scroll: usize) -> LaunchGrid {
-    let field = Rect::new(sw / 2 - 150, 64, 300, 36);
-    let cols = (((sw - 160) / LP_CELL_W).clamp(3, 8)) as usize;
-    let top = field.bottom() + 56;
-    let visible_rows = (((sh - top - 64) / LP_CELL_H).max(1)) as usize;
+/// Lay the launcher out on a `sw x sh` screen for `n` items, `scroll` rows scrolled off the top
+/// and `n_recents` compact recent cells (0 hides the row).
+pub fn launcher_grid(sw: i32, sh: i32, n: usize, scroll: usize, n_recents: usize) -> LaunchGrid {
+    let rail = Rect::new(32, PANEL_H + 40, RAIL_W, RAIL_ROWS as i32 * RAIL_ROW_H + 16);
+    let mut rail_rows = [Rect::new(0, 0, 0, 0); RAIL_ROWS];
+    for (i, r) in rail_rows.iter_mut().enumerate() {
+        *r = Rect::new(
+            rail.x + 8,
+            rail.y + 8 + i as i32 * RAIL_ROW_H,
+            rail.w - 16,
+            RAIL_ROW_H,
+        );
+    }
+    let left = rail.right() + 36;
+    let right = sw - 40;
+    let field = Rect::new(left, PANEL_H + 40, 360.min((right - left).max(120)), 36);
+    let mut y = field.bottom() + 20;
+    let (recents_label, recents) = if n_recents > 0 {
+        let label = Rect::new(left, y, 160, 18);
+        let ry = label.bottom() + 8;
+        let cells = (0..n_recents.min(crate::launcher::RECENTS))
+            .map(|i| Rect::new(left + i as i32 * (RECENT_W + 8), ry, RECENT_W, RECENT_H))
+            .collect();
+        y = ry + RECENT_H + 20;
+        (label, cells)
+    } else {
+        (Rect::new(0, 0, 0, 0), Vec::new())
+    };
+    let top = y;
+    let cols = (((right - left) / LP_CELL_W).clamp(2, 8)) as usize;
+    let visible_rows = (((sh - top - 24) / LP_CELL_H).max(1)) as usize;
     let total_rows = n.div_ceil(cols).max(1);
     let scroll = scroll.min(total_rows.saturating_sub(visible_rows));
-    let used_cols = n.min(cols).max(1) as i32;
-    let left = sw / 2 - used_cols * LP_CELL_W / 2;
     let mut cells = Vec::with_capacity(n);
     for i in 0..n {
         let (row, col) = (i / cols, i % cols);
         // Rows scrolled out of view sit off-screen (negative y): never hit.
-        let y = top + (row as i32 - scroll as i32) * LP_CELL_H;
+        let cy = top + (row as i32 - scroll as i32) * LP_CELL_H;
         cells.push(Rect::new(
             left + col as i32 * LP_CELL_W,
-            y,
+            cy,
             LP_CELL_W,
             LP_CELL_H,
         ));
     }
     LaunchGrid {
+        rail,
+        rail_rows,
         field,
+        recents_label,
+        recents,
         cells,
         cols,
+        top,
+        left,
         visible_rows,
         total_rows,
     }
 }
 
 /// The item under `(x, y)` among the rows currently visible.
-pub fn launchpad_cell_at(g: &LaunchGrid, sh: i32, x: i32, y: i32) -> Option<usize> {
-    let top = g.field.bottom() + 56;
-    let bottom = top + g.visible_rows as i32 * LP_CELL_H;
-    if y < top || y >= bottom.min(sh) {
+pub fn launcher_cell_at(g: &LaunchGrid, sh: i32, x: i32, y: i32) -> Option<usize> {
+    let bottom = g.top + g.visible_rows as i32 * LP_CELL_H;
+    if y < g.top || y >= bottom.min(sh) {
         return None;
     }
     g.cells.iter().position(|r| r.contains(x, y))
+}
+
+/// The rail row under `(x, y)`.
+pub fn launcher_rail_at(g: &LaunchGrid, x: i32, y: i32) -> Option<usize> {
+    g.rail_rows.iter().position(|r| r.contains(x, y))
+}
+
+/// The recent cell under `(x, y)`.
+pub fn launcher_recent_at(g: &LaunchGrid, x: i32, y: i32) -> Option<usize> {
+    g.recents.iter().position(|r| r.contains(x, y))
 }
 
 // ------------------------------------------------------------------ Spotlight
@@ -594,32 +648,56 @@ mod tests {
     }
 
     #[test]
-    fn launchpad_grid_centres_rows_and_scrolls() {
-        let g = launchpad_grid(1280, 720, 21, 0);
-        assert_eq!(g.cols, 8);
-        assert_eq!(g.total_rows, 3);
+    fn the_launcher_has_a_rail_a_field_recents_and_a_scrolling_grid() {
+        let g = launcher_grid(1280, 720, 21, 0, 3);
+        // The rail is a column of five rows at the left; the content starts right of it.
+        assert_eq!(g.rail_rows.len(), 5);
+        assert_eq!(g.rail_rows[1].y, g.rail_rows[0].bottom());
+        assert!(
+            g.rail_rows
+                .iter()
+                .all(|r| r.x >= g.rail.x && r.right() <= g.rail.right())
+        );
+        assert!(g.rail_rows[4].bottom() <= g.rail.bottom());
+        assert!(g.left > g.rail.right());
+        // Field on top of the content, recents under it, grid under them.
+        assert_eq!(g.field.x, g.left);
+        assert!(g.field.bottom() < g.recents_label.y);
+        assert_eq!(g.recents.len(), 3);
+        assert_eq!(g.recents[1].x, g.recents[0].right() + 8);
+        assert!(g.recents[0].bottom() < g.top);
         assert_eq!(g.cells.len(), 21);
+        assert!(g.cols >= 6 && g.total_rows == 21usize.div_ceil(g.cols));
         // Row-major and aligned.
         assert_eq!(g.cells[1].x, g.cells[0].right());
-        assert_eq!(g.cells[8].y, g.cells[0].bottom());
-        assert_eq!(g.cells[8].x, g.cells[0].x);
-        // Centred.
-        let left = g.cells[0].x;
-        let right = g.cells[7].right();
-        assert!((left + right - 1280).abs() <= 1);
-        assert_eq!(g.field.y, 64);
-        assert!((g.field.x * 2 + g.field.w - 1280).abs() <= 1);
-        // Hit test inside the visible rows only.
+        assert_eq!(g.cells[g.cols].y, g.cells[0].bottom());
+        assert_eq!(g.cells[g.cols].x, g.cells[0].x);
+        assert_eq!(g.cells[0].x, g.left);
+        // Everything fits on the screen's right side.
+        assert!(g.cells[g.cols - 1].right() <= 1280 - 40);
+        // Hit tests: cells inside the visible rows, rail rows, recents; nothing elsewhere.
         let c = g.cells[3];
-        assert_eq!(launchpad_cell_at(&g, 720, c.x + 4, c.y + 4), Some(3));
-        assert_eq!(launchpad_cell_at(&g, 720, 5, 5), None);
-        // Few items: the single row is centred on its own width.
-        let g2 = launchpad_grid(1280, 720, 3, 0);
-        assert!((g2.cells[0].x + g2.cells[2].right() - 1280).abs() <= 1);
+        assert_eq!(launcher_cell_at(&g, 720, c.x + 4, c.y + 4), Some(3));
+        assert_eq!(launcher_cell_at(&g, 720, 5, 5), None);
+        let rr = g.rail_rows[2];
+        assert_eq!(launcher_rail_at(&g, rr.x + 3, rr.y + 3), Some(2));
+        assert_eq!(launcher_rail_at(&g, g.cells[0].x, g.cells[0].y), None);
+        let rc = g.recents[2];
+        assert_eq!(launcher_recent_at(&g, rc.x + 3, rc.y + 3), Some(2));
+        // No recents: the row disappears and the grid moves up.
+        let none = launcher_grid(1280, 720, 21, 0, 0);
+        assert!(none.recents.is_empty() && none.top < g.top);
+        // Never more than the remembered recents.
+        assert_eq!(
+            launcher_grid(1280, 720, 4, 0, 9).recents.len(),
+            crate::launcher::RECENTS
+        );
         // Scrolling moves rows up (clamped).
-        let s = launchpad_grid(1280, 300, 40, 99);
+        let s = launcher_grid(1280, 300, 40, 99, 0);
         assert!(s.visible_rows >= 1);
-        assert!(s.cells[0].y < s.field.bottom());
+        assert!(s.cells[0].y < s.top);
+        // A narrow screen still has columns.
+        assert!(launcher_grid(600, 720, 5, 0, 0).cols >= 2);
     }
 
     #[test]
