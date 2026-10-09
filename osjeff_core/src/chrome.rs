@@ -165,6 +165,13 @@ pub fn dock_rest(sw: i32, sh: i32, n: usize, sep_after: Option<usize>) -> (Rect,
 /// `(1 - (d / reach)^2)^2` over the distance `d` to each icon's resting centre,
 /// scaled between [`DOCK_ICON`] and [`DOCK_MAX`]. Springs chase these values.
 pub fn dock_magnify(rest: &[Rect], pointer_x: Option<i32>) -> Vec<f32> {
+    dock_magnify_scaled(rest, pointer_x, 100)
+}
+
+/// [`dock_magnify`] with the bump scaled to `percent` of its height (`0` keeps every icon at
+/// rest; the Ajustes slider).
+pub fn dock_magnify_scaled(rest: &[Rect], pointer_x: Option<i32>, percent: u8) -> Vec<f32> {
+    let gain = percent.min(100) as f32 / 100.0;
     rest.iter()
         .map(|r| {
             let base = DOCK_ICON as f32;
@@ -175,7 +182,7 @@ pub fn dock_magnify(rest: &[Rect], pointer_x: Option<i32>) -> Vec<f32> {
             }
             let t = d as f32 / DOCK_REACH as f32;
             let w = 1.0 - t * t;
-            base + (DOCK_MAX - DOCK_ICON) as f32 * w * w
+            base + (DOCK_MAX - DOCK_ICON) as f32 * gain * w * w
         })
         .collect()
 }
@@ -754,5 +761,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn dock_zoom_scales_the_bump() {
+        let (_, rest) = dock_rest(1280, 720, 9, Some(0));
+        let mid = rest[4].x + rest[4].w / 2;
+        let full = dock_magnify_scaled(&rest, Some(mid), 100);
+        let half = dock_magnify_scaled(&rest, Some(mid), 50);
+        let none = dock_magnify_scaled(&rest, Some(mid), 0);
+        assert_eq!(full, dock_magnify(&rest, Some(mid)));
+        assert!(none.iter().all(|&v| v == DOCK_ICON as f32));
+        let bump = |v: &Vec<f32>| v[4] - DOCK_ICON as f32;
+        assert!((bump(&half) * 2.0 - bump(&full)).abs() < 0.01);
+        // More than 100 is clamped.
+        assert_eq!(dock_magnify_scaled(&rest, Some(mid), 250), full);
     }
 }

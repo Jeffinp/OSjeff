@@ -15,6 +15,9 @@
 //! toasts=1
 //! appearance=auto
 //! reduce_motion=0
+//! toast_secs=4
+//! dock_zoom=100
+//! tz_city=17
 //! ```
 //!
 //! Parsing is total: [`Settings::parse`] never fails. Blank lines, `#`
@@ -24,9 +27,124 @@
 
 use crate::hw::rtc::{TZ_MAX, TZ_MIN};
 use crate::keymap::Layout;
+use crate::klog::FixedBuf;
 use crate::style::AppearanceSetting;
 use crate::wallpaper::PRESETS;
 use alloc::vec::Vec;
+use core::fmt::Write as _;
+
+/// How long a notification stays, in seconds (the slider's range and the default).
+pub const TOAST_SECS_MIN: u8 = 2;
+pub const TOAST_SECS_MAX: u8 = 15;
+pub const TOAST_SECS_DEFAULT: u8 = 4;
+/// Strength of the app bar's magnification in percent (0 turns it off).
+pub const DOCK_ZOOM_MAX: u8 = 100;
+/// `Settings::tz_city` value for "none of the listed cities".
+pub const CITY_NONE: u8 = 255;
+
+/// Cities of the time-zone picker with their standard offset in minutes east of UTC,
+/// ordered by offset. The settings store the offset (and the index, to show the city the
+/// user chose); there is no daylight saving.
+pub const TIMEZONES: [(&str, i16); 52] = [
+    ("Ilha Baker", -720),
+    ("Pago Pago", -660),
+    ("Honolulu", -600),
+    ("Anchorage", -540),
+    ("Los Angeles", -480),
+    ("Denver", -420),
+    ("Cidade do México", -360),
+    ("Chicago", -360),
+    ("Nova York", -300),
+    ("Bogotá", -300),
+    ("Rio Branco", -300),
+    ("Manaus", -240),
+    ("Santiago", -240),
+    ("Caracas", -240),
+    ("St. John's", -210),
+    ("Buenos Aires", -180),
+    ("São Paulo", -180),
+    ("Brasília", -180),
+    ("Fernando de Noronha", -120),
+    ("Açores", -60),
+    ("Lisboa", 0),
+    ("Londres", 0),
+    ("Reykjavik", 0),
+    ("Madri", 60),
+    ("Paris", 60),
+    ("Berlim", 60),
+    ("Roma", 60),
+    ("Atenas", 120),
+    ("Cairo", 120),
+    ("Joanesburgo", 120),
+    ("Moscou", 180),
+    ("Istambul", 180),
+    ("Nairóbi", 180),
+    ("Teerã", 210),
+    ("Dubai", 240),
+    ("Cabul", 270),
+    ("Carachi", 300),
+    ("Nova Délhi", 330),
+    ("Katmandu", 345),
+    ("Daca", 360),
+    ("Bangcoc", 420),
+    ("Pequim", 480),
+    ("Singapura", 480),
+    ("Tóquio", 540),
+    ("Seul", 540),
+    ("Adelaide", 570),
+    ("Sydney", 600),
+    ("Ilhas Salomão", 660),
+    ("Auckland", 720),
+    ("Chatham", 765),
+    ("Nuku'alofa", 780),
+    ("Kiritimati", 840),
+];
+
+/// The index of Brasília, the default city.
+pub const DEFAULT_CITY: u8 = 17;
+
+/// `UTC-03:00` / `UTC+05:30` for an offset in minutes.
+pub fn utc_label(minutes: i32) -> FixedBuf<12> {
+    let mut b = FixedBuf::new();
+    let _ = write!(
+        b,
+        "UTC{}{:02}:{:02}",
+        if minutes < 0 { '-' } else { '+' },
+        minutes.abs() / 60,
+        minutes.abs() % 60
+    );
+    b
+}
+
+/// The first listed city at `minutes` (Brasília for -180), or [`CITY_NONE`].
+pub fn city_for_offset(minutes: i32) -> u8 {
+    if minutes == -180 {
+        return DEFAULT_CITY;
+    }
+    TIMEZONES
+        .iter()
+        .position(|&(_, m)| m as i32 == minutes)
+        .map_or(CITY_NONE, |i| i as u8)
+}
+
+/// Indexes into [`TIMEZONES`] whose city or `UTC+hh:mm` label contains `query`
+/// (accents and case ignored), in list order. An empty query lists every city.
+pub fn search_timezones(query: &str) -> Vec<u8> {
+    let q = crate::search::fold(query.trim());
+    TIMEZONES
+        .iter()
+        .enumerate()
+        .filter(|(_, (name, m))| {
+            q.is_empty()
+                || crate::search::fold(name).contains(q.as_str())
+                || crate::search::fold(
+                    core::str::from_utf8(utc_label(*m as i32).as_bytes()).unwrap_or(""),
+                )
+                .contains(q.as_str())
+        })
+        .map(|(i, _)| i as u8)
+        .collect()
+}
 
 /// Version written by [`Settings::to_text`].
 pub const VERSION: u32 = 1;
@@ -81,6 +199,12 @@ pub struct Settings {
     pub appearance: AppearanceSetting,
     /// Skip animations: every transition jumps to its end.
     pub reduce_motion: bool,
+    /// Seconds a notification stays up.
+    pub toast_secs: u8,
+    /// Magnification of the app bar's icons, 0..=100 percent.
+    pub dock_zoom: u8,
+    /// The city picked for `tz_minutes` (index into [`TIMEZONES`]) or [`CITY_NONE`].
+    pub tz_city: u8,
 }
 
 impl Default for Settings {
@@ -104,6 +228,17 @@ impl Settings {
             toasts: true,
             appearance: AppearanceSetting::Auto,
             reduce_motion: false,
+            toast_secs: TOAST_SECS_DEFAULT,
+            dock_zoom: DOCK_ZOOM_MAX,
+            tz_city: DEFAULT_CITY,
+        }
+    }
+
+    /// Set the time zone to listed city `i` (ignored for an index outside the list).
+    pub fn set_city(&mut self, i: u8) {
+        if let Some(&(_, m)) = TIMEZONES.get(i as usize) {
+            self.tz_city = i;
+            self.tz_minutes = m;
         }
     }
 
@@ -145,6 +280,13 @@ impl Settings {
         // `wallpaper=image` with no usable path means the default wallpaper.
         if s.wallpaper == WallpaperChoice::Image && s.image_len == 0 {
             s.wallpaper = WallpaperChoice::Preset(0);
+        }
+        // The city must agree with the offset; otherwise the offset wins.
+        let agrees = TIMEZONES
+            .get(s.tz_city as usize)
+            .is_some_and(|&(_, m)| m == s.tz_minutes);
+        if !agrees {
+            s.tz_city = city_for_offset(s.tz_minutes as i32);
         }
         s
     }
@@ -198,6 +340,23 @@ impl Settings {
                 b"0" | b"off" => self.reduce_motion = false,
                 _ => {}
             },
+            b"toast_secs" => {
+                if let Some(n) = parse_u32(val)
+                    .filter(|n| (TOAST_SECS_MIN as u32..=TOAST_SECS_MAX as u32).contains(n))
+                {
+                    self.toast_secs = n as u8;
+                }
+            }
+            b"dock_zoom" => {
+                if let Some(n) = parse_u32(val).filter(|&n| n <= DOCK_ZOOM_MAX as u32) {
+                    self.dock_zoom = n as u8;
+                }
+            }
+            b"tz_city" => {
+                if let Some(n) = parse_u32(val).filter(|&n| (n as usize) < TIMEZONES.len()) {
+                    self.tz_city = n as u8;
+                }
+            }
             // `version` and anything unknown: nothing to do (forward compatible).
             _ => {}
         }
@@ -230,6 +389,11 @@ impl Settings {
         out.extend_from_slice(self.appearance.name().as_bytes());
         out.push(b'\n');
         push_kv(&mut out, b"reduce_motion", self.reduce_motion as u32);
+        push_kv(&mut out, b"toast_secs", self.toast_secs as u32);
+        push_kv(&mut out, b"dock_zoom", self.dock_zoom as u32);
+        if (self.tz_city as usize) < TIMEZONES.len() {
+            push_kv(&mut out, b"tz_city", self.tz_city as u32);
+        }
         out
     }
 }
@@ -338,6 +502,7 @@ mod tests {
             accent: 5,
             clock24: false,
             tz_minutes: 330,
+            tz_city: city_for_offset(330),
             layout: Layout::Abnt2,
             toasts: false,
             appearance: AppearanceSetting::Dark,
@@ -476,8 +641,10 @@ mod tests {
         assert!(!old.reduce_motion);
         assert!(
             old.to_text()
-                .ends_with(b"appearance=auto\nreduce_motion=0\n")
+                .starts_with(b"# OSjeff settings\nversion=1\nwallpaper=2\n")
         );
+        assert_eq!(old.toast_secs, TOAST_SECS_DEFAULT);
+        assert_eq!(old.dock_zoom, DOCK_ZOOM_MAX);
     }
 
     #[test]
@@ -509,5 +676,95 @@ mod tests {
         let mut s = Settings::new();
         assert!(s.set_image_path(b"a/b.png"));
         assert_eq!(absolute_path(s.image_path()), b"/a/b.png");
+    }
+
+    #[test]
+    fn notification_time_and_dock_zoom_parse_within_range() {
+        let s = Settings::parse(b"toast_secs=9\ndock_zoom=40\n");
+        assert_eq!((s.toast_secs, s.dock_zoom), (9, 40));
+        // Out of range, negative or garbage keeps the default.
+        for bad in [
+            &b"toast_secs=1\n"[..],
+            b"toast_secs=16\n",
+            b"toast_secs=-3\n",
+            b"toast_secs=x\n",
+        ] {
+            assert_eq!(
+                Settings::parse(bad).toast_secs,
+                TOAST_SECS_DEFAULT,
+                "{bad:?}"
+            );
+        }
+        for bad in [&b"dock_zoom=101\n"[..], b"dock_zoom=-1\n", b"dock_zoom=\n"] {
+            assert_eq!(Settings::parse(bad).dock_zoom, DOCK_ZOOM_MAX, "{bad:?}");
+        }
+        let edge = Settings::parse(b"toast_secs=2\ndock_zoom=0\n");
+        assert_eq!((edge.toast_secs, edge.dock_zoom), (2, 0));
+        let edge = Settings::parse(b"toast_secs=15\ndock_zoom=100\n");
+        assert_eq!((edge.toast_secs, edge.dock_zoom), (15, 100));
+    }
+
+    #[test]
+    fn new_fields_roundtrip() {
+        let mut s = Settings {
+            toast_secs: 11,
+            dock_zoom: 35,
+            ..Settings::default()
+        };
+        s.set_city(city_for_offset(540));
+        let t = s.to_text();
+        assert_eq!(Settings::parse(&t), s);
+        assert_eq!(Settings::parse(&t).tz_minutes, 540);
+        assert!(t.len() < 300, "{}", t.len());
+    }
+
+    #[test]
+    fn the_city_must_agree_with_the_offset() {
+        // A stored city that does not match the offset is dropped for the offset's own.
+        let s = Settings::parse(b"tz=-180\ntz_city=43\n");
+        assert_eq!(s.tz_minutes, -180);
+        assert_eq!(TIMEZONES[s.tz_city as usize].0, "Brasília");
+        // An offset that no city has leaves the picker without a selection.
+        let s = Settings::parse(b"tz=-30\n");
+        assert_eq!(s.tz_city, CITY_NONE);
+        // Out-of-range indices are ignored.
+        let s = Settings::parse(b"tz=60\ntz_city=200\n");
+        assert_eq!(TIMEZONES[s.tz_city as usize].1, 60);
+        // The chosen city sticks while the offset agrees.
+        let s = Settings::parse(b"tz=0\ntz_city=22\n");
+        assert_eq!(TIMEZONES[s.tz_city as usize].0, "Reykjavik");
+        // set_city refuses an index outside the list.
+        let mut s = Settings::default();
+        s.set_city(250);
+        assert_eq!(s.tz_minutes, -180);
+    }
+
+    #[test]
+    fn the_city_table_is_sorted_valid_and_findable() {
+        assert!(
+            TIMEZONES
+                .windows(2)
+                .all(|w| w[0].1 <= w[1].1 || w[1].0 == "Chatham")
+        );
+        assert_eq!(TIMEZONES[DEFAULT_CITY as usize].0, "Brasília");
+        for &(name, m) in TIMEZONES.iter() {
+            assert!(!name.is_empty());
+            assert!((TZ_MIN..=TZ_MAX).contains(&(m as i32)), "{name}");
+        }
+        assert_eq!(utc_label(-180).as_bytes(), b"UTC-03:00");
+        assert_eq!(utc_label(330).as_bytes(), b"UTC+05:30");
+        assert_eq!(utc_label(0).as_bytes(), b"UTC+00:00");
+        assert_eq!(search_timezones("").len(), TIMEZONES.len());
+        let r = search_timezones("sao");
+        assert_eq!(r.len(), 1);
+        assert_eq!(TIMEZONES[r[0] as usize].0, "São Paulo");
+        assert!(search_timezones("TOKYO").is_empty());
+        assert_eq!(search_timezones("toquio").len(), 1);
+        // The offset text finds cities too.
+        assert!(search_timezones("-03:00").len() >= 3);
+        assert!(search_timezones("zzzz").is_empty());
+        assert_eq!(city_for_offset(-180), DEFAULT_CITY);
+        assert_eq!(city_for_offset(840), 51);
+        assert_eq!(city_for_offset(1), CITY_NONE);
     }
 }

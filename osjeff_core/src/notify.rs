@@ -18,8 +18,12 @@ use crate::window::Rect;
 pub const MAX_VISIBLE: usize = 3;
 /// Messages waiting for a free slot.
 pub const QUEUE_CAP: usize = 8;
-/// How long a toast stays, in milliseconds.
+/// How long a toast stays by default, in milliseconds (the settings change it with
+/// [`Toasts::set_lifetime_secs`]).
 pub const LIFETIME_MS: u32 = 4000;
+/// The bounds of a chosen lifetime, in seconds.
+pub const LIFETIME_SECS_MIN: u32 = 2;
+pub const LIFETIME_SECS_MAX: u32 = 15;
 /// Longest message (bytes); the rest is cut.
 pub const TEXT_CAP: usize = 64;
 pub use crate::chrome::{TOAST_GAP as GAP, TOAST_H, TOAST_W};
@@ -37,10 +41,12 @@ pub struct Toast {
     /// Times the same message arrived while it was on screen (1 = once).
     pub count: u8,
     born_ms: u32,
+    /// How long it stays, in milliseconds.
+    life_ms: u32,
 }
 
 impl Toast {
-    fn new(level: Level, text: &[u8], now_ms: u32) -> Toast {
+    fn new(level: Level, text: &[u8], now_ms: u32, life_ms: u32) -> Toast {
         let n = text.len().min(TEXT_CAP);
         let mut t = [0u8; TEXT_CAP];
         t[..n].copy_from_slice(&text[..n]);
@@ -50,7 +56,14 @@ impl Toast {
             len: n as u8,
             count: 1,
             born_ms: now_ms,
+            life_ms,
         }
+    }
+
+    /// Time left, as 256 (just appeared) down to 0 (gone): the auto-dismiss line.
+    pub fn remaining(&self, now_ms: u32) -> u32 {
+        let left = self.life_ms.saturating_sub(self.age_ms(now_ms)) as u64;
+        (left * 256 / self.life_ms.max(1) as u64) as u32
     }
 
     pub fn text(&self) -> &[u8] {
@@ -58,7 +71,7 @@ impl Toast {
     }
 
     fn expired(&self, now_ms: u32) -> bool {
-        now_ms.wrapping_sub(self.born_ms) >= LIFETIME_MS
+        now_ms.wrapping_sub(self.born_ms) >= self.life_ms
     }
 
     /// Milliseconds since it appeared (or was last repeated).
@@ -70,7 +83,7 @@ impl Toast {
     /// screen to the right): it slides in when it appears and out before it expires.
     pub fn slide(&self, now_ms: u32) -> u32 {
         let age = self.age_ms(now_ms);
-        let left = LIFETIME_MS.saturating_sub(age);
+        let left = self.life_ms.saturating_sub(age);
         if age < SLIDE_IN_MS {
             // Ease-out cubic.
             let t = 256 - age * 256 / SLIDE_IN_MS;
@@ -92,6 +105,8 @@ pub struct Toasts {
     queue: [Option<Toast>; QUEUE_CAP],
     /// Messages thrown away because the queue was full.
     pub dropped: u32,
+    /// Lifetime given to the toasts that appear from now on.
+    life_ms: u32,
 }
 
 impl Default for Toasts {
@@ -106,7 +121,13 @@ impl Toasts {
             vis: [None; MAX_VISIBLE],
             queue: [None; QUEUE_CAP],
             dropped: 0,
+            life_ms: LIFETIME_MS,
         }
+    }
+
+    /// Toasts that appear from now on stay `secs` seconds (clamped to 2..=15).
+    pub fn set_lifetime_secs(&mut self, secs: u32) {
+        self.life_ms = secs.clamp(LIFETIME_SECS_MIN, LIFETIME_SECS_MAX) * 1000;
     }
 
     /// Nothing visible and nothing waiting: the compositor can skip all work.
@@ -135,7 +156,7 @@ impl Toasts {
                 return true;
             }
         }
-        let toast = Toast::new(level, text, now_ms);
+        let toast = Toast::new(level, text, now_ms, self.life_ms);
         if let Some(slot) = self.vis.iter_mut().find(|s| s.is_none()) {
             *slot = Some(toast);
             return true;
@@ -406,5 +427,48 @@ mod tests {
         t.clear();
         assert!(t.is_idle());
         assert!(!t.tick(100));
+    }
+
+    #[test]
+    fn lifetime_is_chosen_per_toast_and_clamped() {
+        let mut t = Toasts::new();
+        t.set_lifetime_secs(10);
+        t.push(Level::Info, b"long", 0);
+        t.set_lifetime_secs(2);
+        t.push(Level::Info, b"short", 0);
+        assert!(!t.tick(1999));
+        // The short one is gone at 2 s, the long one at 10 s.
+        assert!(t.tick(2000));
+        assert_eq!(texts(&t), [b"long".to_vec()]);
+        assert!(!t.tick(9999));
+        assert!(t.tick(10_000));
+        assert!(t.is_idle());
+        // Out-of-range requests are clamped.
+        let mut t = Toasts::new();
+        t.set_lifetime_secs(0);
+        t.push(Level::Info, b"a", 0);
+        assert!(t.tick(2000));
+        t.set_lifetime_secs(999);
+        t.push(Level::Info, b"b", 0);
+        assert!(!t.tick(14_999));
+        assert!(t.tick(15_000));
+    }
+
+    #[test]
+    fn the_dismiss_line_runs_down_with_the_toast() {
+        let mut t = Toasts::new();
+        t.set_lifetime_secs(4);
+        t.push(Level::Warn, b"x", 1000);
+        let toast = *t.iter().next().unwrap();
+        assert_eq!(toast.remaining(1000), 256);
+        assert_eq!(toast.remaining(3000), 128);
+        assert_eq!(toast.remaining(5000), 0);
+        assert_eq!(toast.remaining(99_999), 0);
+        // The slide-out follows the chosen lifetime too.
+        t.set_lifetime_secs(10);
+        t.push(Level::Warn, b"y", 0);
+        let y = *t.iter().nth(1).unwrap();
+        assert_eq!(y.slide(5000), 0);
+        assert!(y.slide(10_000 - 50) > 0);
     }
 }
