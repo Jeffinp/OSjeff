@@ -389,42 +389,6 @@ impl Desktop {
             || self.switcher.is_some()
     }
 
-    /// Union of everything the overlays occupy now (with their shadows).
-    pub fn overlay_bounds_full(&self) -> Rect {
-        let sh = &self.shell;
-        let mut b: Option<Rect> = None;
-        let mut add = |r: Rect| b = Some(b.map_or(r, |x| x.union(&r)));
-        if let Some(m) = &sh.menu {
-            add(m.geom.rect.inflated(40));
-        }
-        if let Some(p) = &sh.pop {
-            add(p.rect.inflated(40));
-        }
-        if sh.dialog.is_some() || sh.apps.is_some() {
-            add(Rect::new(0, 0, self.sw, self.sh));
-        }
-        if let Some(s) = &sh.search {
-            let g = osjeff_core::chrome::spotlight_geom(self.sw, self.sh, s.hits.len());
-            add(g.panel.inflated(40));
-        }
-        if let Some(sw) = &self.switcher {
-            add(self.switcher_rect(sw.list().len()).inflated(40));
-        }
-        match b {
-            Some(r) => r.clamped_to(self.sw, self.sh),
-            None => Rect::new(0, 0, 0, 0),
-        }
-    }
-
-    /// The region the hover repaint must redo: the whole overlay, except for the
-    /// Apps overlay which tracks what changed.
-    pub fn overlay_bounds(&self) -> Rect {
-        if self.shell.apps.is_some() && self.shell.dialog.is_none() {
-            return self.shell.dirty.get().clamped_to(self.sw, self.sh);
-        }
-        self.overlay_bounds_full()
-    }
-
     /// The compositor painted the dirty region.
     pub(crate) fn overlay_painted(&self) {
         self.shell.dirty.set(Rect::new(0, 0, 0, 0));

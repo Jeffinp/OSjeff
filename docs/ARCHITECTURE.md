@@ -146,7 +146,7 @@ frame físico por página, zerado). O custo do BSS é RAM. Segmentos do ELF nest
 | Símbolo | Bytes | Uso |
 |---|---|---|
 | `HEAP` | 67.108.864 (64 MiB) | único heap do sistema |
-| `BACK`, `BG`, `STATIC` | 3 x 8.294.400 | buffers de render, 1920x1080x4, alinhados a 64 B |
+| `BACK`, `BG`, `STATIC` | 3 x 8.294.400 | buffers de render, 1920x1080x4, alinhados a 64 B (`STATIC` é o rascunho do modo verify) |
 | `wasm::SURFACE` | 2.291.904 | 2 x 692x414x4, duplo buffer do app WASM |
 | `desktop::SCRATCH` | 1.126.400 | 640x440x4, o que está atrás de uma janela em fade |
 | `desktop::DISK` | 50.688 | imagem OJFS em RAM (99 setores) |
@@ -507,73 +507,81 @@ arquivos do kernel (grep). Isso torna o `unsafe` **justificado e fiscalizado**, 
 
 ### 6.1 Buffers
 
-`BG` guarda o wallpaper (gradiente e *glows* do esquema claro ou escuro, a faixa de vidro da
-painel superior já assado), pintado **uma vez** (e de novo
-quando o wallpaper, o destaque ou a aparência mudam); `BACK` é o alvo de composição; `STATIC`
-é "tudo menos as janelas dinâmicas e a barra de tarefas", composto uma vez por animação ou
-arrasto; uma textura de 3,5 MiB (`TEXTURE`) guarda a janela que abre, fecha, minimiza ou
-restaura enquanto ela é reamostrada; o framebuffer só recebe retângulos ou um blit completo.
-Tamanhos em §2.3.
+`BG` guarda o wallpaper (gradiente e *glows* do esquema claro ou escuro, a faixa de vidro do
+painel superior já assada), pintado **uma vez** (e de novo quando o wallpaper, o destaque ou a
+aparência mudam); `BACK` é o alvo de composição; `STATIC` é só o buffer de rascunho do modo
+verify (Ctrl+Alt+V, §6.2); uma textura de 3,5 MiB (`TEXTURE`) guarda a janela que abre, fecha,
+minimiza ou restaura enquanto ela é reamostrada; o framebuffer só recebe retângulos (o dano) ou,
+quando o dano é a maior parte da tela, um blit completo. Tamanhos em §2.3.
 
-### 6.2 Caminhos do laço (`main.rs`)
+### 6.2 O compositor (`kernel/src/desktop/compositor/`, `osjeff_core::compositor`)
 
-Cada iteração lê a RTC, avança as animações por ticks reais, drena a entrada, escolhe
-**um** caminho de desenho, mede e termina em `sched::idle`.
+Projeto, invariantes e guia para estender: [`design/compositor.md`](design/compositor.md).
+
+Há **um** caminho de desenho. Cada iteração do laço (`main.rs`) lê a RTC, avança as animações
+por ticks reais, drena a entrada, monta um `FrameIn` e chama `Compositor::frame`, que termina
+em `sched::idle`.
 
 ```mermaid
-flowchart TD
-    I["iteracao do compositor"] --> A{"animacao, arrasto ou app WASM visivel?"}
-    A -->|sim| AR{"assinatura da cena mudou?"}
-    AR -->|sim| ARB["AnimRebuild: BG para STATIC, compoe as estaticas, blit completo"]
-    AR -->|nao| AD["AnimDamage: restaura STATIC so no dano, redesenha as dinamicas, blit do retangulo"]
-    A -->|nao| O{"menu, popover, Apps, Busca, folha ou Alt+Tab aberto?"}
-    O -->|sim| OV["OverlayRebuild ou OverlayHover: repinta so o retangulo do overlay (no Apps, so as celulas que mudaram)"]
-    O -->|nao| S{"cena suja?"}
-    S -->|sim| ST["Steady ou Settle: recompoe tudo em BACK, sobe so a janela focada, a que perdeu foco e o relogio"]
-    S -->|nao| CL{"tique do relogio?"}
-    CL -->|sim| CLK["ClockLocal: so a pilula, se nenhuma janela ou sombra a alcanca"]
-    CL -->|nao| CU["Cursor: restaura e redesenha so o sprite"]
+flowchart LR
+    D["Desktop (estado)"] -- "build_scene" --> S["Scene: camadas<br/>footprint, opaque, look, dirty"]
+    S -- "Engine::plan (compara com o quadro anterior)" --> P["Plan: damage + steps"]
+    P -- "pinta de baixo para cima, recortado" --> B["BACK"]
+    B -- "sobe só o damage" --> F["framebuffer"]
+    F --> O["toasts, HUD, cursor (só no framebuffer)"]
 ```
 
-- **Damage tracking com camada em cache.** Na animação o dano é a união da caixa de cada
-  janela dinâmica neste quadro com o do anterior; `STATIC` é restaurado só ali e só o
-  retângulo sobe à VRAM, então o custo por quadro acompanha a área do dano, não o número
-  de janelas. **O custo O(tela) existe no início**: `AnimRebuild` roda quando a assinatura
-  da cena muda (`WindowManager::signature`, FNV-1a sobre id, retângulo, visibilidade,
-  animação e maximização de cada janela em z-order, mais a janela arrastada) ou a cena fica
-  suja. O retângulo da janela que está sendo arrastada ou redimensionada **fica fora** da
-  assinatura: ela é dinâmica (desenhada por cima da camada em cache a cada quadro, só no
-  dano antigo+novo), então mover ou redimensionar continua no caminho barato. Maximizar,
-  restaurar, minimizar-que-termina e fechar um overlay "assentam" com um repaint completo
-  (`Settle`). O app WASM mantém o laço nesse caminho enquanto sua janela está visível
-  (`has_animation`), pois pede quadro novo a cada tick.
+- **A cena** é descrita, não desenhada: do fundo para cima, o papel de parede (implícito), as
+  janelas em z-order (cada uma com o retângulo, a sombra, a área opaca e um `look`), a barra de
+  apps, o painel (opaco, no topo das janelas), a pré-visualização de encaixe e os overlays
+  (Apps, Busca, menu, popover, Alt+Tab, folha). **O motor de dano** (`Engine`, puro, testado
+  no host) compara a cena com a do quadro anterior e calcula o dano: camada que apareceu ou
+  sumiu, que mexeu (retângulo antigo **e** novo), de `look` novo, com retângulo `dirty`, que
+  trocou de lugar na pilha (interseção), mais `invalidate(rect)` (o tique do relógio). Arrastar
+  uma janela, o relógio e o gráfico que desliza são o mesmo caso, não caminhos à parte.
+- **Pintura.** Cada camada é pintada sobre o dano que cai no seu footprint menos o que uma
+  camada opaca acima esconde; onde nada opaco cobre, o papel de parede é restaurado antes. Todo
+  pixel repintado é recalculado do fundo da pilha: a sombra pertence à camada da janela, nunca
+  a um cache, e não pode ser aplicada duas vezes. O dano é um conjunto de retângulos
+  **disjuntos** (`Region`), não um só: mover uma janela para o outro canto não repinta o
+  meio da tela.
+- **Invariante central:** o resultado incremental é idêntico, byte a byte, ao redesenho
+  completo (`Engine::full_plan`) depois de cada quadro. Prova no host: `compositor::tests`
+  (milhares de históricos aleatórios sobre um simulador de área de trabalho, testes de
+  mutação permanentes que quebram cada regra do motor e exigem que o teste falhe), o alvo de
+  fuzz `compositor_ops`; no QEMU: `tools/perf/scen/w27-oracle.sh` (tela em repouso contra o
+  modo referência, Ctrl+Alt+R) e o modo verify (Ctrl+Alt+V).
 - **Abrir, fechar, minimizar, restaurar:** `draw_animating` desenha a janela **uma vez** no
   tamanho de repouso na `TEXTURE` e, a cada quadro, reamostra (bilinear, cantos arredondados,
   alfa da animação) no retângulo do instante, sob uma sombra que desaparece junto; minimizar e
   restaurar voam de/para o ícone do app na barra (`Desktop::dock_target`). Janelas maiores
   que a textura (1280x720) animam sem o efeito de escala. **Zoom** (maximizar/restaurar) não
-  usa textura: desenha a janela real no retângulo em voo com o conteúdo recortado, então o
-  layout nunca vira um bitmap espremido. As animações andam por tempo real
-  (`dt = ticks / 250`), são interrompíveis e obedecem a *reduzir movimento*
-  (`osjeff_core::anim`).
+  usa textura: desenha a janela real no retângulo em voo com o conteúdo recortado. As animações
+  andam por tempo real (`dt = ticks / 250`), são interrompíveis e obedecem a *reduzir
+  movimento* (`osjeff_core::anim`). Uma janela animada não declara área opaca.
+- **Janelas vivas:** o app WASM visível, o terminal executando, uma cópia de arquivos, o
+  arrasto e a troca de foco repintam a janela a cada quadro (`dirty` = o footprint); as
+  Tarefas e outras janelas que animam só o próprio conteúdo declaram o retângulo que muda (o
+  gráfico) e, sozinhas, rodam a 50 quadros por segundo em vez de a cada tick. Uma janela que
+  deixa de ser dinâmica é repintada uma última vez.
 - **O cursor não está em `BACK`**: é desenhado direto no framebuffer, e vale uma invariante
   (`osjeff_core::cursor::CursorTrack`, testada no host com um framebuffer simulado):
   **todo quadro que renderiza algo começa apagando o sprite** (restaura de `BACK` o retângulo
   onde ele foi pintado, recortado na tela) **e termina pintando-o de novo**, depois dos
-  blits, dos toasts e do HUD. Nenhum caminho restaura ou desenha o cursor por conta própria
-  (antes cada caminho fazia o seu, e os que não tratavam `cursor_moved` mas subiam
-  retângulos, como hover, clique ou tecla, deixavam o sprite antigo na tela: um rastro de
-  setas sob as janelas). Vários pacotes de mouse num quadro, cursor preso na borda,
-  mudança de forma (seta para mão) sem movimento e animação sob o cursor caem todos no
-  mesmo par apagar/pintar. O HUD e os toasts também vivem só no framebuffer: se o retângulo
-  apagado os toca, eles são redesenhados antes do cursor. **Ao portar o desenho para outra
-  estrutura, mantenha só isto:** `erase` antes de qualquer escrita no framebuffer do quadro,
-  `paint` depois da última, e `CURSOR_W/H` (= `osjeff_core::pointer::{W, H}`, a caixa de todos os sprites) cobrindo todo sprite. Prova no QEMU: `tools/perf/scen/w20-cursor.sh` (rajadas rápidas sobre bordas,
-  barra de tarefas e cantos) + `tools/perf/w20-cursor-check.sh` (0 pixels diferentes entre a tela em
-  repouso e a mesma tela depois de um repaint completo forçado).
-  **Relógio:** o tique de 1 s repinta só o texto do relógio na barra de
-  menus (e as janelas vivas: Tarefas, Registro, Ajustes, se abertas), em vez de subir ~8 MiB. **Sombra:** não é misturada sob o corpo opaco da janela
-  (`fill_round_rect_alpha_skip`): evita ~85% do blend com saída idêntica.
+  uploads, dos toasts e do HUD. Nenhum caminho restaura ou desenha o cursor por conta própria.
+  O HUD e os toasts também vivem só no framebuffer: se um upload ou o retângulo apagado os
+  toca, eles são redesenhados antes do cursor. **Ao portar o desenho para outra estrutura,
+  mantenha só isto:** `erase` antes de qualquer escrita no framebuffer do quadro, `paint`
+  depois da última, e `CURSOR_W/H` (= `osjeff_core::pointer::{W, H}`) cobrindo todo sprite.
+  Prova no QEMU: `tools/perf/scen/w20-cursor.sh` + `tools/perf/w20-cursor-check.sh` (0 pixels
+  diferentes entre a tela em repouso e a mesma depois de um repaint completo forçado).
+  **Relógio:** o tique de 1 s invalida só o retângulo do relógio (e as janelas "vivas": Tarefas,
+  Registro, Ajustes) em vez de subir ~8 MiB. **Sombra:** não é misturada sob o corpo opaco da
+  janela (`fill_round_rect_alpha_skip`): evita ~85% do blend com saída idêntica.
+- **Depuração:** Ctrl+Alt+R liga o *modo referência* (todo quadro é o redesenho completo, a
+  verdade que o oráculo fotografa); Ctrl+Alt+V liga o *verify* (cada quadro é comparado com o
+  redesenho completo e as divergências saem na serial como `compositor-verify: MISMATCH`);
+  Ctrl+Alt+H, o HUD.
 
 ### 6.3 Primitivas (`fb.rs`, `osjeff_core::gfx`)
 
@@ -1227,7 +1235,7 @@ código seguro em `osjeff_core`, testado e fuzzado, mas a cola em `abi2.rs` e `m
 | Guard page por PTE editada pelo kernel (`vm`), canário só de *fallback* | detecta o estouro no primeiro acesso, sem alocador de frames nem page tables próprias | depende de o `.bss` estar em páginas de 4 KiB (senão recusa e cai no canário fraco); o bloco da pilha nunca volta ao heap |
 | Fatal total para o compositor, #DF, NMI, #MC e falhas com IF=0 | sem o desktop ou com estado de IRQ/lock incerto não há o que preservar | tela de erro e parada, como antes |
 | Buffers de render fixos de 1080p | sem alocação, custo zero | recusa telas maiores; em 24 bpp usa um terço do reservado |
-| Damage tracking e camada `STATIC` | animação proporcional à área do dano | vários caminhos de desenho e uma assinatura de cena que precisa invalidar certo (já colidiu com ≥ 9 janelas; corrigido) |
+| Motor de dano sobre uma cena de camadas (sem cache estático nem assinatura) | todo quadro é função só da descrição da cena; custo proporcional ao dano; um caminho de desenho que o teste diferencial prova igual ao redesenho completo | o dono da cena tem de declarar footprint, área opaca e `look` verdadeiros (o modo verify e o oráculo acusam); janelas "vivas" repintam a cada quadro |
 | `Nic` trait + `Port`, virtio-net e NE2000 polled, `smoltcp`, DHCP e DNS próprios (`lease`, `dns`) | um único dono do endereço e do resolvedor (sem socket DHCP/DNS do `smoltcp`, que só tem um servidor); a lógica é pura e testada | só exercitado no QEMU (virtio-net existe em VMs, não em PCs; NE2000 é ISA rara); virtio só-legado não é suportado; DHCP sem autenticação |
 | Fetcher em thread própria que também é o `netd`, NIC movida para ele | o handshake TLS por software não pode congelar a UI; um dono só, garantido pelo tipo | se o `fetcher` morre a rede fica muda; um RENEW espera uma busca em curso terminar |
 | TLS 1.3 sem verificação de certificado | sem trust store nem relógio confiável | cifra sem autenticar; rótulo honesto na UI; RNG: ver §9.1 (DRBG com pool; HTTPS recusa se Weak) |

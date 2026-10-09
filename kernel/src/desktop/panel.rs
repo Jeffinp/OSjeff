@@ -175,27 +175,6 @@ impl Desktop {
             .map_or(Rect::new(0, 0, 0, 0), |(_, r)| *r)
     }
 
-    /// True when the per-second clock tick can be repainted locally: no window
-    /// that redraws itself every second is on screen.
-    pub fn clock_repaint_is_local(&self) -> bool {
-        self.task_window_rect().is_none()
-    }
-
-    /// Redo only the clock item in `back`: restore the wallpaper's panel under it, then
-    /// draw the text. Valid when [`clock_repaint_is_local`] holds.
-    pub fn repaint_clock(
-        &self,
-        back: &mut [u8],
-        bg: &[u8],
-        info: bootloader_api::info::FrameBufferInfo,
-        time: Time,
-    ) {
-        let r = self.clock_rect();
-        copy_region(back, bg, info, r);
-        let mut c = Canvas::new(back, info);
-        self.draw_panel_item(&mut c, PanelItem::Clock, r, time);
-    }
-
     /// Panel content over the strip baked into the wallpaper.
     pub(crate) fn draw_panel(&self, c: &mut Canvas, time: Time) {
         for (item, rect) in self.panel_items() {
@@ -1159,11 +1138,15 @@ impl Desktop {
         }
     }
 
-    /// Draw the menu, popover and sheet layers.
-    pub(crate) fn draw_menu_layers(&self, c: &mut Canvas) {
+    /// Draw the open menu (a context menu, the system menu, the window menu).
+    pub(crate) fn draw_menu_layer(&self, c: &mut Canvas) {
         if let Some(m) = &self.shell.menu {
             self.draw_open_menu(c, m);
         }
+    }
+
+    /// Draw the open popover (Quick Settings, the notification centre).
+    pub(crate) fn draw_popover_layer(&self, c: &mut Canvas) {
         if let Some(p) = &self.shell.pop {
             self.draw_popover(c, p);
         }

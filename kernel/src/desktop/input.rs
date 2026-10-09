@@ -111,6 +111,11 @@ impl Desktop {
                 }
                 // Ctrl+Alt+R: toggle the reference mode (every frame recomposed from scratch),
                 // a debugging aid for tools/perf/scen/w27-oracle.sh.
+                // Ctrl+Alt+V: verify mode (every frame is compared with a full redraw).
+                Key::Char(b'v' | b'V') if alt_now => {
+                    self.verify = !self.verify;
+                    return true;
+                }
                 Key::Char(b'r' | b'R') if alt_now => {
                     self.reference = !self.reference;
                     self.force_full = true;

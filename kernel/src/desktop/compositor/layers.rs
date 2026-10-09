@@ -1,0 +1,213 @@
+//! The desktop described as a compositor scene: which layers exist, where they can draw, what is
+//! opaque and what their look is. Nothing here paints and nothing here says what to repaint: the
+//! engine (`osjeff_core::compositor`) diffs this description with the previous frame's.
+//!
+//! Bottom to top: wallpaper (implicit), windows in stacking order, the app bar, the panel, the
+//! snap preview, then the shell layers (Apps, Busca, menu, popover, Alt+Tab, sheet). The cursor,
+//! the toasts and the performance HUD are not layers: they live only in the framebuffer (see
+//! `present.rs`).
+//!
+//! # Adding a window type or an overlay
+//! A new kind of window needs nothing here: it is a window. A new overlay is a [`LayerId`]
+//! constant, one entry in [`Slot`], a footprint (everything it can draw, shadow included) and a
+//! look that changes whenever its pixels do; then a branch in `paint.rs`.
+
+use super::super::*;
+use osjeff_core::compositor::{Layer, LayerId, Look, Scene};
+use osjeff_core::style::R_WINDOW;
+
+pub(super) const PANEL: LayerId = LayerId(0xF000_0001);
+pub(super) const DOCK: LayerId = LayerId(0xF000_0002);
+pub(super) const SNAP: LayerId = LayerId(0xF000_0003);
+pub(super) const APPS: LayerId = LayerId(0xF000_0004);
+pub(super) const SEARCH: LayerId = LayerId(0xF000_0005);
+pub(super) const MENU: LayerId = LayerId(0xF000_0006);
+pub(super) const POPOVER: LayerId = LayerId(0xF000_0007);
+pub(super) const SWITCHER: LayerId = LayerId(0xF000_0008);
+pub(super) const DIALOG: LayerId = LayerId(0xF000_0009);
+
+/// What a [`LayerId`] stands for.
+pub(super) enum Slot {
+    Wallpaper,
+    Window(WindowId),
+    Panel,
+    Dock,
+    Snap,
+    Apps,
+    Search,
+    Menu,
+    Popover,
+    Switcher,
+    Dialog,
+}
+
+pub(super) fn slot_of(id: LayerId) -> Slot {
+    match id {
+        LayerId::WALLPAPER => Slot::Wallpaper,
+        PANEL => Slot::Panel,
+        DOCK => Slot::Dock,
+        SNAP => Slot::Snap,
+        APPS => Slot::Apps,
+        SEARCH => Slot::Search,
+        MENU => Slot::Menu,
+        POPOVER => Slot::Popover,
+        SWITCHER => Slot::Switcher,
+        DIALOG => Slot::Dialog,
+        other => Slot::Window(WindowId::from_raw(other.0)),
+    }
+}
+
+/// Version counters of the chrome: they advance when something that is not a window may have
+/// changed (an input event, an overlay animating). Windows do not use them.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Epochs {
+    /// The panel and the app bar change on input and when an animation settles.
+    pub chrome: u64,
+    /// The shell layers also follow the pointer (hover highlights) and their own animations.
+    pub overlay: u64,
+}
+
+/// The scene and what the compositor needs to know about how it was built.
+pub(super) struct Built {
+    pub scene: Scene,
+    /// Windows that are repainted every frame right now (animating, running, live).
+    pub dynamic: Vec<WindowId>,
+    /// The only thing changing is the inside of live windows (Tarefas gliding): such a glide
+    /// needs a frame every 20 ms, not every timer tick.
+    pub live_only: bool,
+}
+
+const NOTHING: Rect = Rect::new(0, 0, 0, 0);
+
+impl Desktop {
+    /// Footprint of a window: its rectangle and, unless it is maximised and still, its shadow.
+    fn window_footprint(&self, w: &Win) -> (Rect, Rect) {
+        let rect = self.window_box(w);
+        let still_max = w.maximized && w.zoom.is_none() && w.anim.is_none();
+        (rect, if still_max { rect } else { shadow_box(rect) })
+    }
+
+    /// Why a window must be repainted every frame: `Some(rect)` is the part that changes (the
+    /// whole footprint, or a live window's chart); `None` when it is still.
+    fn window_activity(&self, w: &Win, footprint: Rect) -> Option<(Rect, bool)> {
+        let busy = w.anim.is_some()
+            || w.zoom.is_some()
+            || self.drag.as_ref().is_some_and(|d| d.win == w.id)
+            || self.focus_busy(w.id)
+            || w.app.kind() == Kind::WasmApp
+            || matches!(&w.app.app, App::Files(f) if f.job.is_some())
+            || matches!(&w.app.app, App::Terminal(t) if t.term.is_running());
+        if busy {
+            return Some((footprint, false));
+        }
+        if self.live_dynamic(w) {
+            return match self.live_rect(w) {
+                Some(r) => Some((r, true)),
+                None => Some((footprint, false)),
+            };
+        }
+        None
+    }
+
+    fn window_layer(&self, w: &Win, dynamic: &mut Vec<WindowId>, live_only: &mut bool) -> Layer {
+        let (rect, footprint) = self.window_footprint(w);
+        let moving = w.anim.is_some() || w.zoom.is_some();
+        let opaque = if moving {
+            NOTHING
+        } else if w.maximized {
+            rect
+        } else {
+            rect.inflated(-R_WINDOW)
+        };
+        let focused = self.focused() == Some(w.id);
+        let hover_btn = self
+            .title_hover
+            .filter(|(id, _)| *id == w.id)
+            .map_or(0, |(_, b)| b as u64 + 1);
+        let look = Look::new()
+            .u(self.focus_mix(w.id, focused) as u64)
+            .b(focused)
+            .u(hover_btn)
+            .b(self.hover == Some(w.id))
+            .b(self.drag.as_ref().is_some_and(|d| d.win == w.id))
+            .b(w.maximized)
+            .b(w.snap.is_some())
+            .b(w.resizable);
+        let dirty = match self.window_activity(w, footprint) {
+            Some((r, live)) => {
+                dynamic.push(w.id);
+                *live_only &= live;
+                Some(r)
+            }
+            None => None,
+        };
+        Layer::new(LayerId(w.id.raw()), footprint)
+            .with_opaque(opaque)
+            .with_look(look.get())
+            .with_dirty(dirty)
+    }
+
+    /// The whole scene for this frame.
+    pub(super) fn build_scene(&self, ep: Epochs) -> Built {
+        let mut scene = Scene::new();
+        let mut dynamic = Vec::new();
+        let mut live_only = true;
+        for w in self.wm.windows().iter().filter(|w| w.shown()) {
+            scene.push(self.window_layer(w, &mut dynamic, &mut live_only));
+        }
+        let sh = &self.shell;
+        let dock_busy = self.dock_animating();
+        let zone = self.dock_paint_zone();
+        let mut dock = Layer::new(DOCK, zone).with_look(ep.chrome);
+        if dock_busy {
+            dock = dock.with_dirty(Some(zone));
+        }
+        scene.push(dock);
+        let panel = self.panel_rect();
+        scene.push(
+            Layer::new(PANEL, panel)
+                .with_opaque(panel)
+                .with_look(ep.chrome),
+        );
+        if let Some(r) = self.snap_preview_rect() {
+            let t = sh.snap.as_ref().map_or(0, |p| p.t.value().to_bits() as u64);
+            scene.push(Layer::new(SNAP, r.inflated(3)).with_look(Look::new().u(t).get()));
+        }
+        let full = Rect::new(0, 0, self.sw, self.sh);
+        if sh.apps.is_some() {
+            let hover = sh.dirty.get();
+            let mut l = Layer::new(APPS, full).with_look(ep.chrome);
+            if !hover.is_empty() {
+                l = l.with_dirty(Some(hover));
+            }
+            scene.push(l);
+        }
+        if let Some(s) = &sh.search {
+            let g = osjeff_core::chrome::spotlight_geom(self.sw, self.sh, s.hits.len());
+            scene.push(Layer::new(SEARCH, g.panel.inflated(40)).with_look(ep.overlay));
+        }
+        if let Some(m) = &sh.menu {
+            scene.push(Layer::new(MENU, m.geom.rect.inflated(40)).with_look(ep.overlay));
+        }
+        if let Some(p) = &sh.pop {
+            scene.push(Layer::new(POPOVER, p.rect.inflated(40)).with_look(ep.overlay));
+        }
+        if let Some(sw) = &self.switcher {
+            let r = self.switcher_rect(sw.list().len()).inflated(40);
+            scene.push(Layer::new(SWITCHER, r).with_look(ep.overlay));
+        }
+        if sh.dialog.is_some() {
+            scene.push(Layer::new(DIALOG, full).with_look(ep.overlay));
+        }
+        let live_only = live_only
+            && !dynamic.is_empty()
+            && !dock_busy
+            && !self.overlay_open()
+            && !self.shell_animating();
+        Built {
+            scene,
+            dynamic,
+            live_only,
+        }
+    }
+}

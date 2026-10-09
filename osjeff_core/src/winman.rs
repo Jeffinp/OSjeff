@@ -1,8 +1,8 @@
 //! Dynamic window table: any number of windows (up to a configurable limit),
 //! each owning an application payload `A`, with z-order, focus, hit-testing,
 //! open / close / minimize / maximize / restore, cascading placement,
-//! move / resize, most-recently-used focus cycling (Alt+Tab) and a signature
-//! of the scene for the compositor's cached static layer.
+//! move / resize and most-recently-used focus cycling (Alt+Tab). What is on screen is
+//! planned by [`crate::compositor`].
 //!
 //! The table is pure logic: it never draws and knows nothing about what `A`
 //! is. The kernel instantiates it with its app-instance type; the tests below
@@ -595,46 +595,6 @@ impl<A> WindowManager<A> {
         w.snap = None;
         true
     }
-
-    // ---------------------------------------------------------- signature
-
-    /// Compact hash of the *static* scene: for every window (back to front)
-    /// its id, rect, flags and whether it animates, plus the drag target. When
-    /// it changes the compositor rebuilds its cached static layer. Unlike the
-    /// fixed-slot [`crate::wm::scene_signature`] it covers geometry, so a
-    /// maximize or a finished move/resize invalidates the cache; the rect of
-    /// the `drag` window itself is left out so dragging stays on the cheap
-    /// damage path.
-    pub fn signature(&self, drag: Option<WindowId>) -> u64 {
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        let mut feed = |v: u32| {
-            for b in v.to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(0x0000_0100_0000_01b3);
-            }
-        };
-        for w in &self.wins {
-            feed(w.id.raw());
-            // The window being dragged / resized is drawn on top of the cached
-            // layer every frame, so its moving rect must not invalidate it.
-            if drag != Some(w.id) {
-                for v in [w.rect.x, w.rect.y, w.rect.w, w.rect.h] {
-                    feed(v as u32);
-                }
-            }
-            feed(
-                (w.shown() as u32)
-                    | ((w.anim.is_some() as u32) << 1)
-                    | ((w.is_leaving() as u32) << 2)
-                    | ((w.maximized as u32) << 3)
-                    | ((w.zoom.is_some() as u32) << 4)
-                    | ((w.snap.is_some() as u32) << 5),
-            );
-        }
-        // +1 so "no drag" and "dragging window 0" differ.
-        feed(drag.map_or(0, |d| d.raw().wrapping_add(1)));
-        h
-    }
 }
 
 // ------------------------------------------------------------ free helpers
@@ -1073,15 +1033,13 @@ mod tests {
     }
 
     #[test]
-    fn snapping_animates_through_the_zoom_and_changes_the_signature() {
+    fn snapping_animates_through_the_zoom() {
         let (mut m, [a, ..]) = table();
         settle(&mut m);
-        let s0 = m.signature(None);
         assert!(m.snap_to(a, SnapZone::TopRight, WORK));
         assert!(m.get(a).unwrap().zoom.is_some());
         m.step(2.0);
         assert!(m.get(a).unwrap().zoom.is_none());
-        assert_ne!(m.signature(None), s0);
         // Tiled windows still resize (from any edge) and then are free again.
         let start = m.get(a).unwrap().rect;
         assert!(m.resize(a, ResizeEdge::W, start, (-40, 0), (1280, 720)));
@@ -1427,79 +1385,6 @@ mod tests {
         assert!(!t.press(4010, 50, 50, a));
     }
 
-    fn sig(m: &WindowManager<u32>, drag: Option<WindowId>) -> u64 {
-        m.signature(drag)
-    }
-
-    #[test]
-    fn signature_is_deterministic_and_tracks_every_ingredient() {
-        let (mut m, [a, b, c]) = table();
-        settle(&mut m);
-        let base = sig(&m, None);
-        assert_eq!(base, sig(&m, None));
-        assert_ne!(base, sig(&m, Some(a))); // drag target
-        assert_ne!(sig(&m, Some(a)), sig(&m, Some(b)));
-
-        m.raise(a); // z-order
-        let raised = sig(&m, None);
-        assert_ne!(base, raised);
-
-        m.move_to(c, 200, 200, 1280, 720); // geometry
-        let moved = sig(&m, None);
-        assert_ne!(raised, moved);
-
-        m.maximize(b, WORK); // maximize
-        let maxed = sig(&m, None);
-        assert_ne!(moved, maxed);
-
-        m.request_close(c); // animation
-        assert_ne!(maxed, sig(&m, None));
-    }
-
-    #[test]
-    fn dragging_a_window_does_not_change_the_signature() {
-        let (mut m, [a, b, _c]) = table();
-        settle(&mut m);
-        let before = sig(&m, Some(a));
-        m.move_to(a, 300, 200, 1280, 720);
-        assert_eq!(before, sig(&m, Some(a)));
-        let start = m.get(a).unwrap().rect;
-        m.resize(a, ResizeEdge::SE, start, (40, 40), (1280, 720));
-        assert_eq!(before, sig(&m, Some(a)));
-        // Moving a *different* window while `a` is dragged does change it.
-        m.move_to(b, 400, 300, 1280, 720);
-        assert_ne!(before, sig(&m, Some(a)));
-        // And once the drag ends the new rect is part of the signature.
-        assert_ne!(sig(&m, None), sig(&m, Some(a)));
-    }
-
-    #[test]
-    fn signature_distinguishes_minimized_from_shown() {
-        let (mut m, [a, ..]) = table();
-        settle(&mut m);
-        let shown = sig(&m, None);
-        m.minimize(a);
-        settle(&mut m);
-        assert_ne!(shown, sig(&m, None));
-    }
-
-    #[test]
-    fn signature_distinguishes_every_swap_with_many_windows() {
-        let mut m = WindowManager::new(32);
-        let ids: Vec<_> = (0..20)
-            .map(|i| m.open(spec(i, i), i as u32).unwrap())
-            .collect();
-        settle(&mut m);
-        let mut seen = alloc::vec![sig(&m, None)];
-        // Every successive raise yields a z-order never seen before.
-        for &id in &ids[..19] {
-            m.raise(id);
-            let s = sig(&m, None);
-            assert!(!seen.contains(&s));
-            seen.push(s);
-        }
-    }
-
     #[test]
     fn empty_table_is_safe() {
         let mut m: WindowManager<u32> = WindowManager::default();
@@ -1510,7 +1395,6 @@ mod tests {
         assert!(m.switch_list().is_empty());
         let (active, gone) = m.step(1.0);
         assert!(!active && gone.is_empty());
-        let _ = sig(&m, None);
         assert!(!m.minimize(WindowId::from_raw(1)));
         assert!(!m.activate(WindowId::from_raw(1)));
         assert!(!m.request_close(WindowId::from_raw(1)));
@@ -1560,19 +1444,15 @@ mod tests {
     }
 
     #[test]
-    fn zoom_is_interruptible_and_changes_the_signature_only_while_it_runs() {
+    fn zoom_is_interruptible() {
         let (mut m, [a, ..]) = table();
         settle(&mut m);
-        let idle = sig(&m, None);
         m.maximize(a, WORK);
-        let running = sig(&m, None);
-        assert_ne!(idle, running);
         m.step(0.02);
         let now = m.get(a).unwrap().visual_rect();
         m.unmaximize(a); // change of mind mid-flight
         assert_eq!(m.get(a).unwrap().visual_rect(), now);
         settle(&mut m);
-        assert_eq!(sig(&m, None), idle);
     }
 
     #[test]

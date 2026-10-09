@@ -15,10 +15,13 @@
 # by themselves: their client areas are masked), all (a then b).
 source "$(dirname "$0")/../lib.sh"
 SET=${W27_SET:-a}
+# W27_VERIFY=1 switches the kernel's verify mode on (Ctrl+Alt+V: every frame is compared with a
+# full redraw; mismatches are logged on the serial port as `compositor-verify: MISMATCH`).
+maybe_verify() { [ "${W27_VERIFY:-0}" = 1 ] && { key ctrl-alt-v; sleep 0.5; }; true; }
 : > "$OUT/masks.txt"
 N=0
 # pair [mask x y w h]...: the screen at rest, then the ground truth. With W27_VOLATILE=1 a
-# second ground-truth shot (clean2_<N>) is taken a moment later: what differs between the two
+# second and third ground-truth shots (clean2_<N>, clean3_<N>) are taken a moment later: what differs between the two
 # truths is content that changes by itself (a live chart) and the checker ignores it.
 pair() {
   N=$((N + 1))
@@ -28,7 +31,7 @@ pair() {
   shot rest$N
   key ctrl-alt-r; sleep 1.6
   shot clean$N
-  if [ "${W27_VOLATILE:-0}" = 1 ]; then sleep 1.3; shot clean2_$N; fi
+  if [ "${W27_VOLATILE:-0}" = 1 ]; then sleep 1.0; shot clean2_$N; sleep 1.0; shot clean3_$N; fi
   key ctrl-alt-r; sleep 1.2
 }
 # burst <prefix> <n>: n instant screenshots 0.2 s apart (flicker: a window or a shadow missing
@@ -46,6 +49,7 @@ btn_menu() { goto $(( $1 + $3 - 122 )) $(( $2 + 16 )); click; sleep 0.8; }
 set_a() {
   wait_first_frame
   sleep 8                                        # let the boot toasts leave
+  maybe_verify
   pair                                           # 1: the terminal alone
   dock_icon editor; click; sleep 1.8; pair       # 2: editor over the terminal (610,110,560,350)
   dock_icon calc; click; sleep 1.8; pair         # 3: calculator (470,100,320,520)
@@ -98,6 +102,7 @@ set_b() {
   export W27_VOLATILE=1
   wait_first_frame
   sleep 8
+  maybe_verify
   key ctrl-spc; sleep 1.0; typestr "snake"; sleep 0.8; key ret; sleep 14   # Snake (240,130,720,470)
   pair                                           # 1: snake over the terminal
   goto 150 96; click; sleep 0.8; typestr "sleep 900"; key ret; sleep 1.5

@@ -98,31 +98,28 @@ pub fn calibrated(khz: u64) {
 
 // ------------------------------------------------------- runtime stats (ON)
 
-/// Frame code paths of the compositor loop (see `main.rs`).
+/// Frame kinds of the compositor (see `desktop/compositor`): how the frame came about. They all
+/// run the same engine; the kind only says why, so the per-second report stays comparable.
 #[derive(Clone, Copy)]
 pub enum Path {
-    /// Animation/drag/WASM: static layer rebuilt + full blit.
+    /// Animation, drag or live app that repaints most of the screen.
     AnimRebuild,
-    /// Animation/drag/WASM: damage-rect frame.
+    /// Animation, drag or live app: a damage-rectangle frame.
     AnimDamage,
-    /// Menu/start panel opened or changed: full recompose + full blit.
-    OverlayRebuild,
-    /// Overlay hover: only the overlay rect.
+    /// Pointer moving over an open menu or overlay.
     OverlayHover,
-    /// First frame after an animation: full recompose + full blit.
+    /// Reference mode, or a change that repaints most of the screen (a settle after an animation).
     Settle,
-    /// Content change (keystroke, click): full recompose, partial blit.
+    /// Content change (keystroke, click).
     Steady,
-    /// Per-second clock tick: full recompose, clock-rect blit.
-    Clock,
-    /// Per-second clock tick repainted locally (wallpaper + pill only).
+    /// Per-second clock tick.
     ClockLocal,
-    /// Cursor only.
+    /// Cursor only: nothing recomposed.
     Cursor,
 }
-const PATHS: usize = 9;
+const PATHS: usize = 7;
 const PATH_NAMES: [&str; PATHS] = [
-    "animrb", "animdm", "ovrb", "ovhov", "settle", "steady", "clock", "clockl", "cursor",
+    "animrb", "animdm", "ovhov", "settle", "steady", "clockl", "cursor",
 ];
 
 /// Work stages inside a frame (cycles are summed per second).

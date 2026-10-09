@@ -27,8 +27,10 @@ for f in $(ls "$out"/rest[1-9]*.png | sort -V); do
   # Content that changes by itself: whatever differs between the two ground-truth shots (taken a
   # moment apart, see W27_VOLATILE in the scenario) is widened a little and ignored.
   if [ -f "$out/clean2_$n.png" ]; then
+    third="$out/clean3_$n.png"; [ -f "$third" ] || third="$out/clean2_$n.png"
     convert "$c" "$out/clean2_$n.png" -compose difference -composite -colorspace Gray -threshold 0 \
-      -morphology Dilate Square:5 -negate "$out/.vol.png"
+      \( "$out/clean2_$n.png" "$third" -compose difference -composite -colorspace Gray -threshold 0 \) \
+      -compose lighten -composite -morphology Dilate Square:25 -negate "$out/.vol.png"
     convert "$c" "${draws[@]}" "$out/.vol.png" -compose multiply -composite "$out/.m0.png"
     convert "$f" "${draws[@]}" "$out/.vol.png" -compose multiply -composite "$out/.m1.png"
   else
@@ -37,8 +39,12 @@ for f in $(ls "$out"/rest[1-9]*.png | sort -V); do
   ae=$(compare -metric AE "$out/.m0.png" "$out/.m1.png" "$out/.d.png" 2>&1 || true)
   ae=${ae%% *}
   total=$((total + 1))
-  if [ "$ae" = 0 ]; then
-    echo "pair $n: differing_pixels=0"
+  # Live content (Tarefas' numbers and chart) differs a little between the shots whatever the
+  # compositor does: pairs with a volatile mask tolerate W27_TOL pixels (default 3500; the bugs
+  # this oracle was written for differ by 4 700 to 62 000).
+  tol=0; [ -f "$out/clean2_$n.png" ] && tol=${W27_TOL:-3500}
+  if [ "$ae" -le "$tol" ]; then
+    echo "pair $n: differing_pixels=$ae"
     rm -f "$out/diff$n.png"
   else
     bad=$((bad + 1)); status=1

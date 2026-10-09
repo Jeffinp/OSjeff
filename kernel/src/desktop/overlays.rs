@@ -828,24 +828,28 @@ impl Desktop {
         self.force_full = true;
     }
 
-    // ---- drawing entry ----
+    // ---- drawing entry: one function per shell layer (see `compositor/layers.rs`) ----
 
-    /// Draw every shell layer above the windows, bottom to top. `part` is the dirty
-    /// rectangle when only part of the layers is being repainted.
-    pub(crate) fn draw_overlays_in(&self, c: &mut Canvas, part: Option<Rect>) {
-        let _ = part;
-        let sh = &self.shell;
-        if let Some(a) = &sh.apps {
+    pub(crate) fn draw_apps_layer(&self, c: &mut Canvas) {
+        if let Some(a) = &self.shell.apps {
             self.draw_apps(c, a);
         }
-        if let Some(s) = &sh.search {
+    }
+
+    pub(crate) fn draw_search_layer(&self, c: &mut Canvas) {
+        if let Some(s) = &self.shell.search {
             self.draw_search(c, s);
         }
-        self.draw_menu_layers(c);
+    }
+
+    pub(crate) fn draw_switcher_layer(&self, c: &mut Canvas) {
         if let Some(sw) = &self.switcher {
             self.draw_switcher(c, sw);
         }
-        if let Some(d) = &sh.dialog {
+    }
+
+    pub(crate) fn draw_dialog_layer(&self, c: &mut Canvas) {
+        if let Some(d) = &self.shell.dialog {
             self.draw_dialog(c, d);
         }
     }

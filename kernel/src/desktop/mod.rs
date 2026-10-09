@@ -140,11 +140,11 @@ pub struct Desktop {
     /// `vfs::generation()` the file managers last loaded, and the tick of that check.
     fs_gen: u32,
     fs_gen_tick: u64,
-    /// Timer tick of the last frame of a window animating its own content (see `render_anim_frame`).
-    live_tick: core::cell::Cell<u64>,
     /// Reference mode (Ctrl+Alt+R): every frame recomposes the whole scene from scratch, which is
     /// the ground truth the oracle scenarios compare the incremental screen with.
     reference: bool,
+    /// Verify mode (Ctrl+Alt+V): every composed frame is compared with a full redraw.
+    verify: bool,
 }
 
 impl Desktop {
@@ -193,8 +193,8 @@ impl Desktop {
             clip_gen: crate::wasm::clip_generation(),
             fs_gen: vfs::generation(),
             fs_gen_tick: 0,
-            live_tick: core::cell::Cell::new(0),
             reference: false,
+            verify: false,
         };
         // Install the bundled apps into /apps (first boot) and build the launcher catalog.
         desk.init_apps();
@@ -479,19 +479,6 @@ impl Desktop {
         }
     }
 
-    /// Screen rect covering every visible window whose content changes by
-    /// itself each second (the Task Manager's CPU figures, the log viewer's new
-    /// lines): the cheap clock-tick path must repaint them too. `None` when no
-    /// such window is shown.
-    pub fn task_window_rect(&self) -> Option<Rect> {
-        self.wm
-            .windows()
-            .iter()
-            .filter(|w| w.app.kind().is_live() && w.shown())
-            .map(|w| self.window_box(w))
-            .reduce(|a, b| a.union(&b))
-    }
-
     /// On-screen rect of window `w` right now: its resting rectangle, the in-flight
     /// rectangle of a zoom, or the scaled/moved one of an open / close / minimise.
     pub(crate) fn window_box(&self, w: &Win) -> Rect {
@@ -499,34 +486,6 @@ impl Desktop {
             return a.frame(w.rect, self.dock_target(w)).rect;
         }
         w.visual_rect()
-    }
-
-    /// On-screen rect of the focused window, or `None` if none is focused. Lets
-    /// the steady-state loop repaint only this window on a content change (a
-    /// keystroke, a calc button) instead of blitting the whole framebuffer.
-    pub fn focused_box(&self) -> Option<Rect> {
-        let id = self.focused()?;
-        self.wm.get(id).map(|w| self.window_box(w))
-    }
-
-    /// A "dynamic" window is one the compositor must redraw every frame and
-    /// keep OUT of the cached static layer: one that is opening/closing, or the
-    /// one currently being dragged or resized. Treating a drag like an
-    /// animation lets the existing damage-tracking fast-path move it by
-    /// repainting only its old+new rectangle each frame, instead of recomposing
-    /// the whole desktop + an 8 MiB blit on every mouse step.
-    pub(crate) fn is_dynamic(&self, w: &Win) -> bool {
-        w.anim.is_some()
-            || w.zoom.is_some()
-            || self.drag.as_ref().is_some_and(|d| d.win == w.id)
-            // A visible WASM app renders a fresh frame every tick (it may animate
-            // on its own clock), so it is kept out of the cached static layer and
-            // repainted through the per-frame damage path like an animation.
-            || (w.shown() && w.app.kind() == Kind::WasmApp)
-            || (w.shown() && matches!(&w.app.app, App::Files(f) if f.job.is_some()))
-            || (w.shown() && matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
-            || self.live_dynamic(w)
-            || self.focus_busy(w.id)
     }
 
     /// True while any window is opening, closing, being dragged, or is a live
@@ -546,6 +505,11 @@ impl Desktop {
                         || matches!(&w.app.app, App::Files(f) if f.job.is_some())
                         || matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
             })
+    }
+
+    /// Is the verify mode (Ctrl+Alt+V, see the `verify` field) on?
+    pub fn verify_mode(&self) -> bool {
+        self.verify
     }
 
     /// Is the reference mode (Ctrl+Alt+R, see the `reference` field) on?
@@ -860,6 +824,7 @@ fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
 mod apps;
 pub(crate) mod calc_ui;
 mod chrome;
+mod compositor;
 mod cursor;
 mod edit;
 mod files;
@@ -873,7 +838,6 @@ mod live;
 mod logview;
 mod overlays;
 mod panel;
-mod render;
 mod settings_ui;
 mod shell;
 mod shellhost;
@@ -887,6 +851,7 @@ pub(crate) mod vfs;
 mod viewer;
 mod wasmwin;
 mod widgets;
+pub use compositor::{Compositor, FrameIn, Screen};
 pub(crate) use edit::EditorState;
 pub(crate) use input::Special;
 pub(crate) use instance::*;
