@@ -142,6 +142,9 @@ pub struct Desktop {
     fs_gen_tick: u64,
     /// Timer tick of the last frame of a window animating its own content (see `render_anim_frame`).
     live_tick: core::cell::Cell<u64>,
+    /// Reference mode (Ctrl+Alt+R): every frame recomposes the whole scene from scratch, which is
+    /// the ground truth the oracle scenarios compare the incremental screen with.
+    reference: bool,
 }
 
 impl Desktop {
@@ -191,6 +194,7 @@ impl Desktop {
             fs_gen: vfs::generation(),
             fs_gen_tick: 0,
             live_tick: core::cell::Cell::new(0),
+            reference: false,
         };
         // Install the bundled apps into /apps (first boot) and build the launcher catalog.
         desk.init_apps();
@@ -542,6 +546,11 @@ impl Desktop {
                         || matches!(&w.app.app, App::Files(f) if f.job.is_some())
                         || matches!(&w.app.app, App::Terminal(t) if t.term.is_running()))
             })
+    }
+
+    /// Is the reference mode (Ctrl+Alt+R, see the `reference` field) on?
+    pub fn reference_mode(&self) -> bool {
+        self.reference
     }
 
     /// Consume the "repaint everything" request (maximize, restore, ...).

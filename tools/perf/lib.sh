@@ -25,16 +25,16 @@ CX=640
 if [ "$MODE" = uefi ]; then CY=400; H=800; else CY=360; H=720; fi
 goto() { move $(( $1 - CX )) $(( $2 - CY )); CX=$1; CY=$2; sleep 0.3; }
 DOCKY=$(( H - 36 )); DY=$(( DOCKY - CY ))
-# The taskbar (floating, centred, no magnification): the Apps button, a separator, nine pinned apps
+# The taskbar (floating, centred, no magnification): the Apps button, a separator, eight pinned apps
 # and the show-desktop sliver. 40 px icons, 6 px gap, 10 px padding, 14 px separators; the icon
-# centres are 417 (Apps), then 471 + 46 * slot. Slots: files browser terminal editor calc viewer
-# tasks monitor settings. `dock_icon <name>` moves the pointer onto an icon's centre.
+# centres are 440 (Apps), then 494 + 46 * slot. Slots: files browser terminal editor calc viewer
+# tasks settings. `dock_icon <name>` moves the pointer onto an icon's centre.
 DOCK_Y_CENTER=$(( H - 36 ))
 dock_x() {
   case "$1" in
-    apps) echo 417 ;; files) echo 471 ;; browser) echo 517 ;; terminal) echo 563 ;; editor) echo 609 ;;
-    calc) echo 655 ;; viewer) echo 701 ;; tasks) echo 747 ;; monitor) echo 793 ;; settings) echo 839 ;;
-    desktop) echo 880 ;; *) echo 417 ;;
+    apps) echo 440 ;; files) echo 494 ;; browser) echo 540 ;; terminal) echo 586 ;; editor) echo 632 ;;
+    calc) echo 678 ;; viewer) echo 724 ;; tasks) echo 770 ;; settings) echo 816 ;;
+    desktop) echo 857 ;; *) echo 440 ;;
   esac
 }
 dock_icon() { goto "$(dock_x "$1")" "$DOCK_Y_CENTER"; }
@@ -83,4 +83,12 @@ typestr() {
     key "$k"
     sleep 0.06
   done
+}
+# drag x y dx dy: press the left button at (x, y), move by (dx, dy) in small steps, release.
+# `goto` first, so the tracked pointer position (CX, CY) stays right.
+drag() {
+  goto "$1" "$2"
+  mon "mouse_button 1"; sleep 0.15
+  move "$3" "$4"; CX=$(( CX + $3 )); CY=$(( CY + $4 ))
+  sleep 0.15; mon "mouse_button 0"; sleep 0.5
 }

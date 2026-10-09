@@ -109,6 +109,13 @@ impl Desktop {
                     self.execute(Cmd::Gallery);
                     return true;
                 }
+                // Ctrl+Alt+R: toggle the reference mode (every frame recomposed from scratch),
+                // a debugging aid for tools/perf/scen/w27-oracle.sh.
+                Key::Char(b'r' | b'R') if alt_now => {
+                    self.reference = !self.reference;
+                    self.force_full = true;
+                    return true;
+                }
                 // Ctrl+Alt+Left / Right: the previous / next workspace; with Shift they carry the
                 // focused window along.
                 Key::Left | Key::Right if alt_now => {

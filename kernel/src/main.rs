@@ -546,6 +546,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         cursor_moved |= desk.hud_visible() != hud_was_on;
 
         // Did this iteration do real rendering work? (Used to time frames.)
+        // Reference mode renders on the same triggers as the normal paths (so the cursor, erased
+        // at the start of a rendering frame and painted at its end, is on screen between them).
+        let reference = desk.reference_mode() && (any_anim || scene_dirty || clock_tick);
         let work = any_anim || scene_dirty || clock_tick || cursor_moved || was_anim;
         let frame_start = io::rdtsc();
         let cpu_start = trace::cpu_now();
@@ -563,7 +566,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             erased_hud = hr.intersection(&r).is_some();
         }
 
-        if any_anim {
+        if reference {
+            // ---- Reference mode (Ctrl+Alt+R): recompose the whole scene from scratch every
+            // frame. This is the ground truth the incremental paths are compared with.
+            path = Some(trace::Path::Settle);
+            copy_bg(back, bg);
+            desk.render(back, info, time);
+            fb_full_blit(framebuffer.buffer_mut(), back, n);
+            static_valid = false;
+        } else if any_anim {
             // ---- Animation fast-path: cache the static scene, then each frame
             // only touch the small damaged region around the animating window.
             let sig = desk.anim_signature();
@@ -737,7 +748,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
             prev_focused = desk.focused_box();
         }
-        was_anim = any_anim;
+        // Leaving the reference mode must settle the cached paths with a full repaint.
+        was_anim = any_anim || reference;
 
         // Record the frame time (only when we actually rendered).
         if work {
