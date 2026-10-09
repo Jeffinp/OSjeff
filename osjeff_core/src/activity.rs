@@ -9,7 +9,6 @@
 use crate::klog::FixedBuf;
 use crate::sysmon::Series;
 use alloc::string::String;
-use alloc::vec::Vec;
 use core::fmt::Write;
 
 // ------------------------------------------------------------------ names
@@ -173,6 +172,34 @@ pub fn fmt_ago(secs: u32) -> FixedBuf<12> {
     b
 }
 
+/// A log timestamp (milliseconds since boot) as `12,345` seconds, or `3:25,100` once past
+/// a minute and `1:02:03,400` past an hour.
+pub fn fmt_log_time(ms: u32) -> FixedBuf<16> {
+    let mut b = FixedBuf::new();
+    let (h, m, s, ms) = (ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000);
+    if h > 0 {
+        let _ = write!(b, "{h}:{m:02}:{s:02},{ms:03}");
+    } else if m > 0 {
+        let _ = write!(b, "{m}:{s:02},{ms:03}");
+    } else {
+        let _ = write!(b, "{s},{ms:03}");
+    }
+    b
+}
+
+/// The chip text of a log level.
+pub const fn level_name(l: crate::klog::Level) -> &'static str {
+    use crate::klog::Level;
+    match l {
+        Level::Trace => "TRACE",
+        Level::Debug => "DEBUG",
+        Level::Info => "INFO",
+        Level::Warn => "AVISO",
+        Level::Error => "ERRO",
+        Level::Fatal => "FATAL",
+    }
+}
+
 /// `0,42` from thousandths (the load average).
 pub fn fmt_milli(v: u32) -> FixedBuf<12> {
     let mut b = FixedBuf::new();
@@ -239,6 +266,11 @@ impl Glide {
         (self.cur + 128) >> 8
     }
 
+    /// Where it is heading, in plain units.
+    pub fn target(&self) -> i32 {
+        self.target >> 8
+    }
+
     /// Current value in Q8.
     pub fn q8(&self) -> i32 {
         self.cur
@@ -252,28 +284,51 @@ impl Glide {
 /// Value of the history at fractional position `pos_q8` (Q8 index, `0` = oldest
 /// kept), linearly interpolated and clamped to the ends. `None` when empty.
 pub fn series_at(s: &Series, pos_q8: i64) -> Option<u32> {
+    let mut buf = [0u32; crate::sysmon::HIST];
+    let n = snapshot(s, &mut buf);
+    slice_at(&buf[..n], pos_q8)
+}
+
+/// Copy a history into `out` (oldest first); returns how many samples were copied.
+pub fn snapshot(s: &Series, out: &mut [u32; crate::sysmon::HIST]) -> usize {
     let n = s.len();
-    if n == 0 {
+    for (i, o) in out.iter_mut().enumerate().take(n) {
+        *o = s.get(i).unwrap_or(0);
+    }
+    n
+}
+
+/// [`series_at`] over a plain slice.
+pub fn slice_at(v: &[u32], pos_q8: i64) -> Option<u32> {
+    if v.is_empty() {
         return None;
     }
-    let max = ((n - 1) as i64) << 8;
+    let max = ((v.len() - 1) as i64) << 8;
     let p = pos_q8.clamp(0, max);
     let i = (p >> 8) as usize;
     let f = (p & 255) as u64;
-    let a = s.get(i)? as u64;
-    let b = s.get((i + 1).min(n - 1))? as u64;
+    let a = v[i] as u64;
+    let b = v[(i + 1).min(v.len() - 1)] as u64;
     Some(((a * (256 - f) + b * f + 128) >> 8) as u32)
 }
 
-/// Light smoothing of a history for drawing: a 3-tap binomial filter (1-2-1), ends
-/// kept. Output has the same length as the input (at most [`crate::sysmon::HIST`]).
-pub fn smooth121(vals: &[u32], out: &mut Vec<u32>) {
-    out.clear();
-    for i in 0..vals.len() {
-        let prev = vals[i.saturating_sub(1)] as u64;
-        let next = vals[(i + 1).min(vals.len() - 1)] as u64;
-        out.push(((prev + 2 * vals[i] as u64 + next + 2) / 4) as u32);
+/// Light smoothing of a history for drawing, in place: a 3-tap binomial filter
+/// (1-2-1) with the ends kept as they are.
+pub fn smooth121(v: &mut [u32]) {
+    if v.len() < 3 {
+        return;
     }
+    let mut prev = v[0] as u64;
+    for i in 1..v.len() - 1 {
+        let cur = v[i] as u64;
+        v[i] = ((prev + 2 * cur + v[i + 1] as u64 + 2) / 4) as u32;
+        prev = cur;
+    }
+}
+
+/// The text of a formatting buffer (empty if a cut left it invalid).
+pub fn text<const N: usize>(b: &FixedBuf<N>) -> &str {
+    core::str::from_utf8(b.as_bytes()).unwrap_or("")
 }
 
 /// Which sample of a plot `plot_w` pixels wide (starting at `plot_x`) is under the
@@ -664,6 +719,13 @@ mod tests {
         assert_eq!(fmt_ago(0).as_bytes(), b"agora");
         assert_eq!(fmt_ago(12).as_bytes(), "há 12 s".as_bytes());
         assert_eq!(fmt_milli(420).as_bytes(), b"0,42");
+        assert_eq!(fmt_log_time(0).as_bytes(), b"0,000");
+        assert_eq!(fmt_log_time(12_345).as_bytes(), b"12,345");
+        assert_eq!(fmt_log_time(205_100).as_bytes(), b"3:25,100");
+        assert_eq!(fmt_log_time(3_723_400).as_bytes(), b"1:02:03,400");
+        let _ = fmt_log_time(u32::MAX);
+        assert_eq!(level_name(crate::klog::Level::Warn), "AVISO");
+        assert_eq!(level_name(crate::klog::Level::Fatal), "FATAL");
         assert_eq!(fmt_milli(1000).as_bytes(), b"1,00");
         // Extremes never panic.
         let _ = fmt_size(u64::MAX);
@@ -733,15 +795,38 @@ mod tests {
 
     #[test]
     fn smoothing_keeps_a_flat_line_and_rounds_a_spike() {
-        let mut out = Vec::new();
-        smooth121(&[40, 40, 40, 40], &mut out);
-        assert_eq!(out, [40, 40, 40, 40]);
-        smooth121(&[0, 0, 100, 0, 0], &mut out);
-        assert_eq!(out, [0, 25, 50, 25, 0]);
-        smooth121(&[7], &mut out);
-        assert_eq!(out, [7]);
-        smooth121(&[], &mut out);
-        assert!(out.is_empty());
+        let mut v = [40u32, 40, 40, 40];
+        smooth121(&mut v);
+        assert_eq!(v, [40, 40, 40, 40]);
+        let mut v = [0u32, 0, 100, 0, 0];
+        smooth121(&mut v);
+        assert_eq!(v, [0, 25, 50, 25, 0]);
+        let mut v = [7u32];
+        smooth121(&mut v);
+        assert_eq!(v, [7]);
+        let mut v: [u32; 0] = [];
+        smooth121(&mut v);
+        let mut v = [0u32, 100];
+        smooth121(&mut v);
+        assert_eq!(v, [0, 100]);
+        // Large values do not overflow.
+        let mut v = [u32::MAX; 4];
+        smooth121(&mut v);
+        assert_eq!(v, [u32::MAX; 4]);
+    }
+
+    #[test]
+    fn snapshot_copies_oldest_first() {
+        let mut ser = Series::new();
+        for i in 0..70u32 {
+            ser.push(i);
+        }
+        let mut buf = [0u32; crate::sysmon::HIST];
+        let n = snapshot(&ser, &mut buf);
+        assert_eq!(n, 60);
+        assert_eq!((buf[0], buf[59]), (10, 69));
+        assert_eq!(slice_at(&buf[..n], 256 * 59), Some(69));
+        assert_eq!(slice_at(&[], 0), None);
     }
 
     #[test]

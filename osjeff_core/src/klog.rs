@@ -339,7 +339,11 @@ impl<const N: usize> FixedBuf<N> {
 impl<const N: usize> core::fmt::Display for FixedBuf<N> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         use core::fmt::Write as _;
-        // Only ASCII is ever formatted into these buffers; map bytes 1:1.
+        // UTF-8 text (the Portuguese UI strings) prints as itself; bytes that are not
+        // UTF-8 (a log line in Latin-1, or text cut in the middle of a letter) map 1:1.
+        if let Ok(s) = core::str::from_utf8(self.as_bytes()) {
+            return f.write_str(s);
+        }
         for &c in self.as_bytes() {
             f.write_char(c as char)?;
         }
@@ -620,6 +624,28 @@ impl LogView {
             .skip(self.top_for(rows))
             .take(rows)
             .filter_map(move |&o| record_at(snapshot, o as usize).map(|(e, _)| e))
+    }
+}
+
+impl LogView {
+    /// `count` records starting at filtered line `first` (clamped), oldest first: for a
+    /// view that scrolls by pixels and draws a partial line at each end.
+    pub fn visible_from<'a>(
+        &'a self,
+        snapshot: &'a [u8],
+        first: usize,
+        count: usize,
+    ) -> impl Iterator<Item = Entry<'a>> + 'a {
+        self.index
+            .iter()
+            .skip(first)
+            .take(count)
+            .filter_map(move |&o| record_at(snapshot, o as usize).map(|(e, _)| e))
+    }
+
+    /// Largest first line for a window of `rows` lines.
+    pub fn max_top_for(&self, rows: usize) -> usize {
+        self.max_top(rows)
     }
 }
 
@@ -1068,6 +1094,43 @@ mod tests {
                 .unwrap()
                 .contains("line 4999 ")
         );
+    }
+
+    #[test]
+    fn view_can_start_anywhere() {
+        let mut ring = LogRing::<4096>::new();
+        for i in 0..10u32 {
+            let mut m = FixedBuf::<16>::new();
+            let _ = core::fmt::Write::write_fmt(&mut m, format_args!("line {i}"));
+            ring.push(i * 10, Level::Info, 0, m.as_bytes());
+        }
+        let mut snap = alloc::vec![0u8; ring.used()];
+        assert_eq!(ring.copy_out(&mut snap), ring.used());
+        let mut view = LogView::new();
+        view.rebuild(&snap, &Filter::new(), 4);
+        let texts = |first, n| {
+            view.visible_from(&snap, first, n)
+                .map(|e| e.text.to_vec())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(texts(0, 2), [b"line 0".to_vec(), b"line 1".to_vec()]);
+        assert_eq!(texts(8, 5), [b"line 8".to_vec(), b"line 9".to_vec()]);
+        assert!(texts(10, 3).is_empty());
+        assert_eq!(view.max_top_for(4), 6);
+    }
+
+    #[test]
+    fn fixed_buf_displays_utf8_and_falls_back_to_latin1() {
+        let mut b = FixedBuf::<16>::new();
+        let _ = core::fmt::Write::write_str(&mut b, "há 4 s");
+        assert_eq!(alloc::format!("{b}"), "há 4 s");
+        let mut raw = FixedBuf::<16>::new();
+        raw.push_flat(&[b'a', 0xE9, b'b']);
+        assert_eq!(alloc::format!("{raw}"), "a\u{e9}b");
+        // Cut in the middle of a two-byte letter: no panic, each byte shown.
+        let mut cut = FixedBuf::<2>::new();
+        let _ = core::fmt::Write::write_str(&mut cut, "há");
+        let _ = alloc::format!("{cut}");
     }
 
     #[test]

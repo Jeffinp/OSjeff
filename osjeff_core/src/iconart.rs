@@ -507,6 +507,16 @@ pub enum Glyph {
     Sun,
     Moon,
     Info,
+    ChevronUp,
+    Trash,
+    Save,
+    Copy,
+    Keyboard,
+    Clock,
+    Disk,
+    Power,
+    Image,
+    Dock,
 }
 
 /// Draw `g` at `px` x `px` in straight ARGB colour `c`.
@@ -569,6 +579,68 @@ pub fn glyph(g: Glyph, px: usize, c: u32) -> Surface {
         Glyph::Check => stroke(&mut s, &[(3, 8), (6, 11), (13, 4)], 2),
         Glyph::ChevronRight => stroke(&mut s, &[(6, 3), (11, 8), (6, 13)], 2),
         Glyph::ChevronDown => stroke(&mut s, &[(3, 6), (8, 11), (13, 6)], 2),
+        Glyph::ChevronUp => stroke(&mut s, &[(3, 10), (8, 5), (13, 10)], 2),
+        Glyph::Trash => {
+            stroke(&mut s, &[(2, 4), (14, 4)], 2);
+            stroke(&mut s, &[(6, 4), (6, 2), (10, 2), (10, 4)], 1);
+            stroke(&mut s, &[(4, 6), (5, 14), (11, 14), (12, 6)], 2);
+        }
+        Glyph::Save => {
+            stroke(&mut s, &[(8, 2), (8, 10)], 2);
+            stroke(&mut s, &[(4, 7), (8, 11), (12, 7)], 2);
+            stroke(&mut s, &[(3, 11), (3, 14), (13, 14), (13, 11)], 2);
+        }
+        Glyph::Keyboard => {
+            stroke(&mut s, &[(2, 4), (14, 4), (14, 12), (2, 12), (2, 4)], 1);
+            for x in [5, 8, 11] {
+                let mut d = Path::new();
+                d.ellipse(u(x), u(7), u(1) - 32, u(1) - 32);
+                s.fill_path(&d, Paint::Solid(c));
+            }
+            stroke(&mut s, &[(5, 10), (11, 10)], 1);
+        }
+        Glyph::Clock => {
+            let mut p = Path::new();
+            p.ellipse(u(8), u(8), u(7), u(7));
+            p.ellipse_hole(u(8), u(8), u(7) - 96, u(7) - 96);
+            s.fill_path(&p, Paint::Solid(c));
+            stroke(&mut s, &[(8, 4), (8, 8), (11, 10)], 1);
+        }
+        Glyph::Disk => {
+            stroke(&mut s, &[(2, 5), (14, 5), (14, 11), (2, 11), (2, 5)], 1);
+            stroke(&mut s, &[(4, 8), (7, 8)], 1);
+            let mut d = Path::new();
+            d.ellipse(u(11), u(8), u(1) - 32, u(1) - 32);
+            s.fill_path(&d, Paint::Solid(c));
+        }
+        Glyph::Power => {
+            // An open ring (the gap at the top) and the bar through it.
+            let pts: Vec<(i32, i32)> = (0..=9)
+                .map(|k| rot(u(8), u(9), 0, -u(5), 40 + k * 31))
+                .collect();
+            s.fill_path(&stroke_path(&pts, w(1) + 96, true), Paint::Solid(c));
+            stroke(&mut s, &[(8, 2), (8, 8)], 2);
+        }
+        Glyph::Image => {
+            stroke(&mut s, &[(2, 3), (14, 3), (14, 13), (2, 13), (2, 3)], 1);
+            stroke(&mut s, &[(2, 12), (6, 8), (9, 11), (11, 9), (14, 12)], 1);
+            let mut d = Path::new();
+            d.ellipse(u(11), u(6), u(1) - 32, u(1) - 32);
+            s.fill_path(&d, Paint::Solid(c));
+        }
+        Glyph::Dock => {
+            stroke(&mut s, &[(1, 9), (15, 9), (15, 14), (1, 14), (1, 9)], 1);
+            for x in [4, 8, 12] {
+                let mut d = Path::new();
+                d.ellipse(u(x), u(11) + 128, u(1) - 48, u(1) - 48);
+                s.fill_path(&d, Paint::Solid(c));
+            }
+            stroke(&mut s, &[(4, 4), (12, 4)], 1);
+        }
+        Glyph::Copy => {
+            stroke(&mut s, &[(3, 6), (10, 6), (10, 13), (3, 13), (3, 6)], 2);
+            stroke(&mut s, &[(6, 3), (13, 3), (13, 10), (11, 10)], 2);
+        }
         Glyph::Close => {
             stroke(&mut s, &[(4, 4), (12, 12)], 2);
             stroke(&mut s, &[(12, 4), (4, 12)], 2);
@@ -730,6 +802,16 @@ mod tests {
             Glyph::Sun,
             Glyph::Moon,
             Glyph::Info,
+            Glyph::ChevronUp,
+            Glyph::Trash,
+            Glyph::Save,
+            Glyph::Copy,
+            Glyph::Keyboard,
+            Glyph::Clock,
+            Glyph::Disk,
+            Glyph::Power,
+            Glyph::Image,
+            Glyph::Dock,
         ] {
             for px in [12usize, 16, 20] {
                 let s = glyph(g, px, rgb(0xFF0000));
@@ -799,6 +881,16 @@ mod tests {
             Glyph::Sun,
             Glyph::Moon,
             Glyph::Info,
+            Glyph::ChevronUp,
+            Glyph::Trash,
+            Glyph::Save,
+            Glyph::Copy,
+            Glyph::Keyboard,
+            Glyph::Clock,
+            Glyph::Disk,
+            Glyph::Power,
+            Glyph::Image,
+            Glyph::Dock,
         ];
         for (i, g) in gl.iter().enumerate() {
             put(
