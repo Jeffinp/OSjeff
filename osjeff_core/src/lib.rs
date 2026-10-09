@@ -28,6 +28,7 @@ pub mod browser;
 pub mod calc;
 pub mod chrome;
 pub mod clipboard;
+pub mod compositor;
 pub mod cursor;
 pub mod deflate;
 pub mod dns;
