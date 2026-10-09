@@ -67,27 +67,27 @@ pub enum VfsError {
 }
 
 impl VfsError {
-    /// A short Portuguese message (ASCII) for the status bar or a dialog.
+    /// A short message in the language in effect, for the status bar or a dialog.
     pub fn message(self) -> &'static str {
         match self {
-            VfsError::NotFound => "Item nao encontrado",
-            VfsError::Exists => "Ja existe um item com esse nome",
-            VfsError::NotDir => "O destino nao e uma pasta",
-            VfsError::IsDir => "O item e uma pasta",
-            VfsError::NotEmpty => "A pasta nao esta vazia",
-            VfsError::InvalidName => "Nome invalido",
-            VfsError::NameTooLong => "Nome longo demais (maximo 255 bytes)",
-            VfsError::InvalidPath => "Caminho invalido",
-            VfsError::Reserved => "Item reservado do sistema",
-            VfsError::InvalidMove => "Nao e possivel mover uma pasta para dentro dela mesma",
-            VfsError::NoSpace => "Disco cheio",
-            VfsError::NoInodes => "Limite de arquivos do disco atingido",
-            VfsError::TooBig => "Arquivo grande demais",
-            VfsError::Busy => "Sistema de arquivos ocupado",
-            VfsError::Unavailable => "Sem sistema de arquivos",
-            VfsError::Io => "Erro de leitura/escrita no disco",
-            VfsError::Corrupt => "Sistema de arquivos danificado",
-            VfsError::Cancelled => "Operacao cancelada",
+            VfsError::NotFound => crate::t!("files.err.not_found"),
+            VfsError::Exists => crate::t!("files.err.exists"),
+            VfsError::NotDir => crate::t!("files.err.not_dir"),
+            VfsError::IsDir => crate::t!("files.err.is_dir"),
+            VfsError::NotEmpty => crate::t!("files.err.not_empty"),
+            VfsError::InvalidName => crate::t!("files.err.invalid_name"),
+            VfsError::NameTooLong => crate::t!("files.err.name_too_long"),
+            VfsError::InvalidPath => crate::t!("files.err.invalid_path"),
+            VfsError::Reserved => crate::t!("files.err.reserved"),
+            VfsError::InvalidMove => crate::t!("files.err.invalid_move"),
+            VfsError::NoSpace => crate::t!("files.err.no_space"),
+            VfsError::NoInodes => crate::t!("files.err.no_inodes"),
+            VfsError::TooBig => crate::t!("files.err.too_big"),
+            VfsError::Busy => crate::t!("files.err.busy"),
+            VfsError::Unavailable => crate::t!("files.err.unavailable"),
+            VfsError::Io => crate::t!("files.err.io"),
+            VfsError::Corrupt => crate::t!("files.err.corrupt"),
+            VfsError::Cancelled => crate::t!("files.err.cancelled"),
         }
     }
 }

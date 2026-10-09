@@ -824,7 +824,7 @@ impl<D: BlockDevice> Fs3<D> {
             .checked_add(len)
             .ok_or(FsError::Corrupt("block range overflow"))?;
         if start < self.geo.data_start || end > self.geo.backup_sb() {
-            return Err(FsError::Corrupt("block range outside the data area"));
+            return Err(FsError::Corrupt("block range outside the data region"));
         }
         for b in start..end {
             if bits::get(&self.bbits, b) == used {

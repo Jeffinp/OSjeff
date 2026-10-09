@@ -91,10 +91,10 @@ pub fn notice() -> Option<&'static str> {
         return None;
     }
     Some(match storage::state() {
-        storage::State::TooSmall => "Disco pequeno demais: arquivos so na memoria",
-        storage::State::NoDisk => "Sem disco: arquivos so na memoria",
-        storage::State::Unknown => "Disco desconhecido (intocado): arquivos so na memoria",
-        _ => "Falha no disco: arquivos so na memoria",
+        storage::State::TooSmall => osjeff_core::t!("files.vol.too_small"),
+        storage::State::NoDisk => osjeff_core::t!("files.vol.none"),
+        storage::State::Unknown => osjeff_core::t!("files.vol.unknown"),
+        _ => osjeff_core::t!("files.vol.failed"),
     })
 }
 

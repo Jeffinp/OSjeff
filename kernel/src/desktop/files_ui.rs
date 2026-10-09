@@ -16,6 +16,7 @@ use crate::text::{self, BODY, CALLOUT, CAPTION, FOOTNOTE, Weight};
 use osjeff_core::appart::{FileKind, Tool};
 use osjeff_core::fileman::ui::{self as fui, Columns, Layout, SideLayout, ViewMode};
 use osjeff_core::fileman::{self, Place, SortKey};
+use osjeff_core::{t, tp};
 
 fn argb(c: Color) -> u32 {
     appui::rgb_of(c)
@@ -108,8 +109,8 @@ impl Desktop {
         ui::fill_token(c, Rect::new(sb.right() - 1, sb.y, 1, sb.h), 0, p.separator);
         let side = SideLayout::of(sb);
         for (title, r) in [
-            ("Favoritos", side.favorites_title),
-            ("Locais", side.places_title),
+            (t!("files.side.favorites"), side.favorites_title),
+            (t!("files.side.places"), side.places_title),
         ] {
             text::draw_left(c, r, title, FOOTNOTE, Weight::Semibold, tertiary());
         }
@@ -169,16 +170,16 @@ impl Desktop {
                 if active { 256 } else { 210 },
             );
             let label = match place {
-                Place::Home => "Início",
-                Place::Documents => "Documentos",
-                Place::Images => "Imagens",
-                Place::Apps => "Apps",
-                Place::Trash => "Lixeira",
+                Place::Home => t!("files.place.home"),
+                Place::Documents => t!("files.place.documents"),
+                Place::Images => t!("files.place.images"),
+                Place::Apps => t!("files.place.apps"),
+                Place::Trash => t!("files.place.trash"),
                 Place::Disk => {
                     if vfs::volume() == vfs::Volume::Memory {
-                        "Memória"
+                        t!("files.place.memory")
                     } else {
-                        "Disco"
+                        t!("files.place.disk")
                     }
                 }
             };
@@ -227,7 +228,10 @@ impl Desktop {
                         256,
                     );
                 }
-                let free = alloc::format!("{} livres", fileman::format_size(st.usage.free));
+                let free = t!(
+                    "files.side.free",
+                    size = &fileman::format_size(st.usage.free)
+                );
                 text::draw_ellipsis(
                     c,
                     rect.x + 12,
@@ -369,7 +373,7 @@ impl Desktop {
                     caret: st.search.input.caret(),
                     selection: st.search.input.selection(),
                 },
-                "Buscar",
+                t!("files.search"),
                 st.search.focused,
                 if st.search.focused {
                     appui::caret_alpha(st.search.last_input)
@@ -407,11 +411,11 @@ impl Desktop {
         let h = lay.header;
         let cols = lay.columns();
         let date_title = if st.view.in_trash() {
-            "Data da exclusão"
+            t!("files.col.deleted")
         } else if st.view.in_apps() {
-            "Estado"
+            t!("files.col.state")
         } else {
-            "Última modificação"
+            t!("files.col.modified")
         };
         appui::hairline(c, h.x, h.bottom() - 1, h.w);
         let sort = st.view.sort;
@@ -460,7 +464,7 @@ impl Desktop {
             c,
             cols.name_x + 28,
             cols.size_x - cols.name_x - 28,
-            "Nome",
+            t!("files.col.name"),
             SortKey::Name,
             false,
         );
@@ -468,7 +472,7 @@ impl Desktop {
             c,
             cols.size_x,
             ui_size_w(&cols),
-            "Tamanho",
+            t!("files.col.size"),
             SortKey::Size,
             true,
         );
@@ -561,18 +565,29 @@ impl Desktop {
         let (icon, title, sub): (EmptyIcon, &str, String) = if !q.is_empty() {
             (
                 EmptyIcon::Tool(Tool::Search),
-                "Nenhum resultado",
-                alloc::format!("Nada encontrado para “{}”", String::from_utf8_lossy(q)),
+                t!("files.empty.no_results"),
+                t!(
+                    "files.empty.nothing_for",
+                    query = &String::from_utf8_lossy(q).into_owned()
+                ),
             )
         } else if st.view.in_trash() {
-            (EmptyIcon::Tool(Tool::Trash), "Lixeira vazia", String::new())
+            (
+                EmptyIcon::Tool(Tool::Trash),
+                t!("files.empty.trash"),
+                String::new(),
+            )
         } else if st.view.in_apps() {
-            (EmptyIcon::File(FileKind::App), "Nenhum app", String::new())
+            (
+                EmptyIcon::File(FileKind::App),
+                t!("files.empty.apps"),
+                String::new(),
+            )
         } else {
             (
                 EmptyIcon::File(FileKind::Folder),
-                "Pasta vazia",
-                String::from("Arraste itens para cá"),
+                t!("files.empty.folder"),
+                String::from(t!("files.empty.drag_here")),
             )
         };
         appui::empty_state(c, lay.list, icon, title, &sub);
@@ -855,7 +870,7 @@ impl Desktop {
             text::draw_centered(
                 c,
                 Rect::new(pane.x, pane.y, pane.w, pane.h),
-                "Selecione um item",
+                t!("files.preview.select"),
                 BODY,
                 Weight::Regular,
                 tertiary(),
@@ -980,7 +995,11 @@ impl Desktop {
         let ty = text::center_y(s.y, s.h, FOOTNOTE, Weight::Regular);
         let mut summary = st.view.summary();
         if !st.view.filter().is_empty() {
-            summary = alloc::format!("{} de {} itens", st.view.rows.len(), st.view.total_rows());
+            summary = tp!(
+                "files.filtered",
+                st.view.total_rows(),
+                shown = st.view.rows.len()
+            );
         }
         let w = text::draw(
             c,
@@ -1005,7 +1024,7 @@ impl Desktop {
                 col,
             );
         } else if st.view.in_apps() {
-            let hint = "Enter abre  ·  I instala  ·  Del remove";
+            let hint = t!("files.hint.apps");
             let x = s.x + 16 + w + 14;
             text::draw_ellipsis(
                 c,
@@ -1040,22 +1059,15 @@ impl Desktop {
         );
         match kind {
             SheetKind::Confirm => {
-                let what = |n: usize, trash: bool| {
-                    let _ = trash;
-                    if n == 1 {
-                        String::from("O item será apagado de vez. Isso não pode ser desfeito.")
-                    } else {
-                        alloc::format!(
-                            "Os {n} itens serão apagados de vez. Isso não pode ser desfeito."
-                        )
-                    }
-                };
+                let what = |n: usize| tp!("files.confirm.purge_body", n);
                 let (title, msg) = match &st.confirm {
-                    Some(Confirm::Purge(p)) => ("Excluir permanentemente?", what(p.len(), false)),
-                    Some(Confirm::PurgeTrash(p)) => ("Excluir da lixeira?", what(p.len(), true)),
+                    Some(Confirm::Purge(p)) => (t!("files.confirm.purge_title"), what(p.len())),
+                    Some(Confirm::PurgeTrash(p)) => {
+                        (t!("files.confirm.purge_trash_title"), what(p.len()))
+                    }
                     _ => (
-                        "Esvaziar a lixeira?",
-                        String::from("Tudo o que está na lixeira será apagado de vez."),
+                        t!("files.confirm.empty_title"),
+                        String::from(t!("files.confirm.empty_body")),
                     ),
                 };
                 appui::sheet_text(c, panel, title, &msg, false);
@@ -1084,13 +1096,20 @@ impl Desktop {
                     c,
                     panel.x + appui::SHEET_PAD,
                     panel.y + appui::SHEET_PAD,
-                    "Informações",
+                    t!("files.sheet.properties"),
                     tw,
                     Weight::Semibold,
                     theme::text(),
                 );
                 let mut y = panel.y + appui::SHEET_PAD + text::line_height(tw) + 10;
-                let label_w = 104;
+                // The widest label sets the column (English and Portuguese labels differ).
+                let label_w = lines
+                    .iter()
+                    .filter_map(|l| l.split_once(": "))
+                    .map(|(k, _)| text::measure(k, BODY, Weight::Regular))
+                    .max()
+                    .unwrap_or(0)
+                    .clamp(64, panel.w / 2);
                 for l in lines {
                     let (k, v) = match l.split_once(": ") {
                         Some((k, v)) => (k, v),
@@ -1137,9 +1156,9 @@ impl Desktop {
                     Some(j) => {
                         let (n, _) = j.copy.files();
                         let label = if n > 1 {
-                            alloc::format!("{} {} arquivos", j.label, n)
+                            tp!("files.job.copying_n", n)
                         } else {
-                            String::from(j.label)
+                            String::from(osjeff_core::i18n::tr(j.label))
                         };
                         (
                             label,

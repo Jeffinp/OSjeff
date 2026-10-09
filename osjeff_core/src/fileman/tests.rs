@@ -265,6 +265,7 @@ fn selection_count_matches_the_mask_under_random_clicks() {
 
 #[test]
 fn breadcrumbs_of_paths() {
+    let _g = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
     let c = breadcrumbs(b"/");
     assert_eq!(c.len(), 1);
     assert_eq!(c[0].label, b"Disco");
@@ -293,6 +294,7 @@ fn breadcrumbs_of_paths() {
 
 #[test]
 fn breadcrumbs_of_the_trash() {
+    let _g = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
     let c = breadcrumbs(TRASH_PATH);
     assert_eq!(c.len(), 2);
     assert_eq!(c[1].label, b"Lixeira");
@@ -335,6 +337,7 @@ fn history_ignores_a_repeat_and_is_bounded() {
 
 #[test]
 fn sizes_are_formatted_with_binary_units() {
+    let _g = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
     assert_eq!(format_size(0), "0 B");
     assert_eq!(format_size(1023), "1023 B");
     assert_eq!(format_size(1024), "1,0 KiB");
@@ -359,14 +362,51 @@ fn civil_dates() {
 
 #[test]
 fn datetimes_are_local() {
-    assert_eq!(format_datetime(0, 0), "--");
-    assert_eq!(format_datetime(1_700_000_000, 0), "14/11/2023 22:13");
+    let _g = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
+    assert_eq!(format_datetime(0, 0, true), "--");
+    assert_eq!(format_datetime(1_700_000_000, 0, true), "14/11/2023 22:13");
     assert_eq!(
-        format_datetime(1_700_000_000, -3 * 3600),
+        format_datetime(1_700_000_000, -3 * 3600, true),
         "14/11/2023 19:13"
     );
     // Crossing midnight backwards.
-    assert_eq!(format_datetime(86_400 + 60, -3600), "01/01/1970 23:01");
+    assert_eq!(
+        format_datetime(86_400 + 60, -3600, true),
+        "01/01/1970 23:01"
+    );
+}
+
+#[test]
+fn datetimes_follow_the_language_and_the_clock() {
+    use crate::i18n::{Lang, testlang::LangGuard};
+    let t = 1_700_000_000; // 2023-11-14 22:13 UTC, a Tuesday
+    {
+        let _g = LangGuard::new(Lang::En);
+        assert_eq!(format_datetime(t, 0, false), "11/14/2023 10:13 PM");
+        assert_eq!(format_datetime(t, 0, true), "11/14/2023 22:13");
+        assert_eq!(format_datetime(0, 0, false), "--");
+        // 1970-01-01 00:01 local (the first minute of the clock's epoch) keeps its AM.
+        assert_eq!(format_datetime(60, 0, false), "01/01/1970 12:01 AM");
+    }
+    let _g = LangGuard::new(Lang::Pt);
+    assert_eq!(format_datetime(t, 0, false), "14/11/2023 10:13 PM");
+    assert_eq!(format_datetime(t, 0, true), "14/11/2023 22:13");
+}
+
+#[test]
+fn sizes_follow_the_language() {
+    use crate::i18n::{Lang, testlang::LangGuard};
+    let big = 1234 * 1024 + 512 * 1024 / 10; // 1234,05 KiB -> 1,2 MiB
+    {
+        let _g = LangGuard::new(Lang::En);
+        assert_eq!(format_size(1536), "1.5 KiB");
+        assert_eq!(format_size(1023), "1023 B");
+        assert_eq!(format_size(big), "1.2 MiB");
+        assert_eq!(format_size(1024 * 1024 - 1), "1023.9 KiB");
+    }
+    let _g = LangGuard::new(Lang::Pt);
+    assert_eq!(format_size(1536), "1,5 KiB");
+    assert_eq!(format_size(big), "1,2 MiB");
 }
 
 #[test]
@@ -650,6 +690,7 @@ fn trash_view_lists_deleted_items() {
 
 #[test]
 fn summary_counts_items_and_selection() {
+    let _g = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
     let mut fs = populated();
     let mut v = FileView::new();
     v.navigate(&mut fs, b"/Docs").unwrap();
@@ -661,7 +702,7 @@ fn summary_counts_items_and_selection() {
     v.sel.select_all();
     assert_eq!(v.summary(), "3 selecionados (4 B)");
     let one = FileView::new();
-    assert_eq!(one.summary(), "0 itens");
+    assert_eq!(one.summary(), "0 item");
 }
 
 #[test]
@@ -721,12 +762,13 @@ fn items() -> Vec<apps::AppItem> {
         it("snake", "Snake", true, 3000),
         it("notes", "Notas", true, 5200),
         it("paint", "Pintura", false, 9000),
-        it("clock", "Relogio", true, 2100),
+        it("clock", "Relógio", true, 2100),
     ]
 }
 
 #[test]
 fn apps_rows_carry_id_state_and_size() {
+    let _g = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
     let rows = apps::rows(&items());
     assert_eq!(rows.len(), 4);
     let r = &rows[2];
@@ -758,8 +800,8 @@ fn apps_place_is_a_pseudo_path_that_never_touches_the_volume() {
         (&b"Apps"[..], APPS_PATH)
     );
     v.set_apps(&items());
-    // Name order (the default sort): Notas, Pintura, Relogio, Snake.
-    assert_eq!(names(&v.rows), ["Notas", "Pintura", "Relogio", "Snake"]);
+    // Name order (the default sort): Notas, Pintura, Relógio, Snake.
+    assert_eq!(names(&v.rows), ["Notas", "Pintura", "Relógio", "Snake"]);
     assert_eq!(v.sel.cursor(), 0);
     assert!(v.sel.is_selected(0), "the first app is selected");
     v.set_apps(&items());
@@ -779,11 +821,12 @@ fn apps_place_is_a_pseudo_path_that_never_touches_the_volume() {
 
 #[test]
 fn apps_selection_follows_the_app_across_catalog_changes() {
+    let _g = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
     let mut fs = fresh();
     let mut v = FileView::new();
     v.navigate(&mut fs, APPS_PATH).unwrap();
     v.set_apps(&items());
-    v.sel.only(2); // Relogio
+    v.sel.only(2); // Relógio
     assert_eq!(v.rows[2].id, b"clock");
     // Pintura gets installed and Notas removed: the cursor stays on the clock.
     let mut now = items();
@@ -797,7 +840,7 @@ fn apps_selection_follows_the_app_across_catalog_changes() {
     assert_eq!(v.sel.cursor(), 0);
     v.set_apps(&[]);
     assert!(v.rows.is_empty());
-    assert_eq!(v.summary(), "0 itens");
+    assert_eq!(v.summary(), "0 item");
 }
 
 #[test]
@@ -818,6 +861,7 @@ fn activating_an_app_row_asks_for_the_app_not_a_file() {
 
 #[test]
 fn app_keys_install_remove_and_run() {
+    let _g = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
     let rows = apps::rows(&items());
     let installed = rows.iter().find(|r| r.id == b"notes").unwrap();
     let missing = rows.iter().find(|r| r.id == b"paint").unwrap();
@@ -835,6 +879,14 @@ fn app_keys_install_remove_and_run() {
         Ok(AppAction::Install("paint".into()))
     );
     assert_eq!(app_action(installed, AppKey::Install), Err("Já instalado"));
+    {
+        let _en = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::En);
+        assert_eq!(
+            app_action(installed, AppKey::Install),
+            Err("Already installed")
+        );
+        assert_eq!(app_action(missing, AppKey::Remove), Err("Not installed"));
+    }
     assert_eq!(
         app_action(installed, AppKey::Remove),
         Ok(AppAction::Remove("notes".into()))
@@ -893,6 +945,7 @@ fn apps_context_menu_offers_what_applies() {
 
 #[test]
 fn manifest_lines_show_every_permission() {
+    let _g = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
     use crate::appmanifest::{ClipPerm, FsPerm, NetPerm};
     let mut m = crate::appmanifest::Manifest::legacy("demo", "Demo");
     m.fs = FsPerm::Own;
@@ -905,6 +958,16 @@ fn manifest_lines_show_every_permission() {
     assert!(all.contains("HTTP"), "{all}");
     assert!(all.contains("ler e escrever"), "{all}");
     assert!(all.contains("Memória:") && all.contains("Janela "), "{all}");
+    {
+        let _en = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::En);
+        let en = apps::manifest_lines(&m).join("\n");
+        assert!(en.contains("Files: only /data/demo"), "{en}");
+        assert!(
+            en.contains("read and write") && en.contains("Window "),
+            "{en}"
+        );
+        assert!(en.contains("Clipboard:"), "{en}");
+    }
     m.fs = FsPerm::None;
     m.net = NetPerm::None;
     m.clipboard = ClipPerm::None;
@@ -945,6 +1008,7 @@ fn searchable() -> FileView {
 
 #[test]
 fn the_filter_narrows_the_rows_and_comes_back() {
+    let _g = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
     let mut v = searchable();
     assert_eq!(v.rows.len(), 5);
     v.set_filter(b"relat");
@@ -958,7 +1022,7 @@ fn the_filter_narrows_the_rows_and_comes_back() {
     assert_eq!(names(&v.rows), vec!["Ação.txt"]);
     v.set_filter(b"zzz");
     assert!(v.rows.is_empty());
-    assert_eq!(v.summary(), "0 itens");
+    assert_eq!(v.summary(), "0 item");
     v.clear_filter();
     assert_eq!(v.rows.len(), 5);
     assert_eq!(v.total_rows(), 5);
@@ -1140,4 +1204,115 @@ fn latin1_keys_are_stored_as_utf8() {
     assert_eq!(t.text(), b"abc");
     let t = TextInput::new("aç".as_bytes(), 2);
     assert_eq!(t.text(), b"a");
+}
+
+#[test]
+fn counts_and_selection_text_in_both_languages() {
+    use crate::i18n::{Lang, testlang::LangGuard};
+    let mut v = searchable();
+    let n = v.rows.len();
+    assert!(n > 1);
+    for (l, none, all_sel) in [
+        (
+            Lang::Pt,
+            std::format!("{n} itens"),
+            std::format!("{n} selecionados"),
+        ),
+        (
+            Lang::En,
+            std::format!("{n} items"),
+            std::format!("{n} selected"),
+        ),
+    ] {
+        let _g = LangGuard::new(l);
+        v.sel.clear();
+        assert_eq!(v.summary(), none, "{l:?}");
+        v.sel.select_all();
+        assert!(v.summary().starts_with(&all_sel), "{l:?}: {}", v.summary());
+    }
+    let _g = LangGuard::new(Lang::En);
+    assert_eq!(crate::tp!("files.count", 1u32), "1 item");
+    assert_eq!(crate::tp!("files.count", 0u32), "0 items");
+    drop(_g);
+    // pt-BR: zero is singular too.
+    let _g = LangGuard::new(Lang::Pt);
+    assert_eq!(crate::tp!("files.count", 0u32), "0 item");
+    assert_eq!(crate::tp!("files.count", 1u32), "1 item");
+    assert_eq!(crate::tp!("files.count", 2u32), "2 itens");
+    assert_eq!(
+        crate::tp!("files.selected", 1u32, size = crate::i18n::bytes(1536)),
+        "1 selecionado (1,5 KiB)"
+    );
+}
+
+#[test]
+fn context_menu_labels_follow_the_language() {
+    use crate::i18n::{Lang, testlang::LangGuard};
+    let blank = MenuCtx {
+        in_trash: false,
+        in_apps: false,
+        app_installed: false,
+        selected: 0,
+        image: false,
+        clip_has_items: true,
+    };
+    let labels = || {
+        context_menu(blank)
+            .into_iter()
+            .map(|(_, l)| l)
+            .collect::<Vec<_>>()
+    };
+    {
+        let _g = LangGuard::new(Lang::Pt);
+        assert_eq!(
+            labels(),
+            [
+                "Novo arquivo",
+                "Nova pasta",
+                "Colar",
+                "Selecionar tudo",
+                "Atualizar",
+                "Informações"
+            ]
+        );
+        assert_eq!(Cmd::TogglePreview.shortcut(), "Espaço");
+    }
+    let _g = LangGuard::new(Lang::En);
+    assert_eq!(
+        labels(),
+        [
+            "New file",
+            "New folder",
+            "Paste",
+            "Select all",
+            "Refresh",
+            "Properties"
+        ]
+    );
+    assert_eq!(Cmd::TogglePreview.shortcut(), "Space");
+    let trash = MenuCtx {
+        in_trash: true,
+        selected: 1,
+        ..blank
+    };
+    let l: Vec<_> = context_menu(trash).into_iter().map(|(_, l)| l).collect();
+    assert_eq!(
+        l,
+        [
+            "Restore",
+            "Delete permanently",
+            "Empty trash",
+            "Properties",
+            "Select all"
+        ]
+    );
+}
+
+#[test]
+fn breadcrumbs_special_labels_follow_the_language() {
+    use crate::i18n::{Lang, testlang::LangGuard};
+    let _g = LangGuard::new(Lang::En);
+    assert_eq!(breadcrumbs(b"/")[0].label, b"Disk");
+    assert_eq!(breadcrumbs(TRASH_PATH)[1].label, b"Trash");
+    assert_eq!(breadcrumbs(b"/Projetos/x")[1].label, b"Projetos");
 }

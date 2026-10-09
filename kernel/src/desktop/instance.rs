@@ -438,6 +438,7 @@ pub(crate) enum Confirm {
 /// A copy running in steps (see `Desktop::step_file_jobs`).
 pub(crate) struct Job {
     pub copy: vfs::CopyJob,
+    /// Catalog key of the sheet's title (looked up when drawn, so it follows the language).
     pub label: &'static str,
     /// Tick the job started: the progress sheet appears only for copies that take a moment.
     pub started: u64,

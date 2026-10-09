@@ -31,6 +31,7 @@ impl Desktop {
                 w.app.title = t;
             }
         }
+        self.files_language_changed_all();
         // Transient layers hold strings: drop them (they are cheap to open again).
         let sh = &mut self.shell;
         sh.menu = None;

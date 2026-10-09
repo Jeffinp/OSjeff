@@ -945,10 +945,11 @@ pub fn icon_kind(name: &[u8], is_dir: bool) -> crate::appart::FileKind {
     }
 }
 
-/// A human description of a file by its name: `Pasta`, `Imagem PNG`, `Texto`, `Aplicativo`...
+/// A human description of a file by its name, in the language in effect: `Pasta`, `Imagem PNG`,
+/// `Texto`, `Aplicativo`... (`Folder`, `PNG image`, `Text`, `App`...).
 pub fn kind_label(name: &[u8], is_dir: bool) -> String {
     if is_dir {
-        return String::from("Pasta");
+        return String::from(crate::t!("files.kind.folder"));
     }
     let ext = super::extension(name);
     let upper: String = ext
@@ -956,12 +957,12 @@ pub fn kind_label(name: &[u8], is_dir: bool) -> String {
         .map(|&b| (b as char).to_ascii_uppercase())
         .collect();
     match preview_kind(name, false) {
-        PreviewKind::Image => alloc::format!("Imagem {upper}"),
-        PreviewKind::App => String::from("Aplicativo"),
-        PreviewKind::Text if ext.is_empty() => String::from("Texto"),
-        PreviewKind::Text => alloc::format!("Texto {upper}"),
-        _ if ext.is_empty() => String::from("Arquivo"),
-        _ => alloc::format!("Arquivo {upper}"),
+        PreviewKind::Image => crate::t!("files.kind.image_ext", ext = &upper),
+        PreviewKind::App => String::from(crate::t!("files.kind.app")),
+        PreviewKind::Text if ext.is_empty() => String::from(crate::t!("files.kind.text")),
+        PreviewKind::Text => crate::t!("files.kind.text_ext", ext = &upper),
+        _ if ext.is_empty() => String::from(crate::t!("files.kind.file")),
+        _ => crate::t!("files.kind.file_ext", ext = &upper),
     }
 }
 
@@ -1012,19 +1013,29 @@ pub fn text_preview(bytes: &[u8], max_lines: usize, max_chars: usize) -> Vec<Str
     out
 }
 
-/// The modified time as people say it: `Hoje, 14:32`, `Ontem, 09:10`, else `dd/mm/aaaa hh:mm`.
-/// `0` (the clock was not set when the file was written) shows `--`.
-pub fn format_modified(unix: u64, now: u64, tz_secs: i32) -> String {
+/// The modified time as people say it: `Hoje, 14:32`, `Ontem, 09:10`, else the date and time
+/// (`Today, 2:32 PM` ... in English). `0` (the clock was not set when the file was written)
+/// shows `--`.
+pub fn format_modified(unix: u64, now: u64, tz_secs: i32, clock24: bool) -> String {
     if unix == 0 {
         return String::from("--");
     }
     let day = |t: u64| (t as i64 + tz_secs as i64).div_euclid(86_400);
     let secs = (unix as i64 + tz_secs as i64).rem_euclid(86_400);
-    let hm = alloc::format!("{:02}:{:02}", secs / 3600, (secs % 3600) / 60);
+    let civil = crate::i18n::Civil {
+        year: 2000,
+        month: 1,
+        day: 1,
+        weekday: 0,
+        hour: (secs / 3600) as u8,
+        minute: ((secs % 3600) / 60) as u8,
+        second: (secs % 60) as u8,
+    };
+    let time = crate::i18n::format_time(civil, clock24, false);
     match day(now) - day(unix) {
-        0 => alloc::format!("Hoje, {hm}"),
-        1 => alloc::format!("Ontem, {hm}"),
-        _ => super::format_datetime(unix, tz_secs),
+        0 => crate::t!("files.when.today", time = &time),
+        1 => crate::t!("files.when.yesterday", time = &time),
+        _ => super::format_datetime(unix, tz_secs, clock24),
     }
 }
 

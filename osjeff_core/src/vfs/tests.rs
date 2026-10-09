@@ -28,7 +28,7 @@ fn run(job: &mut CopyJob, fs: &mut Fs3<RamDisk>, budget: usize) -> usize {
         steps += 1;
         match job.step(fs, budget, NOW + 1).unwrap() {
             Progress::Done => return steps,
-            Progress::Running => assert!(steps < 100_000, "copy does not terminate"),
+            Progress::Running => assert!(steps < 100_000, "copy never ends"),
         }
     }
 }
@@ -163,7 +163,8 @@ fn unique_name_never_exceeds_255_bytes_and_stays_utf8() {
 // ---- errors ----
 
 #[test]
-fn every_error_has_an_ascii_message() {
+fn every_error_has_a_message_in_both_languages() {
+    use crate::i18n::{Lang, testlang::LangGuard};
     let all = [
         VfsError::NotFound,
         VfsError::Exists,
@@ -184,10 +185,20 @@ fn every_error_has_an_ascii_message() {
         VfsError::Corrupt,
         VfsError::Cancelled,
     ];
-    for e in all {
-        assert!(!e.message().is_empty());
-        assert!(e.message().is_ascii(), "{e:?}");
+    for l in Lang::ALL {
+        let _g = LangGuard::new(l);
+        for e in all {
+            assert!(!e.message().is_empty());
+            assert_ne!(e.message(), "files.err.", "{e:?}");
+            assert!(!e.message().starts_with("files."), "{e:?}: key shown");
+        }
     }
+    let _g = LangGuard::new(Lang::Pt);
+    assert_eq!(VfsError::NotFound.message(), "Item não encontrado");
+    assert_eq!(VfsError::Cancelled.message(), "Operação cancelada");
+    let _g = LangGuard::new(Lang::En);
+    assert_eq!(VfsError::NotFound.message(), "Item not found");
+    assert_eq!(VfsError::NoSpace.message(), "Disk full");
 }
 
 #[test]

@@ -19,13 +19,14 @@ use osjeff_core::fileman::ui::{
 use osjeff_core::fileman::{
     self, APPS_PATH, Activation, Cmd, Crumb, FileClass, MenuCtx, Place, SortKey, TRASH_PATH,
 };
+use osjeff_core::{t, tk, tp};
 
 /// Bytes copied per frame by a running copy job.
 const JOB_CHUNK: usize = 128 * 1024;
 
-/// A Unix time as local `dd/mm/aaaa hh:mm`.
+/// A Unix time as a local date and time in the language in effect.
 pub(crate) fn local_time(t: u64) -> String {
-    fileman::format_datetime(t, crate::rtc::tz_minutes() * 60)
+    fileman::format_datetime(t, crate::rtc::tz_minutes() * 60, crate::settings::clock24())
 }
 
 static NOW_UNIX: AtomicU64 = AtomicU64::new(0);
@@ -45,16 +46,31 @@ fn now_unix_cached() -> u64 {
 
 /// A time for the list: `Hoje, 14:32`, `Ontem, 09:10`, else the date.
 pub(crate) fn modified_label(t: u64) -> String {
-    ui::format_modified(t, now_unix_cached(), crate::rtc::tz_minutes() * 60)
+    ui::format_modified(
+        t,
+        now_unix_cached(),
+        crate::rtc::tz_minutes() * 60,
+        crate::settings::clock24(),
+    )
 }
 
-/// `1 item` / `3 itens`.
-fn items(n: usize) -> String {
-    if n == 1 {
-        String::from("1 item")
-    } else {
-        alloc::format!("{n} itens")
+/// The label of a crumb: the well-known folders take their name in the language in effect.
+fn crumb_label(c: &Crumb) -> String {
+    match &c.path[..] {
+        b"/home" => String::from(t!("files.place.home")),
+        b"/Documentos" => String::from(t!("files.place.documents")),
+        b"/Imagens" => String::from(t!("files.place.images")),
+        _ => String::from_utf8_lossy(&c.label).into_owned(),
     }
+}
+
+/// `label: value` line of the information sheet.
+fn prop(label_key: &str, value: &str) -> String {
+    t!(
+        "files.prop.line",
+        label = osjeff_core::i18n::tr(label_key),
+        value = value
+    )
 }
 
 /// The crumbs of `cwd` with their display labels and measured widths (the last one is drawn
@@ -62,16 +78,7 @@ fn items(n: usize) -> String {
 pub(crate) fn crumbs_of(cwd: &[u8]) -> (Vec<Crumb>, Vec<String>, Vec<i32>) {
     let crumbs = fileman::breadcrumbs(cwd);
     let n = crumbs.len();
-    let labels: Vec<String> = crumbs
-        .iter()
-        .map(|c| {
-            if c.path == b"/home" {
-                String::from("Início")
-            } else {
-                String::from_utf8_lossy(&c.label).into_owned()
-            }
-        })
-        .collect();
+    let labels: Vec<String> = crumbs.iter().map(crumb_label).collect();
     let widths: Vec<i32> = labels
         .iter()
         .enumerate()
@@ -89,6 +96,47 @@ pub(crate) fn crumbs_of(cwd: &[u8]) -> (Vec<Crumb>, Vec<String>, Vec<i32>) {
 }
 
 impl Desktop {
+    /// The interface language changed: every file manager holds text built with the old one
+    /// (status message, preview pane, information sheet). Drop or rebuild it; what is drawn from
+    /// the catalog each frame needs nothing.
+    pub(crate) fn files_language_changed_all(&mut self) {
+        let ids: Vec<WindowId> = self
+            .wm
+            .windows()
+            .iter()
+            .filter(|w| matches!(w.app.app, App::Files(_)))
+            .map(|w| w.id)
+            .collect();
+        for id in ids {
+            self.files_language_changed(id);
+        }
+    }
+
+    fn files_language_changed(&mut self, id: WindowId) {
+        let Some(f) = self.files_mut(id) else {
+            return;
+        };
+        f.msg = None;
+        f.preview = None;
+        let props_open = f.props.is_some();
+        let apps = f.view.in_apps();
+        let in_trash = f.view.in_trash();
+        let cwd = f.view.cwd.clone();
+        let paths = f.view.selected_paths();
+        if props_open {
+            if apps {
+                self.files_app_properties(id);
+            } else {
+                self.files_properties(id, in_trash, &cwd, &paths);
+            }
+            // The sheet stays up as it was: no slide-in again.
+            if let Some(f) = self.files_mut(id) {
+                f.sheet_t = osjeff_core::anim::Tween::at(1.0);
+            }
+        }
+        self.files_sync_preview(id);
+    }
+
     // ---- file manager ----
 
     /// Reload window `id`'s folder from the filesystem.
@@ -347,18 +395,18 @@ impl Desktop {
         let result: Result<String, String> = match action {
             AppAction::Launch(app) => {
                 self.launch_wasm_app(&app);
-                Ok(alloc::format!("{name} aberto"))
+                Ok(t!("files.msg.opened", name = &name))
             }
             AppAction::InstallAndLaunch(app) => self.install_bundled(&app).map(|()| {
                 self.launch_wasm_app(&app);
-                alloc::format!("{name} instalado e aberto")
+                t!("files.msg.installed_opened", name = &name)
             }),
             AppAction::Install(app) => self
                 .install_bundled(&app)
-                .map(|()| alloc::format!("{name} instalado")),
+                .map(|()| t!("files.msg.installed", name = &name)),
             AppAction::Remove(app) => self
                 .remove_app(&app)
-                .map(|()| alloc::format!("{name} removido")),
+                .map(|()| t!("files.msg.removed", name = &name)),
         };
         match result {
             Ok(m) => self.files_note(id, &m, false),
@@ -379,7 +427,7 @@ impl Desktop {
                 match sniff {
                     Err(e) => Some((String::from(e.message()), true)),
                     Ok(head) if class == FileClass::Other && !fileman::looks_like_text(&head) => {
-                        Some((String::from("Formato não suportado"), true))
+                        Some((String::from(t!("files.msg.unsupported")), true))
                     }
                     Ok(_) => match self.fs_load_path(path.to_vec()) {
                         Ok(Some(w)) => Some((String::from(w), true)),
@@ -438,16 +486,16 @@ impl Desktop {
         let trash = f.view.in_trash();
         let mut entries = Vec::new();
         for (key, label) in [
-            (SortKey::Name, "Nome"),
-            (SortKey::Size, "Tamanho"),
+            (SortKey::Name, t!("files.col.name")),
+            (SortKey::Size, t!("files.col.size")),
             (
                 SortKey::Modified,
                 if trash {
-                    "Data da exclusão"
+                    t!("files.col.deleted")
                 } else if apps {
-                    "Estado"
+                    t!("files.col.state")
                 } else {
-                    "Última modificação"
+                    t!("files.col.modified")
                 },
             ),
         ] {
@@ -456,7 +504,7 @@ impl Desktop {
             entries.push(e);
         }
         entries.push(Entry::sep());
-        for (asc, label) in [(true, "Crescente"), (false, "Decrescente")] {
+        for (asc, label) in [(true, t!("files.sort.asc")), (false, t!("files.sort.desc"))] {
             let mut e = Entry::item(label, "", ShellCmd::Files(Cmd::SortDir(asc)));
             e.checked = sort.asc == asc;
             entries.push(e);
@@ -918,7 +966,7 @@ impl Desktop {
         };
         let name = |p: &[u8]| {
             if p == b"/" {
-                String::from("Disco")
+                String::from(t!("files.place.disk"))
             } else {
                 String::from_utf8_lossy(vfs::base_name(p)).into_owned()
             }
@@ -938,9 +986,7 @@ impl Desktop {
                 }
                 self.fs_changed();
                 match err {
-                    None => {
-                        self.files_note(id, &alloc::format!("{} na lixeira", items(done)), false)
-                    }
+                    None => self.files_note(id, &tp!("files.msg.trashed", done), false),
                     Some(e) => self.files_note(id, e.message(), true),
                 }
             }
@@ -954,12 +1000,7 @@ impl Desktop {
                 match rep.error {
                     None => self.files_note(
                         id,
-                        &alloc::format!(
-                            "{} {} para {}",
-                            items(n),
-                            if n == 1 { "movido" } else { "movidos" },
-                            name(&dest)
-                        ),
+                        &tp!("files.msg.moved_to", n, dest = &name(&dest)),
                         false,
                     ),
                     Some(e) => self.files_note(id, e.message(), true),
@@ -980,7 +1021,7 @@ impl Desktop {
             return;
         };
         if f.job.is_some() {
-            f.say("Já existe uma cópia em andamento", true);
+            f.say(t!("files.msg.copy_running"), true);
             return;
         }
         match vfs::copy_plan(sources, dest) {
@@ -988,7 +1029,7 @@ impl Desktop {
                 if let Some(f) = self.files_mut(id) {
                     f.job = Some(Job {
                         copy: job,
-                        label: "Copiando",
+                        label: tk!("files.job.copying"),
                         started: crate::interrupts::ticks(),
                     });
                     f.msg = None;
@@ -1094,7 +1135,7 @@ impl Desktop {
                     Key::Enter => self.files_confirmed(id),
                     Key::Esc => {
                         f.confirm = None;
-                        f.say("Cancelado", false);
+                        f.say(t!("files.msg.cancelled"), false);
                     }
                     _ => {}
                 }
@@ -1347,7 +1388,7 @@ impl Desktop {
                 Cmd::SelectAll => f.view.sel.select_all(),
                 Cmd::Refresh => {
                     self.files_refresh(id);
-                    self.files_note(id, "Atualizado", false);
+                    self.files_note(id, t!("files.msg.refreshed"), false);
                 }
                 _ => {}
             };
@@ -1370,16 +1411,16 @@ impl Desktop {
             Cmd::SelectAll => f.view.sel.select_all(),
             Cmd::Refresh => {
                 self.files_refresh(id);
-                self.files_note(id, "Atualizado", false);
+                self.files_note(id, t!("files.msg.refreshed"), false);
             }
             Cmd::NewFile | Cmd::NewFolder => {
                 if in_trash {
                     return;
                 }
                 let base: &[u8] = if cmd == Cmd::NewFile {
-                    "Novo arquivo.txt".as_bytes()
+                    t!("files.new_file_name").as_bytes()
                 } else {
-                    "Nova pasta".as_bytes()
+                    t!("files.new_folder_name").as_bytes()
                 };
                 let name = vfs::unique_name_in(&cwd, base);
                 let made = if cmd == Cmd::NewFile {
@@ -1419,17 +1460,11 @@ impl Desktop {
                 let n = paths.len();
                 let cut = cmd == Cmd::Cut;
                 f.say(
-                    &alloc::format!(
-                        "{} {}",
-                        items(n),
-                        if n == 1 {
-                            if cut { "recortado" } else { "copiado" }
-                        } else if cut {
-                            "recortados"
-                        } else {
-                            "copiados"
-                        }
-                    ),
+                    &if cut {
+                        tp!("files.msg.cut", n)
+                    } else {
+                        tp!("files.msg.copied", n)
+                    },
                     false,
                 );
                 self.pathclip.set(paths, cut);
@@ -1455,9 +1490,7 @@ impl Desktop {
                 }
                 self.fs_changed();
                 match err {
-                    None => {
-                        self.files_note(id, &alloc::format!("{} na lixeira", items(done)), false)
-                    }
+                    None => self.files_note(id, &tp!("files.msg.trashed", done), false),
                     Some(e) => self.files_note(id, e.message(), true),
                 }
             }
@@ -1490,19 +1523,7 @@ impl Desktop {
                 }
                 self.fs_changed();
                 match err {
-                    None => self.files_note(
-                        id,
-                        &alloc::format!(
-                            "{} {}",
-                            items(done),
-                            if done == 1 {
-                                "restaurado"
-                            } else {
-                                "restaurados"
-                            }
-                        ),
-                        false,
-                    ),
+                    None => self.files_note(id, &tp!("files.msg.restored", done), false),
                     Some(e) => self.files_note(id, e.message(), true),
                 }
             }
@@ -1513,7 +1534,7 @@ impl Desktop {
                 if let Some(p) = paths.first() {
                     match self.set_wallpaper_path(p) {
                         Some(m) => self.files_note(id, &m, true),
-                        None => self.files_note(id, "Papel de parede aplicado", false),
+                        None => self.files_note(id, t!("files.msg.wallpaper"), false),
                     }
                 }
             }
@@ -1547,7 +1568,7 @@ impl Desktop {
             return;
         };
         if f.view.in_trash() {
-            f.say("Não é possível colar na lixeira", true);
+            f.say(t!("files.msg.paste_in_trash"), true);
             return;
         }
         if f.job.is_some() {
@@ -1555,7 +1576,7 @@ impl Desktop {
         }
         let dest = f.view.cwd.clone();
         if self.pathclip.is_empty() {
-            self.files_note(id, "Nada para colar", true);
+            self.files_note(id, t!("files.msg.nothing_to_paste"), true);
             return;
         }
         let sources: Vec<Vec<u8>> = self.pathclip.paths().to_vec();
@@ -1565,15 +1586,7 @@ impl Desktop {
             match rep.error {
                 None => {
                     self.pathclip.after_paste();
-                    self.files_note(
-                        id,
-                        &alloc::format!(
-                            "{} {}",
-                            items(n),
-                            if n == 1 { "movido" } else { "movidos" }
-                        ),
-                        false,
-                    );
+                    self.files_note(id, &tp!("files.msg.moved", n), false);
                 }
                 Some(e) => self.files_note(id, e.message(), true),
             }
@@ -1603,7 +1616,7 @@ impl Desktop {
             && let Some(mut job) = f.job.take()
         {
             vfs::copy_abort(&mut job.copy);
-            f.say("Cópia cancelada", false);
+            f.say(t!("files.msg.copy_cancelled"), false);
         }
         self.fs_changed();
     }
@@ -1628,17 +1641,7 @@ impl Desktop {
                 Ok(vfs::Progress::Running) => None,
                 Ok(vfs::Progress::Done) => {
                     let (n, _) = job.copy.files();
-                    Some((
-                        alloc::format!(
-                            "Cópia concluída ({})",
-                            if n == 1 {
-                                String::from("1 arquivo")
-                            } else {
-                                alloc::format!("{n} arquivos")
-                            }
-                        ),
-                        false,
-                    ))
+                    Some((tp!("files.msg.copy_done", n), false))
                 }
                 Err(e) => Some((String::from(e.message()), true)),
             };
@@ -1724,7 +1727,7 @@ impl Desktop {
         }
         self.fs_changed();
         match err {
-            None => self.files_note(id, "Excluído", false),
+            None => self.files_note(id, t!("files.msg.deleted"), false),
             Some(e) => self.files_note(id, e.message(), true),
         }
     }
@@ -1749,7 +1752,7 @@ impl Desktop {
         match (kind, i) {
             (SheetKind::Confirm, 0) => {
                 f.confirm = None;
-                f.say("Cancelado", false);
+                f.say(t!("files.msg.cancelled"), false);
             }
             (SheetKind::Confirm, _) => self.files_confirmed(id),
             (SheetKind::Info, _) => f.props = None,
@@ -1763,74 +1766,96 @@ impl Desktop {
         let free = vfs::statfs();
         let show = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
         if in_trash {
-            lines.push(String::from("Local: Lixeira"));
+            lines.push(prop(tk!("files.prop.location"), t!("files.place.trash")));
             if let Some(f) = self.files_mut(id) {
-                lines.push(alloc::format!("Itens: {}", f.view.rows.len()));
+                lines.push(prop(
+                    tk!("files.prop.items"),
+                    &f.view.rows.len().to_string_lossy(),
+                ));
             }
         } else if paths.len() == 1 {
             let p = &paths[0];
-            lines.push(alloc::format!("Nome: {}", show(vfs::base_name(p))));
-            lines.push(alloc::format!("Local: {}", show(&vfs::parent(p))));
+            lines.push(prop(tk!("files.prop.name"), &show(vfs::base_name(p))));
+            lines.push(prop(tk!("files.prop.location"), &show(&vfs::parent(p))));
             match vfs::stat(p) {
                 Ok(info) => {
                     if info.kind == vfs::EntryKind::Dir {
                         let t = vfs::with_backend(|b| osjeff_core::vfs::tree_size(b, p));
-                        lines.push(String::from("Tipo: Pasta"));
+                        lines.push(prop(tk!("files.prop.type"), t!("files.kind.folder")));
                         if let Ok(Ok(t)) = t {
-                            lines.push(alloc::format!(
-                                "Conteúdo: {} arquivos, {} pastas",
-                                t.files,
-                                t.dirs.saturating_sub(1)
+                            lines.push(prop(
+                                tk!("files.prop.contents"),
+                                &alloc::format!(
+                                    "{}, {}",
+                                    tp!("files.prop.n_files", t.files),
+                                    tp!("files.prop.n_folders", t.dirs.saturating_sub(1))
+                                ),
                             ));
                             lines
-                                .push(alloc::format!("Tamanho: {}", fileman::format_size(t.bytes)));
+                                .push(prop(tk!("files.prop.size"), &fileman::format_size(t.bytes)));
                         }
                     } else {
-                        lines.push(alloc::format!(
-                            "Tipo: {}",
-                            ui::kind_label(vfs::base_name(p), false)
+                        lines.push(prop(
+                            tk!("files.prop.type"),
+                            &ui::kind_label(vfs::base_name(p), false),
                         ));
-                        lines.push(alloc::format!(
-                            "Tamanho: {} ({} bytes)",
-                            fileman::format_size(info.size),
-                            info.size
+                        lines.push(prop(
+                            tk!("files.prop.size"),
+                            &t!(
+                                "files.prop.size_bytes",
+                                size = &fileman::format_size(info.size),
+                                bytes =
+                                    osjeff_core::i18n::num(info.size.min(i64::MAX as u64) as i64)
+                            ),
                         ));
                     }
-                    lines.push(alloc::format!("Criado: {}", local_time(info.ctime)));
-                    lines.push(alloc::format!("Modificado: {}", local_time(info.mtime)));
+                    lines.push(prop(tk!("files.prop.created"), &local_time(info.ctime)));
+                    lines.push(prop(tk!("files.prop.modified"), &local_time(info.mtime)));
                     if info.kind == vfs::EntryKind::File
                         && fileman::classify(vfs::base_name(p)) == FileClass::Wasm
                     {
                         lines.extend(self.wasm_property_lines(p));
                     }
                 }
-                Err(e) => lines.push(alloc::format!("Erro: {}", e.message())),
+                Err(e) => lines.push(prop(tk!("files.prop.error"), e.message())),
             }
         } else if paths.len() > 1 {
-            lines.push(alloc::format!("Seleção: {} itens", paths.len()));
+            lines.push(prop(
+                tk!("files.prop.selection"),
+                &tp!("files.count", paths.len()),
+            ));
             let mut bytes = 0u64;
             for p in paths {
                 if let Ok(Ok(t)) = vfs::with_backend(|b| osjeff_core::vfs::tree_size(b, p)) {
                     bytes += t.bytes;
                 }
             }
-            lines.push(alloc::format!(
-                "Tamanho total: {}",
-                fileman::format_size(bytes)
+            lines.push(prop(
+                tk!("files.prop.total_size"),
+                &fileman::format_size(bytes),
             ));
         } else {
-            lines.push(alloc::format!("Pasta: {}", show(cwd)));
+            lines.push(prop(tk!("files.prop.folder"), &show(cwd)));
             if let Some(f) = self.files_mut(id) {
-                lines.push(alloc::format!("Itens: {}", f.view.rows.len()));
+                lines.push(prop(
+                    tk!("files.prop.items"),
+                    &f.view.rows.len().to_string_lossy(),
+                ));
             }
         }
-        lines.push(alloc::format!(
-            "Livre: {} de {}",
-            fileman::format_size(free.free),
-            fileman::format_size(free.total)
+        lines.push(prop(
+            tk!("files.prop.free"),
+            &t!(
+                "files.prop.free_of",
+                free = &fileman::format_size(free.free),
+                total = &fileman::format_size(free.total)
+            ),
         ));
         if vfs::volume() == vfs::Volume::Memory {
-            lines.push(String::from("Volume: memória (não persiste)"));
+            lines.push(prop(
+                tk!("files.prop.volume"),
+                t!("files.prop.memory_volume"),
+            ));
         }
         if let Some(f) = self.files_mut(id) {
             f.props = Some(lines);
@@ -1851,9 +1876,9 @@ impl SheetKind {
     /// Button labels, left to right (the last is the default).
     pub(crate) fn buttons(self) -> [&'static str; 2] {
         match self {
-            SheetKind::Confirm => ["Cancelar", "Excluir"],
-            SheetKind::Info => ["", "Concluído"],
-            SheetKind::Copy => ["", "Cancelar"],
+            SheetKind::Confirm => [t!("common.cancel"), t!("files.sheet.delete")],
+            SheetKind::Info => ["", t!("files.sheet.done")],
+            SheetKind::Copy => ["", t!("common.cancel")],
         }
     }
 }
@@ -1875,21 +1900,25 @@ impl Desktop {
     fn wasm_property_lines(&self, path: &[u8]) -> Vec<String> {
         let bytes = match vfs::read_range(path, 0, osjeff_core::appinstall::MAX_PACKAGE_BYTES + 1) {
             Ok(b) => b,
-            Err(e) => return alloc::vec![alloc::format!("Erro: {}", e.message())],
+            Err(e) => return alloc::vec![prop(tk!("files.prop.error"), e.message())],
         };
         match osjeff_core::appinstall::check(&bytes) {
             Ok(m) => {
-                let mut v = alloc::vec![String::from("Pacote: pacote de app válido")];
+                let mut v =
+                    alloc::vec![prop(tk!("files.prop.package"), t!("files.prop.pkg_valid"))];
                 v.extend(fapps::manifest_lines(&m));
                 let state = if self.apps.iter().any(|a| a.id == m.id) {
-                    "Estado: instalado"
+                    t!("files.prop.installed")
                 } else {
-                    "Estado: não instalado (Enter instala e abre)"
+                    t!("files.prop.not_installed_hint")
                 };
-                v.push(String::from(state));
+                v.push(prop(tk!("files.prop.state"), state));
                 v
             }
-            Err(e) => alloc::vec![alloc::format!("Pacote: inválido ({e})")],
+            Err(e) => alloc::vec![prop(
+                tk!("files.prop.package"),
+                &t!("files.prop.pkg_invalid", detail = &alloc::format!("{e}")),
+            )],
         }
     }
 
@@ -1904,17 +1933,29 @@ impl Desktop {
         let app_id = String::from_utf8_lossy(&row.id).into_owned();
         let mut lines = match self.app_manifest(&app_id) {
             Some(m) => fapps::manifest_lines(&m),
-            None => alloc::vec![String::from("Manifesto: indisponível")],
+            None => alloc::vec![prop(
+                tk!("files.prop.manifest"),
+                t!("files.prop.manifest_missing"),
+            )],
         };
-        lines.push(alloc::format!(
-            "Estado: {}",
-            fapps::status_label(row.installed)
+        lines.push(prop(
+            tk!("files.prop.state"),
+            fapps::status_label(row.installed),
         ));
-        lines.push(alloc::format!("Pacote: {}", fileman::format_size(row.size)));
+        lines.push(prop(
+            tk!("files.prop.package"),
+            &fileman::format_size(row.size),
+        ));
         if row.installed {
-            lines.push(alloc::format!("Arquivo: /apps/{app_id}.wasm"));
+            lines.push(prop(
+                tk!("files.prop.file"),
+                &alloc::format!("/apps/{app_id}.wasm"),
+            ));
         } else {
-            lines.push(String::from("Origem: embutido no sistema (I instala)"));
+            lines.push(prop(
+                tk!("files.prop.origin"),
+                t!("files.prop.origin_bundled"),
+            ));
         }
         if let Some(f) = self.files_mut(id) {
             f.props = Some(lines);
@@ -2040,11 +2081,13 @@ impl Desktop {
         if rows.len() > 1 {
             let bytes: u64 = rows.iter().filter(|r| !r.is_dir()).map(|r| r.size).sum();
             let mut d = empty(key);
-            d.name = alloc::format!("{} itens", rows.len());
+            d.name = tp!("files.count", rows.len());
             d.kind = FileKind::Folder;
-            d.kind_label = String::from("Seleção");
-            d.info
-                .push((String::from("Tamanho"), fileman::format_size(bytes)));
+            d.kind_label = String::from(t!("files.preview.selection"));
+            d.info.push((
+                String::from(t!("files.preview.size")),
+                fileman::format_size(bytes),
+            ));
             return d;
         }
         let row = &rows[0];
@@ -2056,21 +2099,29 @@ impl Desktop {
         d.kind_label = ui::kind_label(&row.name, row.is_dir());
         if in_apps {
             d.kind = FileKind::App;
-            d.kind_label = String::from("Aplicativo");
+            d.kind_label = String::from(t!("files.kind.app"));
             d.info.push((
-                String::from("Estado"),
+                String::from(t!("files.preview.state")),
                 String::from(fapps::status_label(row.installed)),
             ));
         }
         if !row.is_dir() {
             d.info.push((
-                String::from(if in_apps { "Pacote" } else { "Tamanho" }),
+                String::from(if in_apps {
+                    t!("files.preview.package")
+                } else {
+                    t!("files.preview.size")
+                }),
                 fileman::format_size(row.size),
             ));
         }
         if !in_apps {
             d.info.push((
-                String::from(if in_trash { "Excluído" } else { "Modificado" }),
+                String::from(if in_trash {
+                    t!("files.preview.deleted")
+                } else {
+                    t!("files.preview.modified")
+                }),
                 modified_label(row.mtime),
             ));
         }
@@ -2081,7 +2132,7 @@ impl Desktop {
         match pk {
             ui::PreviewKind::Image => {
                 if row.size > ui::PREVIEW_MAX_IMAGE {
-                    d.note = Some(String::from("Imagem grande demais para pré-visualizar"));
+                    d.note = Some(String::from(t!("files.preview.too_big")));
                 } else {
                     match vfs::read_file(&path)
                         .ok()
@@ -2091,13 +2142,13 @@ impl Desktop {
                             d.info.insert(
                                 1,
                                 (
-                                    String::from("Dimensões"),
-                                    alloc::format!("{} × {} px", img.width(), img.height()),
+                                    String::from(t!("files.preview.dimensions")),
+                                    t!("files.dims", w = img.width(), h = img.height()),
                                 ),
                             );
                             d.image = thumbnail(&img, 216, 156);
                         }
-                        None => d.note = Some(String::from("Não foi possível abrir a imagem")),
+                        None => d.note = Some(String::from(t!("files.preview.cannot_open"))),
                     }
                 }
             }
@@ -2106,7 +2157,7 @@ impl Desktop {
                     Ok(head) => {
                         d.lines = ui::text_preview(&head, 14, 34);
                         if d.lines.is_empty() && pk == ui::PreviewKind::Other {
-                            d.note = Some(String::from("Sem pré-visualização"));
+                            d.note = Some(String::from(t!("files.preview.none")));
                         }
                     }
                     Err(e) => d.note = Some(String::from(e.message())),
@@ -2114,8 +2165,10 @@ impl Desktop {
             }
             ui::PreviewKind::Folder => {
                 if let Ok(list) = vfs::list(&path) {
-                    d.info
-                        .push((String::from("Itens"), list.len().to_string_lossy()));
+                    d.info.push((
+                        String::from(t!("files.preview.items")),
+                        list.len().to_string_lossy(),
+                    ));
                 }
             }
             ui::PreviewKind::App => {}

@@ -62,7 +62,7 @@ impl DiskUsage for VfsUsage {
     fn label(&self) -> &str {
         match vfs::volume() {
             vfs::Volume::Disk => "OJFS v3 (IDE)",
-            vfs::Volume::Memory => "Memoria (sem disco v3)",
+            vfs::Volume::Memory => osjeff_core::t!("files.vol.memory_label"),
         }
     }
 

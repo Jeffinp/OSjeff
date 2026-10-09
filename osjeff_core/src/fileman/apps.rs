@@ -10,7 +10,6 @@
 use super::Row;
 use crate::appmanifest::{Abi, ClipPerm, FsPerm, Manifest, NetPerm};
 use crate::vfs::EntryKind;
-use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -41,12 +40,12 @@ pub fn rows(items: &[AppItem]) -> Vec<Row> {
         .collect()
 }
 
-/// The text of the "Estado" column.
+/// The text of the "Estado" column, in the language in effect.
 pub fn status_label(installed: bool) -> &'static str {
     if installed {
-        "instalado"
+        crate::t!("files.app.installed")
     } else {
-        "não instalado"
+        crate::t!("files.app.not_installed")
     }
 }
 
@@ -80,45 +79,54 @@ pub fn app_action(row: &Row, key: AppKey) -> Result<AppAction, &'static str> {
         (AppKey::Enter, true) => Ok(AppAction::Launch(id)),
         (AppKey::Enter, false) => Ok(AppAction::InstallAndLaunch(id)),
         (AppKey::Install, false) => Ok(AppAction::Install(id)),
-        (AppKey::Install, true) => Err("Já instalado"),
+        (AppKey::Install, true) => Err(crate::t!("files.app.already_installed")),
         (AppKey::Remove, true) => Ok(AppAction::Remove(id)),
-        (AppKey::Remove, false) => Err("Não instalado"),
+        (AppKey::Remove, false) => Err(crate::t!("files.app.not_installed_cap")),
     }
 }
 
-/// The permissions and limits of `m` as lines for the Properties panel (Portuguese).
+/// The permissions and limits of `m` as lines for the Properties panel (`label: value`), in the
+/// language in effect.
 pub fn manifest_lines(m: &Manifest) -> Vec<String> {
     let abi = match m.abi {
-        Abi::V1 => "1 (desenho contínuo)",
-        Abi::V2 => "2 (por eventos)",
+        Abi::V1 => crate::t!("files.app.abi1"),
+        Abi::V2 => crate::t!("files.app.abi2"),
     };
     let fs = match m.fs {
-        FsPerm::None => String::from("nenhum"),
-        FsPerm::Own => format!("só /data/{}", m.id),
-        FsPerm::Home => String::from("pasta do usuário (/home)"),
+        FsPerm::None => String::from(crate::t!("files.app.fs_none")),
+        FsPerm::Own => crate::t!("files.app.fs_own", id = m.id.as_str()),
+        FsPerm::Home => String::from(crate::t!("files.app.fs_home")),
     };
     let net = match m.net {
-        NetPerm::None => "nenhuma",
-        NetPerm::Http => "HTTP e HTTPS (endereços públicos)",
-        NetPerm::Tcp => "HTTP e HTTPS (TCP reservado)",
+        NetPerm::None => crate::t!("files.app.net_none"),
+        NetPerm::Http => crate::t!("files.app.net_http"),
+        NetPerm::Tcp => crate::t!("files.app.net_tcp"),
     };
     let clip = match m.clipboard {
-        ClipPerm::None => "não",
-        ClipPerm::Rw => "ler e escrever",
+        ClipPerm::None => crate::t!("files.app.clip_none"),
+        ClipPerm::Rw => crate::t!("files.app.clip_rw"),
     };
     alloc::vec![
-        format!("App: {} ({})", m.name, m.id),
-        format!("Versão: {}   ABI {}", m.version, abi),
-        format!("Arquivos: {fs}"),
-        format!("Rede: {net}"),
-        format!("Área de transferência: {clip}"),
-        format!("Memória: {} MiB   Disco: {} KiB", m.mem_mib, m.disk_kib),
-        format!(
-            "Arquivos abertos: {}   Janela {}x{}{}",
-            m.max_fds,
-            m.win_w,
-            m.win_h,
-            if m.resizable { "+" } else { "" }
+        crate::t!(
+            "files.app.line.app",
+            name = m.name.as_str(),
+            id = m.id.as_str()
+        ),
+        crate::t!(
+            "files.app.line.version",
+            version = crate::i18n::Arg::Display(&m.version),
+            abi = abi
+        ),
+        crate::t!("files.app.line.files", value = &fs),
+        crate::t!("files.app.line.net", value = net),
+        crate::t!("files.app.line.clipboard", value = clip),
+        crate::t!("files.app.line.limits", mem = m.mem_mib, disk = m.disk_kib),
+        crate::t!(
+            "files.app.line.window",
+            fds = m.max_fds,
+            w = m.win_w,
+            h = m.win_h,
+            resizable = if m.resizable { "+" } else { "" }
         ),
     ]
 }

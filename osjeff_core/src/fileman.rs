@@ -362,15 +362,16 @@ pub struct Crumb {
     pub path: Vec<u8>,
 }
 
-/// The crumbs of `path`: `Disco`, then one per folder (`Lixeira` for the trash).
+/// The crumbs of `path`: the disk (`Disco` / `Disk`), then one per folder (the trash for the
+/// trash). The special labels follow the language in effect.
 pub fn breadcrumbs(path: &[u8]) -> Vec<Crumb> {
     let mut out = alloc::vec![Crumb {
-        label: b"Disco".to_vec(),
+        label: crate::t!("files.place.disk").as_bytes().to_vec(),
         path: b"/".to_vec(),
     }];
     if path == TRASH_PATH {
         out.push(Crumb {
-            label: b"Lixeira".to_vec(),
+            label: crate::t!("files.place.trash").as_bytes().to_vec(),
             path: TRASH_PATH.to_vec(),
         });
         return out;
@@ -469,20 +470,10 @@ impl History {
 // Formatting
 // ---------------------------------------------------------------------------
 
-/// `"512 B"`, `"1,5 KiB"`, `"3,0 MiB"`, `"2,3 GiB"` (one decimal, comma, binary units).
+/// `"512 B"`, `"1,5 KiB"` (pt) / `"1.5 KiB"` (en): one decimal, binary units, the language's
+/// decimal separator (see [`crate::i18n::format_size`]).
 pub fn format_size(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["KiB", "MiB", "GiB", "TiB"];
-    if bytes < 1024 {
-        return alloc::format!("{bytes} B");
-    }
-    let mut unit = 0;
-    let mut scaled = bytes as u128 * 10; // tenths of the current unit
-    scaled /= 1024;
-    while scaled >= 10_240 && unit + 1 < UNITS.len() {
-        scaled /= 1024;
-        unit += 1;
-    }
-    alloc::format!("{},{} {}", scaled / 10, scaled % 10, UNITS[unit])
+    crate::i18n::format_size(bytes)
 }
 
 /// Days since 1970-01-01 to `(year, month, day)` (proleptic Gregorian).
@@ -499,9 +490,10 @@ pub fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-/// `"dd/mm/aaaa hh:mm"` of a Unix time shifted by `tz_secs` (local time). `0` (no
-/// clock when the file was written) shows `"--"`.
-pub fn format_datetime(unix: u64, tz_secs: i32) -> String {
+/// A Unix time shifted by `tz_secs` (local time) as the language writes a date and a time
+/// (`08/10/2026 23:49` / `10/08/2026 11:49 PM`; `clock24` picks the clock). `0` (no clock when
+/// the file was written) shows `--`.
+pub fn format_datetime(unix: u64, tz_secs: i32, clock24: bool) -> String {
     if unix == 0 {
         return String::from("--");
     }
@@ -509,13 +501,20 @@ pub fn format_datetime(unix: u64, tz_secs: i32) -> String {
     let days = t.div_euclid(86_400);
     let secs = t.rem_euclid(86_400);
     let (y, m, d) = civil_from_days(days);
-    alloc::format!(
-        "{:02}/{:02}/{:04} {:02}:{:02}",
-        d,
-        m,
-        y,
-        secs / 3600,
-        (secs % 3600) / 60
+    let civil = crate::i18n::Civil {
+        year: y.clamp(0, 9999) as i32,
+        month: m as u8,
+        day: d as u8,
+        // 1970-01-01 was a Thursday.
+        weekday: (days + 4).rem_euclid(7) as u8,
+        hour: (secs / 3600) as u8,
+        minute: ((secs % 3600) / 60) as u8,
+        second: (secs % 60) as u8,
+    };
+    crate::t!(
+        "files.when.datetime",
+        date = &crate::i18n::format_date(civil, crate::i18n::DateStyle::Short, clock24),
+        time = &crate::i18n::format_time(civil, clock24, false)
     )
 }
 
@@ -946,7 +945,7 @@ impl Cmd {
             Cmd::Delete => "Del",
             Cmd::SelectAll => "Ctrl+A",
             Cmd::Refresh => "F5",
-            Cmd::TogglePreview => "Espaço",
+            Cmd::TogglePreview => crate::t!("files.key.space"),
             Cmd::NewFolder => "N",
             _ => "",
         }
@@ -968,60 +967,66 @@ pub struct MenuCtx {
     pub clip_has_items: bool,
 }
 
-/// The entries of the context menu, in order, with their Portuguese labels.
+/// The entries of the context menu, in order, with their labels in the language in effect.
 pub fn context_menu(ctx: MenuCtx) -> Vec<(Cmd, &'static str)> {
     let mut m = Vec::new();
     if ctx.in_apps {
         if ctx.selected == 1 {
             if ctx.app_installed {
-                m.push((Cmd::Open, "Abrir"));
-                m.push((Cmd::RemoveApp, "Remover"));
+                m.push((Cmd::Open, crate::t!("files.menu.open")));
+                m.push((Cmd::RemoveApp, crate::t!("files.menu.remove")));
             } else {
-                m.push((Cmd::Open, "Instalar e abrir"));
-                m.push((Cmd::InstallApp, "Instalar"));
+                m.push((Cmd::Open, crate::t!("files.menu.install_open")));
+                m.push((Cmd::InstallApp, crate::t!("files.menu.install")));
             }
-            m.push((Cmd::Properties, "Informações"));
+            m.push((Cmd::Properties, crate::t!("files.menu.properties")));
         }
-        m.push((Cmd::Refresh, "Atualizar"));
+        m.push((Cmd::Refresh, crate::t!("files.menu.refresh")));
         return m;
     }
     if ctx.in_trash {
         if ctx.selected > 0 {
-            m.push((Cmd::Restore, "Restaurar"));
-            m.push((Cmd::DeletePermanent, "Excluir permanentemente"));
+            m.push((Cmd::Restore, crate::t!("files.menu.restore")));
+            m.push((
+                Cmd::DeletePermanent,
+                crate::t!("files.menu.delete_permanently"),
+            ));
         }
-        m.push((Cmd::EmptyTrash, "Esvaziar a lixeira"));
+        m.push((Cmd::EmptyTrash, crate::t!("files.menu.empty_trash")));
         if ctx.selected > 0 {
-            m.push((Cmd::Properties, "Informações"));
+            m.push((Cmd::Properties, crate::t!("files.menu.properties")));
         }
-        m.push((Cmd::SelectAll, "Selecionar tudo"));
+        m.push((Cmd::SelectAll, crate::t!("files.menu.select_all")));
         return m;
     }
     if ctx.selected > 0 {
         if ctx.selected == 1 {
-            m.push((Cmd::Open, "Abrir"));
-            m.push((Cmd::TogglePreview, "Pré-visualizar"));
+            m.push((Cmd::Open, crate::t!("files.menu.open")));
+            m.push((Cmd::TogglePreview, crate::t!("files.menu.preview")));
         }
         if ctx.selected == 1 && ctx.image {
-            m.push((Cmd::SetWallpaper, "Definir como papel de parede"));
+            m.push((Cmd::SetWallpaper, crate::t!("files.menu.set_wallpaper")));
         }
-        m.push((Cmd::Cut, "Recortar"));
-        m.push((Cmd::Copy, "Copiar"));
+        m.push((Cmd::Cut, crate::t!("files.menu.cut")));
+        m.push((Cmd::Copy, crate::t!("files.menu.copy")));
         if ctx.selected == 1 {
-            m.push((Cmd::Rename, "Renomear"));
+            m.push((Cmd::Rename, crate::t!("files.menu.rename")));
         }
-        m.push((Cmd::Delete, "Excluir"));
-        m.push((Cmd::DeletePermanent, "Excluir permanentemente"));
-        m.push((Cmd::Properties, "Informações"));
+        m.push((Cmd::Delete, crate::t!("files.menu.delete")));
+        m.push((
+            Cmd::DeletePermanent,
+            crate::t!("files.menu.delete_permanently"),
+        ));
+        m.push((Cmd::Properties, crate::t!("files.menu.properties")));
     } else {
-        m.push((Cmd::NewFile, "Novo arquivo"));
-        m.push((Cmd::NewFolder, "Nova pasta"));
+        m.push((Cmd::NewFile, crate::t!("files.menu.new_file")));
+        m.push((Cmd::NewFolder, crate::t!("files.menu.new_folder")));
         if ctx.clip_has_items {
-            m.push((Cmd::Paste, "Colar"));
+            m.push((Cmd::Paste, crate::t!("files.menu.paste")));
         }
-        m.push((Cmd::SelectAll, "Selecionar tudo"));
-        m.push((Cmd::Refresh, "Atualizar"));
-        m.push((Cmd::Properties, "Informações"));
+        m.push((Cmd::SelectAll, crate::t!("files.menu.select_all")));
+        m.push((Cmd::Refresh, crate::t!("files.menu.refresh")));
+        m.push((Cmd::Properties, crate::t!("files.menu.properties")));
     }
     m
 }
@@ -1473,11 +1478,7 @@ impl FileView {
         let n = self.rows.len();
         let k = self.sel.count();
         if k == 0 {
-            return if n == 1 {
-                String::from("1 item")
-            } else {
-                alloc::format!("{n} itens")
-            };
+            return crate::tp!("files.count", n);
         }
         let bytes: u64 = self
             .selected_rows()
@@ -1485,11 +1486,7 @@ impl FileView {
             .filter(|r| !r.is_dir())
             .map(|r| r.size)
             .sum();
-        if k == 1 {
-            alloc::format!("1 selecionado ({})", format_size(bytes))
-        } else {
-            alloc::format!("{k} selecionados ({})", format_size(bytes))
-        }
+        crate::tp!("files.selected", k, size = crate::i18n::bytes(bytes))
     }
 }
 

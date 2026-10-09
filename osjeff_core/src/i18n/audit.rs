@@ -772,6 +772,15 @@ const ACCENT_STRICT: &[&str] = &[
     "kernel/src/desktop/toasts_ui.rs",
     "kernel/src/desktop/chrome.rs",
     "osjeff_core/src/launcher.rs",
+    // w30: Arquivos, Imagens, Editor.
+    "kernel/src/desktop/files.rs",
+    "kernel/src/desktop/files_ui.rs",
+    "kernel/src/desktop/sysstore.rs",
+    "kernel/src/desktop/vfs.rs",
+    "osjeff_core/src/fileman.rs",
+    "osjeff_core/src/fileman/apps.rs",
+    "osjeff_core/src/fileman/ui.rs",
+    "osjeff_core/src/vfs.rs",
 ];
 
 fn unaccented_literals(file: &str, src: &str, a: &Accents) -> Vec<String> {
