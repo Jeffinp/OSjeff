@@ -429,6 +429,50 @@ mais caro: o tempo dos retângulos arredondados no rastro por primitiva dobra me
 número de chamadas (a janela arrastada é o Terminal, que não mudou), e a soma da composição só sobe
 uns 5 %; não achei a causa e não é efeito do repintar parcial (desligado numa imagem de teste, o
 resultado é o mesmo). Fica como lacuna conhecida.
+### Arquivos, Imagens, Editor e Terminal (W23): testes e custo de quadro
+
+Testes novos no `osjeff_core` (todos no host; o kernel só desenha e roteia; 2497 → 2590 passando, 3 ignorados):
+
+| Módulo | Testes | O que prova |
+|---|---|---|
+| `appart` | 8 (+1 ignorado, que gera a folha de contato) | cada tipo de arquivo tem conteúdo em todos os tamanhos, cantos transparentes, ícones distintos e determinísticos, o destaque tinge pastas e apps e não documentos, glifos na cor pedida, pares espelhados, tamanhos limitados |
+| `fileman::ui` | 32 | layout da janela (barra estreita com busca aberta recolhe o caminho), colunas, migalhas, acerto, geometria dos itens (lista e ícones), itens visíveis sem fora-por-um, seleção por retângulo, rolagem de borda, plano de soltar (mover/copiar, pasta dentro de si mesma recusada, Lixeira), `Scroller` (mola criticamente amortecida), chaves de busca com acentos, tipo de pré-visualização e texto |
+| `fileman` (estado) | 93 no módulo | filtro da pasta, lugares, `TextInput` com seleção e bytes Latin-1, ordenação, seleção por nome |
+| `viewer::ui` | 22 | layout (com e sem faixa), acerto, faixa de miniaturas (rolagem, visíveis, ordem de criação), `Inertia`, `Slideshow`, `RotMap` e limites girados |
+| `editor2::ui` | 15 | grade e margem, célula sob o mouse com cliques na margem e fora, trechos de seleção, guias de indentação, folhas (tamanho, lista, lugares, botões), barra de buscar (controles não se sobrepõem, acerto de cada um) |
+| `editor2` (busca, diálogo) | +3 | foco do campo da barra, nome inicial "fresco", barra de estado |
+| `termui` | 6 | grade dentro da janela, mouse → célula com limites, ordem e trechos da seleção, palavras, extração de texto sem pânico, prompt separado |
+| `anim` | +2 | piscar suave do cursor (monótono, sólido depois da entrada e depois de 12 s) |
+| `settings` | +2 | `editor_font`/`terminal_font` totais com limites, degraus de `font_step` |
+
+Cenários de tela (cada um fotografa; todas as imagens são revisadas em claro e escuro,
+`QEMU_MEM=256M tools/perf/run.sh <img> bios <saida> 300 <cen>`; `FS_IMG` é um disco preparado com o
+`fs3_inject`: `/Imagens/*.png` (inclusive `transparente.png` e `corrompida.png`), `/Documentos`,
+`/Projetos`, `/big.bin` de 3 MB, `/leiame.txt`, `--files 2000 /many` e
+`/etc/osjeff.conf` com `appearance=light` ou `appearance=dark`):
+
+| Cenário | O que faz |
+|---|---|
+| `w23-files.sh` | lista, renomear, menu de contexto, ordenar, Imagens, ícones, pré-visualização (Espaço), busca, seleção por retângulo, arrastar e soltar com destino destacado, confirmação, propriedades, Lixeira vazia |
+| `w23-many.sh` | `/many` (2000 arquivos): roda, PageDown, setas, Home/End, arrastar a barra de rolagem |
+| `w23-viewer.sh` | ajustar, painel de informações, preencher, zoom, giro (quadro no meio), PNG transparente, imagem corrompida, apresentação, folha de salvar |
+| `w23-editor.sh` | digitar, seleção, buscar, substituir, Abrir, Ctrl +/-/0, Salvar como, salvo, a pergunta ao fechar, abrir pelo diálogo |
+| `w23-terminal.sh` | prompt, seleção com o mouse, copiar e colar, rolagem, Ctrl +/-/0, "executando" |
+| `w23-idle.sh` | desktop ocioso com Imagens, Arquivos, Terminal e Editor abertos; `tools/perf/idle_tail.py <saida>` conta os quadros por segundo dos últimos segundos |
+
+Custo de quadro (QEMU/TCG sem KVM, 1280x720, `perf-trace`, `tools/perf/summ.py`; a máquina é
+compartilhada, então cada cenário rodou duas vezes; antes = `bc31f5e`, mesmo disco e mesmos cenários):
+
+| Cenário | antes | depois |
+|---|---|---|
+| ocioso, quadros por segundo depois do boot | 1 (relógio) | 1 (relógio) |
+| ocioso com Imagens, Arquivos, Terminal e Editor abertos (`w23-idle.sh`) | n/a | 1 (relógio), nenhum quadro de app |
+| arrastar a janela (quadro de dano, média das duas rodadas) | 6,4 e 7,2 ms | 8,0 e 6,7 ms |
+| pasta de 2000 arquivos, rolagem (quadro de animação / estável) | 16,4 ms (estável, pico 40 ms) | 9,3 ms (animação, pico 49 ms) |
+
+O cursor que pisca pede quadros só na janela em foco, por 12 s depois da última tecla ou clique; uma
+janela que nunca recebeu entrada não pisca e não pede quadros (corrigido durante o trabalho: o
+terminal aberto no boot fazia cerca de cem quadros por segundo nos primeiros 12 s).
 
 ## 5. Lint e supply chain
 
