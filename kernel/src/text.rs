@@ -129,6 +129,19 @@ pub fn measure(text: &str, px: u16, w: Weight) -> i32 {
     }
 }
 
+/// Width in 1/256 pixel of `text` (kerning included, not rounded).
+pub fn measure_q8(text: &str, px: u16, w: Weight) -> i32 {
+    match engine() {
+        Some(e) => textlayout::measure_q8(&e.face(w, px), text),
+        None => text.chars().count() as i32 * px as i32 * 128,
+    }
+}
+
+/// Does face `w` have a glyph for `c` of its own (rather than the `?` stand-in)?
+pub fn has_glyph(c: char, w: Weight) -> bool {
+    engine().is_none_or(|e| e.has_glyph(w, c))
+}
+
 /// Top of the line box that vertically centres the cap height of `px` text in a
 /// band of height `h` starting at `y`.
 pub fn center_y(y: i32, h: i32, px: u16, w: Weight) -> i32 {
@@ -225,6 +238,68 @@ fn draw_inner(
                         e.coverage(&g),
                         g.w as usize,
                         g.h as usize,
+                        color,
+                        alpha,
+                        lut,
+                    );
+                }
+            }
+        }
+        pen += g.adv_q8;
+        prev = Some(ch);
+    }
+    (pen - x * 256 + 255) >> 8
+}
+
+/// Like [`draw_a`] but slanted to the right, a synthetic italic: every row of a glyph is
+/// shifted by its height above the baseline times about 0.21 (12 degrees). Returns the
+/// pen advance.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_slanted(
+    c: &mut Canvas,
+    x: i32,
+    y: i32,
+    text: &str,
+    px: u16,
+    w: Weight,
+    color: Color,
+    alpha: u16,
+) -> i32 {
+    let Some(e) = engine() else {
+        return 0;
+    };
+    let lut = if luma(color) > 140 {
+        &LUT_LIGHT_TEXT
+    } else {
+        &LUT_DARK_TEXT
+    };
+    let base = y + e.vmetrics(w, px).ascent;
+    let clip = c.clip_rect();
+    let mut pen = x * 256;
+    let mut prev: Option<char> = None;
+    for ch in text.chars() {
+        if let Some(p) = prev {
+            pen += e.kern_q8(w, px, p, ch);
+        }
+        let g = e.glyph(w, px, ch);
+        if g.w > 0 {
+            let gx = ((pen + 128) >> 8) + g.left as i32;
+            let gy = base - g.top as i32;
+            // Skip glyphs wholly outside the clip (with room for the slant).
+            if gx < clip.right() && gx + g.w as i32 + px as i32 / 3 > clip.x {
+                let cov = e.coverage(&g);
+                for row in 0..g.h as usize {
+                    let ry = gy + row as i32;
+                    if ry < clip.y || ry >= clip.bottom() {
+                        continue;
+                    }
+                    let shift = (base - ry) * 21 / 100;
+                    c.blend_coverage(
+                        gx + shift,
+                        ry,
+                        &cov[row * g.w as usize..(row + 1) * g.w as usize],
+                        g.w as usize,
+                        1,
                         color,
                         alpha,
                         lut,

@@ -19,6 +19,9 @@ pub struct Element {
     pub tag: String,
     pub attrs: BTreeMap<String, String>,
     pub children: Vec<Node>,
+    /// Whitespace-only text sat between this element and the previous node (so
+    /// `<b>a</b> <i>b</i>` keeps its space without a text node costing budget).
+    pub ws_before: bool,
 }
 
 impl Element {
@@ -72,15 +75,43 @@ pub const MAX_NODES: usize = 8_000;
 /// `<style>` element (the page's CSS). Tolerant of malformed markup: unknown
 /// tags pass through, mismatched close tags pop to the nearest match.
 pub fn parse_html(input: &[u8]) -> (Vec<Node>, String) {
-    let s = core::str::from_utf8(input).unwrap_or("");
+    // A page that is not valid UTF-8 is read as Windows-1252 (what pages without a
+    // declared charset almost always are) instead of rendering as nothing.
+    let converted;
+    let s = match core::str::from_utf8(input) {
+        Ok(s) => s,
+        Err(_) => {
+            converted = latin1_to_string(input);
+            converted.as_str()
+        }
+    };
     let mut p = HtmlParser {
         b: s.as_bytes(),
         i: 0,
         css: String::new(),
         nodes: 0,
+        pending_ws: false,
+        pre_depth: 0,
     };
     let nodes = p.parse_nodes(&mut Vec::new());
     (nodes, p.css)
+}
+
+/// Decode Windows-1252 bytes (Latin-1 plus the printable 0x80-0x9F block).
+pub(crate) fn latin1_to_string(b: &[u8]) -> String {
+    const CP1252: [char; 32] = [
+        '\u{20ac}', '\u{81}', '\u{201a}', '\u{192}', '\u{201e}', '\u{2026}', '\u{2020}',
+        '\u{2021}', '\u{2c6}', '\u{2030}', '\u{160}', '\u{2039}', '\u{152}', '\u{8d}', '\u{17d}',
+        '\u{8f}', '\u{90}', '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}', '\u{2022}', '\u{2013}',
+        '\u{2014}', '\u{2dc}', '\u{2122}', '\u{161}', '\u{203a}', '\u{153}', '\u{9d}', '\u{17e}',
+        '\u{178}',
+    ];
+    b.iter()
+        .map(|&x| match x {
+            0x80..=0x9f => CP1252[usize::from(x - 0x80)],
+            _ => char::from(x),
+        })
+        .collect()
 }
 
 struct HtmlParser<'a> {
@@ -89,6 +120,10 @@ struct HtmlParser<'a> {
     css: String,
     /// Nodes created so far (see [`MAX_NODES`]).
     nodes: usize,
+    /// Whitespace-only text was just skipped (it becomes the next element's `ws_before`).
+    pending_ws: bool,
+    /// Open `<pre>` elements: whitespace-only text is kept verbatim inside them.
+    pre_depth: usize,
 }
 
 impl HtmlParser<'_> {
@@ -131,8 +166,14 @@ impl HtmlParser<'_> {
                 }
             } else {
                 let text = self.parse_text();
-                if !text.trim().is_empty() {
+                if text.is_empty() {
+                    continue;
+                }
+                if self.pre_depth == 0 && text.bytes().all(is_html_space) {
+                    self.pending_ws = true;
+                } else {
                     self.nodes += 1;
+                    self.pending_ws = false;
                     nodes.push(Node::Text(text));
                 }
             }
@@ -145,7 +186,7 @@ impl HtmlParser<'_> {
         while !self.eof() && self.peek() != b'<' {
             self.i += 1;
         }
-        decode_text(&self.b[start..self.i])
+        decode_text(core::str::from_utf8(&self.b[start..self.i]).unwrap_or(""))
     }
 
     fn parse_element(&mut self, open: &mut Vec<String>) -> Option<Node> {
@@ -158,6 +199,7 @@ impl HtmlParser<'_> {
         }
         let attrs = self.parse_attrs();
         let self_closing = self.consume_tag_end();
+        let ws_before = core::mem::take(&mut self.pending_ws);
 
         // <script>/<style>: consume raw text up to the matching close tag.
         if tag == "script" || tag == "style" {
@@ -175,6 +217,7 @@ impl HtmlParser<'_> {
                 tag,
                 attrs,
                 children: Vec::new(),
+                ws_before,
             }));
         }
 
@@ -188,7 +231,20 @@ impl HtmlParser<'_> {
 
         self.nodes += 1;
         open.push(tag.clone());
+        let is_pre = tag == "pre";
+        if is_pre {
+            self.pre_depth += 1;
+            // A newline right after `<pre>` is not content.
+            if self.starts_with(b"\r\n") {
+                self.i += 2;
+            } else if !self.eof() && self.peek() == b'\n' {
+                self.i += 1;
+            }
+        }
         let children = self.parse_nodes(open);
+        if is_pre {
+            self.pre_depth -= 1;
+        }
         // Consume the matching close tag if present.
         if self.starts_with(b"</") {
             let save = self.i;
@@ -206,6 +262,7 @@ impl HtmlParser<'_> {
             tag,
             attrs,
             children,
+            ws_before,
         }))
     }
 
@@ -331,23 +388,44 @@ impl HtmlParser<'_> {
     }
 }
 
-/// Decode HTML entities and collapse runs of ASCII whitespace into single
-/// spaces (HTML's normal whitespace handling for flow content).
-fn decode_text(bytes: &[u8]) -> String {
-    let mut out = String::new();
-    let mut last_space = false;
+/// HTML's whitespace: space, tab, line feed, form feed, carriage return.
+pub(crate) fn is_html_space(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\n' | 0x0c | b'\r')
+}
+
+/// May `c` appear in page text? Controls, bidirectional overrides (they can make
+/// text lie about its order), zero-width joiners, combining marks (the face has no
+/// composition) and non-characters are dropped. A zero-width space stays: it is
+/// where a long word may break.
+pub(crate) fn keep_char(c: char) -> bool {
+    !matches!(
+        c,
+        '\u{0}'..='\u{8}'
+            | '\u{b}'
+            | '\u{e}'..='\u{1f}'
+            | '\u{7f}'..='\u{9f}'
+            | '\u{200c}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206f}'
+            | '\u{061c}'
+            | '\u{feff}'
+            | '\u{fe00}'..='\u{fe0f}'
+            | '\u{0300}'..='\u{036f}'
+            | '\u{fffe}'
+            | '\u{ffff}'
+    )
+}
+
+/// Decode HTML entities and sanitise `text`; whitespace is kept as written
+/// (line ends normalised to `\n`) because collapsing depends on the style of the
+/// element the text ends up in (`white-space: pre`), which layout knows.
+fn decode_text(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while i < bytes.len() {
         let c = bytes[i];
-        if c.is_ascii_whitespace() {
-            if !last_space {
-                out.push(' ');
-                last_space = true;
-            }
-            i += 1;
-            continue;
-        }
-        last_space = false;
         if c == b'&' {
             let mut j = i + 1;
             while j < bytes.len() && j < i + 12 && bytes[j] != b';' {
@@ -355,37 +433,54 @@ fn decode_text(bytes: &[u8]) -> String {
             }
             if j < bytes.len()
                 && bytes[j] == b';'
-                && let Some(ch) = crate::browser::decode_entity(&bytes[i + 1..j])
+                && let Some(ch) = text.get(i + 1..j).and_then(entity_char)
             {
-                out.push(ch as char);
+                if keep_char(ch) {
+                    out.push(ch);
+                }
                 i = j + 1;
                 continue;
             }
             out.push('&');
             i += 1;
-        } else if c >= 0x80 {
-            let (cp, len) = crate::browser::decode_utf8(&bytes[i..]);
-            if let Some(b) = crate::browser::fold_ascii(cp) {
-                out.push(b as char);
-            }
-            i += len;
-        } else {
-            out.push(c as char);
+        } else if c == b'\r' {
+            // CRLF and lone CR are line ends.
+            out.push('\n');
             i += 1;
+            if i < bytes.len() && bytes[i] == b'\n' {
+                i += 1;
+            }
+        } else if c == 0x0c {
+            out.push(' ');
+            i += 1;
+        } else if c < 0x80 {
+            if keep_char(c as char) {
+                out.push(c as char);
+            }
+            i += 1;
+        } else {
+            // `i` is on a char boundary: only whole characters are skipped.
+            let ch = text[i..].chars().next().unwrap_or('\u{fffd}');
+            if keep_char(ch) {
+                out.push(ch);
+            }
+            i += ch.len_utf8();
         }
     }
     out
 }
 
 /// Named entities that decode to one character (the Latin letters Portuguese
-/// pages use, plus the markup-significant ones). `nbsp` becomes a plain space.
+/// pages use, common punctuation and the markup-significant ones).
 fn entity_char(name: &str) -> Option<char> {
-    const LATIN: [(&str, char); 50] = [
+    const NAMED: &[(&str, char)] = &[
         ("aacute", '\u{e1}'),
         ("agrave", '\u{e0}'),
         ("acirc", '\u{e2}'),
         ("atilde", '\u{e3}'),
         ("auml", '\u{e4}'),
+        ("aring", '\u{e5}'),
+        ("aelig", '\u{e6}'),
         ("eacute", '\u{e9}'),
         ("egrave", '\u{e8}'),
         ("ecirc", '\u{ea}'),
@@ -399,17 +494,22 @@ fn entity_char(name: &str) -> Option<char> {
         ("ocirc", '\u{f4}'),
         ("otilde", '\u{f5}'),
         ("ouml", '\u{f6}'),
+        ("oslash", '\u{f8}'),
         ("uacute", '\u{fa}'),
         ("ugrave", '\u{f9}'),
         ("ucirc", '\u{fb}'),
         ("uuml", '\u{fc}'),
+        ("yacute", '\u{fd}'),
         ("ccedil", '\u{e7}'),
         ("ntilde", '\u{f1}'),
+        ("szlig", '\u{df}'),
         ("Aacute", '\u{c1}'),
         ("Agrave", '\u{c0}'),
         ("Acirc", '\u{c2}'),
         ("Atilde", '\u{c3}'),
         ("Auml", '\u{c4}'),
+        ("Aring", '\u{c5}'),
+        ("AElig", '\u{c6}'),
         ("Eacute", '\u{c9}'),
         ("Egrave", '\u{c8}'),
         ("Ecirc", '\u{ca}'),
@@ -423,14 +523,53 @@ fn entity_char(name: &str) -> Option<char> {
         ("Ocirc", '\u{d4}'),
         ("Otilde", '\u{d5}'),
         ("Ouml", '\u{d6}'),
+        ("Oslash", '\u{d8}'),
         ("Uacute", '\u{da}'),
         ("Ugrave", '\u{d9}'),
         ("Ucirc", '\u{db}'),
         ("Uuml", '\u{dc}'),
+        ("Yacute", '\u{dd}'),
         ("Ccedil", '\u{c7}'),
         ("Ntilde", '\u{d1}'),
         ("euro", '\u{20ac}'),
         ("copy", '\u{a9}'),
+        ("reg", '\u{ae}'),
+        ("trade", '\u{2122}'),
+        ("ndash", '\u{2013}'),
+        ("mdash", '\u{2014}'),
+        ("hellip", '\u{2026}'),
+        ("lsquo", '\u{2018}'),
+        ("rsquo", '\u{2019}'),
+        ("ldquo", '\u{201c}'),
+        ("rdquo", '\u{201d}'),
+        ("bull", '\u{2022}'),
+        ("middot", '\u{b7}'),
+        ("laquo", '\u{ab}'),
+        ("raquo", '\u{bb}'),
+        ("times", '\u{d7}'),
+        ("divide", '\u{f7}'),
+        ("deg", '\u{b0}'),
+        ("plusmn", '\u{b1}'),
+        ("sect", '\u{a7}'),
+        ("para", '\u{b6}'),
+        ("cent", '\u{a2}'),
+        ("pound", '\u{a3}'),
+        ("yen", '\u{a5}'),
+        ("iexcl", '\u{a1}'),
+        ("iquest", '\u{bf}'),
+        ("ordf", '\u{aa}'),
+        ("ordm", '\u{ba}'),
+        ("sup2", '\u{b2}'),
+        ("sup3", '\u{b3}'),
+        ("micro", '\u{b5}'),
+        ("frac12", '\u{bd}'),
+        ("frac14", '\u{bc}'),
+        ("frac34", '\u{be}'),
+        ("larr", '\u{2190}'),
+        ("uarr", '\u{2191}'),
+        ("rarr", '\u{2192}'),
+        ("darr", '\u{2193}'),
+        ("minus", '\u{2212}'),
     ];
     match name {
         "amp" => Some('&'),
@@ -438,7 +577,7 @@ fn entity_char(name: &str) -> Option<char> {
         "gt" => Some('>'),
         "quot" => Some('"'),
         "apos" => Some('\''),
-        "nbsp" => Some(' '),
+        "nbsp" => Some('\u{a0}'),
         _ => {
             if let [b'#', rest @ ..] = name.as_bytes() {
                 let cp = if let [b'x' | b'X', hex @ ..] = rest {
@@ -452,7 +591,7 @@ fn entity_char(name: &str) -> Option<char> {
                 }
                 return char::from_u32(cp);
             }
-            LATIN.iter().find(|(n, _)| *n == name).map(|&(_, c)| c)
+            NAMED.iter().find(|(n, _)| *n == name).map(|&(_, c)| c)
         }
     }
 }
@@ -487,31 +626,22 @@ pub(crate) fn decode_attr(s: &str) -> String {
     out
 }
 
-/// Fold `s` to the bitmap font's printable ASCII for display: accented
-/// letters lose their accent, whitespace and controls collapse to one space,
-/// anything without an ASCII look-alike is dropped.
+/// `s` made fit for one line of display: runs of whitespace and controls collapse to
+/// one space and the characters [`keep_char`] refuses are dropped. Accents and every
+/// other character are kept.
 pub(crate) fn fold_display(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut last_space = false;
     for ch in s.chars() {
         let cp = ch as u32;
-        let folded = if ch.is_whitespace() || cp < 0x20 || cp == 0x7f {
-            Some(b' ')
-        } else {
-            crate::browser::fold_ascii(cp)
-        };
-        match folded {
-            Some(b' ') => {
-                if !last_space {
-                    out.push(' ');
-                }
-                last_space = true;
+        if (ch.is_whitespace() && ch != '\u{a0}') || cp < 0x20 || cp == 0x7f {
+            if !last_space {
+                out.push(' ');
             }
-            Some(b) => {
-                out.push(b as char);
-                last_space = false;
-            }
-            None => {}
+            last_space = true;
+        } else if keep_char(ch) {
+            out.push(ch);
+            last_space = false;
         }
     }
     out
@@ -686,7 +816,7 @@ mod html_tests {
         let p = first_element(&nodes);
         if let Node::Text(t) = &p.children[0] {
             assert!(t.contains("a & b"));
-            assert!(t.contains('e')); // &#233; (é) folded to 'e'
+            assert!(t.contains('\u{e9}')); // &#233; stays an e with acute
         } else {
             panic!("expected text");
         }

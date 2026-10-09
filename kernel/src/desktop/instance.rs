@@ -211,7 +211,9 @@ pub(crate) struct BrowserState {
     pub find: osjeff_core::web::find::FindBar,
     /// Start of a mouse selection (page coordinates) and the selected word range.
     pub sel_anchor: Option<(i32, i32)>,
-    pub sel: Option<(usize, usize)>,
+    pub sel: Option<osjeff_core::web::textops::Selection>,
+    /// The link under the pointer (index into the page's links), for the hover underline.
+    pub hover_link: Option<usize>,
     /// A one-line message over the bottom of the page (cleared by the next key or click).
     pub notice: Option<String>,
 }
@@ -601,6 +603,7 @@ impl App {
                 find: osjeff_core::web::find::FindBar::new(),
                 sel_anchor: None,
                 sel: None,
+                hover_link: None,
                 notice: None,
             })),
             Kind::WasmApp => App::Wasm(Box::new(WasmWin {

@@ -336,7 +336,12 @@ impl Desktop {
         // The find bar takes the keys while it is open.
         if b.find.is_open() {
             use osjeff_core::web::find::FindOutcome;
-            let out = b.find.on_key(key, shift, b.page.as_ref());
+            let out = b.find.on_key(
+                key,
+                shift,
+                b.page.as_ref(),
+                &super::browser_paint::KernelMetrics,
+            );
             if out == FindOutcome::Changed
                 && let Some(y) = b.find.current_y()
             {
@@ -461,7 +466,8 @@ impl Desktop {
                 }));
             }
             Key::Char(b'f') | Key::Char(b'F') => {
-                b.find.open(b.page.as_ref());
+                b.find
+                    .open(b.page.as_ref(), &super::browser_paint::KernelMetrics);
                 b.browser.set_bar_focus(false);
             }
             Key::Char(b'l') | Key::Char(b'L') => {
@@ -630,7 +636,7 @@ impl Desktop {
             return;
         };
         let cur = (cx - content.x, cy - content.y + b.scroll);
-        let sel = page.select(a, cur);
+        let sel = page.select(a, cur, &super::browser_paint::KernelMetrics);
         if sel != b.sel {
             b.sel = sel;
         }
@@ -658,7 +664,7 @@ impl Desktop {
             && let App::Browser(b) = &w.app.app
             && let (Some(sel), Some(page)) = (b.sel, &b.page)
         {
-            let text = page.selection_text(sel);
+            let text = page.selection_text(&sel);
             let n = text.len().min(clipboard::CAP);
             tmp[..n].copy_from_slice(&text.as_bytes()[..n]);
             self.clipboard.set(&tmp[..n]);
@@ -1245,6 +1251,11 @@ impl Desktop {
                 self.title_hover = btn;
                 scene = true;
             }
+        }
+
+        // A link under the pointer is underlined.
+        if cursor_moved && self.browser_hover_update(cx, cy) {
+            scene = true;
         }
 
         // Moving over an open menu / start panel updates the hover highlight,

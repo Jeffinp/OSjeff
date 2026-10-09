@@ -675,7 +675,8 @@ impl Desktop {
             b.sel = None;
             b.sel_anchor = None;
             b.notice = None;
-            b.find.refresh(b.page.as_ref());
+            b.find
+                .refresh(b.page.as_ref(), &browser_paint::KernelMetrics);
             if !t.is_empty() {
                 title.push_str(" - ");
                 title.extend(t.chars().take(48));
@@ -820,6 +821,7 @@ fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
                 cache: images,
                 base: &base,
             },
+            metrics: &browser_paint::KernelMetrics,
         })
     };
     let mut page = lay(&b.images);
@@ -850,9 +852,10 @@ fn layout_browser(b: &mut BrowserState, width: i32, register: bool) {
     let _ = changed;
     b.page = Some(page);
     // The words moved: the selection (word indices) and the find matches follow the new layout.
-    b.find.refresh(b.page.as_ref());
+    b.find
+        .refresh(b.page.as_ref(), &browser_paint::KernelMetrics);
     if let Some(p) = &b.page
-        && b.sel.is_some_and(|(_, e)| e >= p.word_count())
+        && b.sel.is_some_and(|sel| !p.selection_valid(&sel))
     {
         b.sel = None;
     }
@@ -862,6 +865,7 @@ mod appart;
 mod apps;
 mod appui;
 pub(crate) mod calc_ui;
+mod browser_paint;
 mod chrome;
 mod cursor;
 mod edit;

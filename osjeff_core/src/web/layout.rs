@@ -1,44 +1,80 @@
 //! Block layout with inline text flow, producing the display list.
 //!
-//! Besides text and boxes the layout places two kinds of *inline objects* in
-//! the line boxes: pictures (`<img>`, see [`super::imgcache`]) and form
-//! controls (`<input>`, `<button>`, see [`super::form`]). Both are sized here
-//! (declared attributes first, then what is known about the picture), so a page
-//! lays out the same before and after its images arrive unless a picture's own
-//! size differs from what the page declared.
+//! Text is measured, never counted: every width comes from the caller's
+//! [`TextMetrics`], so words wrap at their real widths whatever the face. Line
+//! boxes follow the CSS model closely enough for ordinary pages: a strut from the
+//! block's own font, per-item baselines, `line-height`, `text-align`, collapsing
+//! vertical margins, `width`/`max-width` with auto margins, borders, rounded
+//! corners and backgrounds, lists with markers, tables, preformatted text.
 //!
-//! Integer zoom (percent) scales every length and rounds the font scale; no
-//! floating point anywhere.
+//! Besides text and boxes the layout places two kinds of *inline objects* in the
+//! line boxes: pictures (`<img>`, see [`super::imgcache`]) and form controls
+//! (`<input>`, `<button>`, see [`super::form`]). Both are sized here (declared
+//! attributes first, then what is known about the picture), so a page lays out the
+//! same before and after its images arrive unless a picture's own size differs from
+//! what the page declared.
+//!
+//! Integer zoom (percent) scales every length and the font sizes; no floating
+//! point anywhere. Everything a page controls is bounded: nodes, rules, depth,
+//! words, characters, commands.
 
 use super::Rgb;
 use super::css::{Stylesheet, parse_css};
-use super::dom::{Element, Node, decode_attr, fold_display, parse_html, text_content};
+use super::dom::{
+    Element, Node, decode_attr, fold_display, is_html_space, parse_html, text_content,
+};
 use super::form::{FieldInfo, FieldKind, FormInfo};
 use super::imgcache::{ImageLookup, ImgState, NoImages};
-use super::style::{Align, Computed, Disp, UA_CSS, compute};
+use super::metrics::{FixedAdvance, Font, TextMetrics};
+use super::style::{
+    Align, Computed, Disp, Len, LineH, ListStyle, UA_CSS, Ws, compute, transform_text, zoom_px,
+};
 use alloc::string::String;
 use alloc::vec::Vec;
 
-// ---- layout + display list ----
+// ---- the display list ----
 
-/// A rectangle, a run of text or a picture to paint. The kernel maps
-/// `Rgb`/`scale` onto its framebuffer and bitmap font.
+/// Underline bit of [`Cmd::Text::deco`].
+pub const DECO_UNDERLINE: u8 = 1;
+/// Line-through bit of [`Cmd::Text::deco`].
+pub const DECO_STRIKE: u8 = 2;
+
+/// A rectangle, a run of text or a picture to paint.
 #[derive(Debug, Clone)]
 pub enum Cmd {
+    /// A filled rectangle with rounded corners (`radius` 0 = square).
     Rect {
         x: i32,
         y: i32,
         w: i32,
         h: i32,
         color: Rgb,
+        radius: i32,
     },
+    /// A border drawn inside the box: widths top, right, bottom, left.
+    Border {
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        widths: [i32; 4],
+        radius: i32,
+        color: Rgb,
+    },
+    /// A run of text on one line. `y` is the top of the font's natural line box
+    /// (draw with the face's ascent below it), `h` its height.
     Text {
         x: i32,
         y: i32,
+        w: i32,
+        h: i32,
         text: String,
         color: Rgb,
-        scale: u8,
-        bold: bool,
+        font: Font,
+        /// [`DECO_UNDERLINE`] | [`DECO_STRIKE`].
+        deco: u8,
+        /// Index into [`Page::links`] when the run is link text.
+        link: Option<u32>,
     },
     /// A decoded picture: paint `Page::images[idx]`'s pixels scaled into the box.
     Image {
@@ -55,7 +91,7 @@ pub enum Cmd {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImgRef {
     pub src: String,
-    /// `alt`, entities decoded and folded to the font's ASCII.
+    /// `alt`, entities decoded.
     pub alt: String,
 }
 
@@ -69,19 +105,20 @@ pub struct FieldBox {
     pub y: i32,
     pub w: i32,
     pub h: i32,
-    /// Font scale of the control's text.
-    pub scale: u8,
-    /// Inset of the text from the box's top-left corner.
+    /// Size in pixels of the control's text.
+    pub size: u16,
+    /// Inset of the text from the box's left edge.
     pub pad_x: i32,
-    pub pad_y: i32,
 }
 
 /// A laid-out page: a flat display list plus the total content height (for
 /// scrolling).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Page {
     pub cmds: Vec<Cmd>,
     pub height: i32,
+    /// The canvas colour (`html`/`body` background, white by default).
+    pub background: Rgb,
     /// `href` of every `<a href>` on the page (at most [`MAX_LINKS`]).
     pub links: Vec<String>,
     /// Clickable boxes of link text, in page coordinates (same space as `cmds`).
@@ -94,13 +131,49 @@ pub struct Page {
     pub fields: Vec<FieldBox>,
 }
 
+impl Default for Page {
+    fn default() -> Self {
+        Page {
+            cmds: Vec::new(),
+            height: 0,
+            background: Rgb(255, 255, 255),
+            links: Vec::new(),
+            hits: Vec::new(),
+            images: Vec::new(),
+            forms: Vec::new(),
+            fields: Vec::new(),
+        }
+    }
+}
+
 /// Most links recorded per page (the rest still render, they are just not clickable).
 pub const MAX_LINKS: usize = 2000;
 
 /// Most `<img>` elements recorded per page (the rest are not laid out).
 pub const MAX_IMAGES: usize = 200;
 
-/// The box of one word of link text and the link it belongs to.
+/// Tallest page, in pixels: every y coordinate saturates here, so a hostile page cannot
+/// overflow the arithmetic of the layout, the scroll or the painter.
+pub const MAX_PAGE_H: i32 = 1 << 24;
+
+/// `y + d`, saturating at [`MAX_PAGE_H`].
+fn adv(y: i32, d: i32) -> i32 {
+    y.saturating_add(d).clamp(i32::MIN / 2, MAX_PAGE_H)
+}
+
+/// Most characters of text a page may put on screen (the rest is dropped).
+pub const MAX_TEXT_CHARS: usize = 1_000_000;
+
+/// Most display commands one layout may emit.
+pub const MAX_CMDS: usize = 150_000;
+
+/// Longest unbroken word kept, in characters (a longer one is cut).
+pub const MAX_WORD_CHARS: usize = 4096;
+
+/// Budget of ancestor steps the selector matching of one layout may take.
+const STYLE_BUDGET: u32 = 4_000_000;
+
+/// The box of one run of link text and the link it belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LinkHit {
     pub x: i32,
@@ -112,13 +185,19 @@ pub struct LinkHit {
 }
 
 impl Page {
-    /// The `href` of the link under page coordinates `(x, y)`, if any.
-    pub fn link_at(&self, x: i32, y: i32) -> Option<&str> {
+    /// Index into [`Page::links`] of the link under page coordinates `(x, y)`, if any.
+    pub fn link_index_at(&self, x: i32, y: i32) -> Option<usize> {
         self.hits
             .iter()
             .rev()
             .find(|h| x >= h.x && x < h.x + h.w && y >= h.y && y < h.y + h.h)
-            .and_then(|h| self.links.get(h.link))
+            .map(|h| h.link)
+    }
+
+    /// The `href` of the link under page coordinates `(x, y)`, if any.
+    pub fn link_at(&self, x: i32, y: i32) -> Option<&str> {
+        self.link_index_at(x, y)
+            .and_then(|l| self.links.get(l))
             .map(String::as_str)
     }
 
@@ -139,6 +218,8 @@ pub struct Layout<'a> {
     pub zoom: u16,
     /// What is known about each `<img>`.
     pub images: &'a dyn ImageLookup,
+    /// Where every text width comes from.
+    pub metrics: &'a dyn TextMetrics,
 }
 
 /// Smallest and largest page zoom (percent).
@@ -177,7 +258,17 @@ pub struct Doc {
 impl Doc {
     /// Parse `html` (tolerant of any input, see [`parse_html`]).
     pub fn parse(html: &[u8]) -> Doc {
-        let (dom, css) = parse_html(html);
+        let (mut dom, css) = parse_html(html);
+        // Every document has a body: fragments get one so the UA margins and the page's own
+        // `body { ... }` rules apply to them too.
+        if !has_body(&dom, 0) {
+            dom = alloc::vec![Node::Element(Element {
+                tag: String::from("body"),
+                attrs: Default::default(),
+                children: dom,
+                ws_before: false,
+            })];
+        }
         let mut sheet = parse_css(UA_CSS);
         sheet.rules.extend(parse_css(&css).rules);
         let title = find_title(&dom, 0)
@@ -186,7 +277,7 @@ impl Doc {
         Doc { dom, sheet, title }
     }
 
-    /// The document's `<title>` text, folded to the font's ASCII (empty if none).
+    /// The document's `<title>` text (empty if none).
     pub fn title(&self) -> &str {
         &self.title
     }
@@ -195,7 +286,7 @@ impl Doc {
     pub fn layout(&self, opts: &Layout) -> Page {
         let zoom = i32::from(opts.zoom.clamp(MIN_ZOOM, MAX_ZOOM));
         let root = Computed::root();
-        let mut painter = Painter {
+        let mut p = Painter {
             cmds: Vec::new(),
             links: Vec::new(),
             hits: Vec::new(),
@@ -205,27 +296,45 @@ impl Doc {
             cur_form: None,
             zoom,
             lookup: opts.images,
+            m: opts.metrics,
+            sheet: &self.sheet,
+            anc: Vec::new(),
+            budget: STYLE_BUDGET,
+            chars: 0,
+            items: Vec::new(),
+            space: None,
+            link: None,
+            pending: 0,
+            marker: None,
+            lists: Vec::new(),
+            canvas: None,
         };
-        let pad = painter.z(12);
-        let y = layout_children(
-            &self.dom,
-            &self.sheet,
-            &root,
-            pad,
-            pad,
-            (opts.width - 2 * pad).max(40),
-            &mut painter,
-        );
+        let area = Area {
+            x: 0,
+            w: opts.width.max(40),
+        };
+        let mut y = flow(&mut p, &self.dom, &root, &root, area, 0);
+        y = flush_inline(&mut p, &root, area, y, None);
+        y = adv(y, core::mem::take(&mut p.pending));
         Page {
-            cmds: painter.cmds,
-            height: y + pad,
-            links: painter.links,
-            hits: painter.hits,
-            images: painter.images,
-            forms: painter.forms,
-            fields: painter.fields,
+            cmds: p.cmds,
+            height: y.clamp(0, MAX_PAGE_H),
+            background: p.canvas.unwrap_or(Rgb(255, 255, 255)),
+            links: p.links,
+            hits: p.hits,
+            images: p.images,
+            forms: p.forms,
+            fields: p.fields,
         }
     }
+}
+
+fn has_body(nodes: &[Node], depth: usize) -> bool {
+    depth <= 3
+        && nodes.iter().any(|n| match n {
+            Node::Element(e) => e.tag == "body" || has_body(&e.children, depth + 1),
+            Node::Text(_) => false,
+        })
 }
 
 /// The text of the first `<title>` element (depth-limited: the DOM is
@@ -249,13 +358,42 @@ fn find_title(nodes: &[Node], depth: usize) -> Option<String> {
     None
 }
 
-/// Font metrics of the bitmap font: pixels per character cell and per text line
-/// at a given integer scale.
-fn char_w(scale: u8) -> i32 {
-    6 * scale as i32
+/// Render an HTML document to a display list laid out for `viewport_w` pixels
+/// with the deterministic [`FixedAdvance`] metrics (no images known, zoom 100%).
+/// For tests and fuzzing; the kernel calls [`Doc::layout`] with its own metrics.
+pub fn render(html: &[u8], viewport_w: i32) -> Page {
+    render_with(html, viewport_w, &FixedAdvance)
 }
-fn line_h(scale: u8) -> i32 {
-    9 * scale as i32
+
+/// [`render`] with the caller's metrics.
+pub fn render_with(html: &[u8], viewport_w: i32, metrics: &dyn TextMetrics) -> Page {
+    Doc::parse(html).layout(&Layout {
+        width: viewport_w,
+        zoom: 100,
+        images: &NoImages,
+        metrics,
+    })
+}
+
+// ---- the painter: state of one layout pass ----
+
+/// Horizontal room of a block: its left edge and width.
+#[derive(Clone, Copy, Debug)]
+struct Area {
+    x: i32,
+    w: i32,
+}
+
+/// How a run of text looks.
+#[derive(Clone, Copy, PartialEq)]
+struct Style {
+    font: Font,
+    color: Rgb,
+    deco: u8,
+    bg: Option<Rgb>,
+    link: Option<usize>,
+    /// Line-height of the run in pixels.
+    lh: i32,
 }
 
 /// An inline object: sized when its line is laid out.
@@ -272,21 +410,50 @@ enum Obj {
         form: usize,
         field: usize,
         kind: FieldKind,
-        /// Width in characters (text controls) or the label (buttons).
+        /// Width in characters (text controls).
         chars: usize,
         label: String,
     },
 }
 
-/// One word of inline content, carrying the style it should render with.
-struct Word {
+/// One piece of inline content waiting for its line.
+enum Item {
+    Word {
+        text: String,
+        st: Style,
+        /// A collapsible space precedes the word; the font is that of the text holding it.
+        sp: Option<Font>,
+        /// May break between any two characters (CJK, preformatted lines).
+        any: bool,
+        /// Must stay on the line of the previous item (`white-space: nowrap`).
+        nb: bool,
+    },
+    Obj {
+        obj: Obj,
+        st: Style,
+        sp: Option<Font>,
+    },
+    Br(Style),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MarkerKind {
+    Bullet(ListStyle),
+    Number,
+}
+
+/// A list marker waiting for the first line of its item.
+struct Marker {
+    kind: MarkerKind,
     text: String,
     color: Rgb,
-    scale: u8,
-    bold: bool,
-    /// Index into the page's link table when inside `<a href>`.
-    link: Option<usize>,
-    obj: Option<Obj>,
+    /// Right edge of the marker (page x).
+    right: i32,
+}
+
+struct ListCtx {
+    ordered: bool,
+    next: i32,
 }
 
 struct Painter<'a> {
@@ -301,127 +468,591 @@ struct Painter<'a> {
     /// Zoom in percent.
     zoom: i32,
     lookup: &'a dyn ImageLookup,
+    m: &'a dyn TextMetrics,
+    sheet: &'a Stylesheet,
+    /// Ancestors of the element being styled, outermost first.
+    anc: Vec<&'a Element>,
+    budget: u32,
+    /// Characters of text emitted so far.
+    chars: usize,
+    /// Inline content waiting for its line boxes.
+    items: Vec<Item>,
+    /// A collapsible space precedes the next word (and the font of the text it came from).
+    space: Option<Font>,
+    /// The `<a href>` the content belongs to.
+    link: Option<usize>,
+    /// Vertical margin waiting at the current y (it collapses with the next one).
+    pending: i32,
+    marker: Option<Marker>,
+    lists: Vec<ListCtx>,
+    /// `html` / `body` background.
+    canvas: Option<Rgb>,
 }
 
 impl Painter<'_> {
+    /// Natural line height of `f`, sanitised: the metrics are the caller's, and layout must
+    /// stay in range whatever they answer.
+    fn nat(&self, f: Font) -> i32 {
+        self.m.line_height(f).clamp(1, 1 << 16)
+    }
+
+    /// Ascent of `f`, sanitised like [`Painter::nat`].
+    fn asc(&self, f: Font) -> i32 {
+        self.m.ascent(f).clamp(0, 1 << 16)
+    }
+
     /// Scale a length by the zoom (integer arithmetic).
     fn z(&self, v: i32) -> i32 {
-        (i64::from(v) * i64::from(self.zoom) / 100).clamp(-100_000, 100_000) as i32
+        zoom_px(v, self.zoom)
     }
 
-    /// Scale a font scale by the zoom, rounding to nearest (at least 1).
-    fn zs(&self, scale: u8) -> u8 {
-        ((i32::from(scale) * self.zoom + 50) / 100).clamp(1, 18) as u8
+    fn font(&self, c: &Computed) -> Font {
+        Font {
+            size: self.z(c.font_px).clamp(4, 600) as u16,
+            bold: c.bold,
+            italic: c.italic,
+            mono: c.mono,
+        }
+    }
+
+    fn lh(&self, c: &Computed, font: Font) -> i32 {
+        match c.line_h {
+            LineH::Normal => self.nat(font),
+            LineH::Mult(pct) => (i32::from(font.size) * pct + 50) / 100,
+            LineH::Px(px) => self.z(px),
+        }
+        .clamp(1, 4000)
+    }
+
+    fn style(&self, c: &Computed) -> Style {
+        let font = self.font(c);
+        Style {
+            font,
+            color: c.color,
+            deco: (if c.underline { DECO_UNDERLINE } else { 0 })
+                | (if c.strike { DECO_STRIKE } else { 0 }),
+            // Only an inline element paints a background behind its words; a block paints its own box.
+            bg: c.bg.filter(|_| c.display == Disp::Inline),
+            link: self.link,
+            lh: self.lh(c, font),
+        }
+    }
+
+    fn push_cmd(&mut self, cmd: Cmd) {
+        let low = match &cmd {
+            Cmd::Rect { y, .. }
+            | Cmd::Border { y, .. }
+            | Cmd::Text { y, .. }
+            | Cmd::Image { y, .. } => *y,
+        };
+        if self.cmds.len() < MAX_CMDS && low < MAX_PAGE_H {
+            self.cmds.push(cmd);
+        }
     }
 }
 
-/// Render an HTML document to a display list laid out for `viewport_w` pixels
-/// (no images known, zoom 100%).
-pub fn render(html: &[u8], viewport_w: i32) -> Page {
-    Doc::parse(html).layout(&Layout {
-        width: viewport_w,
-        zoom: 100,
-        images: &NoImages,
-    })
+// ---- text helpers ----
+
+/// Characters that may break between each other (no spaces in the script).
+fn breaks_anywhere(c: char) -> bool {
+    matches!(c as u32,
+        0x0E00..=0x0EFF
+        | 0x2E80..=0x9FFF
+        | 0xA960..=0xA97F
+        | 0xAC00..=0xD7FF
+        | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE4F
+        | 0xFF00..=0xFFEF
+        | 0x1F000..=0x1FAFF
+        | 0x20000..=0x3FFFF)
 }
 
-/// Lay out a list of sibling nodes in a block formatting context, returning the
-/// y just below the last one. Runs of inline content between block children are
-/// gathered into line boxes.
-fn layout_children(
-    nodes: &[Node],
-    sheet: &Stylesheet,
-    parent: &Computed,
+/// Width in q8 pixels (1/256) of `text`.
+fn wq(p: &Painter, text: &str, f: Font) -> i32 {
+    // The metrics report whole pixels; the kernel's engine is more exact through
+    // `width_q8`, which defaults to `width * 256`.
+    p.m.width_q8(text, f).clamp(0, 1 << 26)
+}
+
+const Q: i32 = 256;
+
+/// Byte length of the longest prefix of `text` (at least one character) that fits
+/// in `max_q8`.
+fn fit_prefix(p: &Painter, text: &str, f: Font, max_q8: i32) -> usize {
+    let bounds: Vec<usize> = text
+        .char_indices()
+        .map(|(i, _)| i)
+        .skip(1)
+        .chain([text.len()])
+        .collect();
+    if bounds.is_empty() {
+        return text.len();
+    }
+    // Binary search for the largest count of characters whose width fits.
+    let (mut lo, mut hi) = (0usize, bounds.len()); // lo fits (0 chars), hi may not
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if wq(p, &text[..bounds[mid - 1]], f) <= max_q8 {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    bounds[lo.max(1) - 1]
+}
+
+fn push_word(p: &mut Painter, text: String, st: Style, any: bool, nb: bool) {
+    if text.is_empty() {
+        return;
+    }
+    let sp = p.space.take();
+    p.items.push(Item::Word {
+        text,
+        st,
+        sp,
+        any,
+        nb,
+    });
+}
+
+/// Turn the text of a DOM node into words (collapsing whitespace) or, in
+/// preformatted text, lines.
+fn push_text(p: &mut Painter, text: &str, c: &Computed) {
+    if p.chars >= MAX_TEXT_CHARS {
+        return;
+    }
+    let st = p.style(c);
+    let transformed;
+    let text = if c.transform == super::style::Transform::None {
+        text
+    } else {
+        transformed = transform_text(text, c.transform);
+        transformed.as_str()
+    };
+    if c.ws == Ws::Pre {
+        let mut lines = text.split('\n').peekable();
+        while let Some(line) = lines.next() {
+            if !line.is_empty() {
+                let expanded = expand_tabs(line);
+                let n = expanded.chars().count().min(MAX_WORD_CHARS * 4);
+                p.chars += n;
+                let cut: String = expanded.chars().take(n).collect();
+                // The leading text belongs to the line, spaces included.
+                p.space = None;
+                p.items.push(Item::Word {
+                    text: cut,
+                    st,
+                    sp: None,
+                    any: true,
+                    nb: false,
+                });
+            }
+            if lines.peek().is_some() {
+                p.items.push(Item::Br(st));
+            }
+        }
+        return;
+    }
+    let nowrap = c.ws == Ws::NoWrap;
+    let mut word = String::new();
+    let mut word_any = false;
+    let mut emitted = 0usize;
+    let mut count = 0usize;
+    macro_rules! finish {
+        () => {
+            if !word.is_empty() {
+                let w = core::mem::take(&mut word);
+                p.chars += w.chars().count();
+                emitted += 1;
+                push_word(p, w, st, word_any, nowrap && emitted > 1);
+            }
+        };
+    }
+    for ch in text.chars() {
+        if ch != '\u{a0}' && (ch.is_whitespace() || (ch.is_ascii() && is_html_space(ch as u8))) {
+            finish!();
+            p.space = Some(st.font);
+            continue;
+        }
+        if ch == '\u{200b}' {
+            finish!();
+            continue;
+        }
+        let any = breaks_anywhere(ch);
+        if !word.is_empty() && (any != word_any || count >= MAX_WORD_CHARS) {
+            finish!();
+            count = 0;
+        }
+        if p.chars + count >= MAX_TEXT_CHARS {
+            break;
+        }
+        word_any = any;
+        word.push(ch);
+        count += 1;
+    }
+    finish!();
+}
+
+fn expand_tabs(line: &str) -> String {
+    if !line.contains('\t') {
+        return String::from(line);
+    }
+    let mut out = String::with_capacity(line.len() + 8);
+    let mut col = 0usize;
+    for ch in line.chars() {
+        if ch == '\t' {
+            let n = 4 - col % 4;
+            for _ in 0..n {
+                out.push(' ');
+            }
+            col += n;
+        } else {
+            out.push(ch);
+            col += 1;
+        }
+    }
+    out
+}
+
+// ---- inline layout ----
+
+/// One thing placed on a line.
+struct Piece {
+    kind: PieceKind,
+    st: Style,
+    /// Left edge from the line start, q8 pixels.
     x: i32,
-    mut y: i32,
-    width: i32,
+    /// Width, q8 pixels.
+    w: i32,
+}
+
+enum PieceKind {
+    Text(String),
+    Obj(Obj, i32, i32),
+}
+
+struct Line {
+    pieces: Vec<Piece>,
+    /// Width so far, q8.
+    w: i32,
+    top: i32,
+    bottom: i32,
+}
+
+impl Line {
+    fn new(strut: (i32, i32)) -> Line {
+        Line {
+            pieces: Vec::new(),
+            w: 0,
+            top: strut.0,
+            bottom: strut.1,
+        }
+    }
+}
+
+/// `(above, below)` the baseline of the block's own strut.
+fn strut_of(p: &Painter, c: &Computed) -> (i32, i32) {
+    let f = p.font(c);
+    let lh = p.lh(c, f);
+    let asc = p.asc(f);
+    let nat = p.nat(f);
+    let top = asc + (lh - nat) / 2;
+    (top, lh - top)
+}
+
+/// Extents of a text run: (above baseline, below baseline).
+fn text_extents(p: &Painter, st: &Style) -> (i32, i32) {
+    let asc = p.asc(st.font);
+    let nat = p.nat(st.font);
+    let top = asc + (st.lh - nat) / 2;
+    (top, st.lh - top)
+}
+
+/// Emit the buffered inline words as wrapped, aligned line boxes starting at `y`;
+/// returns the y below the last line. `align_override` replaces the container's
+/// `text-align` (block-level images centred by auto margins).
+fn flush_inline(
     p: &mut Painter,
+    container: &Computed,
+    area: Area,
+    mut y: i32,
+    align_override: Option<Align>,
 ) -> i32 {
-    let mut inline: Vec<Word> = Vec::new();
-    for node in nodes {
-        match node {
-            Node::Text(t) => push_words(&mut inline, t, parent, None, p),
-            Node::Element(el) => {
-                let c = compute(el, sheet, parent);
-                match c.display {
-                    Disp::None => {}
-                    Disp::Inline => collect_inline(el, sheet, &c, &mut inline, p, None),
-                    Disp::Block | Disp::ListItem => {
-                        y = flush_inline(&mut inline, x, y, width, parent.align, p);
-                        y = layout_block(el, &c, sheet, x, y, width, p);
+    if p.items.is_empty() {
+        return y;
+    }
+    // The margin waiting above the first line.
+    y = adv(y, core::mem::take(&mut p.pending));
+    p.space = None;
+    let items = core::mem::take(&mut p.items);
+    let align = align_override.unwrap_or(container.align);
+    let strut = strut_of(p, container);
+    let avail = area.w.max(1).saturating_mul(Q);
+    let mut line = Line::new(strut);
+
+    for item in items {
+        match item {
+            Item::Br(st) => {
+                if line.pieces.is_empty() {
+                    // An empty line still has the height of its strut and of the break.
+                    let (t, b) = text_extents(p, &st);
+                    y = adv(y, (t.max(strut.0) + b.max(strut.1)).max(1));
+                } else {
+                    y = emit_line(p, &mut line, area, align, y, strut);
+                }
+            }
+            Item::Obj { obj, st, sp } => {
+                let (w, h) = obj_size(p, &obj, area.w);
+                let space = match sp {
+                    Some(f) if !line.pieces.is_empty() => wq(p, " ", f),
+                    _ => 0,
+                };
+                let wq_ = w.saturating_mul(Q);
+                if !line.pieces.is_empty()
+                    && line.w.saturating_add(space).saturating_add(wq_) > avail
+                {
+                    y = emit_line(p, &mut line, area, align, y, strut);
+                }
+                let space = if line.pieces.is_empty() { 0 } else { space };
+                let x = line.w.saturating_add(space);
+                line.w = x.saturating_add(wq_);
+                line.top = line.top.max(h);
+                line.pieces.push(Piece {
+                    kind: PieceKind::Obj(obj, w, h),
+                    st,
+                    x,
+                    w: wq_,
+                });
+            }
+            Item::Word {
+                mut text,
+                st,
+                sp,
+                any,
+                nb,
+            } => {
+                let mut sp = sp;
+                loop {
+                    let ww = wq(p, &text, st.font);
+                    let space = match sp {
+                        Some(f) if !line.pieces.is_empty() => wq(p, " ", f),
+                        _ => 0,
+                    };
+                    if line.w.saturating_add(space).saturating_add(ww) <= avail
+                        || (nb && !line.pieces.is_empty())
+                    {
+                        place_text(p, &mut line, text, st, space, ww);
+                        break;
                     }
+                    if !line.pieces.is_empty() {
+                        // Fill the rest of this line with the head of a word that may break anywhere.
+                        if any {
+                            let room = avail.saturating_sub(line.w).saturating_sub(space);
+                            if room > 0 {
+                                let k = fit_prefix(p, &text, st.font, room);
+                                if k < text.len() && wq(p, &text[..k], st.font) <= room {
+                                    let tail = text.split_off(k);
+                                    let hw = wq(p, &text, st.font);
+                                    place_text(p, &mut line, text, st, space, hw);
+                                    y = emit_line(p, &mut line, area, align, y, strut);
+                                    text = tail;
+                                    sp = None;
+                                    continue;
+                                }
+                            }
+                        }
+                        y = emit_line(p, &mut line, area, align, y, strut);
+                        sp = None;
+                        continue;
+                    }
+                    // Alone on an empty line and still too wide: cut it.
+                    let k = fit_prefix(p, &text, st.font, avail);
+                    if k >= text.len() {
+                        place_text(p, &mut line, text, st, 0, ww);
+                        break;
+                    }
+                    let tail = text.split_off(k);
+                    let hw = wq(p, &text, st.font);
+                    place_text(p, &mut line, text, st, 0, hw);
+                    y = emit_line(p, &mut line, area, align, y, strut);
+                    text = tail;
+                    sp = None;
                 }
             }
         }
     }
-    flush_inline(&mut inline, x, y, width, parent.align, p)
+    if !line.pieces.is_empty() {
+        y = emit_line(p, &mut line, area, align, y, strut);
+    }
+    // A marker whose item had no text still shows, on a line of its own height.
+    y
 }
 
-/// Lay out a single block element (margins, padding, background, then content).
-fn layout_block(
-    el: &Element,
-    c: &Computed,
-    sheet: &Stylesheet,
-    x: i32,
-    mut y: i32,
-    width: i32,
-    p: &mut Painter,
-) -> i32 {
-    let margin = p.z(c.margin);
-    let padding = p.z(c.padding);
-    y += margin;
-    let cx = x
-        + padding
-        + if c.display == Disp::ListItem {
-            p.z(8)
-        } else {
-            0
-        };
-    let cw = (width - 2 * padding).max(20);
-    let top = y;
-    let bg_index = p.cmds.len();
-    y += padding;
+fn place_text(p: &Painter, line: &mut Line, text: String, st: Style, space: i32, w: i32) {
+    let x = line.w.saturating_add(space);
+    line.w = x.saturating_add(w);
+    let (t, b) = text_extents(p, &st);
+    line.top = line.top.max(t);
+    line.bottom = line.bottom.max(b);
+    line.pieces.push(Piece {
+        kind: PieceKind::Text(text),
+        st,
+        x,
+        w,
+    });
+}
 
-    // List marker.
-    if c.display == Disp::ListItem {
-        p.cmds.push(Cmd::Text {
-            x: cx - p.z(12),
-            y,
-            text: "-".into(),
-            color: c.color,
-            scale: p.zs(c.scale),
-            bold: false,
+/// Place the pieces of `line` and start a new one; returns the y below it.
+fn emit_line(
+    p: &mut Painter,
+    line: &mut Line,
+    area: Area,
+    align: Align,
+    y: i32,
+    strut: (i32, i32),
+) -> i32 {
+    let done = core::mem::replace(line, Line::new(strut));
+    let line_h = (done.top + done.bottom).max(1);
+    let baseline = y.saturating_add(done.top);
+    let slack = (area.w.saturating_mul(Q) - done.w).max(0);
+    let shift = match align {
+        Align::Left => 0,
+        Align::Center => slack / 2,
+        Align::Right => slack,
+    };
+    let x0 = area.x.saturating_mul(Q) + shift;
+
+    // A marker belongs to the first line of its item.
+    if let Some(mk) = p.marker.take() {
+        let f = done
+            .pieces
+            .iter()
+            .find_map(|pc| matches!(pc.kind, PieceKind::Text(_)).then_some(pc.st.font))
+            .unwrap_or(p.style(&Computed::root()).font);
+        emit_marker(p, &mk, baseline, f);
+    }
+
+    // Merge neighbouring text pieces that look the same into one run.
+    let mut runs: Vec<(i32, i32, String, Style)> = Vec::new(); // x q8, w q8, text, style
+    let mut objs: Vec<(i32, Obj, i32, i32, Style)> = Vec::new();
+    for pc in done.pieces {
+        match pc.kind {
+            PieceKind::Text(t) => {
+                if let Some(last) = runs.last_mut()
+                    && last.3 == pc.st
+                    && last.0 + last.1 <= pc.x
+                    && pc.x - (last.0 + last.1) <= wq(p, " ", pc.st.font) + Q
+                {
+                    // The gap between the pieces is the collapsed space.
+                    if pc.x > last.0 + last.1 {
+                        last.2.push(' ');
+                    }
+                    last.2.push_str(&t);
+                    last.1 = pc.x + pc.w - last.0;
+                } else {
+                    runs.push((pc.x, pc.w, t, pc.st));
+                }
+            }
+            PieceKind::Obj(o, w, h) => objs.push((pc.x, o, w, h, pc.st)),
+        }
+    }
+    for (x, text, w, st) in runs.into_iter().map(|(x, w, t, s)| (x, t, w, s)) {
+        let px = (x0.saturating_add(x).saturating_add(Q / 2)) / Q;
+        let pw = (w + Q - 1) / Q;
+        let nat = p.nat(st.font);
+        let ty = baseline - p.asc(st.font);
+        if let Some(bg) = st.bg {
+            p.push_cmd(Cmd::Rect {
+                x: px,
+                y: ty - 1,
+                w: pw,
+                h: nat + 2,
+                color: bg,
+                radius: 3,
+            });
+        }
+        if let Some(l) = st.link {
+            p.hits.push(LinkHit {
+                x: px,
+                y,
+                w: pw,
+                h: line_h,
+                link: l,
+            });
+        }
+        p.push_cmd(Cmd::Text {
+            x: px,
+            y: ty,
+            w: pw,
+            h: nat,
+            text,
+            color: st.color,
+            font: st.font,
+            deco: st.deco,
+            link: st.link.map(|l| l as u32),
         });
     }
-
-    // A <form> opens a scope for the controls inside it.
-    let saved_form = p.cur_form;
-    if el.tag == "form" && p.forms.len() < super::form::MAX_FORMS {
-        p.forms.push(FormInfo::from_attrs(
-            el.attrs.get("method").map(String::as_str),
-            el.attrs.get("action").map(|a| decode_attr(a)),
-        ));
-        p.cur_form = Some(p.forms.len() - 1);
+    for (x, obj, w, h, st) in objs {
+        let px = (x0.saturating_add(x).saturating_add(Q / 2)) / Q;
+        emit_obj(p, &obj, px, baseline - h, w, h, st);
     }
-    y = layout_children(&el.children, sheet, c, cx, y, cw, p);
-    p.cur_form = saved_form;
-    y += padding;
-
-    // Background fills the border box; inserted behind the content.
-    if let Some(bg) = c.bg {
-        p.cmds.insert(
-            bg_index,
-            Cmd::Rect {
-                x,
-                y: top,
-                w: width,
-                h: (y - top).max(0),
-                color: bg,
-            },
-        );
-    }
-    y + margin
+    adv(y, line_h)
 }
+
+fn emit_marker(p: &mut Painter, mk: &Marker, baseline: i32, f: Font) {
+    match mk.kind {
+        MarkerKind::Number => {
+            let w = (wq(p, &mk.text, f) + Q - 1) / Q;
+            let nat = p.nat(f);
+            p.push_cmd(Cmd::Text {
+                x: mk.right - w,
+                y: baseline - p.asc(f),
+                w,
+                h: nat,
+                text: mk.text.clone(),
+                color: mk.color,
+                font: f,
+                deco: 0,
+                link: None,
+            });
+        }
+        MarkerKind::Bullet(style) => {
+            let d = (i32::from(f.size) * 3 / 10).max(3);
+            let right = mk.right - p.z(2);
+            let x = right - d;
+            let y = baseline - i32::from(f.size) * 3 / 8 - d / 2;
+            match style {
+                ListStyle::Circle => p.push_cmd(Cmd::Border {
+                    x,
+                    y,
+                    w: d,
+                    h: d,
+                    widths: [1; 4],
+                    radius: d / 2,
+                    color: mk.color,
+                }),
+                ListStyle::Square => p.push_cmd(Cmd::Rect {
+                    x,
+                    y,
+                    w: d,
+                    h: d,
+                    color: mk.color,
+                    radius: 0,
+                }),
+                _ => p.push_cmd(Cmd::Rect {
+                    x,
+                    y,
+                    w: d,
+                    h: d,
+                    color: mk.color,
+                    radius: d / 2,
+                }),
+            }
+        }
+    }
+}
+
+// ---- objects: pictures and controls ----
 
 /// Parse a pixel attribute (`width="120"`, `"120px"`); percentages and
 /// anything else are ignored (0).
@@ -434,180 +1065,6 @@ fn attr_px(el: &Element, name: &str) -> i32 {
         return 0;
     }
     v.parse::<i32>().unwrap_or(0).clamp(0, 4096)
-}
-
-/// Recursively gather a word stream from an inline element subtree. `<a href>`
-/// registers its target in `links` and tags every word below it.
-fn collect_inline(
-    el: &Element,
-    sheet: &Stylesheet,
-    parent: &Computed,
-    out: &mut Vec<Word>,
-    p: &mut Painter,
-    link: Option<usize>,
-) {
-    if el.tag == "br" {
-        out.push(Word {
-            text: "\n".into(),
-            color: parent.color,
-            scale: p.zs(parent.scale),
-            bold: parent.bold,
-            link: None,
-            obj: None,
-        });
-        return;
-    }
-    if el.tag == "img" {
-        if p.images.len() < MAX_IMAGES {
-            let src = decode_attr(el.attrs.get("src").map(String::as_str).unwrap_or(""));
-            let alt = fold_display(&decode_attr(
-                el.attrs.get("alt").map(String::as_str).unwrap_or(""),
-            ));
-            let state = if src.trim().is_empty() {
-                ImgState::Failed
-            } else {
-                p.lookup.lookup(&src)
-            };
-            let idx = p.images.len();
-            p.images.push(ImgRef {
-                src,
-                alt: alt.clone(),
-            });
-            let (dw, dh) = (p.z(attr_px(el, "width")), p.z(attr_px(el, "height")));
-            out.push(Word {
-                text: String::new(),
-                color: parent.color,
-                scale: p.zs(parent.scale),
-                bold: false,
-                link,
-                obj: Some(Obj::Img {
-                    idx,
-                    dw,
-                    dh,
-                    state,
-                    alt,
-                }),
-            });
-        }
-        return;
-    }
-    if (el.tag == "input" || el.tag == "button") && collect_control(el, parent, out, p) {
-        return;
-    }
-    let mut link = link;
-    if el.tag == "a"
-        && let Some(href) = el.attrs.get("href")
-        && p.links.len() < MAX_LINKS
-    {
-        link = Some(p.links.len());
-        p.links.push(decode_attr(href));
-    }
-    for node in &el.children {
-        match node {
-            Node::Text(t) => push_words(out, t, parent, link, p),
-            Node::Element(child) => {
-                let c = compute(child, sheet, parent);
-                if c.display != Disp::None {
-                    collect_inline(child, sheet, &c, out, p, link);
-                }
-            }
-        }
-    }
-}
-
-/// Register the form control `el` (an `<input>` or `<button>`) in the current
-/// form and queue its box. Returns `true` when the element was consumed (a
-/// control, or something to skip), `false` to let it render as ordinary
-/// content (a `<button type=button>` shows its label as text).
-fn collect_control(el: &Element, parent: &Computed, out: &mut Vec<Word>, p: &mut Painter) -> bool {
-    let attr = |n: &str| el.attrs.get(n).map(String::as_str);
-    let ty = attr("type").unwrap_or("").trim().to_ascii_lowercase();
-    let name = decode_attr(attr("name").unwrap_or(""));
-    let value = decode_attr(attr("value").unwrap_or(""));
-    let (kind, label, chars) = if el.tag == "button" {
-        match ty.as_str() {
-            "" | "submit" => {
-                let t = fold_display(text_content(&el.children).trim());
-                (
-                    FieldKind::Submit,
-                    if t.is_empty() { "Enviar".into() } else { t },
-                    0,
-                )
-            }
-            _ => return false,
-        }
-    } else {
-        match ty.as_str() {
-            "hidden" => (FieldKind::Hidden, String::new(), 0),
-            "" | "text" | "search" | "url" | "email" | "tel" | "number" => {
-                let n = attr("size")
-                    .and_then(|s| s.trim().parse::<usize>().ok())
-                    .filter(|&n| n > 0)
-                    .unwrap_or(20)
-                    .min(80);
-                (FieldKind::Text, String::new(), n)
-            }
-            "password" => (FieldKind::Password, String::new(), 20),
-            "submit" => {
-                let l = if value.is_empty() {
-                    "Enviar".into()
-                } else {
-                    fold_display(&value)
-                };
-                (FieldKind::Submit, l, 0)
-            }
-            // checkbox, radio, file, image, reset, button, ...: not supported, not drawn.
-            _ => return true,
-        }
-    };
-    let Some(form) = p.cur_form else {
-        return true; // a control outside any <form> has nowhere to go
-    };
-    let f = &mut p.forms[form];
-    if f.fields.len() >= super::form::MAX_FIELDS {
-        return true;
-    }
-    let field = f.fields.len();
-    f.fields.push(FieldInfo {
-        name,
-        kind,
-        value,
-        size: chars,
-        label: label.clone(),
-    });
-    if kind != FieldKind::Hidden {
-        out.push(Word {
-            text: String::new(),
-            color: parent.color,
-            scale: p.zs(2),
-            bold: false,
-            link: None,
-            obj: Some(Obj::Field {
-                form,
-                field,
-                kind,
-                chars,
-                label,
-            }),
-        });
-    }
-    true
-}
-
-fn push_words(out: &mut Vec<Word>, text: &str, c: &Computed, link: Option<usize>, p: &Painter) {
-    for w in text.split(' ') {
-        if w.is_empty() {
-            continue;
-        }
-        out.push(Word {
-            text: w.into(),
-            color: c.color,
-            scale: p.zs(c.scale),
-            bold: c.bold,
-            link,
-            obj: None,
-        });
-    }
 }
 
 /// Width and height of an image box, given what the page declared, what is
@@ -632,7 +1089,7 @@ pub(crate) fn img_box(dw: i32, dh: i32, state: ImgState, avail: i32, zoom: i32) 
         (false, false, None) => match state {
             // A picture that will not come: a compact message box.
             ImgState::Pending => (160 * i64::from(zoom) / 100, 120 * i64::from(zoom) / 100),
-            _ => (240 * i64::from(zoom) / 100, 34 * i64::from(zoom) / 100),
+            _ => (240 * i64::from(zoom) / 100, 48 * i64::from(zoom) / 100),
         },
     };
     let avail = i64::from(avail.max(8));
@@ -643,92 +1100,146 @@ pub(crate) fn img_box(dw: i32, dh: i32, state: ImgState, avail: i32, zoom: i32) 
     (w.clamp(1, 20_000) as i32, h.clamp(1, 20_000) as i32)
 }
 
+/// Font size of the text inside controls (CSS px).
+const CONTROL_PX: i32 = 14;
+
+fn control_font(p: &Painter) -> Font {
+    Font::new(p.z(CONTROL_PX).clamp(6, 200) as u16)
+}
+
+/// The (width, height) of an object on a line with `avail` pixels.
+fn obj_size(p: &Painter, obj: &Obj, avail: i32) -> (i32, i32) {
+    match obj {
+        Obj::Img { dw, dh, state, .. } => img_box(*dw, *dh, *state, avail, p.zoom),
+        Obj::Field {
+            kind, chars, label, ..
+        } => {
+            let f = control_font(p);
+            let h = p.z(30);
+            let w = match kind {
+                FieldKind::Submit | FieldKind::PushButton => {
+                    let tw = (wq(p, label, f) + Q - 1) / Q;
+                    (tw + 2 * p.z(16)).max(p.z(64))
+                }
+                FieldKind::Checkbox | FieldKind::Radio => {
+                    let s = p.z(16).max(8);
+                    return (s, s);
+                }
+                _ => {
+                    let cw = (wq(p, "0", f) + Q - 1) / Q;
+                    cw * (*chars as i32).clamp(1, 80) + 2 * p.z(10)
+                }
+            };
+            (w.min(avail.max(20)).max(8), h)
+        }
+    }
+}
+
+/// Fit `text` in `max_w` pixels, cutting with an ellipsis.
+fn ellipsize(p: &Painter, text: &str, f: Font, max_w: i32) -> String {
+    let max_q = max_w.max(0).saturating_mul(Q);
+    if wq(p, text, f) <= max_q {
+        return String::from(text);
+    }
+    let room = max_q - wq(p, "\u{2026}", f);
+    if room <= 0 {
+        return String::new();
+    }
+    let k = fit_prefix(p, text, f, room);
+    let mut s = String::from(&text[..k]);
+    if wq(p, &s, f) > room {
+        s.clear();
+    }
+    s.push('\u{2026}');
+    s
+}
+
 /// Draw the message box of an image that has no picture: border, alt text
 /// and the reason.
 fn paint_missing(p: &mut Painter, x: i32, y: i32, w: i32, h: i32, alt: &str, state: ImgState) {
-    p.cmds.push(Cmd::Rect {
+    p.push_cmd(Cmd::Rect {
         x,
         y,
         w,
         h,
-        color: Rgb(0xB8, 0xC0, 0xCE),
+        color: Rgb(0xEE, 0xEF, 0xF3),
+        radius: p.z(6),
     });
-    p.cmds.push(Cmd::Rect {
-        x: x + 1,
-        y: y + 1,
-        w: (w - 2).max(0),
-        h: (h - 2).max(0),
-        color: Rgb(0xEC, 0xEF, 0xF5),
+    p.push_cmd(Cmd::Border {
+        x,
+        y,
+        w,
+        h,
+        widths: [1; 4],
+        radius: p.z(6),
+        color: Rgb(0xC9, 0xCC, 0xD6),
     });
-    let sc = p.zs(1).max(1);
-    let cw = char_w(sc);
-    let cols = ((w - 8) / cw).max(0) as usize;
-    let lh = line_h(sc);
-    let mut ty = y + 4.max(p.z(4));
+    let f = Font::new(p.z(12).clamp(6, 100) as u16);
+    let lh = p.nat(f);
+    let inner = w - 2 * p.z(8);
+    let mut ty = y + p.z(8);
     let alt = alt.trim();
-    if !alt.is_empty() && cols > 0 && ty + lh <= y + h {
-        let t: String = alt.chars().take(cols).collect();
-        p.cmds.push(Cmd::Text {
-            x: x + 4,
+    if !alt.is_empty() && inner > 0 && ty + lh <= y + h {
+        let t = ellipsize(p, alt, f, inner);
+        let tw = (wq(p, &t, f) + Q - 1) / Q;
+        p.push_cmd(Cmd::Text {
+            x: x + p.z(8),
             y: ty,
+            w: tw,
+            h: lh,
             text: t,
             color: Rgb(0x33, 0x40, 0x55),
-            scale: sc,
-            bold: false,
+            font: f,
+            deco: 0,
+            link: None,
         });
-        ty += lh + 2;
+        ty += lh + p.z(2);
     }
     if let Some(m) = state.message()
-        && cols > 0
+        && inner > 0
         && ty + lh <= y + h
     {
-        let t: String = m.chars().take(cols).collect();
-        p.cmds.push(Cmd::Text {
-            x: x + 4,
+        let t = ellipsize(p, m, f, inner);
+        let tw = (wq(p, &t, f) + Q - 1) / Q;
+        p.push_cmd(Cmd::Text {
+            x: x + p.z(8),
             y: ty,
+            w: tw,
+            h: lh,
             text: t,
-            color: Rgb(0x8A, 0x1C, 0x1C),
-            scale: sc,
-            bold: false,
+            color: Rgb(0x9A, 0x2B, 0x2B),
+            font: f,
+            deco: 0,
+            link: None,
         });
     }
 }
 
-/// Place a laid-out object at `(x, y)` (top-left of its box) and record hit
-/// boxes. `link` makes a picture clickable.
-#[allow(clippy::too_many_arguments)]
-fn emit_obj(
-    p: &mut Painter,
-    obj: &Obj,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    scale: u8,
-    link: Option<usize>,
-) {
+/// Place a laid-out object at `(x, y)` (top-left of its box) and record hit boxes.
+fn emit_obj(p: &mut Painter, obj: &Obj, x: i32, y: i32, w: i32, h: i32, st: Style) {
     match obj {
         Obj::Img {
             idx, state, alt, ..
         } => {
             match state {
-                ImgState::Ready { .. } => p.cmds.push(Cmd::Image {
+                ImgState::Ready { .. } => p.push_cmd(Cmd::Image {
                     x,
                     y,
                     w,
                     h,
                     idx: *idx,
                 }),
-                ImgState::Pending => p.cmds.push(Cmd::Rect {
+                ImgState::Pending => p.push_cmd(Cmd::Rect {
                     x,
                     y,
                     w,
                     h,
                     color: Rgb(0xDD, 0xE1, 0xE8),
+                    radius: p.z(6),
                 }),
                 other => paint_missing(p, x, y, w, h, alt, *other),
             }
-            if let Some(l) = link {
+            if let Some(l) = st.link {
                 p.hits.push(LinkHit {
                     x,
                     y,
@@ -739,50 +1250,9 @@ fn emit_obj(
             }
         }
         Obj::Field {
-            form,
-            field,
-            kind,
-            label,
-            ..
+            form, field, kind, ..
         } => {
-            let pad_x = p.z(6) + 1;
-            let pad_y = p.z(5) + 1;
-            match kind {
-                FieldKind::Submit => {
-                    p.cmds.push(Cmd::Rect {
-                        x,
-                        y,
-                        w,
-                        h,
-                        color: Rgb(0x15, 0x65, 0xC0),
-                    });
-                    let lw = char_w(scale) * label.chars().count() as i32;
-                    p.cmds.push(Cmd::Text {
-                        x: x + ((w - lw) / 2).max(0),
-                        y: y + pad_y,
-                        text: label.clone(),
-                        color: Rgb(255, 255, 255),
-                        scale,
-                        bold: false,
-                    });
-                }
-                _ => {
-                    p.cmds.push(Cmd::Rect {
-                        x,
-                        y,
-                        w,
-                        h,
-                        color: Rgb(0x9A, 0xA6, 0xBC),
-                    });
-                    p.cmds.push(Cmd::Rect {
-                        x: x + 1,
-                        y: y + 1,
-                        w: (w - 2).max(0),
-                        h: (h - 2).max(0),
-                        color: Rgb(255, 255, 255),
-                    });
-                }
-            }
+            let f = control_font(p);
             p.fields.push(FieldBox {
                 form: *form,
                 field: *field,
@@ -791,293 +1261,505 @@ fn emit_obj(
                 y,
                 w,
                 h,
-                scale,
-                pad_x,
-                pad_y,
+                size: f.size,
+                pad_x: p.z(10),
             });
         }
     }
 }
 
-/// The (width, height) of an object on a line with `avail` pixels.
-fn obj_size(p: &Painter, obj: &Obj, scale: u8, avail: i32) -> (i32, i32) {
-    match obj {
-        Obj::Img { dw, dh, state, .. } => img_box(*dw, *dh, *state, avail, p.zoom),
-        Obj::Field {
-            kind, chars, label, ..
-        } => {
-            let cw = char_w(scale);
-            let h = line_h(scale) + 2 * (p.z(5) + 1);
-            let w = match kind {
-                FieldKind::Submit => cw * label.chars().count() as i32 + 2 * p.z(12),
-                _ => cw * *chars as i32 + 2 * (p.z(6) + 1),
-            };
-            (w.min(avail.max(20)).max(8), h)
-        }
-    }
-}
+// ---- flow: blocks and inline content ----
 
-/// Emit the buffered inline words as wrapped, optionally centered, line boxes.
-fn flush_inline(
-    words: &mut Vec<Word>,
-    x: i32,
+/// Lay out a list of sibling nodes in the formatting context of `container`.
+/// Inline content is buffered in the painter; a block child first flushes it.
+/// `parent` is the style the text of these nodes inherits (an inline element's
+/// own style when recursing through inline elements), `container` the nearest
+/// block (its strut and alignment shape the lines). Returns the y after the
+/// last line or block emitted (buffered inline content is still waiting).
+fn flow<'a>(
+    p: &mut Painter<'a>,
+    nodes: &'a [Node],
+    parent: &Computed,
+    container: &Computed,
+    area: Area,
     mut y: i32,
-    width: i32,
-    align: Align,
-    p: &mut Painter,
 ) -> i32 {
-    if words.is_empty() {
-        return y;
-    }
-    // Size every object once, now that the line width is known.
-    let sizes: Vec<(i32, i32)> = words
-        .iter()
-        .map(|w| match &w.obj {
-            Some(o) => obj_size(p, o, w.scale, width),
-            None => (
-                char_w(w.scale) * w.text.chars().count() as i32,
-                line_h(w.scale),
-            ),
-        })
-        .collect();
-    // Group consecutive words into lines that fit `width`.
-    let mut line: Vec<usize> = Vec::new();
-    let mut line_w = 0;
-    let mut max_scale = 1u8;
-    let mut line_height = 0;
-
-    let flush_line = |line: &mut Vec<usize>,
-                      line_w: &mut i32,
-                      max_scale: &mut u8,
-                      line_height: &mut i32,
-                      y: &mut i32,
-                      p: &mut Painter| {
-        if line.is_empty() {
-            return;
-        }
-        let lh = (*line_height).max(line_h(*max_scale));
-        let mut lx = x;
-        if align == Align::Center && *line_w < width {
-            lx += (width - *line_w) / 2;
-        }
-        for &i in line.iter() {
-            let w = &words[i];
-            let (ww, wh) = sizes[i];
-            if let Some(obj) = &w.obj {
-                // Objects sit on the baseline (the bottom of the line box).
-                emit_obj(p, obj, lx, *y + lh - wh, ww, wh, w.scale, w.link);
-            } else {
-                let ty = *y + lh - line_h(w.scale);
-                if let Some(link) = w.link {
-                    p.hits.push(LinkHit {
-                        x: lx,
-                        y: ty,
-                        w: ww,
-                        h: line_h(w.scale),
-                        link,
-                    });
+    for node in nodes {
+        match node {
+            Node::Text(t) => push_text(p, t, parent),
+            Node::Element(el) => {
+                if el.ws_before {
+                    p.space = Some(p.font(parent));
                 }
-                p.cmds.push(Cmd::Text {
-                    x: lx,
-                    y: ty,
-                    text: w.text.clone(),
-                    color: w.color,
-                    scale: w.scale,
-                    bold: w.bold,
-                });
+                let c = compute(el, p.sheet, parent, &p.anc, &mut p.budget);
+                match c.display {
+                    Disp::None => {}
+                    Disp::Inline => {
+                        y = inline_element(p, el, &c, area, y);
+                    }
+                    _ if el.tag == "img" => {
+                        // A block-level picture sits on a line of its own; auto side margins
+                        // centre it.
+                        y = flush_inline(p, container, area, y, None);
+                        p.pending = p.pending.max(side(c.margin[0], area.w, p.zoom));
+                        image_element(p, el, &c);
+                        let centred = c.margin[1] == Len::Auto && c.margin[3] == Len::Auto;
+                        y = flush_inline(p, container, area, y, centred.then_some(Align::Center));
+                        p.pending = p.pending.max(side(c.margin[2], area.w, p.zoom));
+                    }
+                    _ => {
+                        y = flush_inline(p, container, area, y, None);
+                        y = layout_block(p, el, &c, area, y);
+                    }
+                }
             }
-            lx += ww + char_w(w.scale);
         }
-        *y += lh;
-        line.clear();
-        *line_w = 0;
-        *max_scale = 1;
-        *line_height = 0;
-    };
-
-    for (i, w) in words.iter().enumerate() {
-        if w.obj.is_none() && w.text == "\n" {
-            flush_line(
-                &mut line,
-                &mut line_w,
-                &mut max_scale,
-                &mut line_height,
-                &mut y,
-                p,
-            );
-            continue;
-        }
-        let ww = sizes[i].0;
-        let space = if line.is_empty() { 0 } else { char_w(w.scale) };
-        if line_w + space + ww > width && !line.is_empty() {
-            flush_line(
-                &mut line,
-                &mut line_w,
-                &mut max_scale,
-                &mut line_height,
-                &mut y,
-                p,
-            );
-        }
-        line_w += if line.is_empty() { ww } else { space + ww };
-        max_scale = max_scale.max(w.scale);
-        line_height = line_height.max(sizes[i].1);
-        line.push(i);
     }
-    flush_line(
-        &mut line,
-        &mut line_w,
-        &mut max_scale,
-        &mut line_height,
-        &mut y,
-        p,
-    );
-    words.clear();
     y
 }
 
-#[cfg(test)]
-mod layout_tests {
-    use super::*;
-
-    fn texts(page: &Page) -> Vec<String> {
-        page.cmds
-            .iter()
-            .filter_map(|c| match c {
-                Cmd::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn renders_heading_and_paragraph() {
-        let page = render(b"<h1>Title</h1><p>Hello world</p>", 600);
-        let t = texts(&page);
-        assert!(t.iter().any(|s| s == "Title"));
-        assert!(t.iter().any(|s| s == "Hello"));
-        assert!(t.iter().any(|s| s == "world"));
-        assert!(page.height > 0);
-    }
-
-    #[test]
-    fn heading_is_larger_than_paragraph() {
-        let page = render(b"<h1>Big</h1><p>small</p>", 600);
-        let big = page.cmds.iter().find_map(|c| match c {
-            Cmd::Text { text, scale, .. } if text == "Big" => Some(*scale),
-            _ => None,
-        });
-        let small = page.cmds.iter().find_map(|c| match c {
-            Cmd::Text { text, scale, .. } if text == "small" => Some(*scale),
-            _ => None,
-        });
-        assert!(big > small);
-    }
-
-    #[test]
-    fn css_color_and_background_applied() {
-        let page = render(
-            b"<style>.hl{color:#ff0000} body{background:#ffffff}</style><p class=hl>red</p>",
-            600,
-        );
-        let red = page.cmds.iter().any(|c| matches!(c, Cmd::Text { text, color, .. } if text == "red" && *color == Rgb(255,0,0)));
-        assert!(red, "class color should apply");
-    }
-
-    #[test]
-    fn display_none_hides_content() {
-        let page = render(b"<p>shown</p><div style='display:none'>hidden</div>", 600);
-        let t = texts(&page);
-        assert!(t.iter().any(|s| s == "shown"));
-        assert!(!t.iter().any(|s| s == "hidden"));
-    }
-
-    #[test]
-    fn long_text_wraps_within_width() {
-        let long = "word ".repeat(100);
-        let html = alloc::format!("<p>{long}</p>");
-        let page = render(html.as_bytes(), 300);
-        // Multiple lines → distinct y values among the text commands.
-        let ys: Vec<i32> = page
-            .cmds
-            .iter()
-            .filter_map(|c| match c {
-                Cmd::Text { y, .. } => Some(*y),
-                _ => None,
-            })
-            .collect();
-        assert!(ys.iter().max() > ys.iter().min());
-    }
-
-    /// Regression: CSS lengths were unbounded i32s fed straight into layout
-    /// arithmetic (`y += margin`, `width - 2 * padding`, ...). A page with
-    /// `margin:2147483647` panicked with overflow checks and, in the kernel's
-    /// release build, wrapped into garbage (negative) coordinates that the
-    /// rasterizer then cast to usize.
-    #[test]
-    fn huge_css_lengths_do_not_overflow_layout() {
-        let html = b"<div style='margin:2147483647;padding:2147483647'>\
-            <p style='margin:2147483647;padding:2147483647'>x</p>\
-            <p style='margin:2147483647'>y</p></div>\
-            <p style='font-size:2147483647px;margin:99999999999999999999'>z</p>";
-        let page = render(html, 600);
-        assert!(page.height >= 0);
-        for c in &page.cmds {
-            match c {
-                Cmd::Rect { x, y, w, h, .. } => {
-                    assert!(*x >= 0 && *y >= 0 && *w >= 0 && *h >= 0);
-                }
-                Cmd::Text { x, y, .. } => assert!(*x >= 0 && *y >= 0),
-                Cmd::Image { x, y, w, h, .. } => assert!(*x >= 0 && *y >= 0 && *w >= 0 && *h >= 0),
+/// An inline element: special ones (`br`, `img`, controls), otherwise its
+/// children join the inline run.
+fn inline_element<'a>(
+    p: &mut Painter<'a>,
+    el: &'a Element,
+    c: &Computed,
+    area: Area,
+    y: i32,
+) -> i32 {
+    match el.tag.as_str() {
+        "br" => {
+            let st = p.style(c);
+            p.items.push(Item::Br(st));
+            p.space = None;
+            return y;
+        }
+        "wbr" => return y,
+        "img" => {
+            image_element(p, el, c);
+            return y;
+        }
+        "input" | "button" => {
+            if collect_control(p, el, c) {
+                return y;
             }
         }
+        _ => {}
     }
-
-    #[test]
-    fn links_get_the_ua_blue() {
-        let page = render(b"<p>see <a href=x>this link</a> ok</p>", 600);
-        let link_blue = page.cmds.iter().any(|c| matches!(c, Cmd::Text { text, color, .. } if text == "link" && *color == Rgb(0x15,0x65,0xC0)));
-        assert!(link_blue);
+    let saved_link = p.link;
+    if el.tag == "a"
+        && let Some(href) = el.attrs.get("href")
+        && p.links.len() < MAX_LINKS
+    {
+        p.link = Some(p.links.len());
+        p.links.push(decode_attr(href));
     }
+    p.anc.push(el);
+    let y = flow(p, &el.children, c, c, area, y);
+    p.anc.pop();
+    p.link = saved_link;
+    y
+}
 
-    #[test]
-    fn links_are_recorded_with_hit_boxes() {
-        let page = render(
-            b"<p>go <a href='/x'>to x</a> or <a href=y>there</a></p>",
-            600,
-        );
-        assert_eq!(page.links, ["/x", "y"]);
-        // "to", "x", "there": one box per word of link text.
-        assert_eq!(page.hits.len(), 3);
-        let first = page.hits[0];
-        assert_eq!(page.link_at(first.x + 1, first.y + 1), Some("/x"));
-        let last = page.hits[2];
-        assert_eq!(
-            page.link_at(last.x + last.w - 1, last.y + last.h - 1),
-            Some("y")
-        );
-        // Plain text is not a link; neither is outside every box.
-        assert_eq!(page.link_at(0, 0), None);
-        assert_eq!(page.link_at(first.x, first.y + first.h), None);
+fn image_element(p: &mut Painter, el: &Element, c: &Computed) {
+    if p.images.len() >= MAX_IMAGES {
+        return;
     }
+    let src = decode_attr(el.attrs.get("src").map(String::as_str).unwrap_or(""));
+    let alt = fold_display(&decode_attr(
+        el.attrs.get("alt").map(String::as_str).unwrap_or(""),
+    ));
+    let state = if src.trim().is_empty() {
+        ImgState::Failed
+    } else {
+        p.lookup.lookup(&src)
+    };
+    let idx = p.images.len();
+    p.images.push(ImgRef {
+        src,
+        alt: alt.clone(),
+    });
+    let (dw, dh) = (p.z(attr_px(el, "width")), p.z(attr_px(el, "height")));
+    // A CSS pixel width overrides the attribute.
+    let dw = match c.width {
+        Len::Px(w) => p.z(w),
+        _ => dw,
+    };
+    let st = p.style(c);
+    let sp = p.space.take();
+    p.items.push(Item::Obj {
+        obj: Obj::Img {
+            idx,
+            dw,
+            dh,
+            state,
+            alt,
+        },
+        st,
+        sp,
+    });
+}
 
-    #[test]
-    fn nested_inline_inside_a_link_stays_clickable() {
-        let page = render(b"<a href='/n'>plain <b>bold</b></a> after", 600);
-        assert_eq!(page.links, ["/n"]);
-        assert_eq!(page.hits.len(), 2);
-        assert!(page.hits.iter().all(|h| page.links[h.link] == "/n"));
-    }
-
-    #[test]
-    fn anchor_without_href_is_not_a_link_and_links_are_capped() {
-        let page = render(b"<a name=top>x</a><a>y</a>", 600);
-        assert!(page.links.is_empty() && page.hits.is_empty());
-        let mut html = String::new();
-        for i in 0..(MAX_LINKS + 50) {
-            html.push_str(&alloc::format!("<a href=/{i}>l</a> "));
+/// Register the form control `el` (an `<input>` or `<button>`) in the current
+/// form and queue its box. Returns `true` when the element was consumed (a
+/// control, or something to skip), `false` to let it render as ordinary content.
+fn collect_control(p: &mut Painter, el: &Element, c: &Computed) -> bool {
+    let attr = |n: &str| el.attrs.get(n).map(String::as_str);
+    let ty = attr("type").unwrap_or("").trim().to_ascii_lowercase();
+    let name = decode_attr(attr("name").unwrap_or(""));
+    let value = decode_attr(attr("value").unwrap_or(""));
+    let placeholder = fold_display(&decode_attr(attr("placeholder").unwrap_or("")));
+    let checked = el.attrs.contains_key("checked");
+    let (kind, label, chars) = if el.tag == "button" {
+        match ty.as_str() {
+            "" | "submit" => {
+                let t = fold_display(text_content(&el.children).trim());
+                (
+                    FieldKind::Submit,
+                    if t.is_empty() { "Enviar".into() } else { t },
+                    0,
+                )
+            }
+            "button" | "reset" => {
+                let t = fold_display(text_content(&el.children).trim());
+                (FieldKind::PushButton, t, 0)
+            }
+            _ => return false,
         }
-        let page = render(html.as_bytes(), 600);
-        assert!(page.links.len() <= MAX_LINKS);
+    } else {
+        match ty.as_str() {
+            "hidden" => (FieldKind::Hidden, String::new(), 0),
+            "" | "text" | "search" | "url" | "email" | "tel" | "number" => {
+                let n = attr("size")
+                    .and_then(|s| s.trim().parse::<usize>().ok())
+                    .filter(|&n| n > 0)
+                    .unwrap_or(20)
+                    .min(80);
+                (FieldKind::Text, String::new(), n)
+            }
+            "password" => (FieldKind::Password, String::new(), 20),
+            "submit" => {
+                let l = if value.is_empty() {
+                    "Enviar".into()
+                } else {
+                    fold_display(&value)
+                };
+                (FieldKind::Submit, l, 0)
+            }
+            "button" | "reset" => (FieldKind::PushButton, fold_display(&value), 0),
+            "checkbox" => (FieldKind::Checkbox, String::new(), 0),
+            "radio" => (FieldKind::Radio, String::new(), 0),
+            // file, image, range, color, date, ...: not supported, not drawn.
+            _ => return true,
+        }
+    };
+    let Some(form) = p.cur_form else {
+        return true; // a control outside any <form> has nowhere to go
+    };
+    let f = &mut p.forms[form];
+    if f.fields.len() >= super::form::MAX_FIELDS {
+        return true;
+    }
+    let field = f.fields.len();
+    let value = if matches!(kind, FieldKind::Checkbox | FieldKind::Radio) && value.is_empty() {
+        String::from("on")
+    } else {
+        value
+    };
+    f.fields.push(FieldInfo {
+        name,
+        kind,
+        value,
+        size: chars,
+        label: label.clone(),
+        checked,
+        placeholder,
+    });
+    if kind != FieldKind::Hidden {
+        let st = p.style(c);
+        p.items.push(Item::Obj {
+            obj: Obj::Field {
+                form,
+                field,
+                kind,
+                chars,
+                label,
+            },
+            st,
+            sp: p.space.take(),
+        });
+    }
+    true
+}
+
+/// Resolve a margin or padding side against the container width.
+fn side(l: Len, base: i32, zoom: i32) -> i32 {
+    l.resolve(base, zoom).unwrap_or(0)
+}
+
+/// Lay out a single block-level element: margins, border, padding, background and
+/// content. Returns the y below its border box (its bottom margin waits in
+/// `p.pending` to collapse with what follows).
+fn layout_block<'a>(
+    p: &mut Painter<'a>,
+    el: &'a Element,
+    c: &Computed,
+    area: Area,
+    mut y: i32,
+) -> i32 {
+    let zoom = p.zoom;
+    let aw = area.w;
+    let [mt_l, mr_l, mb_l, ml_l] = c.margin;
+    let mt = side(mt_l, aw, zoom);
+    let mb = side(mb_l, aw, zoom);
+    let pad_t = side(c.padding[0], aw, zoom);
+    let pad_r = side(c.padding[1], aw, zoom);
+    let pad_b = side(c.padding[2], aw, zoom);
+    let pad_l = side(c.padding[3], aw, zoom);
+    let [bt, br, bb, bl] = c.border_w.map(|w| if w > 0 { p.z(w).max(1) } else { 0 });
+    let extra = pad_l + pad_r + bl + br;
+
+    // ---- width and horizontal position ----
+    let ml_fixed = if ml_l == Len::Auto {
+        0
+    } else {
+        side(ml_l, aw, zoom)
+    };
+    let mr_fixed = if mr_l == Len::Auto {
+        0
+    } else {
+        side(mr_l, aw, zoom)
+    };
+    let room = (aw - ml_fixed - mr_fixed).max(1);
+    let mut total = room;
+    if let Some(w) = c.width.resolve(aw, zoom) {
+        total = if c.border_box { w } else { w + extra };
+    }
+    if let Some(mw) = c.max_width.resolve(aw, zoom) {
+        let cap = if c.border_box { mw } else { mw + extra };
+        total = total.min(cap);
+    }
+    total = total.clamp(extra.max(1), room.max(extra).max(1));
+    let leftover = (aw - ml_fixed - mr_fixed - total).max(0);
+    let ml = match (ml_l == Len::Auto, mr_l == Len::Auto) {
+        (true, true) => leftover / 2,
+        (true, false) => leftover,
+        _ => ml_fixed,
+    };
+    let bx = area.x + ml;
+    let bw = total;
+    let cx = bx + bl + pad_l;
+    let cw = (bw - extra).max(1);
+
+    // ---- top ----
+    p.pending = p.pending.max(mt);
+    let is_canvas = el.tag == "html" || el.tag == "body";
+    if is_canvas && let Some(bg) = c.bg {
+        // The page background belongs to the canvas, not to this box.
+        if el.tag == "html" || p.canvas.is_none() {
+            p.canvas = Some(bg);
+        }
+    }
+    let paint_bg = c.bg.filter(|_| !is_canvas);
+    let boxed_top = paint_bg.is_some() || bt > 0 || pad_t > 0;
+    let boxed_bottom = paint_bg.is_some() || bb > 0 || pad_b > 0;
+    if boxed_top {
+        y = adv(y, core::mem::take(&mut p.pending));
+    }
+    let top = y;
+    let bg_index = p.cmds.len();
+    y = adv(y, bt + pad_t);
+
+    // ---- list marker ----
+    let mut own_marker = false;
+    if c.display == Disp::ListItem {
+        let n = match p.lists.last_mut() {
+            Some(l) => {
+                if let Some(v) = el
+                    .attrs
+                    .get("value")
+                    .and_then(|v| v.trim().parse::<i32>().ok())
+                {
+                    l.next = v;
+                }
+                let n = l.next;
+                l.next = l.next.saturating_add(1);
+                Some((l.ordered, n))
+            }
+            None => None,
+        };
+        let (ordered, n) = n.unwrap_or((false, 0));
+        let kind = if ordered
+            || matches!(
+                c.list,
+                ListStyle::Decimal
+                    | ListStyle::LowerAlpha
+                    | ListStyle::UpperAlpha
+                    | ListStyle::LowerRoman
+                    | ListStyle::UpperRoman
+            ) {
+            MarkerKind::Number
+        } else {
+            MarkerKind::Bullet(c.list)
+        };
+        if c.list != ListStyle::None {
+            p.marker = Some(Marker {
+                kind,
+                text: if kind == MarkerKind::Number {
+                    let mut s = counter_text(n, c.list);
+                    s.push('.');
+                    s
+                } else {
+                    String::new()
+                },
+                color: c.color,
+                right: cx - p.z(8),
+            });
+            own_marker = true;
+        }
+    }
+
+    // ---- scopes opened by this element ----
+    let saved_form = p.cur_form;
+    if el.tag == "form" && p.forms.len() < super::form::MAX_FORMS {
+        p.forms.push(FormInfo::from_attrs(
+            el.attrs.get("method").map(String::as_str),
+            el.attrs.get("action").map(|a| decode_attr(a)),
+        ));
+        p.cur_form = Some(p.forms.len() - 1);
+    }
+    let is_list = matches!(el.tag.as_str(), "ul" | "ol" | "menu" | "dir");
+    if is_list {
+        let start = el
+            .attrs
+            .get("start")
+            .and_then(|v| v.trim().parse::<i32>().ok())
+            .unwrap_or(1);
+        if p.lists.len() < 32 {
+            p.lists.push(ListCtx {
+                ordered: el.tag == "ol",
+                next: start,
+            });
+        }
+    }
+
+    // ---- content ----
+    p.anc.push(el);
+    let inner = Area { x: cx, w: cw };
+    y = flow(p, &el.children, c, c, inner, y);
+    y = flush_inline(p, c, inner, y, None);
+    p.anc.pop();
+    if is_list && !p.lists.is_empty() {
+        p.lists.pop();
+    }
+    p.cur_form = saved_form;
+
+    // A marker that never found a line (an empty item) sits on a line of its own.
+    if own_marker && let Some(mk) = p.marker.take() {
+        let f = p.font(c);
+        let strut = strut_of(p, c);
+        emit_marker(p, &mk, top + bt + pad_t + strut.0, f);
+        y = adv(y, strut.0 + strut.1);
+    }
+
+    // ---- bottom ----
+    if boxed_bottom {
+        y = adv(y, core::mem::take(&mut p.pending));
+        y = adv(y, pad_b + bb);
+    }
+    if c.min_height > 0 {
+        y = y.max(top + p.z(c.min_height));
+    }
+    let height = (y - top).max(0);
+
+    // Background behind the content, border on top of it.
+    if let Some(bg) = paint_bg {
+        let rect = Cmd::Rect {
+            x: bx,
+            y: top,
+            w: bw,
+            h: height,
+            color: bg,
+            radius: p.z(c.radius).min(bw / 2).min(height / 2),
+        };
+        if bg_index <= p.cmds.len() && p.cmds.len() < MAX_CMDS {
+            p.cmds.insert(bg_index, rect);
+        }
+    }
+    if bt + br + bb + bl > 0 {
+        p.push_cmd(Cmd::Border {
+            x: bx,
+            y: top,
+            w: bw,
+            h: height,
+            widths: [bt, br, bb, bl],
+            radius: p.z(c.radius).min(bw / 2).min(height / 2),
+            color: c.border_color,
+        });
+    }
+    p.pending = p.pending.max(mb);
+    y
+}
+
+/// The text of list counter `n`: `1`, `a`, `iv`.
+fn counter_text(n: i32, style: ListStyle) -> String {
+    match style {
+        ListStyle::LowerAlpha | ListStyle::UpperAlpha => {
+            if n < 1 {
+                return alloc::format!("{n}");
+            }
+            let mut s = String::new();
+            let mut k = n - 1;
+            loop {
+                let d = (k % 26) as u8;
+                s.insert(
+                    0,
+                    char::from(if style == ListStyle::LowerAlpha {
+                        b'a' + d
+                    } else {
+                        b'A' + d
+                    }),
+                );
+                k = k / 26 - 1;
+                if k < 0 || s.len() > 8 {
+                    break;
+                }
+            }
+            s
+        }
+        ListStyle::LowerRoman | ListStyle::UpperRoman => {
+            if !(1..4000).contains(&n) {
+                return alloc::format!("{n}");
+            }
+            let table = [
+                (1000, "m"),
+                (900, "cm"),
+                (500, "d"),
+                (400, "cd"),
+                (100, "c"),
+                (90, "xc"),
+                (50, "l"),
+                (40, "xl"),
+                (10, "x"),
+                (9, "ix"),
+                (5, "v"),
+                (4, "iv"),
+                (1, "i"),
+            ];
+            let mut s = String::new();
+            let mut k = n;
+            for (v, r) in table {
+                while k >= v {
+                    s.push_str(r);
+                    k -= v;
+                }
+            }
+            if style == ListStyle::UpperRoman {
+                s.to_uppercase()
+            } else {
+                s
+            }
+        }
+        _ => alloc::format!("{n}"),
     }
 }

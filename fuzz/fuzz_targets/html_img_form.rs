@@ -25,7 +25,7 @@ use osjeff_core::web::form::{FormState, MAX_QUERY, MAX_VALUE};
 use osjeff_core::web::imgcache::{
     self, ImageCache, ImageLookup, ImgFail, ImgState, Loaded, NoImages, PageImages,
 };
-use osjeff_core::web::{Cmd, Doc, Layout, Page};
+use osjeff_core::web::{Cmd, Doc, FixedAdvance, Font, Layout, Page, TextMetrics};
 
 const STACK: usize = 512 * 1024;
 
@@ -34,6 +34,37 @@ struct Fixed(ImgState);
 impl ImageLookup for Fixed {
     fn lookup(&self, _src: &str) -> ImgState {
         self.0
+    }
+}
+
+/// Metrics that misbehave: widths from the input, zero, or absurdly large. The layout must
+/// stay bounded whatever the metrics say.
+struct Weird(u8);
+
+impl TextMetrics for Weird {
+    fn width(&self, t: &str, f: Font) -> i32 {
+        let n = t.chars().count() as i32;
+        match self.0 % 5 {
+            0 => 0,
+            1 => n.saturating_mul(1_000_000),
+            2 => i32::MAX,
+            3 => n * i32::from(f.size) / 3,
+            _ => -n,
+        }
+    }
+    fn line_height(&self, f: Font) -> i32 {
+        match self.0 % 3 {
+            0 => 0,
+            1 => -5,
+            _ => i32::from(f.size) * 100_000,
+        }
+    }
+    fn ascent(&self, f: Font) -> i32 {
+        match self.0 % 3 {
+            0 => 0,
+            1 => i32::MIN,
+            _ => i32::from(f.size) * 50,
+        }
     }
 }
 
@@ -61,6 +92,7 @@ fn check_page(p: &Page) {
                 assert!(*idx < p.images.len());
             }
             Cmd::Rect { x, y, w, h, .. } => assert!(*x >= 0 && *y >= 0 && *w >= 0 && *h >= 0),
+            Cmd::Border { w, h, .. } => assert!(*w >= 0 && *h >= 0),
             Cmd::Text { x, y, .. } => assert!(*x >= 0 && *y >= 0),
         }
     }
@@ -117,11 +149,20 @@ fn exercise(data: &[u8]) {
                 width: viewport,
                 zoom: z,
                 images: l,
+                metrics: &FixedAdvance,
             });
             check_page(&p);
             page = Some(p);
         }
     }
+    // Misbehaving metrics: no checks on the geometry (it is garbage in, garbage out), only that
+    // layout terminates without a panic or an overflow.
+    let _ = doc.layout(&Layout {
+        width: viewport,
+        zoom: zoom as u16,
+        images: &NoImages,
+        metrics: &Weird(mode),
+    });
     let page = page.expect("a page");
 
     // ---- forms: edit with the bytes as keys, then submit ----
@@ -147,7 +188,7 @@ fn exercise(data: &[u8]) {
                     assert!(st.value(fi, i).is_char_boundary(st.caret().min(st.value(fi, i).len())) || st.focus().is_none());
                 }
                 st.insert_str(&page.forms, &text);
-                let _ = st.visible(&page.forms, fi, i, (viewport as usize % 40) + 1);
+                let _ = st.toggle(&page.forms, fi, i);
             }
             if let Ok(q) = st.query(&page.forms, fi, Some(i)) {
                 assert!(q.len() <= MAX_QUERY + 2000);
@@ -161,13 +202,14 @@ fn exercise(data: &[u8]) {
     }
 
     // ---- find / selection ----
-    let _ = page.find(&text.chars().take(8).collect::<String>());
+    let _ = page.find(&text.chars().take(8).collect::<String>(), &FixedAdvance);
     let a = (i32::from(raw.first().copied().unwrap_or(0)) * 4, i32::from(raw.get(1).copied().unwrap_or(0)) * 4);
     let b = (i32::from(raw.get(2).copied().unwrap_or(9)) * 4, i32::from(raw.get(3).copied().unwrap_or(9)) * 8);
-    if let Some(r) = page.select(a, b) {
-        let _ = page.selection_spans(r);
-        let _ = page.selection_text(r);
+    if let Some(r) = page.select(a, b, &FixedAdvance) {
+        let _ = page.selection_spans(&r, &FixedAdvance);
+        let _ = page.selection_text(&r);
     }
+    let _ = page.select_word(a.0, a.1, &FixedAdvance);
 
     // ---- decoders and the cache ----
     let _ = base64::decode(raw, 4096);
@@ -250,6 +292,7 @@ fn exercise(data: &[u8]) {
                         width: 400,
                         zoom: 100,
                         images: &NoImages,
+                        metrics: &FixedAdvance,
                     }));
                 }
             }

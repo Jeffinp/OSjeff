@@ -7,8 +7,9 @@
 //! browser navigates there. `method=post` is refused with a message
 //! ([`FormError::Post`]). Supported controls: text-like inputs (`text`,
 //! `search`, `url`, `email`, `tel`, `number` and no type), `password`,
-//! `hidden`, `submit` and `<button>`. Check boxes, radio buttons, files,
-//! `<select>` and `<textarea>` are not drawn.
+//! `hidden`, `submit` and `<button>`, check boxes and radio buttons (a radio
+//! group is the buttons of one form that share a `name`). Files, `<select>` and
+//! `<textarea>` are not drawn.
 
 use crate::Key;
 use alloc::string::String;
@@ -34,6 +35,12 @@ pub enum FieldKind {
     Hidden,
     /// A button; submitted only when it is the one pressed.
     Submit,
+    /// A button that submits nothing (`type=button`, `type=reset`).
+    PushButton,
+    /// A check box: submitted (with its `value`) when checked.
+    Checkbox,
+    /// A radio button: one per group is checked.
+    Radio,
 }
 
 impl FieldKind {
@@ -54,6 +61,10 @@ pub struct FieldInfo {
     pub size: usize,
     /// The text on a button.
     pub label: String,
+    /// The `checked` attribute (check boxes and radio buttons).
+    pub checked: bool,
+    /// The `placeholder` attribute of a text box.
+    pub placeholder: String,
 }
 
 /// A `<form>` and its controls.
@@ -89,12 +100,12 @@ pub enum FormError {
 }
 
 impl FormError {
-    /// The message shown to the user (ASCII).
+    /// The message shown to the user.
     pub fn message(self) -> &'static str {
         match self {
-            FormError::Post => "formularios POST nao suportados",
-            FormError::TooLong => "formulario grande demais para enviar",
-            FormError::NoForm => "formulario invalido",
+            FormError::Post => "Formulários POST não são suportados.",
+            FormError::TooLong => "Formulário grande demais para enviar.",
+            FormError::NoForm => "Formulário inválido.",
         }
     }
 }
@@ -299,6 +310,10 @@ impl FormState {
                     f.fields
                         .iter()
                         .map(|fi| {
+                            if matches!(fi.kind, FieldKind::Checkbox | FieldKind::Radio) {
+                                // The state of a toggle: "1" when checked.
+                                return String::from(if fi.checked { "1" } else { "" });
+                            }
                             let mut v = fi.value.clone();
                             truncate_at_boundary(&mut v, MAX_VALUE);
                             v
@@ -318,6 +333,46 @@ impl FormState {
             .get(form)
             .and_then(|f| f.get(field))
             .map_or("", String::as_str)
+    }
+
+    /// Is the check box or radio button checked?
+    pub fn is_checked(&self, form: usize, field: usize) -> bool {
+        !self.value(form, field).is_empty()
+    }
+
+    /// Flip a check box, or select a radio button (clearing the others of its group).
+    /// Returns whether anything changed.
+    pub fn toggle(&mut self, forms: &[FormInfo], form: usize, field: usize) -> bool {
+        let Some(f) = forms.get(form) else {
+            return false;
+        };
+        let Some(fi) = f.fields.get(field) else {
+            return false;
+        };
+        let set = |s: &mut Self, i: usize, on: bool| {
+            if let Some(v) = s.values.get_mut(form).and_then(|r| r.get_mut(i)) {
+                *v = String::from(if on { "1" } else { "" });
+            }
+        };
+        match fi.kind {
+            FieldKind::Checkbox => {
+                let now = !self.is_checked(form, field);
+                set(self, field, now);
+                true
+            }
+            FieldKind::Radio => {
+                if self.is_checked(form, field) {
+                    return false;
+                }
+                for (i, other) in f.fields.iter().enumerate() {
+                    if other.kind == FieldKind::Radio && other.name == fi.name {
+                        set(self, i, i == field);
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     /// The focused control, if any.
@@ -438,6 +493,32 @@ impl FormState {
                 self.insert_str(forms, &s);
             }
         }
+        if matches!(kind, FieldKind::Checkbox | FieldKind::Radio) {
+            return match key {
+                Key::Char(b' ') => {
+                    self.toggle(forms, form, field);
+                    FormOutcome::Changed
+                }
+                Key::Enter => FormOutcome::Submit {
+                    form,
+                    submitter: None,
+                },
+                Key::Esc => {
+                    self.blur();
+                    FormOutcome::Blur
+                }
+                _ => FormOutcome::Ignored,
+            };
+        }
+        if kind == FieldKind::PushButton {
+            return match key {
+                Key::Esc => {
+                    self.blur();
+                    FormOutcome::Blur
+                }
+                _ => FormOutcome::Ignored,
+            };
+        }
         if kind == FieldKind::Submit {
             return match key {
                 Key::Enter | Key::Char(b' ') => FormOutcome::Submit {
@@ -535,6 +616,10 @@ impl FormState {
             let include = match fi.kind {
                 FieldKind::Hidden | FieldKind::Text | FieldKind::Password => !fi.name.is_empty(),
                 FieldKind::Submit => submitter == Some(i) && !fi.name.is_empty(),
+                FieldKind::Checkbox | FieldKind::Radio => {
+                    !fi.name.is_empty() && self.is_checked(form, i)
+                }
+                FieldKind::PushButton => false,
             };
             if !include {
                 continue;
@@ -545,7 +630,9 @@ impl FormState {
             urlencode(&fi.name, &mut q);
             q.push('=');
             let v = match fi.kind {
-                FieldKind::Hidden | FieldKind::Submit => fi.value.as_str(),
+                FieldKind::Hidden | FieldKind::Submit | FieldKind::Checkbox | FieldKind::Radio => {
+                    fi.value.as_str()
+                }
                 _ => self.value(form, i),
             };
             urlencode(v, &mut q);
@@ -576,47 +663,6 @@ impl FormState {
         t.push('?');
         t.push_str(&q);
         Ok(t)
-    }
-
-    /// What to draw in a text control `cols` characters wide: the visible
-    /// slice (folded to the font's ASCII; bullets for a password) and the
-    /// caret's column inside it.
-    pub fn visible(
-        &self,
-        forms: &[FormInfo],
-        form: usize,
-        field: usize,
-        cols: usize,
-    ) -> (String, usize) {
-        let kind = forms
-            .get(form)
-            .and_then(|f| f.fields.get(field))
-            .map(|fi| fi.kind);
-        let v = self.value(form, field);
-        let caret_byte = if self.focus == Some((form, field)) {
-            self.caret.min(v.len())
-        } else {
-            v.len()
-        };
-        let shown: Vec<char> = v
-            .chars()
-            .map(|c| {
-                if kind == Some(FieldKind::Password) {
-                    '*'
-                } else {
-                    crate::browser::fold_ascii(c as u32).map_or('?', char::from)
-                }
-            })
-            .collect();
-        let caret_col = v[..caret_byte.min(v.len())].chars().count();
-        let cols = cols.max(1);
-        let start = if shown.len() < cols {
-            0
-        } else {
-            (caret_col + 1).saturating_sub(cols)
-        };
-        let end = (start + cols).min(shown.len());
-        (shown[start..end].iter().collect(), caret_col - start)
     }
 }
 
