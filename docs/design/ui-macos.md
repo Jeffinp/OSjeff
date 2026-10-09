@@ -129,7 +129,7 @@ its end in the next frame).
 
 ## 3. The toolkit (the API for wave 2)
 
-Drawing lives in `kernel/src/desktop/ui.rs` (over `Canvas`, reading the current palette);
+Drawing lives in `kernel/src/desktop/kit/ui/` (over `Canvas`, reading the current palette);
 geometry, hit testing and state are pure and tested in `kitsune_core::widgets` and
 `kitsune_core::chrome`. Draw functions take the interaction state as an argument, and the
 caller derives `Control::Hover` / `Pressed` from the pointer.
@@ -149,16 +149,16 @@ caller derives `Control::Hover` / `Pressed` from the pointer.
 | smooth history chart with a hover value | `kit::chart(c, r, &Chart)` (curves, axis labels, scroll progress, hovered sample) | `kit::plot_of`, `kitsune_core::activity::{slice_at, sample_under, smooth121}` |
 | usage bar, pressure gauge, chip, card, stat and key/value rows | `kit::{bar, pressure_gauge, chip, card, stat, kv}` | |
 | search field, button with a glyph, sort arrow | `kit::{search_field, icon_button, sort_arrow}` | |
-| hover and press for a whole window | `Desktop::live_hover` (a key per control; the window repaints only when it changes), `live_step`, `live_busy` | `desktop/live.rs` |
+| hover and press for a whole window | `Desktop::live_hover` (a key per control; the window repaints only when it changes), `live_step`, `live_busy` | `desktop/kit/live.rs` |
 | glass panel (blurred backdrop, tint, edge, shadow) | `glass::panel`, `BackdropSlot` | |
 | text | `text::draw`, `draw_centered`, `draw_left`, `draw_right`, `draw_ellipsis`, `measure`, `wrap`, `draw_mono` | `kitsune_core::textlayout` |
 | icons and glyphs | `icons::blit(c, Icon, x, y, size, opacity)`, `ui::draw_glyph(c, Glyph, x, y, size, argb)` | `kitsune_core::iconart` |
 | colours | `theme::{pal, text, text_muted, window_body, toolbar, sidebar, surface, zebra, line, button_bg, tool_bg, ink, ink_dim, danger, ok, selection, accent}` | `kitsune_core::style` |
 
 The **gallery** (`Ctrl+Alt+G`, also in the system menu) shows all of it live in four tabs
-(controls, type, colours, icons) and is the reference for app authors. `desktop/kit.rs` holds
-the pieces the system apps needed beyond `ui.rs` (chart, gauge, chips, search field); like
-`ui.rs` they draw at a rectangle the caller computed, follow the palette and measure text with
+(controls, type, colours, icons) and is the reference for app authors. `desktop/kit/charts.rs` holds
+the pieces the system apps needed beyond `ui/` (chart, gauge, chips, search field); like
+`ui/` they draw at a rectangle the caller computed, follow the palette and measure text with
 the real font.
 
 ## 4. System chrome
@@ -259,16 +259,16 @@ blur capture, paid once.
 | Area | Files |
 |---|---|
 | tokens, appearance | `kernel/src/theme.rs`, `kitsune_core/src/{style,settings}.rs` |
-| text | `kitsune_core/src/{ttf,glyph,fontcache,textlayout}.rs`, `kernel/src/text.rs`, `assets/fonts/` |
-| primitives | `kitsune_core/src/{gfx,raster}.rs`, `kernel/src/fb.rs`, `kernel/src/fb/{shapes,scale}.rs` |
-| motion | `kitsune_core/src/anim.rs` |
-| chrome geometry, search, cursor, widgets | `kitsune_core/src/{window,layout,chrome,widgets,search,cursor,iconart}.rs` |
-| chrome drawing | `kernel/src/desktop/{chrome,dock,menubar,overlays,shell,glass,cursor,render}.rs` |
-| toolkit and gallery | `kernel/src/desktop/{ui,kit,gallery}.rs` |
-| system apps (section 11) | `kernel/src/desktop/{tarefas,logview,settings_ui,calc_ui,toasts_ui,live}.rs`, `kitsune_core/src/{activity,calc,settings,notify,klog,layout}.rs` |
-| chrome drawing | `kernel/src/desktop/{chrome,dock,panel,overlays,shell,glass,cursor,render}.rs` |
-| chrome drawing | `kernel/src/desktop/{chrome,taskbar,panel,overlays,shell,glass,cursor,render}.rs` |
-| toolkit and gallery | `kernel/src/desktop/{ui,gallery}.rs` |
+| text | `kitsune_core/src/ui/{ttf,glyph,fontcache,textlayout}.rs`, `kernel/src/text.rs`, `assets/fonts/` |
+| primitives | `kitsune_core/src/ui/{gfx,raster}.rs`, `kernel/src/fb.rs`, `kernel/src/fb/{shapes,scale}.rs` |
+| motion | `kitsune_core/src/ui/anim.rs` |
+| chrome geometry, search, cursor, widgets | `kitsune_core/src/{windowing/window,ui/layout,ui/chrome,ui/widgets,format/search,ui/cursor,ui/iconart}.rs` |
+| chrome drawing | `kernel/src/desktop/{windows/chrome.rs,windows/cursor.rs,shell/,kit/glass.rs}` |
+| toolkit and gallery | `kernel/src/desktop/{kit/ui/,kit/charts.rs,apps/gallery/}` |
+| system apps (section 11) | `kernel/src/desktop/{apps/tarefas,apps/registro,apps/ajustes,apps/calculadora,shell/toasts.rs,kit/live.rs}`, `kitsune_core/src/{apps/activity,apps/calc,system/settings,system/notify,system/klog,ui/layout}.rs` |
+| chrome drawing | `kernel/src/desktop/{windows/chrome.rs,windows/cursor.rs,shell/,kit/glass.rs}` |
+| chrome drawing | `kernel/src/desktop/{windows/chrome.rs,windows/cursor.rs,shell/,kit/glass.rs}` |
+| toolkit and gallery | `kernel/src/desktop/{kit/ui/,apps/gallery/}` |
 | icons, glyphs | `kernel/src/{icons,glyphs}.rs` |
 
 ## 8. Compatibility rules for app content (wave 2)
@@ -372,10 +372,10 @@ of the editor and the terminal (`text::mono_cell_px`); no `text::legacy`; light 
 palette; frames are requested only while something moves (each app has an `animating()` predicate
 that `is_dynamic`/`has_animation` read), so an idle desktop with all four open costs no frames.
 
-Shared pieces added for them (not in the wave-1 toolkit): `kernel/src/desktop/appui.rs` (glyph tool
+Shared pieces added for them (not in the wave-1 toolkit): `kernel/src/desktop/kit/appui.rs` (glyph tool
 buttons and segmented control, the path-bar pill, a one-line field with selection and an eased caret,
 the window-attached sheet with dim and slide, empty states, selection colours, caret curve) and
-`kernel/src/desktop/appart.rs` (a cache over `kitsune_core::appart`: the file-type icons Pasta, Texto,
+`kernel/src/desktop/kit/appart.rs` (a cache over `kitsune_core::appart`: the file-type icons Pasta, Texto,
 Imagem, App, Genérico, Disco, drawn in the accent, and 33 monochrome tool glyphs).
 
 | App | Content | Pure core | Kernel |
@@ -404,8 +404,8 @@ list scrolls by whole rows.
 
 ## 11. Browser (wave 2)
 
-The Navegador keeps the indigo accent and is drawn from the toolkit (`kernel/src/desktop/browser_ui.rs`;
-geometry in `kitsune_core::layout::BrowserChrome`, state in `desktop/browser.rs`).
+The Navegador keeps the indigo accent and is drawn from the toolkit (`kernel/src/desktop/apps/browser/ui/`;
+geometry in `kitsune_core::layout::BrowserChrome`, state in `desktop/apps/browser/`).
 
 * **Toolbar** (48 px, same colour as the title bar): back, forward, reload (becomes stop while
   loading), a rounded omnibox (security badge, host highlighted at rest, animated star) and "+".

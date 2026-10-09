@@ -450,7 +450,7 @@ Plano original:
 3. O disco de 64 KiB do `run.ps1` precisa crescer para ≥ 1 MiB (recomendado 64 MiB) para
    migrar; com 64 KiB a migração devolve `TooSmall` e o v2 segue funcionando.
 
-### 9.1 Integração do desktop (`desktop/vfs.rs`, `kitsune_core::vfs`)
+### 9.1 Integração do desktop (`desktop/services/vfs.rs`, `kitsune_core::vfs`)
 
 O desktop não toca mais o v2 (`disk()`, `PERSIST`, `flush_disk`, `fs::*` e
 `ata::read_image/write_image` foram removidos). Todos os consumidores usam **uma** API de

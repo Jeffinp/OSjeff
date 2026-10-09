@@ -292,8 +292,7 @@ compositor, o navegador e o resto do sistema seguem. Retomar a chamada de forma 
 * **Dock e boot idênticos:** a dock continua com os 7 ícones atuais e o ícone "WASM" abre o app
   padrão (`snake`), como hoje. Como o Painel Iniciar só aparece aberto, o desktop do boot
   fica pixel a pixel igual à linha de base (`tools/verify-boot.sh`, 0 pixels).
-* **Primeiro boot:** a imagem embute os apps de exemplo (`clock`, `notes`, `paint`, `hello`,
-  `snake`, `plasma`) e `appinstall::seed_once` instala os que faltam em `/apps`, sem sobrescrever
+* **Primeiro boot:** a imagem embute os apps `clock`, `notes`, `paint` e `snake` e `appinstall::seed_once` instala os que faltam em `/apps`, sem sobrescrever
   o que o usuário já tem. Com o volume persistente cada pacote embutido é oferecido **uma vez**:
   o arquivo `/apps/.seeded` guarda os ids já oferecidos, então um app que o usuário removeu **não
   volta** no boot seguinte, e um pacote novo numa versão posterior do sistema ainda é instalado
@@ -321,10 +320,10 @@ compositor, o navegador e o resto do sistema seguem. Retomar a chamada de forma 
 `wasm-apps/sdk` (crate `no_std`, `wasm32-unknown-unknown`, workspace isolado): `sys` (imports
 `osj.*` crus), wrappers seguros (`Canvas`, `File`, `Dir`, `log!`, `Error`), o macro
 `manifest!("id=clock\nname=Clock\nname.pt=Relógio\n...")` que emite `#[link_section = "kitsune.manifest"]`
-(e `icon!(include_bytes!(...))`), e o `panic_handler`. Apps: `hello`, `clock`, `notes`
+(e `icon!(include_bytes!(...))`), e o `panic_handler`. Apps: `clock`, `notes`
 (arquivos em `/`, ou seja `/data/notes/`), `paint` (mouse; salva BMP pelo host? não: o guest
-escreve um BMP de 24 bits direto com `fs_write`, formato trivial), mais `snake` e `plasma`
-empacotados com manifesto.
+escreve um BMP de 24 bits direto com `fs_write`, formato trivial), mais `snake`
+empacotados com manifesto; `hello`, `plasma` e `nettest` ficam em `wasm-apps/examples/` (compiláveis, fora da imagem).
 
 ## 10. O que vira teste
 

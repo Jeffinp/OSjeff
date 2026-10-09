@@ -75,6 +75,26 @@ quebrou o build uma vez, ver `docs/audit/RELATORIO.md`).
 - **Dependências novas no `kernel`** precisam de justificativa (tamanho, `no_std`,
   `unsafe`, licença) e passam por `cargo deny check`.
 
+## Onde coloco X? (Where do I put X)
+
+| Quero... | Vai para |
+|---|---|
+| Lógica pura (parser, regra, formato), testável no host | `kitsune_core/src/<grupo>/` (veja a tabela de grupos em [`docs/design/code-structure.md`](docs/design/code-structure.md)), com `tests.rs` ao lado |
+| Pixels, entrada e glue de hardware de um app | `kernel/src/desktop/apps/<app>/` (`state`, `input`, `paint`) |
+| Um widget ou helper de desenho compartilhado | `kernel/src/desktop/kit/` |
+| Painel, barra de apps, menus, Apps/Busca, toasts | `kernel/src/desktop/shell/` |
+| Moldura, ciclo de vida, snap e arrasto de janela | `kernel/src/desktop/windows/` |
+| Teclado e ponteiro (roteamento) | `kernel/src/desktop/input/` |
+| Acesso a arquivos pelo desktop, trait do sistema, thread do shell | `kernel/src/desktop/services/` |
+| Um driver | `kernel/src/<driver>.rs` + a parte pura em `kitsune_core/src/hw/` |
+| Um app WASM de exemplo (fora da imagem) | `wasm-apps/examples/<app>/` |
+| Texto visível ao usuário | chave em `assets/i18n/{pt,en}.txt` + `t!("chave")` |
+| Teste de um módulo | `<módulo>/tests.rs` (ou `tests/` por assunto); auxiliar compartilhado em `kitsune_core/src/testutil.rs` |
+
+Checklists de "novo app / tipo de janela / overlay / driver / módulo do core" estão em
+`docs/design/code-structure.md`. Antes de abrir o PR: `cargo test -p kitsune_core structure::` confere as
+regras de dependência entre as pastas do core.
+
 ## Decisões de arquitetura
 
 Mudanças grandes (modo usuário, paginação por processo, novo allocator, troca de

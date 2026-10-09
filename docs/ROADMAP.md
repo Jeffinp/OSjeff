@@ -63,7 +63,7 @@ tecla, framebuffer sem *write-combining*), dimensionar os buffers pelo framebuff
 
 ### 6. Mais kernel testado
 Continuar migrando lógica pura para o `kitsune_core`: o despacho de entrada
-(`desktop/input.rs`, exige trocar chamadas diretas por um enum de comandos), a lógica de
+(`desktop/input/`, exige trocar chamadas diretas por um enum de comandos), a lógica de
 dano do `render.rs`, o parse do cabeçalho do anel do DP8390.
 *Aceite:* o kernel perde linhas de decisão a cada PR e o core ganha testes.
 

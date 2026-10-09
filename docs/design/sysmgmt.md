@@ -10,11 +10,11 @@ de diferença nos dois modos).
 
 | Peça | Lógica pura (`kitsune_core`) | Cola (`kernel/src`) |
 |---|---|---|
-| Registro (W25; era o Log do sistema) | `klog` (anel, filtro, visão, `LineAsm`/`classify`, `dump_bounded`) | `klog.rs`, `desktop/logview.rs`, `logd.rs` (gravação em disco) |
+| Registro (W25; era o Log do sistema) | `klog` (anel, filtro, visão, `LineAsm`/`classify`, `dump_bounded`) | `klog.rs`, `desktop/apps/registro/`, `logd.rs` (gravação em disco) |
 | Tarefas (W25; era o Monitor de recursos) | `sysmon` (séries, `CpuSampler`), `activity` (nomes, formatação pt-BR, interpolação, taxas, carga, pressão, tabela ordenável) | `desktop/{tarefas,kit,live}.rs`, `ata::io_bytes`, `netd::stats()` |
-| Ajustes (W25; eram as Configurações) | `settings` (com `toast_secs`, `dock_zoom`, cidades de fuso), `wallpaper`, `hw::rtc` (data/hora/fuso), `keymap` (ABNT2) | `settings.rs`, `rtc.rs`, `desktop/settings_ui.rs`, `font.rs` (Latin-1) |
-| Notificações | `notify` (`Toasts`) | `notify.rs`, `desktop/toasts_ui.rs` |
-| Interfaces para outras frentes | `sysif` (traits) | `desktop/sysstore.rs` (implementações de hoje) |
+| Ajustes (W25; eram as Configurações) | `settings` (com `toast_secs`, `dock_zoom`, cidades de fuso), `wallpaper`, `hw::rtc` (data/hora/fuso), `keymap` (ABNT2) | `settings.rs`, `rtc.rs`, `desktop/apps/ajustes/`, `font.rs` (Latin-1) |
+| Notificações | `notify` (`Toasts`) | `notify.rs`, `desktop/shell/toasts.rs` |
+| Interfaces para outras frentes | `sysif` (traits) | `desktop/services/sysstore.rs` (implementações de hoje) |
 
 Os apps novos (**Tarefas**, **Ajustes**, **Registro**) estão no overlay Apps e na Busca; a barra de apps
 tem **Tarefas** e **Ajustes** (nove itens depois da W25).
@@ -62,7 +62,7 @@ editor foram migrados para `klog!` com nível explícito; a saída serial é a m
 - O **caminho de pânico/exceção fatal não depende do klog**: `crash::die` congela o
   espelho (`klog::freeze`) e escreve só pela UART, como antes.
 
-**Registro** (W25, `desktop/logview.rs`): tabela com hora (fonte mono), nível (etiqueta colorida: TRACE, DEBUG,
+**Registro** (W25, `desktop/apps/registro/`): tabela com hora (fonte mono), nível (etiqueta colorida: TRACE, DEBUG,
 INFO, AVISO, ERRO, FATAL), origem (nome amigável da thread) e mensagem (mono); busca (digitar vai para o campo;
 `Del` limpa; `Esc` limpa e, vazia, fecha), filtro de nível segmentado (Tudo, Info, Aviso, Erro; `Tab` avança),
 chave **Seguir**, **Limpar** e **Salvar** (trait `LogSink`; grava `/var/log/syslog.txt` com o log filtrado, até 256 KiB, as
@@ -117,7 +117,7 @@ pelo gerenciador. Memória por app só existe como estimativa do estado da inst�
 fracionária e filtro 1-2-1 da história, qual amostra está sob o ponteiro, **taxas a partir de contadores com volta
 ao zero** (`wrapping_delta`, `Rate`), carga média, nível de pressão, tabela ordenável estável (nomes sem acento).
 
-## 3. Ajustes (W25; eram as Configurações, `desktop/settings_ui.rs`)
+## 3. Ajustes (W25; eram as Configurações, `desktop/apps/ajustes/`)
 
 `Settings` (`kitsune_core::settings`) é um `Copy` com texto `chave=valor`:
 
@@ -150,7 +150,7 @@ de miniaturas desenhadas ao vivo (aparência atual) mais uma imagem do usuário 
 que abre o Arquivos), a barra de apps tem um controle de ampliação com pré-visualização, o fuso é uma lista de 52
 cidades com busca (`settings::TIMEZONES`), Rede e Disco leem ao vivo `netd::stats()` e o volume, Energia abre a folha
 de confirmação e Sobre mostra versão, processador, memória, tempo ligado, tela, como iniciou e uma linha sobre a fonte
-de números aleatórios. Cada página é uma função do construtor imediato `Ui` (`settings_ui.rs`): desenha, acha o clique e
+de números aleatórios. Cada página é uma função do construtor imediato `Ui` (`apps/ajustes/pages/`): desenha, acha o clique e
 acha o hover pelo mesmo código. Um controle deslizante aplica ao vivo e **grava o arquivo uma vez, ao soltar**.
 
 - **Aparência**: papel de parede (o original *Indigo*, três gradientes novos, um sólido e
@@ -222,7 +222,7 @@ hoje; a frente que trouxer algo melhor só implementa o trait e troca o objeto.
 
 | Trait | Implementação de hoje | O que a outra frente liga |
 |---|---|---|
-| `DiskUsage` (`label`, `usage() -> DiskUsageInfo{total,used,items}`) | `VfsUsage` (`desktop/sysstore.rs`): capacidade real do volume (`statfs`), "OJFS v3 (IDE)" ou "Memoria" | inodes livres (`items_*`) |
+| `DiskUsage` (`label`, `usage() -> DiskUsageInfo{total,used,items}`) | `VfsUsage` (`desktop/services/sysstore.rs`): capacidade real do volume (`statfs`), "OJFS v3 (IDE)" ou "Memoria" | inodes livres (`items_*`) |
 | `NetStats` (`counters() -> Option<NetCounters>`) | `KernelNetStats` sobre `netd::stats()` (os contadores de `nic::STATS`, alimentados por **todos** os drivers; a página Rede das Configurações lê o mesmo `Snapshot`) | `NetCounters` pode ganhar campos (descartes, erros) |
 | `NetControl` (`renew_dhcp()`) | `NoNetControl` (sempre `Unsupported`) | renovação DHCP (a W25 tirou o botão até existir uma API) |
 | `LogSink` (`write_file(nome, dados)`) | `VfsSink`: `/var/log/<nome>` no volume; mantém as últimas linhas inteiras que cabem em 256 KiB (`SinkError::Truncated`) | rotação de logs |
@@ -232,7 +232,7 @@ Outros pontos de integração: `klog!`/`notify!` já podem ser usados em qualque
 (`netstack`, `fetch`, `ata`, `wasm` seguem com `serial_println!`, espelhado no log como INFO
 ou pela palavra-chave; trocar por `klog!(Warn, ...)` dá o nível exato);
 `Desktop::set_network(nic, NetConfig)` guarda a identidade de rede para a página Rede
-(chamar de novo quando houver uma renovação); `Kind`/`App` em `desktop/instance.rs` têm
+(chamar de novo quando houver uma renovação); `Kind`/`App` em `desktop/windows/instance.rs` têm
 `TaskMgr` (Tarefas), `Settings` (Ajustes) e `LogViewer` (Registro); o `Monitor` deixou de existir na W25.
 
 ## 6. Como reproduzir as provas

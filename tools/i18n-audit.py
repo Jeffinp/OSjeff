@@ -416,29 +416,29 @@ def scan_file(rel):
 AREAS = [
     # (area id, display name, owner note, regex over the path)
     ("shell", "Shell (migrado nesta onda)", "painel, barra de apps, Apps/Busca, diálogo de energia, banners",
-     r"^kernel/src/desktop/(panel|taskbar|overlays|shell|chrome|toasts_ui|lang|glass)\.rs$|^kitsune_core/src/(launcher|chrome|taskbar|notify|sysif|snap|search)\.rs$"),
+     r"^kernel/src/desktop/(shell|windows/chrome\.rs|kit/glass\.rs)|^kitsune_core/src/windowing/(launcher|taskbar|snap)\.rs$|^kitsune_core/src/ui/chrome\.rs$|^kitsune_core/src/system/(notify|sysif)\.rs$|^kitsune_core/src/format/search\.rs$"),
     ("settings", "Ajustes", "janela de Ajustes e o modelo de configurações",
-     r"^kernel/src/desktop/settings_ui\.rs$|^kitsune_core/src/(settings|wallpaper|keymap)\.rs$|^kernel/src/settings\.rs$"),
+     r"^kernel/src/desktop/apps/ajustes/|^kitsune_core/src/system/(settings|keymap)\.rs$|^kitsune_core/src/ui/wallpaper\.rs$|^kernel/src/settings\.rs$"),
     ("files", "Arquivos", "gerenciador de arquivos, lixeira, VFS",
-     r"^kernel/src/desktop/(files|files_ui|vfs|sysstore)\.rs$|^kitsune_core/src/(fileman|vfs|fs)(\.rs|/)|^kitsune_core/src/fs3/|^kernel/src/storage\.rs$"),
+     r"^kernel/src/desktop/apps/files/|^kernel/src/desktop/services/(vfs|sysstore)\.rs$|^kitsune_core/src/apps/fileman|^kitsune_core/src/storage/|^kernel/src/storage\.rs$"),
     ("editor", "Editor", "editor de texto e diálogos",
-     r"^kernel/src/desktop/(edit|edit_ui)\.rs$|^kitsune_core/src/editor2/"),
+     r"^kernel/src/desktop/apps/editor/|^kitsune_core/src/apps/editor2/"),
     ("terminal", "Terminal", "terminal, interpretador e comandos",
-     r"^kernel/src/desktop/(term|shellhost)\.rs$|^kitsune_core/src/(shell|termui)(\.rs|/)"),
+     r"^kernel/src/desktop/apps/terminal/|^kernel/src/desktop/services/shellhost/|^kitsune_core/src/apps/(shell|termui)(\.rs|/)"),
     ("tasks", "Tarefas", "monitor de atividade",
-     r"^kernel/src/desktop/tarefas\.rs$|^kitsune_core/src/(activity|sysmon|netstats|process)\.rs$"),
+     r"^kernel/src/desktop/apps/tarefas/|^kitsune_core/src/apps/activity\.rs$|^kitsune_core/src/system/(sysmon|process)\.rs$|^kitsune_core/src/network/netstats\.rs$"),
     ("log", "Registro", "visualizador do registro",
-     r"^kernel/src/desktop/logview\.rs$|^kitsune_core/src/klog\.rs$"),
+     r"^kernel/src/desktop/apps/registro/|^kitsune_core/src/system/klog\.rs$"),
     ("calc", "Calculadora", "calculadora",
-     r"^kernel/src/desktop/calc_ui\.rs$|^kitsune_core/src/calc\.rs$"),
+     r"^kernel/src/desktop/apps/calculadora/|^kitsune_core/src/apps/calc\.rs$"),
     ("viewer", "Imagens", "visualizador de imagens e decodificadores",
-     r"^kernel/src/desktop/viewer\.rs$|^kitsune_core/src/(viewer|image|png|bmp|ppm|inflate|deflate|gzip)(\.rs|/)"),
-    ("browser", "Navegador", "navegador, páginas internas, erros de rede e TLS (outro agente está editando)",
-     r"^kernel/src/desktop/apps\.rs$|^kitsune_core/src/(browser|web|redirect|dns|net|icmp|lease|sntp|tlsverify|x509|appnet)(\.rs|/)|^kernel/src/(fetch|netd|netstack|tlsv)\.rs$"),
+     r"^kernel/src/desktop/apps/viewer/|^kitsune_core/src/apps/viewer\.rs$|^kitsune_core/src/format/"),
+    ("browser", "Navegador", "navegador, páginas internas, erros de rede e TLS",
+     r"^kernel/src/desktop/apps/browser/|^kitsune_core/src/(browsing|network)/|^kitsune_core/src/platform/appnet|^kernel/src/(fetch|netd|netstack|tlsv)\.rs$"),
     ("apps", "Apps de terceiros (WASM)", "janela de app, manifesto, instalação, SDK",
-     r"^kernel/src/desktop/(wasmwin|appart|appui)\.rs$|^kernel/src/wasm/|^kitsune_core/src/(appabi|appart|appfs|appinstall|appmanifest|wasmsec)(\.rs|/)"),
+     r"^kernel/src/desktop/apps/wasm/|^kernel/src/desktop/kit/(appart|appui)\.rs$|^kernel/src/wasm/|^kitsune_core/src/platform/|^kitsune_core/src/ui/appart\.rs$"),
     ("kit", "Kit de componentes", "widgets, galeria e primitivas",
-     r"^kernel/src/desktop/(kit|ui|widgets|gallery|cursor|input|render|live|instance|mod)\.rs$|^kitsune_core/src/(widgets|style|iconart|window|winman|wm)\.rs$"),
+     r"^kernel/src/desktop/(kit/|apps/gallery/|windows/|input/|frame\.rs|mod\.rs)|^kitsune_core/src/(ui|windowing)/"),
     ("system", "Sistema (logs e tela de falha: ficam em inglês)", "boot, falha grave, drivers",
      r"^kernel/src/(crash|main|boot|serial|klog|logd|power|rtc|sysinfo|trace|perf|sched|vm|allocator)\.rs$|^kernel/src/"),
 ]
@@ -462,7 +462,7 @@ def render():
     per_file = {}
     migrated = {}
     for rel in files:
-        if rel.endswith(("/tests.rs", "/test.rs")) or "/tests/" in rel:
+        if re.search(r"/(tests?|[a-z0-9_]*_tests?|tests_[a-z_]*|vectors?|testcerts)\.rs$", rel) or "/tests/" in rel:
             continue
         found, mig = scan_file(rel)
         if found:

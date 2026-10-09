@@ -124,8 +124,8 @@ if let Some(p) = ed.prompt() { /* barra de busca / ir para linha: p.label, p.tex
 ## Integração no desktop (W15b)
 
 O Editor e o Terminal do desktop são esses dois módulos; o que o kernel acrescenta é só cola
-(`kernel/src/desktop/`): `edit.rs`, `term.rs` e `shellhost.rs`. Tudo que toca arquivo passa por
-`desktop/vfs.rs`. Os módulos antigos `kitsune_core::editor` e `terminal` (grade fixa 44x18 / 40x14)
+(`kernel/src/desktop/`): `apps/editor/`, `apps/terminal/` e `services/shellhost/`. Tudo que toca arquivo passa por
+`desktop/services/vfs.rs`. Os módulos antigos `kitsune_core::editor` e `terminal` (grade fixa 44x18 / 40x14)
 foram removidos.
 
 ```text

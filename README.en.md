@@ -85,7 +85,7 @@ variants (DOOM) and troubleshooting: [`docs/BUILDING.md`](docs/BUILDING.md) (Por
 |---|---|---|
 | **Boot and CPU** | BIOS/UEFI boot (`bootloader 0.11`), own GDT/TSS with an IST stack for #DF, full IDT, 8259 PIC, 250 Hz PIT, every CPU exception and spurious IRQ handled, error screen | `kernel/src/{gdt,interrupts,crash}.rs` |
 | **Scheduler** | Timer-preemptive (context switch in the ISR, assembly), **ready/blocked** threads, yield via `int 0x81`, `hlt` without lost wakeups, **guard-page stacks**, **a failing thread dies alone**, real per-thread CPU | `sched.rs`, `switch.s` |
-| **Memory** | `GlobalAlloc` heap (free list with coalescing, spin lock with IRQs off), alignment math tested on the host | `allocator.rs`, `kitsune_core/src/heap.rs` |
+| **Memory** | `GlobalAlloc` heap (free list with coalescing, spin lock with IRQs off), alignment math tested on the host | `allocator.rs`, `kitsune_core/src/system/heap.rs` |
 | **Graphics** | Damage-tracking compositor, double buffering, own 8×8 font, alpha shadows, animations; performance HUD | `fb.rs`, `desktop/` |
 | **Apps** | Terminal (shell with ~55 commands, pipes, scripts, scrollback, history, Tab completion, `ping`/`nslookup`/`curl`), Editor (find/replace, undo, 16 MiB files, Open/Save dialogs), File manager (copy/move with progress, trash, Apps), Image viewer, Browser, Tarefas (activity monitor), Registro (log viewer), Ajustes (settings), Calculator, WebAssembly apps | `desktop/`, `kitsune_core` |
 | **Storage** | **OJFS v3**: metadata journal + copy-on-write data, extents, CRC32, `fsck` at boot, automatic v2 migration, block cache, ATA with `FLUSH`; the whole desktop reaches the disk through one VFS layer (with a RAM volume when there is no v3 disk) | `kitsune_core/src/{fs3,vfs,blockcache}`, `ata.rs`, `storage.rs` |
@@ -190,12 +190,14 @@ Most documents are in Portuguese.
 
 ```
 Kitsune/
-├── kitsune_core/   # pure no_std logic, tested on the host (forbid(unsafe_code))
-├── kernel/        # bare-metal x86_64-unknown-none: drivers, scheduler, compositor, wasm
+├── kitsune_core/   # pure no_std logic, tested on the host (forbid(unsafe_code)); folders by responsibility:
+│   └── src/        #   ui/ storage/ network/ browsing/ format/ platform/ system/ windowing/ apps/ hw/ i18n/
+├── kernel/        # bare-metal x86_64-unknown-none: drivers, scheduler, wasm
+│   └── src/desktop/ #  windows/ shell/ input/ kit/ services/ apps/<app>/ compositor/
 ├── os/            # builder: embeds the kernel and produces the BIOS/UEFI images
 ├── fuzz/          # cargo-fuzz: 17 targets (entropy, network, OJFS, web, shell, editor, X.509, apps) + regressions
 ├── bench/         # microbenchmarks (criterion), outside the workspace
-├── wasm-apps/     # WebAssembly apps (snake default; plasma; cdemo; doom)
+├── wasm-apps/     # WebAssembly apps (snake default; clock, notes, paint; examples/: hello, plasma, nettest; cdemo; doom)
 ├── tools/         # run.sh, qemu-headless.sh, verify-boot.sh, perf harness
 └── docs/          # architecture, guides, security, audit
 ```

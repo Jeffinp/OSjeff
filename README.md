@@ -85,7 +85,7 @@ variantes (DOOM) e solução de problemas: [`docs/BUILDING.md`](docs/BUILDING.md
 |---|---|---|
 | **Boot e CPU** | Boot BIOS/UEFI (`bootloader 0.11`), GDT/TSS próprias com pilha IST para #DF, IDT completa, PIC 8259, PIT 250 Hz, tratamento de todas as exceções e IRQs espúrias, tela de erro | `kernel/src/{gdt,interrupts,crash}.rs` |
 | **Scheduler** | Preemptivo por timer (troca de contexto no ISR, assembly), threads **prontas/bloqueadas**, yield por `int 0x81`, `hlt` sem perder wakeups, **pilhas com página de guarda**, **uma thread que falha morre sozinha**, CPU real por thread | `sched.rs`, `switch.s` |
-| **Memória** | Heap `GlobalAlloc` (free-list com coalescência, spin lock com IRQs desligadas), matemática de alinhamento testada no host | `allocator.rs`, `kitsune_core/src/heap.rs` |
+| **Memória** | Heap `GlobalAlloc` (free-list com coalescência, spin lock com IRQs desligadas), matemática de alinhamento testada no host | `allocator.rs`, `kitsune_core/src/system/heap.rs` |
 | **Gráficos** | Compositor com damage tracking, double buffer, fonte 8×8 própria, sombras alpha, animações; HUD de desempenho | `fb.rs`, `desktop/` |
 | **Apps** | Terminal (shell com ~55 comandos, pipes, scripts, scrollback, histórico, Tab, `ping`/`nslookup`/`curl`), Editor (busca/substituição, desfazer, arquivos de 16 MiB, diálogos Abrir/Salvar), Gerenciador de arquivos (copiar/mover com progresso, lixeira, Apps), Visualizador de imagens, Navegador, Tarefas (monitor de atividade), Registro, Ajustes, Calculadora, apps WebAssembly | `desktop/`, `kitsune_core` |
 | **Armazenamento** | **OJFS v3**: journal de metadados + dados *copy-on-write*, extents, CRC32, `fsck` no boot, migração automática do v2, cache de blocos, ATA com `FLUSH`; o desktop inteiro fala com o disco por uma camada VFS (com volume em RAM quando não há disco v3) | `kitsune_core/src/{fs3,vfs,blockcache}`, `ata.rs`, `storage.rs` |
@@ -188,12 +188,14 @@ Lista priorizada do que vem a seguir: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ```
 Kitsune/
-├── kitsune_core/   # lógica pura no_std, testada no host (forbid(unsafe_code))
-├── kernel/        # bare-metal x86_64-unknown-none: drivers, scheduler, compositor, wasm
+├── kitsune_core/   # lógica pura no_std, testada no host (forbid(unsafe_code)); pastas por responsabilidade:
+│   └── src/        #   ui/ storage/ network/ browsing/ format/ platform/ system/ windowing/ apps/ hw/ i18n/
+├── kernel/        # bare-metal x86_64-unknown-none: drivers, scheduler, wasm
+│   └── src/desktop/ #  windows/ shell/ input/ kit/ services/ apps/<app>/ compositor/
 ├── os/            # builder: embute o kernel e gera as imagens BIOS/UEFI
 ├── fuzz/          # cargo-fuzz: 17 alvos (entropia, rede, OJFS, web, shell, editor, X.509, apps) + regressões
 ├── bench/         # microbenchmarks (criterion), fora do workspace
-├── wasm-apps/     # apps WebAssembly (snake padrão; plasma; cdemo; doom)
+├── wasm-apps/     # apps WebAssembly (snake padrão; clock, notes, paint; examples/: hello, plasma, nettest; cdemo; doom)
 ├── tools/         # run.sh, qemu-headless.sh, verify-boot.sh, harness de perf
 └── docs/          # arquitetura, guias, segurança, auditoria
 ```

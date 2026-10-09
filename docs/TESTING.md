@@ -29,6 +29,32 @@ com `std` sob teste e `no_std` em produção (`#![forbid(unsafe_code)]`).
 Regra do projeto: **lógica nova vai para o core com teste; o kernel só liga o
 hardware a ela.**
 
+### Onde ficam os testes (Where tests live)
+
+- **Ao lado do módulo.** Os testes do módulo `foo` ficam em `foo/tests.rs` (módulo `foo.rs`) ou
+  `tests.rs` na mesma pasta (módulo `foo/mod.rs`), declarados com `#[cfg(test)] mod tests;`.
+  Nenhum módulo carrega o bloco de testes inline.
+- **Por assunto.** Quando os testes passam de ~500 linhas, `tests.rs` vira a pasta `tests/`: `mod.rs`
+  com os auxiliares do módulo e um arquivo por assunto (`apps/editor2/tests/{movement,undo_redo,...}.rs`).
+- **Auxiliares compartilhados** entre módulos ficam num lugar só: `kitsune_core/src/testutil.rs`
+  (`cfg(test)`): decodificação hex dos vetores de codec e o localizador de módulos só de teste.
+- **Testes de estrutura:** `kitsune_core/src/structure.rs` confere o grafo de dependências entre as
+  pastas (`docs/design/code-structure.md`); `i18n/audit.rs` confere o catálogo contra as fontes.
+- **Integração:** `kitsune_core/tests/` (ex.: `klog_noalloc.rs`, `golden/`); fuzz em `fuzz/`.
+- **Kernel:** sem harness; a prova é `tools/verify-boot.sh` e os cenários de `tools/perf/scen/`.
+
+Rodar uma área só (o nome do teste segue o caminho do módulo):
+
+```bash
+cargo test -p kitsune_core storage::          # OJFS, VFS, blockdev, cache
+cargo test -p kitsune_core network::           # pilha de rede, DHCP, DNS, X.509
+cargo test -p kitsune_core browsing::          # HTML/CSS, navegador
+cargo test -p kitsune_core format::            # codecs (png, inflate, ...)
+cargo test -p kitsune_core apps::editor2::     # um app
+cargo test -p kitsune_core structure::         # regras de dependência
+cargo test -p kitsune_core i18n                # catálogo e auditoria
+```
+
 ### Cobertura
 
 ```bash
@@ -393,7 +419,7 @@ Testes novos no `kitsune_core` (todos no host; o kernel só liga o framebuffer a
 | `anim` | 16 | bezier monotônico, mola sem divergir, `Tween` que reaponta sem salto, animação de janela interrompível, *reduzir movimento*, salto de lançamento |
 | `style`, `chrome`, `widgets` | 4, 11, 6 | paletas e aparência automática pela hora, geometria e acerto do painel superior (relógio centralizado, pílula, pontos das áreas de trabalho), menus, trilho do Apps, Busca, popovers (Configurações rápidas, calendário com notificações) e banners; segmentado, switch, controle deslizante, barra de rolagem |
 | `snap`, `taskbar`, `launcher` | 8, 7, 6 | zonas de encaixe nas bordas e cantos, divisão exata da área útil, tamanho mínimo, `Alt+setas`; barra de tarefas (layout, hit test, indicador, clique, reordenar com vizinhos que abrem espaço); categorias, filtro, recentes |
-| `brand` | 14 | a marca da raposa: polígonos dentro da grade e sem degenerados, simetria, mono de uma cor, cobertura e tinta distinta de olhos e nariz em 16 a 128 px, coroa de caudas, SVG, hash dourado do tile de 32 px (atualização: veja o comentário de `GOLDEN_TILE_32` em `kitsune_core/src/brand/tests.rs`), tela de contato com `BRAND_SHEET=/tmp/b.ppm cargo test -p kitsune_core dump_brand -- --ignored` |
+| `brand` | 14 | a marca da raposa: polígonos dentro da grade e sem degenerados, simetria, mono de uma cor, cobertura e tinta distinta de olhos e nariz em 16 a 128 px, coroa de caudas, SVG, hash dourado do tile de 32 px (atualização: veja o comentário de `GOLDEN_TILE_32` em `kitsune_core/src/ui/brand/tests.rs`), tela de contato com `BRAND_SHEET=/tmp/b.ppm cargo test -p kitsune_core dump_brand -- --ignored` |
 | `iconart`, `cursor` | 7, 4 | todos os ícones e glifos têm conteúdo, cantos transparentes, determinismo; sprites dentro da caixa, ponto quente sobre a forma |
 | `search` | 5 | ranqueamento, dobra de acentos, calculadora exata (overflow recusado, nunca embrulhado), nenhum texto curto derruba o *parser* |
 | `notify`, `settings`, `wallpaper`, `window`, `layout`, `winman` | 10, 15, 10, 21, 40, 44 | banners deslizando, chaves `appearance`/`reduce_motion` totais, esquemas claro e escuro, botões à direita (`title_layout`), encaixe e soltar pela barra, áreas de trabalho (`switch_workspace`, `move_to_workspace`), área útil entre o painel e a barra de tarefas |

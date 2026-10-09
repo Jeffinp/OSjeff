@@ -89,10 +89,10 @@ Para mandar teclas e mouse enquanto roda:
 
 ## 4. Apps WebAssembly
 
-A imagem embute os apps de exemplo (`hello`, `clock`, `notes`, `paint`, `snake`,
-`plasma`, em `wasm-apps/`; `kernel/build.rs` compila todos para
+A imagem embute os apps `clock`, `notes`, `paint` e `snake` (em `wasm-apps/`;
+`kernel/build.rs` compila todos para
 `wasm32-unknown-unknown`) e os instala em `/apps` no primeiro boot, sem sobrescrever
-os que já existem. Eles aparecem no Painel Iniciar (com ícone e nome) e no Gerenciador
+os que já existem. (Os exemplos `hello`, `plasma` e `nettest`, em `wasm-apps/examples/`, continuam compiláveis mas não vêm na imagem.) Eles aparecem no Painel Iniciar (com ícone e nome) e no Gerenciador
 de arquivos (vista **Apps**: `Enter` abre, `I` instala, `Del` remove). O ícone "W" do dock
 abre o `snake`. Detalhes: [`docs/design/apps.md`](design/apps.md).
 

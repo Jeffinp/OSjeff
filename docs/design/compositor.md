@@ -151,7 +151,7 @@ virou o scratch do modo verify. O heap de 64 MiB não é tocado.
 
 ## 6. O teste diferencial
 
-`kitsune_core/src/compositor/sim/` simula uma área de trabalho (192x128): janelas com
+`kitsune_core/src/windowing/compositor/sim/` simula uma área de trabalho (192x128): janelas com
 áreas de trabalho, z-order, animações (opacidade e retângulo), três tipos de conteúdo (parado,
 "vivo" com um gráfico que muda por conta própria, "jogo" que muda tudo), painel, barra,
 popover, toast e pré-visualização de encaixe. O **pintor de modelo** desenha cada camada com um

@@ -44,6 +44,9 @@ o `#![forbid(unsafe_code)]` do crate `kitsune_core`, não hardware.
 - **Boot [M]:** primeiro frame em ~5 s (BIOS e UEFI) após a entrada do kernel, quase tudo
   é o splash.
 
+> **Mapa do código:** a estrutura de pastas, as regras de dependência e os checklists (novo app, janela, overlay,
+> driver, módulo do core) estão em [`docs/design/code-structure.md`](design/code-structure.md).
+
 ## 1. Visão geral e fronteira core ↔ kernel
 
 | Crate | Tipo | Tamanho | Papel |
@@ -81,8 +84,8 @@ O kernel faz a porta de E/S ou o MMIO e entrega bytes a `kitsune_core::hw::*`, q
 decodifica (PS/2, BCD/12h/fuso do RTC, `IDENTIFY` e LBA do ATA, varredura PCI, capabilities
 virtio, estatísticas do HUD, a conta de páginas das guard pages em `paging`, a escolha
 da próxima thread em `schedule`), ou a `gfx`, `layout`, `wm`, `redirect`. A regra **ainda
-não vale para tudo** [L]: o despacho de entrada (`desktop/input.rs`), a lógica de dano
-(`desktop/render.rs`), as primitivas de `fb.rs`, o ring de eventos do WASM e os drivers
+não vale para tudo** [L]: o despacho de entrada (`desktop/input/`), a lógica de dano
+(`desktop/compositor/`), as primitivas de `fb.rs`, o ring de eventos do WASM e os drivers
 de porta de E/S seguem no kernel, sem teste automatizado. O comentário de `lib.rs`
 ("toda a lógica de decisão") é uma meta, não um fato.
 
@@ -634,17 +637,17 @@ quadro (algumas dezenas de valores).
   calendário com centro de notificações) e dos banners; paletas clara e escura; o ranqueamento e a calculadora da Busca; os
   ícones e glifos vetoriais.
 
-No kernel: `desktop/shell.rs` guarda o estado (menus, popovers, folha, Apps, Busca, barra de
-apps) e executa os comandos (`Cmd`), `panel.rs`, `taskbar.rs`, `overlays.rs`, `chrome.rs` e
-`cursor.rs` desenham e tratam entrada, `glass.rs` captura o fundo borrado **uma vez** quando uma
-superfície abre, e `ui.rs`/`gallery.rs` são o toolkit e sua vitrine. A janela do Alt+Tab, os
+No kernel: `desktop/shell/model.rs` guarda o estado (menus, popovers, folha, Apps, Busca, barra de
+apps) e executa os comandos (`Cmd`), `desktop/shell/{panel,taskbar,overlays}/`,
+`desktop/windows/{chrome,cursor}.rs` desenham e tratam entrada, `desktop/kit/glass.rs` captura o fundo
+borrado **uma vez** quando uma superfície abre, e `desktop/kit/ui/`/`desktop/apps/gallery/` são o toolkit e sua vitrine. A janela do Alt+Tab, os
 banners e o HUD usam o mesmo vidro. Aparência (automática pelo relógio, clara, escura), cor de
 destaque e *reduzir movimento* vêm de `kitsune_core::settings` e valem na hora.
 
 **Idiomas (`kitsune_core::i18n`).** Todo texto do shell sai de catálogos `chave = valor`
 (`assets/i18n/pt.txt` e `en.txt`) compilados em tabelas ordenadas por uma `const fn`; a consulta
 (`t!`, `tp!`) cai do idioma atual para o inglês e depois para a própria chave, sem alocar. O idioma
-é `Settings::lang`; `Desktop::language_changed` (`desktop/lang.rs`) refaz títulos de janela e
+é `Settings::lang`; `Desktop::language_changed` (`desktop/shell/lang.rs`) refaz títulos de janela e
 camadas transitórias e pede repintura total. Datas, números, tamanhos e plurais seguem o idioma.
 A tela de falha e os logs ficam em inglês. Projeto, convenções, guia de tradução e como acrescentar
 um idioma: [`docs/design/i18n.md`](design/i18n.md); o que falta migrar:
@@ -738,7 +741,7 @@ instalados, Terminal (execução) interrompe os comandos em andamento.
 
 Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da janela.
 
-- **Terminal** (`desktop/term.rs`, `shellhost.rs`; veja `docs/design/editor-shell.md`, "Integração no
+- **Terminal** (`desktop/apps/terminal/`, `shellhost.rs`; veja `docs/design/editor-shell.md`, "Integração no
   desktop"): `kitsune_core::shell::Term` (histórico rolável de até 5000 linhas, linha editável com
   histórico, Ctrl+R, Tab, Ctrl+C/L/D) sobre um `Shell` de 52 comandos cujo sistema de arquivos é o VFS
   (`VfsFs`, diretório corrente por terminal, `rm` vai para a lixeira) e cujas informações do sistema
@@ -751,7 +754,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   cores ANSI. As linhas rodam em duas threads `shelld` (fila única, resultado
   recolhido em `step_shell_jobs` a cada tick), então um comando que espera nunca congela o desktop; Ctrl+C
   cancela. `edit`, `files`, `tasks`, `calc`, `reboot` e `shutdown` pedem ao compositor por uma fila.
-- **Editor** (`desktop/edit.rs`): `kitsune_core::editor2` (UTF-8, desfazer/refazer, buscar/substituir,
+- **Editor** (`desktop/apps/editor/`): `kitsune_core::editor2` (UTF-8, desfazer/refazer, buscar/substituir,
   números de linha, mouse, roda, arquivos de até 16 MiB inteiros) com abrir/salvar como pelo VFS
   (`Picker`, Ctrl+O, Ctrl+S, Ctrl+Shift+S) e a pergunta **Salvar / Descartar / Cancelar** em toda forma de
   fechar uma janela com alterações (`request_close`: botão, Ctrl+Q, Tarefas, `kill`, Reiniciar/
@@ -760,7 +763,7 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   (`EditorState::path`, `None` = sem nome); o título é `Editor — nome`, com ` •` enquanto há alterações. A
   grade acompanha a janela (`sync_editor`) e nada é desenhado fora dela. A janela é descrita por
   `kitsune_core::editor2::ui` (margem de números, linha atual, guias de indentação, barra de buscar fina e
-  clicável, barra de estado, folhas) e desenhada em `desktop/edit_ui.rs`; o cursor desliza na linha e
+  clicável, barra de estado, folhas) e desenhada em `desktop/apps/editor/paint.rs`; o cursor desliza na linha e
   pisca suave por 12 s depois da última tecla, Ctrl +/−/0 mudam o tamanho (`editor_font`).
 - **Calculadora:** quatro operações, entrada de até 16 caracteres, formatador decimal sem
   intrínsecos de `f64` do `std`. As teclas se esticam com a janela (`calc_layout`).
@@ -800,8 +803,8 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
   com inércia e barra sobreposta, lista virtualizada. O Visualizador tem faixa de miniaturas (feitas
   uma por vez), ajustar/preencher/real com zoom por mola, arrasto com inércia, giro animado, painel de
   informações e apresentação. Geometria, acerto, plano de soltar, filtro, miniaturas, inércia e os
-  glifos são lógica pura (`fileman::ui`, `viewer::ui`, `appart`), `desktop/{files,files_ui,viewer,appui,
-  appart}.rs` desenham e roteiam. Os quadros só são pedidos enquanto algo se move (`animating()`).
+  glifos são lógica pura (`fileman::ui`, `viewer::ui`, `appart`), `desktop/apps/{files,viewer}/`,
+  `desktop/kit/{appui,appart}.rs` desenham e roteiam. Os quadros só são pedidos enquanto algo se move (`animating()`).
 - **Navegador:** a barra de endereço e a área de conteúdo seguem a janela, e a página é
   **diagramada de novo** para a nova largura ao terminar de redimensionar (o corpo HTML
   fica guardado na instância). Fechar a janela descarta página e estado.
@@ -819,10 +822,10 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
 
 ### 7.4 Como registrar um app novo
 
-1. `desktop/instance.rs`: nova variante em `Kind` (metadados `const`: título, nome de
+1. `desktop/windows/instance.rs`: nova variante em `Kind` (metadados `const`: título, nome de
    processo, rótulo, ícone, `default_rect`, `min_size`, `multi`, `resizable`) e em `App`
    (estado por janela, criado em `App::new`).
-2. `desktop/render.rs` (`draw_window`) e `apps.rs`: desenhar dentro do `Rect` da janela
+2. `desktop/compositor/` (`draw_window`) e `apps.rs`: desenhar dentro do `Rect` da janela
    (nunca fora dele); `input.rs`: teclas (`handle_key`) e cliques (`click_window`).
 3. Barra de tarefas (opcional): uma entrada em `taskbar::DEFAULT_PINNED`. Todo `Kind` de `Kind::ALL`
    aparece sozinho no overlay Apps e na Busca; enquanto roda, a barra mostra o app mesmo sem fixar.
@@ -932,7 +935,7 @@ conteúdo desconhecido → **não escreve nada**. API: `storage::with_fs(|fs| ..
 RTC). **O desktop não usa mais o v2** (`disk()`, `PERSIST`, `ata::read_image/write_image`
 foram removidos): tudo passa pela camada VFS abaixo.
 
-### 8.3 A camada VFS do desktop (`desktop/vfs.rs`, `kitsune_core::vfs`)
+### 8.3 A camada VFS do desktop (`desktop/services/vfs.rs`, `kitsune_core::vfs`)
 
 Um único caminho para arquivos: gerenciador, visualizador, editor e comandos do terminal.
 A lógica (caminhos, validação de nomes, `unique_name`, `move_to`, `CopyJob`, `tree_size`,
@@ -950,7 +953,7 @@ um `VfsError` mostrado ao usuário, nunca um pânico. A API (documentada no topo
 `trash_list`, `restore`, `trash_purge`, `empty_trash`, `move_to`, `copy_plan`/`copy_step`/
 `copy_abort`, `copy` e `generation`.
 
-O terminal usa a mesma camada pelo `VfsFs` (`desktop/shellhost.rs`): `ShellFs` sobre `vfs::*`, caminho
+O terminal usa a mesma camada pelo `VfsFs` (`desktop/services/shellhost/`): `ShellFs` sobre `vfs::*`, caminho
 absoluto por chamada e o diretório corrente guardado no próprio terminal; `rm` e `mv` por cima de um
 arquivo mandam o antigo para a lixeira. O editor lê e grava só com `vfs::read_file`/`write_file`.
 **O que mais vive no volume (W18).** O mesmo volume (disco v3 ou RAM) guarda, por convenção:
@@ -1169,7 +1172,7 @@ removido não volta no boot seguinte) sem sobrescrever os do usuário. O Arquivo
 **Apps** (instalar, remover, abrir, manifesto em Propriedades; `kitsune_core::fileman::apps`) e abre
 um `.wasm` instalando-o e executando-o. O manifesto aceita `net_hosts` (lista de destinos de rede).
 
-`kernel/build.rs` compila `wasm-apps/{hello,clock,notes,paint,snake,plasma}` (Rust,
+`kernel/build.rs` compila `wasm-apps/{clock,notes,paint,snake}` (Rust,
 `wasm32-unknown-unknown`, workspaces isolados, SDK em `wasm-apps/sdk`) e os embute. Um módulo
 **sem** manifesto (DOOM com `DOOM=1 WASI_SDK_PATH=...`, `cdemo` com `WASI_SDK_PATH=...`) roda como
 app legado (ABI v1, 692x414 fixa), aberto pelo ícone "W" da barra de tarefas; sem essas variáveis o ícone

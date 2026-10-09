@@ -257,7 +257,7 @@ envia `q=caf%C3%A9+a%C3%A7%C3%A3o&nome=Jos%C3%A9` e o servidor decodifica `café
 | Botões | voltar, avançar (cinza sem histórico), recarregar, início, buscar; estrela de favorito |
 | Cursor | mão sobre link, botão de formulário, botão da barra e sugestão |
 | Endereço | Ctrl+L ou clique seleciona tudo (digitar substitui); sugestões (favoritos, depois histórico; prefixo antes de substring; até 6; ↑/↓/Enter/clique; Esc fecha) |
-| Favoritos | Ctrl+D ou a estrela; `BookmarkStore` (trait) com `MemoryBookmarks` (até 64); o ponto único de troca é `new_bookmark_store()` em `kernel/src/desktop/instance.rs` (não existe `desktop/vfs.rs` na base desta frente, então nada é gravado em `/home/.bookmarks`) |
+| Favoritos | Ctrl+D ou a estrela; `BookmarkStore` (trait) com `MemoryBookmarks` (até 64); o ponto único de troca é `new_bookmark_store()` em `kernel/src/desktop/windows/instance.rs` (não existe `desktop/services/vfs.rs` na base desta frente, então nada é gravado em `/home/.bookmarks`) |
 | Páginas internas | `kitsune://inicio` (a tela inicial), `favoritos` (com "[remover]"), `historico`, `sobre`: HTML gerado e diagramado pelo mesmo motor, sem rede |
 | Rolagem | setas, PageUp/PageDown, Home/End e Espaço/Shift+Espaço (com o foco na página; Home/End movem o caret quando o foco é a barra), roda do mouse |
 | Busca na página | Ctrl+F, destaca todas as ocorrências (a atual em laranja), Enter/Shift+Enter navega, Esc fecha |

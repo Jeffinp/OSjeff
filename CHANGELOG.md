@@ -4,6 +4,19 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O Kitsune (
 seção) não tem releases versionadas; as seções são marcos na `master`. As seções anteriores ao
 renomeio mantêm o nome da época.
 
+## 2026-10 — Código organizado por responsabilidade (W34)
+
+- **Refatoração pura, sem mudança de comportamento** (telas do boot idênticas pixel a pixel à linha de base).
+  `kernel/src/desktop/` (~40 arquivos soltos) virou `windows/ shell/ input/ kit/ services/ apps/<app>/ compositor/`,
+  cada app com seu estado, entrada e desenho numa pasta; nenhum arquivo passa de ~650 linhas.
+  `kitsune_core/src` (~100 módulos soltos) virou `ui/ storage/ network/ browsing/ format/ platform/ system/
+  windowing/ apps/` ao lado de `hw/` e `i18n/`; `lib.rs` reexporta os nomes antigos (`kitsune_core::fs3`).
+  Um teste de estrutura confere o grafo de dependências entre as pastas. Os testes de cada módulo ficam ao lado
+  dele (`tests.rs` / `tests/` por assunto). Mapa, regras e checklists em `docs/design/code-structure.md`.
+- **Apps de demonstração fora da imagem:** `plasma` e `hello` (Olá) deixam de vir embutidos e `nettest` (Teste de
+  rede) segue como fixture; os três ficam em `wasm-apps/examples/` e continuam compiláveis. Vêm na imagem:
+  Cobrinha, Notas, Pintura e Relógio.
+
 ## 2026-10 — O sistema passa a se chamar Kitsune (W33)
 
 - **Nome.** OSjeff vira **Kitsune** (a raposa de nove caudas do folclore japonês). Detalhes do nome em
