@@ -171,10 +171,19 @@ pub(crate) fn install(l: &mut Linker<HostState>) -> Result<(), &'static str> {
             Err(e) => return Ok(e),
         };
         charge(&mut c, bytes.len() as u64 * 8)?;
-        // Non-ASCII bytes draw as the font's replacement glyph; never an error.
-        let s: String = bytes.iter().map(|&b| b as char).collect();
+        // UTF-8 text (accents included); bytes that are not UTF-8 are read as Latin-1, as old
+        // apps wrote them. Never an error.
+        let s: String = match core::str::from_utf8(&bytes) {
+            Ok(s) => String::from(s),
+            Err(_) => bytes.iter().map(|&b| b as char).collect(),
+        };
         host_text(c.data(), &s, x, y, color, scale);
         Ok(0)
+    });
+    // The language of the interface: 0 Portuguese (Brazil), 1 English. An app asks again each
+    // time it draws, because the language can change while it runs.
+    reg!(l, "lang", |_c: C| -> R<i32> {
+        Ok(i32::from(osjeff_core::i18n::lang().index()))
     });
     reg!(l, "blit_rgba", |mut c: C,
                           ptr: i32,

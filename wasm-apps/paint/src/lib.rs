@@ -128,10 +128,24 @@ impl Paint {
         self.status.clear();
         match r {
             Ok(()) => {
-                let _ = write!(self.status, "salvo: paint.bmp ({}x{} BMP 24 bits)", CW, CH);
+                let _ = match lang() {
+                    Lang::Pt => write!(
+                        self.status,
+                        "salvo: paint.bmp ({}\u{d7}{}, BMP de 24 bits)",
+                        CW, CH
+                    ),
+                    Lang::En => write!(
+                        self.status,
+                        "saved: paint.bmp ({}\u{d7}{}, 24-bit BMP)",
+                        CW, CH
+                    ),
+                };
             }
             Err(e) => {
-                let _ = write!(self.status, "erro ao salvar: {} (-6 = cota)", e.0);
+                let _ = match lang() {
+                    Lang::Pt => write!(self.status, "erro ao salvar: {} (-6 = cota)", e.0),
+                    Lang::En => write!(self.status, "could not save: {} (-6 = quota)", e.0),
+                };
             }
         }
     }
@@ -148,13 +162,16 @@ impl Paint {
             }
         }
         let mut t = StrBuf::<24>::new();
-        let _ = write!(t, "pincel {}", self.size);
+        let _ = write!(t, "{} {}", tr("pincel", "brush"), self.size);
         c.text(300, 14, t.as_str(), 0xE6EAF2, 2);
         c.fill_rect(0, OY + CH as i32 + 2, w, h - (OY + CH as i32 + 2), 0x10141F);
         c.text(
             10,
             OY + CH as i32 + 4,
-            "Ctrl+S salva BMP  +/- pincel  e borracha  c limpa",
+            tr(
+                "Ctrl+S salva BMP  +/- pincel  e borracha  c limpa",
+                "Ctrl+S saves BMP  +/- brush  e eraser  c clear",
+            ),
             0x6A7488,
             1,
         );

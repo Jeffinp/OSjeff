@@ -275,7 +275,7 @@ fn host_text(st: &HostState, s: &str, x: i32, y: i32, color: i32, scale: i32) {
     }
     let col = rgb(color);
     let mut px = st.ox as i64 + x as i64;
-    for &ch in s.as_bytes() {
+    for ch in s.chars() {
         if px >= bx + bw {
             break; // past the right edge — nothing more is visible
         }

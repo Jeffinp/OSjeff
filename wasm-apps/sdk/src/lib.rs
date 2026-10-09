@@ -16,7 +16,7 @@
 //!     fn on_key(&mut self, _code: i32, _mods: i32) { self.n += 1; }
 //!     fn render(&mut self, c: &mut Canvas) {
 //!         c.clear(0x10141F);
-//!         c.text(16, 16, "Ola!", 0xFFFFFF, 2);
+//!         c.text(16, 16, "Hello!", 0xFFFFFF, 2);
 //!     }
 //! }
 //! export_app!(Hello);
@@ -146,6 +146,33 @@ macro_rules! export_app {
             $crate::App::render(__osj_app(), &mut c)
         }
     };
+}
+
+/// The language of the system's interface.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Lang {
+    /// Brazilian Portuguese.
+    Pt,
+    /// English.
+    En,
+}
+
+/// The language of the interface now. Ask again each time you draw: the person can change it
+/// while the app runs.
+pub fn lang() -> Lang {
+    if unsafe { sys::lang() } == 1 {
+        Lang::En
+    } else {
+        Lang::Pt
+    }
+}
+
+/// `tr(pt, en)`: the text in the language of the interface.
+pub fn tr<'a>(pt: &'a str, en: &'a str) -> &'a str {
+    match lang() {
+        Lang::En => en,
+        Lang::Pt => pt,
+    }
 }
 
 /// Embeds the manifest text as the `osjeff.manifest` custom section.
@@ -343,24 +370,28 @@ impl Canvas {
         self.fill_rect(0, 0, w, h, rgb);
     }
 
-    /// Draws ASCII text; each glyph cell is `6 * scale` x `8 * scale` pixels.
+    /// Draws text (UTF-8: accents work); each glyph cell is `6 * scale` x `8 * scale` pixels.
     pub fn text(&mut self, x: i32, y: i32, s: &str, rgb: u32, scale: i32) {
-        // The host takes at most 4096 bytes per call.
-        let mut off = 0;
+        // The host takes at most 4096 bytes per call, and whole characters only.
         let mut cx = x;
-        while off < s.len() {
-            let n = (s.len() - off).min(4000);
-            unsafe {
-                sys::draw_text(cx, y, s.as_ptr().add(off), n as i32, rgb as i32, scale);
+        let mut rest = s;
+        while !rest.is_empty() {
+            let mut n = rest.len().min(4000);
+            while !rest.is_char_boundary(n) {
+                n -= 1;
             }
-            cx += n as i32 * 6 * scale;
-            off += n;
+            let (head, tail) = rest.split_at(n);
+            unsafe {
+                sys::draw_text(cx, y, head.as_ptr(), head.len() as i32, rgb as i32, scale);
+            }
+            cx += head.chars().count() as i32 * 6 * scale;
+            rest = tail;
         }
     }
 
     /// Width in pixels of `s` at `scale`.
     pub fn text_width(s: &str, scale: i32) -> i32 {
-        s.len() as i32 * 6 * scale
+        s.chars().count() as i32 * 6 * scale
     }
 
     /// 1:1 copy of an RGBA image (`w * h * 4` bytes; alpha ignored).

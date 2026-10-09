@@ -143,7 +143,7 @@ impl Notes {
                 }
                 n += 1;
                 if n > 99 {
-                    self.say(format_args!("muitas notas"));
+                    self.say(format_args!("{}", tr("notas demais", "too many notes")));
                     return;
                 }
             }
@@ -156,11 +156,23 @@ impl Notes {
                 let mut s = StrBuf::<NAME>::new();
                 let _ = s.write_str(self.name.as_str());
                 let n = self.len;
-                self.say(format_args!("salvo: {} ({} bytes)", s.as_str(), n));
+                self.say(format_args!(
+                    "{}: {} ({} bytes)",
+                    tr("salvo", "saved"),
+                    s.as_str(),
+                    n
+                ));
                 self.refresh_list();
             }
-            Err(Errno::NOSPC) => self.say(format_args!("disco cheio (cota do app)")),
-            Err(e) => self.say(format_args!("erro ao salvar: {}", e.0)),
+            Err(Errno::NOSPC) => self.say(format_args!(
+                "{}",
+                tr("disco cheio (cota do app)", "disk full (app quota)")
+            )),
+            Err(e) => self.say(format_args!(
+                "{}: {}",
+                tr("erro ao salvar", "could not save"),
+                e.0
+            )),
         }
     }
 
@@ -179,11 +191,19 @@ impl Notes {
                     let _ = self.name.write_str(s.as_str());
                     self.dirty = false;
                     self.focus = Focus::Editor;
-                    self.say(format_args!("aberto: {}", s.as_str()));
+                    self.say(format_args!("{}: {}", tr("aberto", "opened"), s.as_str()));
                 }
-                Err(e) => self.say(format_args!("erro de leitura: {}", e.0)),
+                Err(e) => self.say(format_args!(
+                    "{}: {}",
+                    tr("erro de leitura", "read error"),
+                    e.0
+                )),
             },
-            Err(e) => self.say(format_args!("erro ao abrir: {}", e.0)),
+            Err(e) => self.say(format_args!(
+                "{}: {}",
+                tr("erro ao abrir", "could not open"),
+                e.0
+            )),
         }
     }
 
@@ -193,7 +213,7 @@ impl Notes {
         self.name.clear();
         self.dirty = false;
         self.focus = Focus::Editor;
-        self.say(format_args!("nova nota"));
+        self.say(format_args!("{}", tr("nova nota", "new note")));
     }
 
     fn delete_note(&mut self) {
@@ -204,11 +224,15 @@ impl Notes {
         let _ = s.write_str(self.name.as_str());
         match unlink(s.as_str()) {
             Ok(()) => {
-                self.say(format_args!("apagado: {}", s.as_str()));
+                self.say(format_args!("{}: {}", tr("apagado", "deleted"), s.as_str()));
                 self.new_note();
                 self.refresh_list();
             }
-            Err(e) => self.say(format_args!("erro ao apagar: {}", e.0)),
+            Err(e) => self.say(format_args!(
+                "{}: {}",
+                tr("erro ao apagar", "could not delete"),
+                e.0
+            )),
         }
     }
 
@@ -226,8 +250,11 @@ impl Notes {
             c
         );
         self.say(format_args!(
-            "sandbox: ../../etc={} /../x={} ..={} (-1 = recusado)",
-            a, b, c
+            "sandbox: ../../etc={} /../x={} ..={} (-1 = {})",
+            a,
+            b,
+            c,
+            tr("recusado", "refused")
         ));
     }
 }
@@ -249,7 +276,11 @@ impl App for Notes {
         };
         n.refresh_list();
         n.say(format_args!(
-            "Ctrl+S salva  Ctrl+N nova  Tab lista"
+            "{}",
+            tr(
+                "Ctrl+S salva  Ctrl+N nova  Tab lista",
+                "Ctrl+S saves  Ctrl+N new  Tab list"
+            )
         ));
         n
     }
@@ -327,7 +358,7 @@ impl App for Notes {
         c.clear(0x10141F);
         // list panel
         c.fill_rect(0, 0, LIST_W, h, 0x181D27);
-        c.text(10, 12, "NOTAS", 0x9AA6BD, 2);
+        c.text(10, 12, tr("NOTAS", "NOTES"), 0x9AA6BD, 2);
         for i in 0..self.n_files {
             let y = 40 + i as i32 * 20;
             let selected = i == self.sel;
@@ -345,7 +376,7 @@ impl App for Notes {
         let ex = LIST_W + 12;
         let mut title = StrBuf::<48>::new();
         let nm = if self.name.as_str().is_empty() {
-            "(nova nota)"
+            tr("(nova nota)", "(new note)")
         } else {
             self.name.as_str()
         };

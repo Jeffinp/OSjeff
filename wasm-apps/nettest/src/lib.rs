@@ -69,7 +69,7 @@ impl App for NetTest {
                 log!("nettest {}: ok {} bytes", url, n);
             }
             Err(e) => {
-                let _ = write!(self.last, "{}: erro {}", url, e.0);
+                let _ = write!(self.last, "{}: {} {}", url, tr("erro", "error"), e.0);
                 log!("nettest {}: error {}", url, e.0);
             }
         }
@@ -79,7 +79,16 @@ impl App for NetTest {
         let (w, h) = c.size();
         c.clear(0x10141F);
         c.fill_rect(0, 0, w, 30, 0x2F6FDE);
-        c.text(12, 8, "Teste de rede: teclas 1 a 9 e 0", 0xFFFFFF, 2);
+        c.text(
+            12,
+            8,
+            tr(
+                "Teste de rede: teclas 1 a 9 e 0",
+                "Network test: keys 1 to 9 and 0",
+            ),
+            0xFFFFFF,
+            2,
+        );
         let mut y = 44;
         for (i, u) in URLS.iter().enumerate() {
             let mut b = StrBuf::<80>::new();
@@ -91,7 +100,7 @@ impl App for NetTest {
         c.text(12, y + 16, self.last.as_str(), 0xFFD84D, 1);
         c.text(12, y + 32, self.body.as_str(), 0xFFFFFF, 1);
         let mut b = StrBuf::<32>::new();
-        let _ = write!(b, "pedidos: {}", self.count);
+        let _ = write!(b, "{}: {}", tr("pedidos", "requests"), self.count);
         c.text(12, h - 16, b.as_str(), 0x6A7488, 1);
     }
 }

@@ -9,6 +9,7 @@ extern "C" {
     pub fn request_redraw();
     pub fn fill_rect(x: i32, y: i32, w: i32, h: i32, rgb: i32);
     pub fn draw_text(x: i32, y: i32, ptr: *const u8, len: i32, rgb: i32, scale: i32) -> i32;
+    pub fn lang() -> i32;
     pub fn blit_rgba(ptr: *const u8, w: i32, h: i32, dx: i32, dy: i32) -> i32;
     pub fn draw_image_png(ptr: *const u8, len: i32, x: i32, y: i32) -> i32;
     pub fn now_ms() -> i64;
@@ -43,6 +44,9 @@ mod stubs {
     pub unsafe fn request_redraw() {}
     pub unsafe fn fill_rect(x: i32, y: i32, w: i32, h: i32, rgb: i32) {}
     pub unsafe fn draw_text(x: i32, y: i32, ptr: *const u8, len: i32, rgb: i32, scale: i32) -> i32 {
+        0
+    }
+    pub unsafe fn lang() -> i32 {
         0
     }
     pub unsafe fn blit_rgba(ptr: *const u8, w: i32, h: i32, dx: i32, dy: i32) -> i32 {

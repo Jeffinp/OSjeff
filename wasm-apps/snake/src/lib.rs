@@ -32,7 +32,7 @@ const MAXLEN: usize = (COLS * ROWS) as usize;
 const STEP: i64 = 140; // ms between moves
 
 static TITLE: &[u8] = b"Snake";
-static OVER: &[u8] = b"GAME OVER  -  R reinicia";
+static OVER: &[u8] = b"GAME OVER  -  R";
 
 // Game state, in the guest's own memory (persists across frames).
 static mut BODY: [(i16, i16); MAXLEN] = [(0, 0); MAXLEN]; // [0] = head

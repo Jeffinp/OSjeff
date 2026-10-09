@@ -522,9 +522,9 @@ pub mod guest {
         6 * scale
     }
 
-    pub fn draw_char(c: &mut Canvas, x: usize, y: usize, ch: u8, color: Color, scale: usize) {
+    pub fn draw_char(c: &mut Canvas, x: usize, y: usize, ch: char, color: Color, scale: usize) {
         let mut buf = [0u8; 4];
-        let s = char::from(ch).encode_utf8(&mut buf);
+        let s = ch.encode_utf8(&mut buf);
         draw_text(c, x, y, s, color, scale);
     }
 
