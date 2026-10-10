@@ -4,7 +4,7 @@ Documento de referência técnica. Descreve o sistema **como está no código de
 checkout**, não como se pretende que fique. Para compilar e rodar veja
 [`BUILDING.md`](BUILDING.md); para verificação, [`TESTING.md`](TESTING.md); para o que
 protege e o que não protege, [`SECURITY-MODEL.md`](SECURITY-MODEL.md); para o que
-falta, [`ROADMAP.md`](ROADMAP.md). Os relatórios em [`audit/`](audit/README.md) são o
+falta, [`ROADMAP.md`](ROADMAP.md); para os números, [`BENCHMARKS.md`](BENCHMARKS.md). Os relatórios em [`audit/`](audit/README.md) são o
 registro histórico da auditoria e **parte deles descreve um estado anterior às
 correções**: onde divergem do código, vale o código.
 
@@ -15,18 +15,20 @@ como hardware real); **[A]** medido ou provado pela auditoria e **não repetido*
 
 ## TL;DR
 
-Kitsune é um SO x86_64 `no_std` em Rust que sobe direto de um bootloader (BIOS ou UEFI)
-e mostra um desktop gráfico com 7 apps. **Tudo roda em ring 0, num único espaço de
-endereçamento**; não existe modo usuário. O que separa "app" de "kernel" é convenção e
-o `#![forbid(unsafe_code)]` do crate `kitsune_core`, não hardware.
+Kitsune é um sistema operacional x86_64 `no_std` escrito em Rust (a linguagem é uma
+escolha de implementação; nada na interface fala dela). Sobe direto de um bootloader (BIOS ou
+UEFI) e entrega um desktop gráfico com nove apps do sistema (Arquivos, Navegador, Terminal,
+Editor, Calculadora, Imagens, Tarefas, Registro, Ajustes) e quatro apps WebAssembly
+(Relógio, Notas, Pintura, Cobrinha). **Tudo roda em ring 0, num único espaço de
+endereçamento**; o isolamento entre "app" e "kernel" vem do `#![forbid(unsafe_code)]` do crate
+`kitsune_core` e dos limites do WebAssembly, não do hardware (próximo passo: [`ROADMAP.md`](ROADMAP.md)).
 
-- **Dois crates de código.** `kitsune_core` (dezenas de milhares de linhas com testes, 2949 testes
-  passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~11,0 mil linhas,
+- **Dois crates de código.** `kitsune_core` (~112 mil linhas, testes incluídos, 2953 testes
+  passando [M], sem `unsafe`): toda a lógica decidível. `kernel` (~47 mil linhas,
   0 testes): hardware, scheduler, compositor, drivers.
-- **Multitarefa preemptiva** a 250 Hz, com bloqueio. Cinco threads: `compositor`,
-  `fetcher` (rede), `appd` e duas `shelld` (comandos do terminal).
-- **Multitarefa preemptiva** a 250 Hz, com bloqueio. Quatro threads: `compositor`,
-  `fetcher` (rede), `appd` (apps WASM) e `logd` (grava o log em disco, dorme até ser chamada).
+- **Multitarefa preemptiva** a 250 Hz, com bloqueio. Threads: `compositor`, `fetcher`
+  (rede), `appd` (apps WASM), duas `shelld` (comandos do terminal) e `logd` (grava o log em
+  disco, dorme até ser chamada).
 - **Memória:** heap fixo de 64 MiB num BSS de ~91 MiB; sem alocador de frames. As page
   tables são do bootloader; o kernel só edita uma entrada de nível 1 por pilha de thread,
   para criar uma **guard page**.
@@ -41,8 +43,9 @@ o `#![forbid(unsafe_code)]` do crate `kitsune_core`, não hardware.
   interface, `smoltcp` configurado pelo lease (fallback estático do SLIRP), TLS 1.3
   **com verificação de cadeia e nome** (§9), motor HTML/CSS próprio, `wasmi` com apps
   instaláveis que guardam dados no disco OJFS v3 e usam a rede pelo mesmo `fetcher`.
-- **Boot [M]:** primeiro frame em ~5 s (BIOS e UEFI) após a entrada do kernel, quase tudo
-  é o splash.
+- **Boot [M]:** primeiro quadro do desktop em ~8 s (BIOS e UEFI, QEMU sem KVM) após a entrada
+  do kernel: 5 s são a vinheta de abertura (duração mínima fixa) e ~2,6 s a montagem do disco
+  num disco novo (0,65 s num já formatado). Números e comandos em [`BENCHMARKS.md`](BENCHMARKS.md).
 
 > **Mapa do código:** a estrutura de pastas, as regras de dependência e os checklists (novo app, janela, overlay,
 > driver, módulo do core) estão em [`docs/design/code-structure.md`](design/code-structure.md).
@@ -51,11 +54,11 @@ o `#![forbid(unsafe_code)]` do crate `kitsune_core`, não hardware.
 
 | Crate | Tipo | Tamanho | Papel |
 |---|---|---|---|
-| `kitsune_core` | lib, `no_std` fora de testes, `forbid(unsafe_code)` | 11,7 mil linhas, 423 testes [M] | lógica pura, testável no host |
-| `kernel` | bin `x86_64-unknown-none`, `test = false` | 11,0 mil linhas + `switch.s` (85) | hardware, scheduler, compositor, drivers, rede, WASM |
+| `kitsune_core` | lib, `no_std` fora de testes, `forbid(unsafe_code)` | ~112 mil linhas, 2953 testes [M] | lógica pura, testável no host |
+| `kernel` | bin `x86_64-unknown-none`, `test = false` | ~47 mil linhas + `switch.s` (85) | hardware, scheduler, compositor, drivers, rede, WASM |
 | `os` | builder | ~70 linhas | `build.rs` gera `kitsune-bios.img` e `kitsune-uefi.img`; `main.rs` lança o QEMU |
 
-Fora do workspace, cada um com seu `Cargo.lock`: `fuzz/` (3 alvos), `bench/` (criterion,
+Fora do workspace, cada um com seu `Cargo.lock`: `fuzz/` (17 alvos), `bench/` (criterion,
 host) e `wasm-apps/*` (guests). O kernel é *artifact dependency* do `os` (`-Z bindeps`):
 `os/build.rs` recebe o ELF e chama `bootloader::BiosBoot` e `UefiBoot`.
 

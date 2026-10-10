@@ -1,8 +1,25 @@
 # Changelog
 
-Formato inspirado em [Keep a Changelog](https://keepachangelog.com). O Kitsune (antes OSjeff; veja a primeira
+Uma seção por marco, do mais novo para o mais antigo. O Kitsune (antes OSjeff; veja a primeira
 seção) não tem releases versionadas; as seções são marcos na `master`. As seções anteriores ao
 renomeio mantêm o nome da época.
+
+## 2026-10 — README e documentação falam só do Kitsune (W35)
+
+- **README.md e README.en.md reescritos:** apresentação, destaques com números, capturas, como começar (Windows
+  nativo e WSL, flags do `run.ps1`), o que tem dentro, como funciona, qualidade, segurança, estado do projeto,
+  índice da documentação, estrutura e licença.
+- **`docs/BENCHMARKS.md` (novo):** cada número citado nos READMEs, com o comando que o reproduz, a data (2026-10-10) e
+  o aviso de que são proporções de QEMU sem KVM (tempo de boot, tamanho da imagem, heap ocioso, quadros, testes).
+- **Interface:** `docs/design/ui-identity.md` agora registra só as decisões do shell do Kitsune e `ui-macos.md`
+  virou `docs/design/ui-design.md` (tokens, toolkit, regras de desenho, orçamento de desempenho, seções por app);
+  sem tabelas de comparação nem notas de pesquisa.
+- **Neutralidade:** comentários e documentos passam a usar só os nomes do Kitsune (Tarefas, Busca, Apps, painel,
+  barra de tarefas); `Icon::Launchpad` virou `Icon::Apps` e a curva `GENIE` virou `SWOOP`. Instruções de compilação
+  do host (Windows, WSL, `apt`) ficam como requisitos do host em `docs/BUILDING.md`.
+- **Roadmap e segurança:** `docs/ROADMAP.md` reescrito (entregue / próximos passos com critério de aceite);
+  `SECURITY.md` e `docs/SECURITY-MODEL.md` corrigidos (linhas duplicadas e valores antigos removidos, sem tirar
+  nenhuma ressalva). Contagens atualizadas: 2953 testes, 17 alvos de fuzz.
 
 ## 2026-10 — Código organizado por responsabilidade (W34)
 

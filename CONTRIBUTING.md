@@ -18,7 +18,7 @@ Uso comercial exige licença escrita do Titular.
 
 ```bash
 rustup show                 # instala o nightly fixado e os alvos
-cargo test-core             # 200+ testes, ~0,1 s
+cargo test-core             # ~2950 testes, ~1 min
 cargo lint-kernel && cargo lint-host
 ```
 

@@ -14,13 +14,13 @@ Isso não é bug, é uma decisão de projeto documentada. Interessam, em ordem:
 1. **Entrada externa que derruba, trava ou corrompe o kernel**: frame de rede, resposta
    HTTP, HTML/CSS, imagem de disco OJFS, módulo `.wasm`.
 2. **Fuga de um app WebAssembly** para fora da própria memória e das host functions.
-3. **Qualquer caminho que contorne os limites** (corpo de 256 KiB, profundidade/nós/regras
+3. **Qualquer caminho que contorne os limites** (corpo de 1 MiB, profundidade/nós/regras
    do HTML, *fuel* e memória do WASM).
 4. Falhas de **supply chain**: dependência vulnerável ou de licença incompatível.
 
 **Já conhecidos** (não precisam de relato, estão em [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md#3-o-que-não-é-protegido)):
-HTTPS sem verificação de certificado, ausência de ring 3, threads mortas que não são
-reiniciadas nem liberam recursos, lease DHCP sem renovação nem autenticação, imagem sem assinatura (Secure Boot desligado).
+HTTPS sem revogação (CRL/OCSP) nem HSTS, ausência de ring 3, threads mortas que não são
+reiniciadas nem liberam recursos, DHCP e DNS sem autenticação, imagem sem assinatura (Secure Boot desligado).
 
 ## Como relatar
 

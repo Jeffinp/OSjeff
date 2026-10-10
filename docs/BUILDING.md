@@ -28,8 +28,8 @@ cargo build --release -p os
 
 O crate `os` embute o kernel como *artifact dependency* (`-Z bindeps`, já
 habilitado em `.cargo/config.toml`) e gera duas imagens de disco em
-`target/release/build/os-*/out/`: `kitsune-bios.img` (~4,7 MB) e
-`kitsune-uefi.img` (~4,3 MB). A primeira compilação leva ~1–2 min (baixa e compila
+`target/release/build/os-*/out/`: `kitsune-bios.img` (~8,9 MB) e
+`kitsune-uefi.img` (~8,5 MB). A primeira compilação leva ~1–2 min (baixa e compila
 o bootloader); as seguintes ~25 s.
 
 ## 3. Rodar
