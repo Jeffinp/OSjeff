@@ -4,6 +4,26 @@ Uma seção por marco, do mais novo para o mais antigo. O Kitsune (antes OSjeff;
 seção) não tem releases versionadas; as seções são marcos na `master`. As seções anteriores ao
 renomeio mantêm o nome da época.
 
+## 2026-10 — Dependências e edição 2024 nos apps
+
+- **Edição 2024 do Rust em todos os crates**: o SDK e os apps (`wasm-apps/*`, `examples/*`) estavam na
+  2021. As macros do SDK passaram a gerar `#[unsafe(no_mangle)]` e `#[unsafe(link_section = ...)]`; a
+  Cobrinha deixou de tomar referências compartilhadas a `static mut` (`&raw const`). Os quatro apps
+  embutidos e os três exemplos compilam sem avisos.
+- **Dependências**: `wasmi` 1 → 2 (a validação dos módulos passa a ser pedida explicitamente com a
+  feature `validate`; o runtime precisa de mais pilha: a thread `appd` roda numa pilha de 512 KiB, via
+  `sched::spawn_with_stack`), `smoltcp` 0.12 → 0.14, `rustls-webpki` 0.103.13 → 0.103.15,
+  `rustls-pki-types` 1.14.1 → 1.15.1 e as atualizações compatíveis do `Cargo.lock` (workspace, fuzz e
+  apps). Combustível e limite de memória do runtime novo foram conferidos com um teste isolado
+  (laço infinito → `OutOfFuel`; `memory.grow` acima do limite → -1).
+- **Não atualizadas, de propósito**: `sha2` 0.11, `p256`/`p384` 0.14 e `rsa`: o `rsa` 0.9 ainda depende
+  do `digest` 0.10 e não compila com `sha2` 0.11; ficam juntos em 0.10/0.13/0.9 até haver um `rsa`
+  estável para o `digest` 0.11. O `rsa` continua com a exceção do aviso Marvin documentada em
+  `deny.toml`. O nightly fixado (`nightly-2026-10-05`) também fica: trocar de nightly é uma decisão
+  deliberada, com verificação própria.
+- Verificado: 2953 testes, clippy, `cargo deny`, `cargo audit`, `cargo fuzz build`, boot BIOS e UEFI, os
+  quatro apps abrindo e rodando, HTTP simples e uma conexão TLS (certificado autoassinado recusado).
+
 ## 2026-10 — README e documentação falam só do Kitsune (W35)
 
 - **README.md e README.en.md reescritos:** apresentação, destaques com números, capturas, como começar (Windows

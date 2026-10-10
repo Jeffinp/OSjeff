@@ -349,7 +349,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // freezes the UI.
     wasm::init(info, tsc_khz);
     x86_64::instructions::interrupts::without_interrupts(|| {
-        sched::spawn("appd", wasm::worker);
+        sched::spawn_with_stack("appd", wasm::worker, 512 * 1024);
         // The terminal's command thread: sleep, ping and curl wait here, not in the compositor.
         sched::spawn("shelld", desktop::shell_worker);
         sched::spawn("shelld2", desktop::shell_worker2);

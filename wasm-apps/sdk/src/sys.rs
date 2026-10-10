@@ -4,7 +4,7 @@
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "osj")]
-extern "C" {
+unsafe extern "C" {
     pub fn set_title(ptr: *const u8, len: i32) -> i32;
     pub fn get_size() -> i64;
     pub fn request_redraw();

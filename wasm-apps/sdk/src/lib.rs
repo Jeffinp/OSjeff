@@ -112,35 +112,35 @@ macro_rules! export_app {
                 (*core::ptr::addr_of_mut!(__OSJ_APP)).get_or_insert_with(<$t as $crate::App>::new)
             }
         }
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub extern "C" fn on_key(code: i32, mods: i32) {
             $crate::App::on_key(__osj_app(), code, mods)
         }
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub extern "C" fn on_text(ch: i32) {
             $crate::App::on_text(__osj_app(), ch as u32)
         }
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub extern "C" fn on_pointer(x: i32, y: i32, buttons: i32) {
             $crate::App::on_pointer(__osj_app(), x, y, buttons)
         }
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub extern "C" fn on_scroll(dx: i32, dy: i32) {
             $crate::App::on_scroll(__osj_app(), dx, dy)
         }
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub extern "C" fn on_resize(w: i32, h: i32) {
             $crate::App::on_resize(__osj_app(), w, h)
         }
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub extern "C" fn on_tick(dt: i32) {
             $crate::App::on_tick(__osj_app(), dt)
         }
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub extern "C" fn on_close() {
             $crate::App::on_close(__osj_app())
         }
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub extern "C" fn render() {
             let mut c = $crate::Canvas::new();
             $crate::App::render(__osj_app(), &mut c)
@@ -178,11 +178,11 @@ pub fn tr<'a>(pt: &'a str, en: &'a str) -> &'a str {
 /// Embeds the manifest text as the `kitsune.manifest` custom section.
 #[macro_export]
 macro_rules! manifest {
-    ($text:expr) => {
+    ($text:expr_2021) => {
         const _: () = {
             const T: &[u8] = $text.as_bytes();
             #[used]
-            #[link_section = "kitsune.manifest"]
+            #[unsafe(link_section = "kitsune.manifest")]
             static M: [u8; T.len()] = {
                 let mut a = [0u8; T.len()];
                 let mut i = 0;
@@ -200,11 +200,11 @@ macro_rules! manifest {
 /// `icon!(include_bytes!("icon.png"));`
 #[macro_export]
 macro_rules! icon {
-    ($bytes:expr) => {
+    ($bytes:expr_2021) => {
         const _: () = {
             const B: &[u8] = $bytes;
             #[used]
-            #[link_section = "kitsune.icon"]
+            #[unsafe(link_section = "kitsune.icon")]
             static I: [u8; B.len()] = {
                 let mut a = [0u8; B.len()];
                 let mut i = 0;

@@ -19,7 +19,7 @@ fn panic(_: &PanicInfo) -> ! {
 // to the window; `host.fill_rect`/`host.draw_text` draw chrome; `host.time_ms`
 // drives the animation.
 #[link(wasm_import_module = "host")]
-extern "C" {
+unsafe extern "C" {
     fn blit(ptr: *const u8, w: i32, h: i32, dx: i32, dy: i32);
     fn fill_rect(x: i32, y: i32, w: i32, h: i32, rgb: i32);
     fn draw_text(x: i32, y: i32, ptr: *const u8, len: i32, rgb: i32, scale: i32);
@@ -38,7 +38,7 @@ static mut SHIFT: u32 = 0; // palette offset, nudged by input
 static mut SPEED: u32 = 16; // animation divisor, cycled by Enter
 
 /// Render one frame: a header bar, then the computed plasma image blitted below.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn render() {
     let t = unsafe { time_ms() } as u32;
     let shift = unsafe { SHIFT };
@@ -73,7 +73,7 @@ pub extern "C" fn render() {
 }
 
 /// Keyboard: Space shifts the palette, Enter cycles the animation speed.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn on_key(code: i32) {
     unsafe {
         if code == 32 {
@@ -85,7 +85,7 @@ pub extern "C" fn on_key(code: i32) {
 }
 
 /// Pointer: a click shifts the palette by the click's x, so it feels reactive.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn on_pointer(x: i32, _y: i32, buttons: i32) {
     if buttons != 0 {
         unsafe { SHIFT = SHIFT.wrapping_add((x.max(0) as u32).wrapping_mul(2)) };
@@ -94,8 +94,8 @@ pub extern "C" fn on_pointer(x: i32, _y: i32, buttons: i32) {
 
 // Package manifest (a custom wasm section, see docs/design/apps.md): one file = one app.
 #[used]
-#[link_section = "kitsune.manifest"]
+#[unsafe(link_section = "kitsune.manifest")]
 static MANIFEST: [u8; 104] = *b"id=plasma\nname=Plasma\nversion=1.0.0\nabi=1\nmem_mib=4\nfuel_frame=20000000\nwin_w=692\nwin_h=414\nresizable=0\n";
 #[used]
-#[link_section = "kitsune.icon"]
+#[unsafe(link_section = "kitsune.icon")]
 static ICON: [u8; include_bytes!("../icon.png").len()] = *include_bytes!("../icon.png");

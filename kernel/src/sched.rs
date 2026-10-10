@@ -41,7 +41,7 @@ use alloc::alloc::{Layout, alloc_zeroed, handle_alloc_error};
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use kitsune_core::paging::{self, PAGE_SIZE};
 use x86_64::registers::segmentation::{CS, SS, Segment};
 
@@ -175,15 +175,15 @@ fn current_sp() -> u64 {
 /// take the guard page out of the page tables so running off the stack faults (see `vm`). Returns the
 /// block's regions and the guard page's address, or `None` for the guard if it could not be installed
 /// (no physical-memory mapping, huge page), in which case the canary is planted instead.
-fn alloc_stack() -> (paging::StackRegions, Option<u64>) {
-    let size = paging::guarded_block_size(STACK_SIZE).expect("stack size");
+fn alloc_stack(stack_size: usize) -> (paging::StackRegions, Option<u64>) {
+    let size = paging::guarded_block_size(stack_size).expect("stack size");
     let layout = Layout::from_size_align(size, PAGE_SIZE as usize).expect("stack layout");
     // SAFETY: `layout` has a non-zero size.
     let base = unsafe { alloc_zeroed(layout) };
     if base.is_null() {
         handle_alloc_error(layout);
     }
-    let regions = paging::stack_regions(base as u64, STACK_SIZE).expect("page-aligned stack block");
+    let regions = paging::stack_regions(base as u64, stack_size).expect("page-aligned stack block");
     // The block is never freed, so the unmapped page never gets back to the allocator (whose free-list
     // node writes would fault on it): a dead thread's stack stays allocated for good.
     match crate::vm::unmap_page(regions.guard_start) {
@@ -202,10 +202,17 @@ fn alloc_stack() -> (paging::StackRegions, Option<u64>) {
 
 /// Spawn a preemptible kernel thread starting at `entry` (must never return).
 pub fn spawn(name: &'static str, entry: extern "C" fn() -> !) {
+    spawn_with_stack(name, entry, STACK_SIZE);
+}
+
+/// Like [`spawn`], on a stack of `stack_size` bytes (a multiple of the page size). For threads whose
+/// work is deep (the app runtime validates and translates WebAssembly modules).
+pub fn spawn_with_stack(name: &'static str, entry: extern "C" fn() -> !, stack_size: usize) {
     let s = scheduler();
     assert!(s.threads.len() < MAX_THREADS, "too many threads");
+    STACK_KIB[s.threads.len()].store((stack_size / 1024) as u32, Ordering::Relaxed);
 
-    let (regions, guard) = alloc_stack();
+    let (regions, guard) = alloc_stack(stack_size);
     match guard {
         Some(g) => crate::klog!(
             Info,
@@ -564,9 +571,15 @@ pub fn thread_stack_kib(i: usize) -> u32 {
     if i == 0 {
         512
     } else {
-        (STACK_SIZE / 1024) as u32
+        match STACK_KIB.get(i).map(|k| k.load(Ordering::Relaxed)) {
+            Some(k) if k != 0 => k,
+            _ => (STACK_SIZE / 1024) as u32,
+        }
     }
 }
+
+/// Stack size of each slot in KiB (0 = the default `STACK_SIZE`), set by `spawn_with_stack`.
+static STACK_KIB: [AtomicU32; MAX_THREADS] = [const { AtomicU32::new(0) }; MAX_THREADS];
 
 const _: () = assert!(MAX_THREADS == kitsune_core::sysmon::MAX_THREADS);
 

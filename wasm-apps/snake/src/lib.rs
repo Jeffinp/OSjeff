@@ -17,7 +17,7 @@ fn panic(_: &PanicInfo) -> ! {
 }
 
 #[link(wasm_import_module = "host")]
-extern "C" {
+unsafe extern "C" {
     fn fill_rect(x: i32, y: i32, w: i32, h: i32, rgb: i32);
     fn draw_text(x: i32, y: i32, ptr: *const u8, len: i32, rgb: i32, scale: i32);
     fn time_ms() -> i64;
@@ -61,7 +61,7 @@ fn place_food() {
             let x = (rng_next() % COLS as u32) as i32;
             let y = (rng_next() % ROWS as u32) as i32;
             let mut on = false;
-            for &(bx, by) in BODY.iter().take(LEN) {
+            for &(bx, by) in (*(&raw const BODY)).iter().take(LEN) {
                 if bx as i32 == x && by as i32 == y {
                     on = true;
                     break;
@@ -106,7 +106,7 @@ fn step() {
             ALIVE = false;
             return;
         }
-        for &(bx, by) in BODY.iter().take(LEN) {
+        for &(bx, by) in (*(&raw const BODY)).iter().take(LEN) {
             if bx as i32 == hx && by as i32 == hy {
                 ALIVE = false;
                 return;
@@ -127,7 +127,7 @@ fn step() {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn on_key(code: i32) {
     unsafe {
         match code as u8 {
@@ -165,7 +165,7 @@ pub extern "C" fn on_key(code: i32) {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn render() {
     unsafe {
         if !STARTED {
@@ -186,7 +186,7 @@ pub extern "C" fn render() {
         // Food.
         fill_rect(OX + FX * CELL + 2, OY + FY * CELL + 2, CELL - 4, CELL - 4, 0xE54B4B);
         // Snake (brighter head).
-        for (i, &(bx, by)) in BODY.iter().take(LEN).enumerate() {
+        for (i, &(bx, by)) in (*(&raw const BODY)).iter().take(LEN).enumerate() {
             let c = if i == 0 { 0x39D353 } else { 0x2EA043 };
             fill_rect(
                 OX + bx as i32 * CELL + 1,
@@ -211,8 +211,8 @@ pub extern "C" fn render() {
 
 // Package manifest (a custom wasm section, see docs/design/apps.md): one file = one app.
 #[used]
-#[link_section = "kitsune.manifest"]
+#[unsafe(link_section = "kitsune.manifest")]
 static MANIFEST: [u8; 133] = *b"id=snake\nname=Snake\nname.pt=Cobrinha\nname.en=Snake\nversion=1.0.0\nabi=1\nmem_mib=4\nfuel_frame=20000000\nwin_w=692\nwin_h=414\nresizable=0\n";
 #[used]
-#[link_section = "kitsune.icon"]
+#[unsafe(link_section = "kitsune.icon")]
 static ICON: [u8; include_bytes!("../icon.png").len()] = *include_bytes!("../icon.png");

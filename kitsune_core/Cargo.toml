@@ -14,8 +14,8 @@ description = "Pure, no_std OS logic (keymap, terminal, editor, window geometry)
 # pure-Rust RustCrypto ones (no C, no asm, no SIMD: they build for the bare-metal
 # target). Versions of the webpki pair are pinned exactly. See docs/design/tls-browser.md.
 [dependencies]
-rustls-pki-types = { version = "=1.14.1", default-features = false, features = ["alloc"] }
-rustls-webpki = { version = "=0.103.13", default-features = false, features = ["alloc"] }
+rustls-pki-types = { version = "=1.15.1", default-features = false, features = ["alloc"] }
+rustls-webpki = { version = "=0.103.15", default-features = false, features = ["alloc"] }
 p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa"] }
 p384 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 rsa = { version = "0.9", default-features = false, features = ["sha2"] }
