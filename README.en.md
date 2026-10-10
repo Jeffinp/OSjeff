@@ -40,7 +40,7 @@ documents and most of the technical docs are in Portuguese.)
 
 > **Honesty first.** What is said here is what the repository proves. Every number has the command that reproduces
 > it in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) (Portuguese), and what is still in progress is in
-> [Project status](#-project-status).
+> [Project status](#project-status).
 
 ---
 
@@ -204,7 +204,7 @@ problem: [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md) · [`SECURITY.md`](S
 
 ---
 
-## 🗺️ Project status
+## Project status
 
 Kitsune runs end to end on QEMU, in BIOS and UEFI, and that is where everything is measured and tested. What comes
 next, in order, with an acceptance criterion for each item, is in [`docs/ROADMAP.md`](docs/ROADMAP.md):

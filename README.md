@@ -40,7 +40,7 @@ documentados.
 
 > **Honestidade primeiro.** O que está dito aqui é o que o repositório prova. Cada número tem o comando que o
 > reproduz em [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md), e o que ainda está em andamento está na seção
-> [Estado do projeto](#-estado-do-projeto).
+> [Estado do projeto](#estado-do-projeto).
 
 ---
 
@@ -204,7 +204,7 @@ um problema: [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md) · [`SECURITY.md
 
 ---
 
-## 🗺️ Estado do projeto
+## Estado do projeto
 
 O Kitsune roda de ponta a ponta em QEMU, em BIOS e UEFI, e é nesse ambiente que tudo é medido e testado. O que vem
 a seguir, em ordem, com critério de aceite para cada item, está em [`docs/ROADMAP.md`](docs/ROADMAP.md):
