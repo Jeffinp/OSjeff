@@ -4,6 +4,22 @@ Uma seção por marco, do mais novo para o mais antigo. O Kitsune (antes OSjeff;
 seção) não tem releases versionadas; as seções são marcos na `master`. As seções anteriores ao
 renomeio mantêm o nome da época.
 
+## 2026-10 — Hardware, dívida técnica
+
+- **Vídeo:** `tools/gpu-matrix.sh` inicia a imagem em cada adaptador de vídeo que o QEMU emula (BIOS e
+  UEFI): 11 de 12 casos chegam ao desktop. O que falha é `virtio-gpu-pci` sem VGA em UEFI (a GOP é só de
+  *blit*, sem framebuffer linear). Detalhes em [`docs/HARDWARE.md`](docs/HARDWARE.md). O boot passa a
+  registrar o framebuffer (resolução, stride, formato) e `tools/hw-check.ps1` repete a matriz no Windows
+  e prepara o pendrive.
+- **Notas 1.1.0** aceita acentos e qualquer caractere UTF-8 (cursor, apagar e quebra de linha por
+  caractere). As Propriedades de um app mostram o nome no idioma em uso.
+- Um app embutido instalado numa versão **anterior** é atualizado no boot (relógio, pintura e cobrinha
+  1.0.1, notas 1.1.0), sem ressuscitar um app que o usuário removeu.
+- `bench/` volta a compilar (módulos de `fb` divididos, API atual do shell e do editor).
+- Divisão de arquivos longos do kernel: `main.rs` (737 → 503 linhas, o resto em `bringup.rs`),
+  `fetch/`, `netstack/` e `wasm/manager/` em módulos por responsabilidade; comportamento verificado por
+  boot em BIOS e UEFI, apps e `curl`.
+
 ## 2026-10 — Disco: limite de tempo e nova tentativa
 
 - O driver ATA desistia por **contagem de leituras do registrador de estado**: numa máquina carregada

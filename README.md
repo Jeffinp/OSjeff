@@ -225,6 +225,7 @@ a seguir, em ordem, com critério de aceite para cada item, está em [`docs/ROAD
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Mergulho técnico em cada subsistema |
 | [`docs/BUILDING.md`](docs/BUILDING.md) | Compilar, rodar, DOOM, criar um app, problemas comuns |
 | [`docs/BOOT-USB.md`](docs/BOOT-USB.md) | Gravar a imagem num pendrive |
+| [`docs/HARDWARE.md`](docs/HARDWARE.md) | Placas de vídeo testadas e drivers que faltam |
 | [`docs/TESTING.md`](docs/TESTING.md) | Testes, cobertura, fuzzing, QEMU, desempenho |
 | [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Cada número deste README, o comando que o reproduz e a data |
 | [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md) | Fronteiras de confiança, o que é e não é protegido |

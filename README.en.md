@@ -227,6 +227,7 @@ Most technical documents are in Portuguese.
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Technical deep dive into each subsystem |
 | [`docs/BUILDING.md`](docs/BUILDING.md) | Build, run, DOOM, writing an app, common problems |
 | [`docs/BOOT-USB.md`](docs/BOOT-USB.md) | Writing the image to a USB stick |
+| [`docs/HARDWARE.md`](docs/HARDWARE.md) | Video adapters tested and drivers still missing |
 | [`docs/TESTING.md`](docs/TESTING.md) | Tests, coverage, fuzzing, QEMU, performance |
 | [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Every number in this README, the command that reproduces it and the date |
 | [`docs/SECURITY-MODEL.md`](docs/SECURITY-MODEL.md) | Trust boundaries, what is and is not protected |
