@@ -1,4 +1,4 @@
-//! Visual identity: the design tokens of `docs/design/ui-macos.md` as drawing
+//! Visual identity: the design tokens of `docs/design/ui-design.md` as drawing
 //! colours, the live accent and the current appearance (light / dark).
 //!
 //! New UI code reads [`pal`] (a palette that follows the appearance) and

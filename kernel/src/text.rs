@@ -6,7 +6,7 @@
 //! `Canvas` drawing helpers. Only the compositor thread draws UI text, so the
 //! lazily filled cache needs no lock (see the SAFETY note on [`engine`]).
 //!
-//! Sizes used by the UI: 11, 12, 13, 15, 17, 22, 28 (see `docs/design/ui-macos.md`);
+//! Sizes used by the UI: 11, 12, 13, 15, 17, 22, 28 (see `docs/design/ui-design.md`);
 //! any size from 8 to 64 works and is cached on first use. The 8x8 bitmap font in
 //! `font.rs` remains only for the terminal and editor grids.
 
