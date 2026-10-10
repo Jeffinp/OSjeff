@@ -8,7 +8,7 @@ wait_first_frame
 t=dark
 if [ "${LIGHT:-0}" = 1 ]; then
   t=light
-  goto 1100 14; click; sleep 0.6; goto 953 188; click; sleep 0.6; key esc; sleep 0.6
+  panel_item tray; click; sleep 0.7; quick_tile appearance; click; sleep 0.7; key esc; sleep 0.6
 fi
 key ctrl-w; sleep 0.8
 dock_icon browser; click; sleep 2
