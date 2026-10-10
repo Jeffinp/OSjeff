@@ -19,6 +19,10 @@ renomeio mantêm o nome da época.
 - Divisão de arquivos longos do kernel: `main.rs` (737 → 503 linhas, o resto em `bringup.rs`),
   `fetch/`, `netstack/` e `wasm/manager/` em módulos por responsabilidade; comportamento verificado por
   boot em BIOS e UEFI, apps e `curl`.
+- Divisão de arquivos longos do `kitsune_core` (só movimentos de código, 2958 testes passam): layout e
+  estilo da web, navegador, builtins e executor do shell, linha de comando e parser, gerenciador de
+  arquivos, editor, VFS, fs3, inflate, PNG, imagem, fonte TTF, atividade, klog e DHCP. Restam poucos
+  arquivos entre 600 e 970 linhas (o maior é a auditoria de i18n).
 
 ## 2026-10 — Disco: limite de tempo e nova tentativa
 
