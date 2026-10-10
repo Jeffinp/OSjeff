@@ -18,6 +18,9 @@ impl Desktop {
         if let Some(d) = sh.dialog.as_mut() {
             busy |= d.t.step(dt);
         }
+        if let Some(l) = sh.login.as_mut() {
+            busy |= l.t.step(dt);
+        }
         if let Some(a) = sh.apps.as_mut() {
             busy |= a.t.step(dt);
         }
@@ -52,6 +55,14 @@ impl Desktop {
             self.force_full = true;
         }
         if sh
+            .login
+            .as_ref()
+            .is_some_and(|l| l.closing && l.t.finished())
+        {
+            sh.login = None;
+            self.force_full = true;
+        }
+        if sh
             .apps
             .as_ref()
             .is_some_and(|a| a.closing && a.t.finished())
@@ -76,6 +87,7 @@ impl Desktop {
         sh.menu.as_ref().is_some_and(|m| !m.t.finished())
             || sh.pop.as_ref().is_some_and(|p| !p.t.finished())
             || sh.dialog.as_ref().is_some_and(|d| !d.t.finished())
+            || sh.login.as_ref().is_some_and(|l| !l.t.finished())
             || sh.apps.as_ref().is_some_and(|a| !a.t.finished())
             || sh.search.as_ref().is_some_and(|s| !s.t.finished())
             || sh.knobs.iter().any(|k| !k.finished())
@@ -91,6 +103,7 @@ impl Desktop {
         sh.menu.is_some()
             || sh.pop.is_some()
             || sh.dialog.is_some()
+            || sh.login.is_some()
             || sh.apps.is_some()
             || sh.search.is_some()
             || self.switcher.is_some()
@@ -128,6 +141,7 @@ impl Desktop {
     pub(crate) fn modal_open(&self) -> bool {
         let sh = &self.shell;
         sh.dialog.as_ref().is_some_and(|d| !d.closing)
+            || sh.login.as_ref().is_some_and(|l| !l.closing)
             || sh.apps.as_ref().is_some_and(|a| !a.closing)
             || sh.search.as_ref().is_some_and(|s| !s.closing)
     }

@@ -98,6 +98,10 @@ impl Desktop {
                 }
                 return;
             }
+            Focus::User(k) => {
+                st.users_key(k, key);
+                return;
+            }
             Focus::None => {}
         }
         let n = SECTIONS.len() as u8;
@@ -166,6 +170,10 @@ impl Desktop {
         let Some((hid, hrect)) = hit else {
             return;
         };
+        if (A_UFIELD..A_UFIELD + 0x100).contains(&hid) {
+            st.users_click(hid);
+            return;
+        }
         let mut s = crate::settings::get();
         match hid {
             h if (A_SEC..A_SEC + 16).contains(&h) => {

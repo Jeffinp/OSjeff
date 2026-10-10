@@ -19,6 +19,9 @@ impl Desktop {
             Entry::item(t!("menu.system.settings"), "", Cmd::Settings),
             Entry::item(t!("menu.system.gallery"), "Ctrl+Alt+G", Cmd::Gallery),
             Entry::sep(),
+            Entry::item(t!("menu.system.lock"), "Ctrl+Alt+L", Cmd::Lock),
+            Entry::item(t!("menu.system.sign_out"), "", Cmd::SignOut),
+            Entry::sep(),
             Entry::item(t!("menu.system.restart"), "", Cmd::Reboot),
             Entry::item(t!("menu.system.shutdown"), "", Cmd::Shutdown),
         ]

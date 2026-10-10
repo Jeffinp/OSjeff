@@ -16,7 +16,7 @@ pub(super) const ROW: i32 = 48;
 pub(super) const COL_MAX: i32 = 600;
 
 /// The sections, in order: name, glyph and the colour of its badge.
-pub(super) const SECTIONS: [(&str, Glyph, u32); 10] = [
+pub(super) const SECTIONS: [(&str, Glyph, u32); 11] = [
     (tk!("settings.sec.appearance"), Glyph::Sun, 0x5B5CF6),
     (tk!("settings.sec.wallpaper"), Glyph::Image, 0xEC4899),
     (tk!("settings.sec.dock"), Glyph::Dock, 0x14B8C4),
@@ -26,10 +26,12 @@ pub(super) const SECTIONS: [(&str, Glyph, u32); 10] = [
     (tk!("settings.sec.network"), Glyph::Network, 0x0A84FF),
     (tk!("settings.sec.disk"), Glyph::Disk, 0x8E8E93),
     (tk!("settings.sec.power"), Glyph::Power, 0xFF9F0A),
+    (tk!("settings.sec.users"), Glyph::User, 0x5B5CF6),
     (tk!("settings.sec.about"), Glyph::Info, 0x8B90A0),
 ];
 /// Section numbers other code opens.
-pub(crate) const ABOUT: u8 = 9;
+pub(crate) const ABOUT: u8 = 10;
+pub(super) const S_USERS: u8 = 9;
 pub(super) const S_TIME: u8 = 4;
 pub(super) const S_LANG: u8 = 5;
 
@@ -60,6 +62,20 @@ pub(super) const A_LANG: u32 = 0x2C0;
 pub(super) const A_CLOCKFMT: u32 = 0x2D0;
 pub(super) const A_KBDUSE: u32 = 0x2E0;
 pub(super) const A_TZ: u32 = 0x300;
+// The Users page.
+pub(super) const A_UFIELD: u32 = 0x500;
+pub(super) const A_UADMIN: u32 = 0x510;
+pub(super) const A_UCREATE: u32 = 0x511;
+pub(super) const A_UMINE: u32 = 0x512;
+pub(super) const A_UMINE_SAVE: u32 = 0x513;
+pub(super) const A_UMINE_CANCEL: u32 = 0x514;
+pub(super) const A_USET: u32 = 0x520;
+pub(super) const A_UDEL: u32 = 0x540;
+pub(super) const A_UROLE: u32 = 0x560;
+pub(super) const A_USET_SAVE: u32 = 0x580;
+pub(super) const A_USET_CANCEL: u32 = 0x581;
+pub(super) const A_UDEL_YES: u32 = 0x582;
+pub(super) const A_UDEL_NO: u32 = 0x583;
 pub(super) const DOWN: u32 = 1 << 31;
 
 /// Rows of the time-zone list shown at once.
@@ -73,6 +89,27 @@ pub(super) enum Focus {
     Path,
     TzSearch,
     Kbd,
+    /// A field of the Users page: 0 name, 1 full name, 2 password (new account); 3 current and
+    /// 4 new password (own password); 5 an administrator's new password for somebody else.
+    User(u8),
+}
+
+/// What the Users page is in the middle of.
+#[derive(Default)]
+pub(super) struct UsersForm {
+    pub name: String,
+    pub full: String,
+    pub pw: String,
+    pub admin: bool,
+    /// Changing one's own password: the form is open, with the current and the new one.
+    pub mine_open: bool,
+    pub cur_pw: String,
+    pub new_pw: String,
+    /// An administrator setting somebody else's password.
+    pub set_for: Option<String>,
+    pub set_pw: String,
+    /// Asking before removing an account.
+    pub confirm_del: Option<String>,
 }
 
 /// Per-window state of the settings app.
@@ -99,6 +136,7 @@ pub(crate) struct SettingsState {
     pub(super) drag: u32,
     /// Switch knobs: reduzir movimento, notificações, 24 horas.
     pub(super) knobs: [Glide; 3],
+    pub(super) users: UsersForm,
 }
 
 impl SettingsState {
@@ -135,6 +173,7 @@ impl SettingsState {
                 Glide::at(if s.toasts { 256 } else { 0 }),
                 Glide::at(if s.clock24 { 256 } else { 0 }),
             ],
+            users: UsersForm::default(),
         };
         let p = s.image_path();
         st.path[..p.len()].copy_from_slice(p);

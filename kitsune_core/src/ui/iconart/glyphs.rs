@@ -39,6 +39,8 @@ pub enum Glyph {
     StarFill,
     Globe,
     Home,
+    /// A head and shoulders: accounts.
+    User,
 }
 
 /// Draw `g` at `px` x `px` in straight ARGB colour `c`.
@@ -219,6 +221,13 @@ pub fn glyph(g: Glyph, px: usize, c: u32) -> Surface {
             let mut dot = Path::new();
             dot.ellipse(u(8), u(5), u(1) - 32, u(1) - 32);
             s.fill_path(&dot, Paint::Solid(c));
+        }
+        Glyph::User => {
+            let mut head = Path::new();
+            head.ellipse(u(8), u(5), u(3) + 32, u(3) + 32);
+            s.fill_path(&head, Paint::Solid(c));
+            let body = quad_points(pt(2, 15), pt(8, 5), pt(14, 15), 10);
+            s.fill_path(&stroke_path(&body, w(2) + 32, true), Paint::Solid(c));
         }
         Glyph::ChevronLeft => stroke(&mut s, &[(10, 3), (5, 8), (10, 13)], 2),
         Glyph::Reload => {

@@ -52,6 +52,10 @@ impl Desktop {
     /// the pointer. Returns whether the scene changed.
     pub(super) fn mouse_left_press(&mut self, cx: i32, cy: i32) -> bool {
         let mut scene = false;
+        if self.login_active() {
+            self.login_click(cx, cy);
+            return true;
+        }
         if self
             .toasts
             .click(cx, cy, self.sw, self.sh, shell::toasts::now_ms())

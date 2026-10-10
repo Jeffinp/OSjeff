@@ -190,6 +190,10 @@ fn with_sys<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
 /// [`Secured`](kitsune_core::secured::Secured) with the session's credentials. Before an account
 /// exists (early boot) there is no session and the call has full rights.
 fn with_user<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
+    // Accounts exist and nobody is signed in: nothing a user asked for may touch the files.
+    if super::accounts::locked_out() {
+        return Err(VfsError::PermissionDenied);
+    }
     let cred = super::accounts::cred();
     with_sys(|be| match cred {
         Some(c) => {

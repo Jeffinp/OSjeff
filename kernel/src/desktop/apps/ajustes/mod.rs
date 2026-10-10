@@ -10,5 +10,6 @@ mod input;
 mod pages;
 mod paint;
 mod state;
+mod users_logic;
 
 pub(crate) use state::{ABOUT, SettingsState};

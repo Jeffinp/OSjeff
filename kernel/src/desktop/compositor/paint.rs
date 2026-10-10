@@ -60,6 +60,13 @@ impl Painter for DeskPainter<'_> {
                 c.set_clip(clip);
                 desk.draw_panel(&mut c, self.time);
             }
+            Slot::Login => {
+                // The wallpaper under a dim: nothing of the session shows through.
+                self.restore_wallpaper(clip);
+                let mut c = Canvas::new(self.back, self.info);
+                c.set_clip(clip);
+                desk.draw_login_layer(&mut c);
+            }
             other => {
                 let mut c = Canvas::new(self.back, self.info);
                 c.set_clip(clip);
@@ -72,7 +79,7 @@ impl Painter for DeskPainter<'_> {
                     Slot::Popover => desk.draw_popover_layer(&mut c),
                     Slot::Switcher => desk.draw_switcher_layer(&mut c),
                     Slot::Dialog => desk.draw_dialog_layer(&mut c),
-                    Slot::Wallpaper | Slot::Window(_) | Slot::Panel => {}
+                    Slot::Wallpaper | Slot::Window(_) | Slot::Panel | Slot::Login => {}
                 }
             }
         }

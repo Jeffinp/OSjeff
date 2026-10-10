@@ -62,8 +62,10 @@ impl Desktop {
 
     pub fn handle_key(&mut self, scan: u8, extended: bool, pressed: bool, _time: Time) -> bool {
         let alt_before = self.keymap.alt();
+        let login = self.login_active();
         if pressed
             && !alt_before
+            && !login
             && let Some(sp) = special_of(scan, extended)
             && self.handle_special(sp)
         {
@@ -86,6 +88,11 @@ impl Desktop {
         let Some(key) = key else {
             return false;
         };
+        // The sign-in / lock screen takes every key: no shortcut reaches what is behind it.
+        if login {
+            self.login_key(key);
+            return true;
+        }
         if !alt_now && self.switcher.take().is_some() {
             self.shell.switcher_glass.clear();
             self.force_full = true;
@@ -137,6 +144,11 @@ impl Desktop {
                 // Ctrl+Alt+D: show the desktop (or bring the windows back).
                 Key::Char(b'd' | b'D') if alt_now => {
                     self.execute(Cmd::ShowDesktop);
+                    return true;
+                }
+                // Ctrl+Alt+L: lock the screen.
+                Key::Char(b'l' | b'L') if alt_now => {
+                    self.execute(Cmd::Lock);
                     return true;
                 }
                 // Ctrl+Space: Busca.

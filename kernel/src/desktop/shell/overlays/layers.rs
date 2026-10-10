@@ -23,6 +23,12 @@ impl Desktop {
         }
     }
 
+    pub(crate) fn draw_login_layer(&self, c: &mut Canvas) {
+        if let Some(l) = &self.shell.login {
+            self.draw_login(c, l);
+        }
+    }
+
     pub(crate) fn draw_dialog_layer(&self, c: &mut Canvas) {
         if let Some(d) = &self.shell.dialog {
             self.draw_dialog(c, d);

@@ -7,5 +7,6 @@ mod helpers;
 mod keys;
 mod launcher;
 mod layers;
+mod login;
 mod pointer;
 mod search;

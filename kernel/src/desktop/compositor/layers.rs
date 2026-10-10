@@ -25,6 +25,7 @@ pub(super) const MENU: LayerId = LayerId(0xF000_0006);
 pub(super) const POPOVER: LayerId = LayerId(0xF000_0007);
 pub(super) const SWITCHER: LayerId = LayerId(0xF000_0008);
 pub(super) const DIALOG: LayerId = LayerId(0xF000_0009);
+pub(super) const LOGIN: LayerId = LayerId(0xF000_000A);
 
 /// What a [`LayerId`] stands for.
 pub(super) enum Slot {
@@ -39,6 +40,7 @@ pub(super) enum Slot {
     Popover,
     Switcher,
     Dialog,
+    Login,
 }
 
 pub(super) fn slot_of(id: LayerId) -> Slot {
@@ -53,6 +55,7 @@ pub(super) fn slot_of(id: LayerId) -> Slot {
         POPOVER => Slot::Popover,
         SWITCHER => Slot::Switcher,
         DIALOG => Slot::Dialog,
+        LOGIN => Slot::Login,
         other => Slot::Window(WindowId::from_raw(other.0)),
     }
 }
@@ -240,6 +243,22 @@ impl Desktop {
         }
         if sh.dialog.is_some() {
             scene.push(Layer::new(DIALOG, full).with_look(ep.overlay));
+        }
+        if let Some(l) = &sh.login {
+            // Opaque and over everything: nothing below is painted while it is up.
+            let look = Look::new()
+                .u(super::super::shell::level(&l.t) as u64)
+                .u(l.sel as u64)
+                .u(l.pw.len() as u64)
+                .u(l.msg.as_ref().map_or(0, |m| m.0.len() as u64 + 1))
+                .b(l.msg.as_ref().is_some_and(|m| m.1))
+                .u(l.users.len() as u64)
+                .u(ep.overlay);
+            scene.push(
+                Layer::new(LOGIN, full)
+                    .with_opaque(full)
+                    .with_look(look.get()),
+            );
         }
         let live_only = live_only
             && !dynamic.is_empty()

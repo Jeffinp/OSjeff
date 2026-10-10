@@ -17,6 +17,8 @@ impl Desktop {
             Cmd::Sep => {}
             Cmd::About => self.open_settings(crate::desktop::apps::ajustes::ABOUT),
             Cmd::Settings => self.open_settings(0),
+            Cmd::Lock => self.lock_screen(),
+            Cmd::SignOut => self.sign_out(),
             Cmd::Reboot => self.ask_power(false),
             Cmd::Shutdown => self.ask_power(true),
             Cmd::NewWindow => {

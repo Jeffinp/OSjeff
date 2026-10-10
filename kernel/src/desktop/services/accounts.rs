@@ -1,4 +1,3 @@
-#![allow(dead_code)] // the Users page and the login screen use the rest
 //! Accounts and the signed-in session.
 //!
 //! The pure logic (the database, password hashing, permission rules, login throttling) is in
@@ -460,4 +459,11 @@ pub fn identity() -> Option<kitsune_core::shell::sys::Identity> {
             admin: s.admin,
         }
     })
+}
+
+/// Accounts exist but nobody is signed in: the screen is on the sign-in layer. The user-facing
+/// file access is refused in this state (see `vfs`).
+pub fn locked_out() -> bool {
+    let has_db = DB.lock().ok().is_some_and(|g| g.is_some());
+    has_db && !signed_in()
 }

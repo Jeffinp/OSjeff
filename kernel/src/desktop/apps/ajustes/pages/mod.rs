@@ -4,5 +4,6 @@ mod index;
 mod look;
 mod region;
 mod system;
+mod users;
 
 pub(super) use index::page;

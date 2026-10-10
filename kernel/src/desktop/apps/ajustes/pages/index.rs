@@ -10,6 +10,7 @@ use super::system::page_about;
 use super::system::page_disk;
 use super::system::page_network;
 use super::system::page_power;
+use super::users::page_users;
 use crate::desktop::apps::ajustes::builder::Ui;
 use crate::desktop::apps::ajustes::state::*;
 use crate::desktop::kit;
@@ -28,6 +29,7 @@ pub(in super::super) fn page(ui: &mut Ui<'_, '_>, d: &Desktop) {
         6 => page_network(ui, d),
         7 => page_disk(ui, d),
         8 => page_power(ui),
+        S_USERS => page_users(ui),
         _ => page_about(ui, d),
     }
     ui.st

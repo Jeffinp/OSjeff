@@ -171,8 +171,13 @@ impl Desktop {
         };
         // Install the bundled apps into /apps (first boot) and build the launcher catalog.
         desk.init_apps();
-        // The terminal is open (and focused) at boot.
-        desk.open_new(Kind::Terminal);
+        // The sign-in screen when accounts need one (several users, or a password set); else the
+        // terminal is open (and focused) at boot.
+        if services::accounts::login_required() && !services::accounts::signed_in() {
+            desk.open_login(false);
+        } else {
+            desk.open_new(Kind::Terminal);
+        }
         desk
     }
 

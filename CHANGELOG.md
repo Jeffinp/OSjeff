@@ -28,8 +28,14 @@ renomeio mantêm o nome da época.
   a base de contas usam o acesso do sistema. Os lugares do Arquivos (Início, Documentos, Imagens) e a pasta
   inicial do Terminal e dos apps `fs=home` seguem o usuário. Terminal: `whoami`, `id`, `groups`, `users`,
   `chmod` (octal e simbólico, `-R`), `chown`, `chgrp`, `ls -l` e `stat` com dono, grupo e modo. Verificado em
-  QEMU: um `chmod 000` impede o `cat`, e criar algo em `/` é recusado. Ainda sem tela de login nem página
-  Usuários nos Ajustes.
+  QEMU: um `chmod 000` impede o `cat`, e criar algo em `/` é recusado.
+- **Login e página Usuários.** Com senha definida ou mais de uma conta, o boot mostra a **tela de login**
+  (avatares das contas, Tab troca, Enter entra; erro genérico, espera crescente após 3 erros, tudo no
+  `LoginGuard`). Bloquear a tela (Ctrl+Alt+L ou menu do sistema) e **Sair** voltam a ela. Ajustes ganhou a
+  página **Usuários**: sua conta e troca de senha (pede a atual), lista de contas, definir senha, tornar
+  administrador ou comum e remover (com confirmação) para administradores, e formulário de nova conta.
+  Verificado em QEMU (W38/W39): criar `maria` com senha, reiniciar, senha errada recusada, senha certa
+  abre `/home/maria`; o PBKDF2 (20 000 iterações) leva ~140 ms em QEMU/TCG.
 - (histórico) O kernel não usava essas peças ainda (não havia login): o plano em fases está em
   [`docs/design/usuarios-seguranca.md`](docs/design/usuarios-seguranca.md) e o de compatibilidade em
   [`docs/design/compatibilidade.md`](docs/design/compatibilidade.md); o roadmap foi atualizado.

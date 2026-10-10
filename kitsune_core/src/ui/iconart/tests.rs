@@ -43,6 +43,7 @@ fn every_glyph_draws_ink_inside_its_box_at_every_size() {
         Glyph::Bell,
         Glyph::Wave,
         Glyph::Clock,
+        Glyph::User,
     ];
     for g in all {
         for px in [12usize, 16, 20, 24] {

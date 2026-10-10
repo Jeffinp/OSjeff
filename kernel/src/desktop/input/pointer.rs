@@ -30,6 +30,19 @@ impl Desktop {
         let right_pressed = right && !self.prev_right;
         let released = !left && self.prev_left;
 
+        // The sign-in / lock screen takes the pointer: nothing behind it is reachable.
+        if self.login_active() {
+            if left_pressed {
+                self.login_click(cx, cy);
+            }
+            self.prev_left = left;
+            self.prev_right = right;
+            return MouseResult {
+                scene_dirty: left_pressed,
+                cursor_moved,
+            };
+        }
+
         // Hover of the shell layers (panel, menus, Apps, Busca) and the app bar.
         if cursor_moved {
             if self.shell_pointer(cx, cy) {
