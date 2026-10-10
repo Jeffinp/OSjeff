@@ -305,6 +305,8 @@ pub struct Browser {
     caret: usize,
     status: Status,
     pending: bool,
+    /// Body of the POST being navigated to (`application/x-www-form-urlencoded`); `None` = GET.
+    post: Option<Vec<u8>>,
     nav: [u8; URL_CAP],
     nav_len: usize,
     home: bool, // showing the native start page (no page loaded)

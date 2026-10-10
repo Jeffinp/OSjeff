@@ -91,6 +91,7 @@ fn first_run(p: &Page) -> (i32, i32) {
 mod dead_keys;
 mod find_page;
 mod forms_parsing;
+mod forms_select_textarea;
 mod forms_state_query;
 mod hostile_input;
 mod images_layout;

@@ -2,14 +2,15 @@
 //! the user edits ([`FormState`]), dead-key accent composition ([`Compose`])
 //! and the GET query ([`FormState::target`]).
 //!
-//! Only `method=get` works: submitting builds `action?name=value&...` with
-//! `application/x-www-form-urlencoded` escaping of the UTF-8 bytes and the
-//! browser navigates there. `method=post` is refused with a message
-//! ([`FormError::Post`]). Supported controls: text-like inputs (`text`,
+//! Submitting builds `name=value&...` with `application/x-www-form-urlencoded`
+//! escaping of the UTF-8 bytes: for `method=get` the browser navigates to
+//! `action?query`, for `method=post` it sends the query as the request body
+//! ([`FormState::submission`]). Supported controls: text-like inputs (`text`,
 //! `search`, `url`, `email`, `tel`, `number` and no type), `password`,
 //! `hidden`, `submit` and `<button>`, check boxes and radio buttons (a radio
-//! group is the buttons of one form that share a `name`). Files, `<select>` and
-//! `<textarea>` are not drawn.
+//! group is the buttons of one form that share a `name`), `<select>` (a single
+//! choice, changed by click or keys: there is no drop-down list) and `<textarea>`
+//! (several lines; Enter inserts a line break). Files are not drawn.
 
 use crate::Key;
 use crate::tk;
@@ -22,8 +23,14 @@ pub const MAX_FORMS: usize = 16;
 pub const MAX_FIELDS: usize = 32;
 /// Longest value a text control holds, in bytes.
 pub const MAX_VALUE: usize = 256;
-/// Longest query string built from a form, in bytes.
+/// Longest text a `<textarea>` holds, in bytes.
+pub const MAX_TEXTAREA: usize = 4096;
+/// Options kept per `<select>`.
+pub const MAX_OPTIONS: usize = 256;
+/// Longest query string built from a form for a GET, in bytes.
 pub const MAX_QUERY: usize = 380;
+/// Longest body a POST form sends, in bytes.
+pub const MAX_POST: usize = 16 * 1024;
 
 /// The kinds of control we draw and submit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,13 +49,29 @@ pub enum FieldKind {
     Checkbox,
     /// A radio button: one per group is checked.
     Radio,
+    /// A `<select>`: one of its options is chosen.
+    Select,
+    /// A multi-line text box.
+    TextArea,
 }
 
 impl FieldKind {
     /// Can the user type into it?
     pub fn is_text(self) -> bool {
-        matches!(self, FieldKind::Text | FieldKind::Password)
+        matches!(
+            self,
+            FieldKind::Text | FieldKind::Password | FieldKind::TextArea
+        )
     }
+}
+
+/// One `<option>` of a `<select>`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectOption {
+    /// What is sent (the `value` attribute, else the text).
+    pub value: String,
+    /// What is shown.
+    pub label: String,
 }
 
 /// One control of a form, as written in the page.
@@ -66,6 +89,12 @@ pub struct FieldInfo {
     pub checked: bool,
     /// The `placeholder` attribute of a text box.
     pub placeholder: String,
+    /// The options of a `<select>`.
+    pub options: Vec<SelectOption>,
+    /// The option a `<select>` starts on.
+    pub selected: usize,
+    /// Visible lines of a `<textarea>`.
+    pub rows: usize,
 }
 
 /// A `<form>` and its controls.
@@ -92,9 +121,7 @@ impl FormInfo {
 /// Why a form could not be submitted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FormError {
-    /// `method=post`.
-    Post,
-    /// The query would not fit in a URL.
+    /// The query would not fit in a URL (or the body in a request).
     TooLong,
     /// No such form.
     NoForm,
@@ -104,7 +131,6 @@ impl FormError {
     /// Catalog key of the message shown to the user.
     pub fn message_key(self) -> &'static str {
         match self {
-            FormError::Post => tk!("web.form.post"),
             FormError::TooLong => tk!("web.form.too_long"),
             FormError::NoForm => tk!("web.form.invalid"),
         }
@@ -282,6 +308,103 @@ pub struct FormState {
     compose: Compose,
 }
 
+/// Split a `<textarea>` value into the rows it shows: byte ranges (without the line break) of at
+/// most `max_w` pixels, where `width_of` is the width of one character. A row breaks after the
+/// last space that fits, or in the middle of a word wider than the box. Every character falls in
+/// one row, so a caret can always be placed.
+pub fn wrap_rows(value: &str, max_w: i32, width_of: impl Fn(char) -> i32) -> Vec<(usize, usize)> {
+    let mut rows = Vec::new();
+    let mut line_start = 0;
+    loop {
+        let line_end = value[line_start..]
+            .find('\n')
+            .map_or(value.len(), |i| line_start + i);
+        let mut a = line_start;
+        loop {
+            let mut w = 0;
+            let mut cut = None; // the last place a row may end: just after a space
+            let mut end = line_end;
+            for (i, ch) in value[a..line_end].char_indices() {
+                let cw = width_of(ch);
+                // A space may hang past the edge, so a row ends after it, not before it.
+                if w + cw > max_w && i > 0 && ch != ' ' {
+                    end = cut.unwrap_or(a + i);
+                    break;
+                }
+                w += cw;
+                if ch == ' ' {
+                    cut = Some(a + i + 1);
+                }
+            }
+            rows.push((a, end));
+            if end >= line_end {
+                break;
+            }
+            a = end;
+        }
+        if line_end >= value.len() {
+            return rows;
+        }
+        line_start = line_end + 1;
+    }
+}
+
+/// The row of `rows` (from [`wrap_rows`]) that holds byte offset `caret`, and the offset into it.
+pub fn caret_row(rows: &[(usize, usize)], caret: usize) -> (usize, usize) {
+    for (k, &(a, b)) in rows.iter().enumerate() {
+        let soft_wrap_next = rows.get(k + 1).is_some_and(|n| n.0 == b);
+        if caret < b || (caret == b && !soft_wrap_next) {
+            return (k, caret.saturating_sub(a));
+        }
+    }
+    rows.last()
+        .map_or((0, 0), |&(a, b)| (rows.len() - 1, b - a))
+}
+
+/// Longest value of a control, in bytes.
+fn max_len(kind: FieldKind) -> usize {
+    if kind == FieldKind::TextArea {
+        MAX_TEXTAREA
+    } else {
+        MAX_VALUE
+    }
+}
+
+/// Byte offset of the start of the line holding `caret`.
+fn line_start(s: &str, caret: usize) -> usize {
+    let c = caret.min(s.len());
+    s[..c].rfind('\n').map_or(0, |i| i + 1)
+}
+
+/// Byte offset of the end (before the `\n`) of the line holding `caret`.
+fn line_end(s: &str, caret: usize) -> usize {
+    let c = caret.min(s.len());
+    s[c..].find('\n').map_or(s.len(), |i| c + i)
+}
+
+/// The caret one line up or down, in the same column (counted in characters).
+fn vertical(s: &str, caret: usize, up: bool) -> usize {
+    let c = caret.min(s.len());
+    let start = line_start(s, c);
+    let col = s[start..c].chars().count();
+    let target_start = if up {
+        if start == 0 {
+            return 0;
+        }
+        line_start(s, start - 1)
+    } else {
+        let end = line_end(s, c);
+        if end >= s.len() {
+            return s.len();
+        }
+        end + 1
+    };
+    let target_end = line_end(s, target_start);
+    let line = &s[target_start..target_end];
+    let off = line.char_indices().nth(col).map_or(line.len(), |(i, _)| i);
+    target_start + off
+}
+
 fn prev_boundary(s: &str, i: usize) -> usize {
     let mut i = i.min(s.len());
     if i == 0 {
@@ -320,8 +443,13 @@ impl FormState {
                                 // The state of a toggle: "1" when checked.
                                 return String::from(if fi.checked { "1" } else { "" });
                             }
+                            if fi.kind == FieldKind::Select {
+                                // The index of the chosen option.
+                                let i = fi.selected.min(fi.options.len().saturating_sub(1));
+                                return alloc::format!("{i}");
+                            }
                             let mut v = fi.value.clone();
-                            truncate_at_boundary(&mut v, MAX_VALUE);
+                            truncate_at_boundary(&mut v, max_len(fi.kind));
                             v
                         })
                         .collect()
@@ -344,6 +472,68 @@ impl FormState {
     /// Is the check box or radio button checked?
     pub fn is_checked(&self, form: usize, field: usize) -> bool {
         !self.value(form, field).is_empty()
+    }
+
+    /// The index of the option a `<select>` shows.
+    pub fn select_index(&self, form: usize, field: usize) -> usize {
+        self.value(form, field).parse().unwrap_or(0)
+    }
+
+    /// The label of the option a `<select>` shows (empty when it has none).
+    pub fn select_label<'a>(&self, forms: &'a [FormInfo], form: usize, field: usize) -> &'a str {
+        forms
+            .get(form)
+            .and_then(|f| f.fields.get(field))
+            .and_then(|fi| fi.options.get(self.select_index(form, field)))
+            .map_or("", |o| o.label.as_str())
+    }
+
+    /// Choose another option of a `<select>`: `delta` steps, wrapping round. Returns whether
+    /// the choice changed.
+    pub fn step_select(
+        &mut self,
+        forms: &[FormInfo],
+        form: usize,
+        field: usize,
+        delta: i32,
+    ) -> bool {
+        let Some(fi) = forms.get(form).and_then(|f| f.fields.get(field)) else {
+            return false;
+        };
+        let n = fi.options.len() as i32;
+        if fi.kind != FieldKind::Select || n < 2 {
+            return false;
+        }
+        let now = self.select_index(form, field) as i32;
+        let next = (now + delta).rem_euclid(n) as usize;
+        if let Some(v) = self.values.get_mut(form).and_then(|r| r.get_mut(field)) {
+            *v = alloc::format!("{next}");
+        }
+        true
+    }
+
+    /// Jump to the next option whose label starts with `c` (any case), after the current one.
+    fn select_by_letter(&mut self, forms: &[FormInfo], form: usize, field: usize, c: char) {
+        let Some(fi) = forms.get(form).and_then(|f| f.fields.get(field)) else {
+            return;
+        };
+        let n = fi.options.len();
+        let now = self.select_index(form, field);
+        let c = c.to_ascii_lowercase();
+        for k in 1..=n {
+            let i = (now + k) % n;
+            if fi.options[i]
+                .label
+                .chars()
+                .next()
+                .is_some_and(|f| f.to_ascii_lowercase() == c)
+            {
+                if let Some(v) = self.values.get_mut(form).and_then(|r| r.get_mut(field)) {
+                    *v = alloc::format!("{i}");
+                }
+                return;
+            }
+        }
     }
 
     /// Flip a check box, or select a radio button (clearing the others of its group).
@@ -460,6 +650,11 @@ impl FormState {
     /// result of composition). Returns whether anything was inserted.
     pub fn insert_str(&mut self, forms: &[FormInfo], s: &str) -> bool {
         let caret = self.caret;
+        let multi = self
+            .focus
+            .and_then(|(f, i)| forms.get(f)?.fields.get(i))
+            .is_some_and(|fi| fi.kind == FieldKind::TextArea);
+        let max = if multi { MAX_TEXTAREA } else { MAX_VALUE };
         let Some(v) = self.focused_text(forms) else {
             return false;
         };
@@ -469,10 +664,10 @@ impl FormState {
         }
         let mut added = 0;
         for ch in s.chars() {
-            if ch < ' ' || ch == '\u{7f}' {
+            if (ch < ' ' && !(multi && ch == '\n')) || ch == '\u{7f}' {
                 continue; // no control characters in a field
             }
-            if v.len() + ch.len_utf8() > MAX_VALUE {
+            if v.len() + ch.len_utf8() > max {
                 break;
             }
             v.insert(at + added, ch);
@@ -498,6 +693,31 @@ impl FormState {
                 let s: String = pending.into_iter().collect();
                 self.insert_str(forms, &s);
             }
+        }
+        if kind == FieldKind::Select {
+            return match key {
+                Key::Up | Key::Left => {
+                    self.step_select(forms, form, field, -1);
+                    FormOutcome::Changed
+                }
+                Key::Down | Key::Right | Key::Char(b' ') => {
+                    self.step_select(forms, form, field, 1);
+                    FormOutcome::Changed
+                }
+                Key::Char(b) if b.is_ascii_graphic() => {
+                    self.select_by_letter(forms, form, field, b as char);
+                    FormOutcome::Changed
+                }
+                Key::Enter => FormOutcome::Submit {
+                    form,
+                    submitter: None,
+                },
+                Key::Esc => {
+                    self.blur();
+                    FormOutcome::Blur
+                }
+                _ => FormOutcome::Ignored,
+            };
         }
         if matches!(kind, FieldKind::Checkbox | FieldKind::Radio) {
             return match key {
@@ -588,12 +808,30 @@ impl FormState {
                 FormOutcome::Changed
             }
             Key::Home => {
-                self.caret = 0;
+                let v = self.value(form, field);
+                self.caret = if kind == FieldKind::TextArea {
+                    line_start(v, self.caret)
+                } else {
+                    0
+                };
                 FormOutcome::Changed
             }
             Key::End => {
-                let n = self.value(form, field).len();
-                self.caret = n;
+                let v = self.value(form, field);
+                self.caret = if kind == FieldKind::TextArea {
+                    line_end(v, self.caret)
+                } else {
+                    v.len()
+                };
+                FormOutcome::Changed
+            }
+            Key::Up | Key::Down if kind == FieldKind::TextArea => {
+                let v = self.value(form, field);
+                self.caret = vertical(v, self.caret, key == Key::Up);
+                FormOutcome::Changed
+            }
+            Key::Enter if kind == FieldKind::TextArea => {
+                self.insert_str(forms, "\n");
                 FormOutcome::Changed
             }
             Key::Enter => FormOutcome::Submit {
@@ -616,11 +854,24 @@ impl FormState {
         form: usize,
         submitter: Option<usize>,
     ) -> Result<String, FormError> {
+        self.encode(forms, form, submitter, MAX_QUERY)
+    }
+
+    fn encode(
+        &self,
+        forms: &[FormInfo],
+        form: usize,
+        submitter: Option<usize>,
+        limit: usize,
+    ) -> Result<String, FormError> {
         let f = forms.get(form).ok_or(FormError::NoForm)?;
         let mut q = String::new();
         for (i, fi) in f.fields.iter().enumerate() {
             let include = match fi.kind {
-                FieldKind::Hidden | FieldKind::Text | FieldKind::Password => !fi.name.is_empty(),
+                FieldKind::Hidden | FieldKind::Text | FieldKind::Password | FieldKind::TextArea => {
+                    !fi.name.is_empty()
+                }
+                FieldKind::Select => !fi.name.is_empty() && !fi.options.is_empty(),
                 FieldKind::Submit => submitter == Some(i) && !fi.name.is_empty(),
                 FieldKind::Checkbox | FieldKind::Radio => {
                     !fi.name.is_empty() && self.is_checked(form, i)
@@ -635,41 +886,74 @@ impl FormState {
             }
             urlencode(&fi.name, &mut q);
             q.push('=');
-            let v = match fi.kind {
+            match fi.kind {
                 FieldKind::Hidden | FieldKind::Submit | FieldKind::Checkbox | FieldKind::Radio => {
-                    fi.value.as_str()
+                    urlencode(fi.value.as_str(), &mut q)
                 }
-                _ => self.value(form, i),
-            };
-            urlencode(v, &mut q);
-            if q.len() > MAX_QUERY {
+                FieldKind::Select => {
+                    let o = fi.options.get(self.select_index(form, i));
+                    urlencode(o.map_or("", |o| o.value.as_str()), &mut q)
+                }
+                // A browser sends a line break as CR LF.
+                FieldKind::TextArea => {
+                    urlencode(&self.value(form, i).replace('\n', "\r\n"), &mut q)
+                }
+                _ => urlencode(self.value(form, i), &mut q),
+            }
+            if q.len() > limit {
                 return Err(FormError::TooLong);
             }
         }
         Ok(q)
     }
 
-    /// The `href` to navigate to on submit (relative to the page URL): the
-    /// form's action without its own query or fragment, then `?` and the
-    /// query. An empty action stays on the current page.
+    /// What submitting `form` sends: the address (relative to the page URL: the form's action
+    /// without its own query or fragment; empty stays on the current page) and, for
+    /// `method=post`, the body. A GET puts the query in the address after `?`.
+    pub fn submission(
+        &self,
+        forms: &[FormInfo],
+        form: usize,
+        submitter: Option<usize>,
+    ) -> Result<Submission, FormError> {
+        let f = forms.get(form).ok_or(FormError::NoForm)?;
+        let action = f.action.trim();
+        let end = action.find(['?', '#']).unwrap_or(action.len());
+        let mut href = String::from(&action[..end]);
+        if f.post {
+            // A POST keeps the query string of its action (it is part of the address).
+            let q_end = action.find('#').unwrap_or(action.len());
+            href = String::from(&action[..q_end]);
+            let body = self.encode(forms, form, submitter, MAX_POST)?;
+            return Ok(Submission {
+                href,
+                body: Some(body),
+            });
+        }
+        let q = self.encode(forms, form, submitter, MAX_QUERY)?;
+        href.push('?');
+        href.push_str(&q);
+        Ok(Submission { href, body: None })
+    }
+
+    /// The `href` to navigate to on submit for a GET form (see [`FormState::submission`]).
     pub fn target(
         &self,
         forms: &[FormInfo],
         form: usize,
         submitter: Option<usize>,
     ) -> Result<String, FormError> {
-        let f = forms.get(form).ok_or(FormError::NoForm)?;
-        if f.post {
-            return Err(FormError::Post);
-        }
-        let q = self.query(forms, form, submitter)?;
-        let action = f.action.trim();
-        let end = action.find(['?', '#']).unwrap_or(action.len());
-        let mut t = String::from(&action[..end]);
-        t.push('?');
-        t.push_str(&q);
-        Ok(t)
+        self.submission(forms, form, submitter).map(|s| s.href)
     }
+}
+
+/// What a form sends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Submission {
+    /// Where to, relative to the page URL.
+    pub href: String,
+    /// The urlencoded body of a POST (`None`: a GET, the data is in `href`).
+    pub body: Option<String>,
 }
 
 fn truncate_at_boundary(s: &mut String, max: usize) {

@@ -73,7 +73,21 @@ pub fn build_get_request(
     port: u16,
     tls: bool,
 ) {
-    req.extend_from_slice(b"GET ");
+    build_request(req, lang, host, path, port, tls, None);
+}
+
+/// Append an HTTP/1.1 request to `req`: a `GET`, or a `POST` of `body` as
+/// `application/x-www-form-urlencoded` when there is one.
+pub fn build_request(
+    req: &mut Vec<u8>,
+    lang: Lang,
+    host: &str,
+    path: &str,
+    port: u16,
+    tls: bool,
+    body: Option<&[u8]>,
+) {
+    req.extend_from_slice(if body.is_some() { b"POST " } else { b"GET " });
     req.extend_from_slice(path.as_bytes());
     req.extend_from_slice(b" HTTP/1.1\r\nHost: ");
     req.extend_from_slice(host.as_bytes());
@@ -102,7 +116,29 @@ pub fn build_get_request(
         .as_bytes(),
     );
     req.extend_from_slice(accept_language(lang).as_bytes());
-    req.extend_from_slice(b"\r\nAccept-Encoding: gzip, deflate\r\nConnection: close\r\n\r\n");
+    req.extend_from_slice(b"\r\nAccept-Encoding: gzip, deflate\r\nConnection: close\r\n");
+    if let Some(body) = body {
+        req.extend_from_slice(
+            b"Content-Type: application/x-www-form-urlencoded\r\nContent-Length: ",
+        );
+        let mut digits = [0u8; 20];
+        let mut n = body.len();
+        let mut i = digits.len();
+        loop {
+            i -= 1;
+            digits[i] = b'0' + (n % 10) as u8;
+            n /= 10;
+            if n == 0 {
+                break;
+            }
+        }
+        req.extend_from_slice(&digits[i..]);
+        req.extend_from_slice(b"\r\n");
+    }
+    req.extend_from_slice(b"\r\n");
+    if let Some(body) = body {
+        req.extend_from_slice(body);
+    }
 }
 
 impl Browser {
@@ -113,6 +149,7 @@ impl Browser {
             caret: 0,
             status: Status::Idle,
             pending: false,
+            post: None,
             nav: [0; URL_CAP],
             nav_len: 0,
             home: true,
@@ -188,6 +225,8 @@ impl Browser {
 
     pub(super) fn set_url(&mut self, s: &[u8]) {
         self.bar_selected = false;
+        // Every way to navigate goes through here, so only `open_post` leaves a body behind.
+        self.post = None;
         self.url_len = s.len().min(URL_CAP);
         self.url[..self.url_len].copy_from_slice(&s[..self.url_len]);
         self.caret = self.url_len;
@@ -465,6 +504,35 @@ impl Browser {
             }
             Err(_) => false,
         }
+    }
+
+    /// A form with `method=post` was submitted: resolve `href` like a link and navigate there
+    /// with `body` (urlencoded). Returns `false` when the address was refused. Reloading or
+    /// going back to the result asks for the address with GET (a silent second POST could
+    /// repeat an action), so the body is not kept.
+    pub fn open_post(&mut self, href: &[u8], body: Vec<u8>) -> bool {
+        let base = if self.internal {
+            parse_url(b"http://kitsune.local/")
+        } else {
+            parse_url(self.nav_url())
+        };
+        let Some(base) = base else {
+            return false;
+        };
+        match crate::browsing::redirect::resolve_redirect(&base, href) {
+            Ok(target) => {
+                self.set_url(&target);
+                self.post = Some(body);
+                self.submit();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// The body to send with the request just taken by [`Browser::take_request`] (`None` for a GET).
+    pub fn post_body(&self) -> Option<&[u8]> {
+        self.post.as_deref()
     }
 
     /// Like [`Browser::loaded`], recording how the page actually arrived: `conn`

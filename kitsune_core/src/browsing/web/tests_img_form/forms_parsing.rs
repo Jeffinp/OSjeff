@@ -48,11 +48,13 @@ fn button_type_button_is_a_button_that_submits_nothing() {
 }
 
 #[test]
-fn unsupported_controls_are_skipped() {
+fn unsupported_controls_are_skipped_and_the_others_are_not_text() {
     let p = form_page(
         "<form><input type=file name=f><input type=range name=g><select name=s><option>um</option></select><textarea name=t>txt</textarea></form>",
     );
-    assert!(p.forms[0].fields.is_empty());
+    // Files and ranges are not drawn; a select and a textarea are controls now.
+    let kinds: Vec<_> = p.forms[0].fields.iter().map(|f| f.kind).collect();
+    assert_eq!(kinds, [FieldKind::Select, FieldKind::TextArea]);
     // The option text and textarea content are not rendered as page text.
     let t = texts(&p);
     assert!(!t.iter().any(|s| s == "um" || s == "txt"), "{t:?}");

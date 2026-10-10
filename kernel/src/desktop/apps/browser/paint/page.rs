@@ -9,7 +9,9 @@ use super::metrics::rgb;
 use crate::desktop::*;
 use crate::text::{self, Weight};
 use kitsune_core::web::{
-    Cmd as WebCmd, DECO_STRIKE, DECO_UNDERLINE, Font, Page, form::FieldKind, textops::Span,
+    Cmd as WebCmd, DECO_STRIKE, DECO_UNDERLINE, Font, Page,
+    form::{FieldKind, caret_row, wrap_rows},
+    textops::Span,
 };
 
 /// Copy `img` into the box `(x, y, w, h)` (screen coordinates), clipped to `clip`. A picture whose
@@ -398,6 +400,97 @@ impl Desktop {
                             (r.y + f.h / 5).max(0) as usize,
                             1,
                             (f.h - 2 * (f.h / 5)).max(1) as usize,
+                            accent,
+                        );
+                    }
+                    c.restore_clip(saved);
+                }
+                FieldKind::Select => {
+                    c.fill_rrect(r, radius, Corner::Circle, white, 256);
+                    if focused {
+                        c.stroke_rrect(r.inflated(2), radius + 2, Corner::Circle, accent, 90);
+                        c.stroke_rrect(r, radius, Corner::Circle, accent, 256);
+                    } else {
+                        c.stroke_rrect(r, radius, Corner::Circle, edge, 256);
+                    }
+                    let arrow = (f.h / 2).clamp(10, 18);
+                    let inner = Rect::new(r.x + f.pad_x, r.y, r.w - f.pad_x - arrow - 8, r.h);
+                    let label = bs.forms.select_label(&page.forms, f.form, f.field);
+                    let ty = text::center_y(r.y, r.h, px, wt);
+                    text::draw_ellipsis(c, inner.x, ty, inner.w, label, px, wt, ink);
+                    ui::draw_glyph(
+                        c,
+                        kitsune_core::iconart::Glyph::ChevronDown,
+                        r.right() - arrow - 8,
+                        r.y + (r.h - arrow) / 2,
+                        arrow,
+                        0xFF6E_6E73,
+                    );
+                }
+                FieldKind::TextArea => {
+                    c.fill_rrect(r, radius.min(8), Corner::Circle, white, 256);
+                    if focused {
+                        c.stroke_rrect(
+                            r.inflated(2),
+                            radius.min(8) + 2,
+                            Corner::Circle,
+                            accent,
+                            90,
+                        );
+                        c.stroke_rrect(r, radius.min(8), Corner::Circle, accent, 256);
+                    } else {
+                        c.stroke_rrect(r, radius.min(8), Corner::Circle, edge, 256);
+                    }
+                    let inner = Rect::new(
+                        r.x + f.pad_x,
+                        r.y + f.pad_y,
+                        r.w - 2 * f.pad_x,
+                        r.h - 2 * f.pad_y,
+                    );
+                    let value = bs.forms.value(f.form, f.field);
+                    let saved = c.set_clip(
+                        inner
+                            .intersection(&c.clip_rect())
+                            .unwrap_or(Rect::new(0, 0, 0, 0)),
+                    );
+                    let line_h = f.line_h.max(1);
+                    if value.is_empty()
+                        && let Some(ph) = info.map(|i| i.placeholder.as_str())
+                    {
+                        let ty = text::center_y(inner.y, line_h, px, wt);
+                        text::draw(c, inner.x, ty, ph, px, wt, hint);
+                    }
+                    let rows = wrap_rows(value, inner.w, |ch| {
+                        text::measure(ch.encode_utf8(&mut [0; 4]), px, wt)
+                    });
+                    let visible = (inner.h / line_h).max(1) as usize;
+                    let caret = if focused {
+                        bs.forms.caret().min(value.len())
+                    } else {
+                        0
+                    };
+                    let (caret_r, caret_off) = caret_row(&rows, caret);
+                    // The rows around the caret, so it stays visible; from the top when idle.
+                    let top = if focused {
+                        (caret_r + 1).saturating_sub(visible)
+                    } else {
+                        0
+                    };
+                    for (k, &(a, b)) in rows.iter().enumerate().skip(top).take(visible) {
+                        let ly = inner.y + (k - top) as i32 * line_h;
+                        let ty = text::center_y(ly, line_h, px, wt);
+                        text::draw(c, inner.x, ty, &value[a..b], px, wt, ink);
+                    }
+                    if focused && caret_r >= top && caret_r < top + visible {
+                        let (a, _) = rows.get(caret_r).copied().unwrap_or((0, 0));
+                        let before = &value[a..(a + caret_off).min(value.len())];
+                        let cx = text::measure(before, px, wt);
+                        let ly = inner.y + (caret_r - top) as i32 * line_h;
+                        c.fill_rect(
+                            (inner.x + cx).max(0) as usize,
+                            ly.max(0) as usize,
+                            1,
+                            line_h.max(1) as usize,
                             accent,
                         );
                     }

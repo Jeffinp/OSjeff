@@ -127,7 +127,8 @@ pub fn pump_browser(desk: &mut Desktop, redraw: &mut bool) {
         if let Some(len) = desk.browser_take_request(&mut url) {
             let mut host = [0u8; 96];
             let hlen = desk.browser_insecure_host(&mut host);
-            fetch::try_post(&url[..len], &host[..hlen]);
+            let body = desk.browser_post_body();
+            fetch::try_post(&url[..len], &host[..hlen], body.as_deref());
         } else if let Some((len, fit_w)) = desk.browser_next_image(&mut url) {
             // Nothing else is waiting: fetch the next picture of the page.
             if !fetch::try_post_image(&url[..len], &[], fit_w) {

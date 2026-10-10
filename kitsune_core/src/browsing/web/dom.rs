@@ -151,6 +151,14 @@ impl HtmlParser<'_> {
     fn starts_with(&self, s: &[u8]) -> bool {
         self.b[self.i..].starts_with(s)
     }
+    /// Is the next thing the start tag `<name` (any case, followed by a name end)?
+    fn at_open_tag(&self, name: &[u8]) -> bool {
+        let r = &self.b[self.i..];
+        r.len() > name.len() + 1
+            && r[0] == b'<'
+            && r[1..=name.len()].eq_ignore_ascii_case(name)
+            && !(r[name.len() + 1].is_ascii_alphanumeric() || r[name.len() + 1] == b'-')
+    }
 
     /// Parse sibling nodes until EOF or an unmatched close tag whose name is on
     /// the `open` stack (so the caller can pop to it).
@@ -176,6 +184,13 @@ impl HtmlParser<'_> {
                 break;
             }
             if self.peek() == b'<' {
+                // `<option>` and `<optgroup>` have optional end tags: one that starts while an
+                // option is open ends it (a long list would otherwise nest past the depth limit).
+                if open.last() == Some(&name_key("option"))
+                    && (self.at_open_tag(b"option") || self.at_open_tag(b"optgroup"))
+                {
+                    break;
+                }
                 if let Some(node) = self.parse_element(open) {
                     nodes.push(node);
                 }

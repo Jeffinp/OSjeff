@@ -36,6 +36,13 @@ renomeio mantêm o nome da época.
   administrador ou comum e remover (com confirmação) para administradores, e formulário de nova conta.
   Verificado em QEMU (W38/W39): criar `maria` com senha, reiniciar, senha errada recusada, senha certa
   abre `/home/maria`; o PBKDF2 (20 000 iterações) leva ~140 ms em QEMU/TCG.
+- **Formulários no navegador:** `method=post` (corpo `application/x-www-form-urlencoded` com
+  `Content-Length`; um *redirect* 301/302/303 vira GET, 307/308 mantêm o corpo; recarregar ou voltar
+  pede o endereço com GET para não repetir um envio sem querer), `<select>` (clique ou setas/letra
+  trocam a opção; a lista suspensa ainda não existe) e `<textarea>` (várias linhas com quebra
+  automática, Enter insere quebra, ↑/↓/Home/End por linha, limite de 4 KiB). O parser passou a
+  fechar `<option>` implicitamente. `tools/nettest-server.py` ganhou `/form`, `/echo` e `/redir-post`;
+  cenário W40 verificado em QEMU (envio, eco e POST com 303).
 - (histórico) O kernel não usava essas peças ainda (não havia login): o plano em fases está em
   [`docs/design/usuarios-seguranca.md`](docs/design/usuarios-seguranca.md) e o de compatibilidade em
   [`docs/design/compatibilidade.md`](docs/design/compatibilidade.md); o roadmap foi atualizado.

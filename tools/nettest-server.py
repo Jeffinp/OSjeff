@@ -12,7 +12,8 @@ to that address reach this server on the host's loopback:
 
 (203.0.113.0/24 is TEST-NET-3: a public range for the filter, never routed anywhere.)
 
-HTTP routes (port 8077): /hello (200), /redir-ok (302 -> /hello), /redir-local (302 ->
+HTTP routes (port 8077): /form (a POST form with select and textarea), /echo (shows the method
+and body it got), /redir-post (303 -> /echo), /hello (200), /redir-ok (302 -> /hello), /redir-local (302 ->
 http://10.0.2.2/, a private target the app policy must refuse), /missing (404), /gzip,
 /chunked, /big (400 KiB, to see the cut). Port 8078 serves /hello over TLS with a
 self-signed certificate (needs `openssl`): an app must NOT receive that page.
@@ -45,19 +46,46 @@ class Handler(socketserver.StreamRequestHandler):
         self.wfile.write(head.encode() + b"\r\n" + body)
 
     def handle(self):
+        headers = {}
         try:
             line = self.rfile.readline(4096).decode("latin-1", "replace").strip()
-            while True:  # discard the headers
+            while True:
                 h = self.rfile.readline(4096)
                 if h in (b"\r\n", b"\n", b""):
                     break
-        except (OSError, ssl.SSLError):
+                k, _, v = h.decode("latin-1", "replace").partition(":")
+                headers[k.strip().lower()] = v.strip()
+            body_in = self.rfile.read(min(int(headers.get("content-length", "0") or 0), 1 << 20))
+        except (OSError, ssl.SSLError, ValueError):
             return
         log(f"{self.server.server_address[1]} {line}")
         parts = line.split(" ")
         path = parts[1] if len(parts) > 1 else "/"
         close = {"Connection": "close"}
-        if path == "/hello":
+        if path == "/form":
+            page = (
+                "<html><head><title>Formulario</title></head><body><h1>Formulario</h1>"
+                "<form method=post action=/echo>"
+                "<p>Nome <input name=nome value=Ana></p>"
+                "<p>Pais <select name=pais><option value=br>Brasil<option value=pt selected>Portugal"
+                "<option value=ar>Argentina</select></p>"
+                "<p>Mensagem<br><textarea name=msg rows=4 cols=30>Ola</textarea></p>"
+                "<p><input type=submit value=Enviar></p></form>"
+                "<form method=post action=/redir-post><input type=hidden name=x value=1>"
+                "<input type=submit value='POST com redirect'></form></body></html>"
+            ).encode()
+            self.reply("200 OK", {"Content-Type": "text/html; charset=utf-8", "Content-Length": str(len(page)), **close}, page)
+        elif path == "/echo":
+            text = body_in.decode("utf-8", "replace")
+            page = (
+                "<html><head><title>Eco</title></head><body><h1>Recebido</h1>"
+                f"<p>metodo: {parts[0]}</p><p>tipo: {headers.get('content-type', '-')}</p>"
+                f"<p>tamanho: {headers.get('content-length', '-')}</p><pre>{text}</pre></body></html>"
+            ).encode()
+            self.reply("200 OK", {"Content-Type": "text/html; charset=utf-8", "Content-Length": str(len(page)), **close}, page)
+        elif path == "/redir-post":
+            self.reply("303 See Other", {"Location": "/echo", "Content-Length": "0", **close})
+        elif path == "/hello":
             body = b"hello from the fake server"
             self.reply("200 OK", {"Content-Type": "text/plain", "Content-Length": str(len(body)), **close}, body)
         elif path == "/redir-ok":

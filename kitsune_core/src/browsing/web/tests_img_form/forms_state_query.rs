@@ -155,12 +155,38 @@ fn empty_action_stays_on_the_page() {
 }
 
 #[test]
-fn post_forms_are_refused_with_a_message() {
-    let forms = form_page("<form method=post action=/p><input name=q></form>").forms;
+fn post_forms_send_the_query_as_the_body() {
+    let forms = form_page(
+        "<form method=POST action='/p?a=1#x'><input type=hidden name=h value='a b'><input name=q value='é&'><input type=submit name=go value=Ok></form>",
+    )
+    .forms;
     let st = FormState::new(&forms);
-    let e = st.target(&forms, 0, None).unwrap_err();
-    assert_eq!(e, FormError::Post);
-    assert_eq!(e.message(), "Formulários POST não são suportados.");
+    let sub = st.submission(&forms, 0, Some(2)).unwrap();
+    // A POST keeps the action's own query and drops only the fragment.
+    assert_eq!(sub.href, "/p?a=1");
+    assert_eq!(sub.body.as_deref(), Some("h=a+b&q=%C3%A9%26&go=Ok"));
+    let get = form_page("<form action='/g?old=1'><input name=q value=x></form>").forms;
+    let sub = FormState::new(&get).submission(&get, 0, None).unwrap();
+    assert_eq!((sub.href.as_str(), sub.body), ("/g?q=x", None));
+}
+
+#[test]
+fn a_post_body_may_be_larger_than_a_query() {
+    let html = "<input name=a><input name=b><input name=c>";
+    let fill = |html: String| {
+        let forms = form_page(&html).forms;
+        let mut st = FormState::new(&forms);
+        for i in 0..3 {
+            st.set_focus(&forms, 0, i);
+            typed(&forms, &mut st, &"x".repeat(200));
+        }
+        st.submission(&forms, 0, None)
+    };
+    assert!(fill(format!("<form method=post>{html}</form>")).is_ok());
+    assert_eq!(
+        fill(format!("<form>{html}</form>")),
+        Err(FormError::TooLong)
+    );
 }
 
 #[test]

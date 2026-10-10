@@ -145,6 +145,16 @@ impl Desktop {
         }
     }
 
+    /// The body of the POST the tab just handed over by
+    /// [`browser_take_request`](Self::browser_take_request) (`None` for a GET).
+    pub fn browser_post_body(&mut self) -> Option<alloc::vec::Vec<u8>> {
+        let id = self.browser_id()?;
+        let b = self.browser_state_mut(id)?;
+        let tid = b.req_tab?;
+        let (_, t) = b.tab_by_id(tid)?;
+        t.browser.post_body().map(<[u8]>::to_vec)
+    }
+
     /// Show a fetched raw HTTP response in the tab that asked for it. `conn` says how the
     /// final connection was authenticated, `truncated` that the response hit the size cap and
     /// `cert` summarises the server certificate (https only). Dropped when the tab was closed

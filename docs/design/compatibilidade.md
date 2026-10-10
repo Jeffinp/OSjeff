@@ -22,8 +22,8 @@ tutorial do SDK produz um app instalável em menos de dez minutos seguindo só o
 |---|---|---|
 | W.1 | HTML, CSS, imagens PNG/BMP/PPM, formulários **GET**, gzip/deflate, HTTPS verificado | feito |
 | W.2 | **GIF** (com a primeira imagem de um GIF animado) e **JPEG** *baseline* | feito (progressivo e CMYK ainda não) |
-| W.3 | Formulários **POST** (`application/x-www-form-urlencoded`), `<textarea>` e `<select>` | a fazer |
-| W.4 | Reuso de conexão (*keep-alive*), `Content-Length` e *redirect* de POST (303/307) | a fazer |
+| W.3 | Formulários **POST** (`application/x-www-form-urlencoded`), `<textarea>` e `<select>` | feito (`<select>` sem lista: o clique ou as setas trocam a opção; sem `multipart` nem envio de arquivos) |
+| W.4 | *Redirect* de POST (303 vira GET; 307/308 mantêm o corpo) feito; reuso de conexão (*keep-alive*) a fazer | parcial |
 | W.5 | HSTS, revogação e *pinning* (ver [usuários e segurança](usuarios-seguranca.md), fase 2) | a fazer |
 | W.6 | JPEG progressivo e CMYK, WebP, SVG simples | depois |
 

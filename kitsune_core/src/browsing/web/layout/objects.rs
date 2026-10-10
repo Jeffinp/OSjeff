@@ -57,10 +57,18 @@ pub(super) fn obj_size(p: &Painter, obj: &Obj, avail: i32) -> (i32, i32) {
     match obj {
         Obj::Img { dw, dh, state, .. } => img_box(*dw, *dh, *state, avail, p.zoom),
         Obj::Field {
-            kind, chars, label, ..
+            kind,
+            chars,
+            rows,
+            label,
+            ..
         } => {
             let f = control_font(p);
-            let h = p.z(30);
+            let h = if *kind == FieldKind::TextArea {
+                *rows as i32 * p.nat(f) + 2 * p.z(8)
+            } else {
+                p.z(30)
+            };
             let w = match kind {
                 FieldKind::Submit | FieldKind::PushButton => {
                     let tw = (wq(p, label, f) + Q - 1) / Q;
@@ -70,6 +78,11 @@ pub(super) fn obj_size(p: &Painter, obj: &Obj, avail: i32) -> (i32, i32) {
                     // The box and a gap before the label that follows.
                     let s = p.z(16).max(8);
                     return (s + p.z(6), s);
+                }
+                FieldKind::Select => {
+                    // The longest label, the arrow and the padding.
+                    let cw = (wq(p, "0", f) + Q - 1) / Q;
+                    cw * (*chars as i32).clamp(1, 80) + 2 * p.z(10) + p.z(22)
                 }
                 _ => {
                     let cw = (wq(p, "0", f) + Q - 1) / Q;
@@ -89,6 +102,11 @@ pub(super) fn obj_below(p: &Painter, obj: &Obj, h: i32) -> i32 {
         Obj::Img { .. } => 0,
         Obj::Field { kind, .. } => match kind {
             FieldKind::Checkbox | FieldKind::Radio => h / 4,
+            FieldKind::TextArea => {
+                // The first line's baseline is on the line's.
+                let f = control_font(p);
+                (h - (p.z(8) + p.asc(f))).clamp(0, h)
+            }
             _ => {
                 let f = control_font(p);
                 let text_top = (h - p.nat(f)) / 2;
@@ -239,6 +257,8 @@ pub(super) fn emit_obj(p: &mut Painter, obj: &Obj, x: i32, y: i32, w: i32, h: i3
                 h,
                 size: f.size,
                 pad_x: p.z(10),
+                line_h: p.nat(f),
+                pad_y: p.z(8),
             });
         }
     }

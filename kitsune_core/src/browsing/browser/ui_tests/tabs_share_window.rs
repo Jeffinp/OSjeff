@@ -61,6 +61,41 @@ fn reload_refetches_the_navigated_address_not_the_typed_text() {
 }
 
 #[test]
+fn a_post_request_carries_its_body_and_length() {
+    let mut r = Vec::new();
+    build_request(
+        &mut r,
+        Lang::En,
+        "example.com",
+        "/p",
+        80,
+        false,
+        Some(b"a=1&b=2"),
+    );
+    let t = String::from_utf8(r).unwrap();
+    assert!(t.starts_with("POST /p HTTP/1.1\r\nHost: example.com\r\n"));
+    assert!(t.contains("\r\nContent-Type: application/x-www-form-urlencoded\r\n"));
+    assert!(t.contains("\r\nContent-Length: 7\r\n"));
+    assert!(t.ends_with("\r\n\r\na=1&b=2"));
+}
+
+#[test]
+fn open_post_navigates_with_a_body_that_reload_and_back_drop() {
+    let mut b = Browser::new();
+    b.open(b"https://example.com/form");
+    assert!(b.take_request().is_some());
+    b.loaded();
+    assert!(b.open_post(b"/send?x=1", b"k=v".to_vec()));
+    assert_eq!(b.take_request(), Some(&b"https://example.com/send?x=1"[..]));
+    assert_eq!(b.post_body(), Some(&b"k=v"[..]));
+    b.loaded();
+    b.reload();
+    assert!(b.take_request().is_some());
+    assert_eq!(b.post_body(), None);
+    assert!(!b.open_post(b"javascript:x", Vec::new()));
+}
+
+#[test]
 fn the_request_asks_for_the_language_of_the_interface() {
     let ask = |l: Lang, host: &str, port: u16, tls: bool| {
         let mut r = Vec::new();

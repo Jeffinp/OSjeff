@@ -154,7 +154,7 @@ pub(super) fn serve_job(net: &mut netstack::Net) {
             }))
         }
         Some(NetJob::Get(url)) => {
-            match fetch_url(net, url.as_bytes(), b"", MAX_RESPONSE_BYTES, None) {
+            match fetch_url(net, url.as_bytes(), b"", MAX_RESPONSE_BYTES, None, None) {
                 Ok(p) => NetJobResult::Page(p),
                 Err(e) => NetJobResult::Failed(e),
             }

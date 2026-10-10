@@ -93,6 +93,8 @@ static OFFLINE: AtomicBool = AtomicBool::new(false);
 static NET: RacyCell<Option<Netd>> = RacyCell::new(None);
 static REQ_URL: RacyCell<[u8; URL_CAP]> = RacyCell::new([0; URL_CAP]);
 static REQ_LEN: RacyCell<usize> = RacyCell::new(0);
+/// Body of the page request when it is a POST (written with the URL).
+static REQ_BODY: RacyCell<Option<Vec<u8>>> = RacyCell::new(None);
 /// Host the user explicitly allowed past a certificate error (empty = none). It
 /// applies to that host only, on every hop of the navigation.
 static REQ_INSECURE: RacyCell<[u8; INSECURE_CAP]> = RacyCell::new([0; INSECURE_CAP]);
@@ -162,18 +164,18 @@ pub fn wake_worker() {
 
 /// Queue a fetch for `url` if the worker is idle. Returns `true` if accepted.
 /// `insecure_host` (usually empty) is the one host the user allowed to proceed
-/// despite a certificate error, for this session.
-pub fn try_post(url: &[u8], insecure_host: &[u8]) -> bool {
-    post(url, insecure_host, KIND_PAGE, 0)
+/// despite a certificate error, for this session. `body` makes it a POST (urlencoded form data).
+pub fn try_post(url: &[u8], insecure_host: &[u8], body: Option<&[u8]>) -> bool {
+    post(url, insecure_host, KIND_PAGE, 0, body)
 }
 
 /// Queue the download of one picture for the page being shown; it is decoded and scaled to
 /// `fit_w` pixels wide on the worker. Collect the answer with [`take_image_result`].
 pub fn try_post_image(url: &[u8], insecure_host: &[u8], fit_w: usize) -> bool {
-    post(url, insecure_host, KIND_IMAGE, fit_w)
+    post(url, insecure_host, KIND_IMAGE, fit_w, None)
 }
 
-fn post(url: &[u8], insecure_host: &[u8], kind: u8, fit_w: usize) -> bool {
+fn post(url: &[u8], insecure_host: &[u8], kind: u8, fit_w: usize, body: Option<&[u8]>) -> bool {
     if worker_dead() {
         return false;
     }
@@ -217,6 +219,7 @@ fn post(url: &[u8], insecure_host: &[u8], kind: u8, fit_w: usize) -> bool {
         let ib = &mut *REQ_INSECURE.get();
         ib[..m].copy_from_slice(&insecure_host[..m]);
         *REQ_INSECURE_LEN.get() = m;
+        *REQ_BODY.get() = body.map(<[u8]>::to_vec);
     }
     REQ_KIND.store(kind, Ordering::Relaxed);
     REQ_FIT_W.store(fit_w, Ordering::Relaxed);
@@ -305,6 +308,8 @@ pub extern "C" fn worker() -> ! {
                 let n = *REQ_INSECURE_LEN.get();
                 (&*REQ_INSECURE.get())[..n].to_vec()
             };
+            // SAFETY: as for REQ_URL above (written with it, before REQUESTED).
+            let body = unsafe { (*REQ_BODY.get()).take() };
             let kind = REQ_KIND.load(Ordering::Relaxed);
             let fit_w = REQ_FIT_W.load(Ordering::Relaxed);
             let app = WHO.load(Ordering::Acquire) != WHO_BROWSER;
@@ -336,9 +341,16 @@ pub extern "C" fn worker() -> ! {
                         // An app only reaches public addresses, checked on what the name resolved to.
                         net.set_public_only(app);
                         let r = match (app, policy.as_ref()) {
-                            (false, _) => fetch_url(net, &url, &insecure, MAX_RESPONSE_BYTES, None),
+                            (false, _) => fetch_url(
+                                net,
+                                &url,
+                                &insecure,
+                                MAX_RESPONSE_BYTES,
+                                None,
+                                body.as_deref(),
+                            ),
                             (true, Some(p)) => {
-                                fetch_url(net, &url, &[], MAX_RESPONSE_BYTES, Some(p))
+                                fetch_url(net, &url, &[], MAX_RESPONSE_BYTES, Some(p), None)
                             }
                             // An app request without a policy cannot happen; refuse rather than guess.
                             (true, None) => Err(FailReason::Network),
@@ -423,11 +435,14 @@ fn fetch_url(
     insecure_host: &[u8],
     cap: usize,
     app: Option<&AppPolicy>,
+    body: Option<&[u8]>,
 ) -> FetchResult {
     use kitsune_core::browser::{header_value, parse_url, status_code};
     use kitsune_core::redirect::Redirects;
     let mut cur: Vec<u8> = url.to_vec();
     let mut chain: Option<Redirects> = None;
+    // The form data of a POST: kept through 307/308, dropped (the next hop is a GET) otherwise.
+    let mut body = body;
 
     loop {
         // An app's request, and each redirect hop it is sent on to, passes the same gate:
@@ -447,7 +462,8 @@ fn fetch_url(
             return Err(FailReason::Network);
         };
         serial_println!(
-            "fetch: GET {}://{}{} :{}",
+            "fetch: {} {}://{}{} :{}",
+            if body.is_some() { "POST" } else { "GET" },
             if u.https { "https" } else { "http" },
             host,
             path,
@@ -462,9 +478,9 @@ fn fetch_url(
             let allow = app.is_none()
                 && !insecure_host.is_empty()
                 && u.host().eq_ignore_ascii_case(insecure_host);
-            net.https_get(host, path, u.port, allow, cap)?
+            net.https_get(host, path, u.port, allow, cap, body)?
         } else {
-            (net.http_get(host, path, u.port, cap)?, Conn::Plain)
+            (net.http_get(host, path, u.port, cap, body)?, Conn::Plain)
         };
 
         let code = status_code(&r.data).unwrap_or(0);
@@ -474,6 +490,9 @@ fn fetch_url(
             match chain.follow(&u, loc) {
                 Ok(next) => {
                     cur = next;
+                    if !matches!(code, 307 | 308) {
+                        body = None;
+                    }
                     serial_println!("fetch: {} redirect", code);
                     continue;
                 }
@@ -512,6 +531,7 @@ fn fetch_image(
         url,
         insecure_host,
         imgcache::MAX_IMAGE_BYTES + 8 * 1024,
+        None,
         None,
     ) {
         Ok(r) => r,

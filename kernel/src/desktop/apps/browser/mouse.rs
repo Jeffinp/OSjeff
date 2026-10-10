@@ -163,6 +163,10 @@ impl Desktop {
                 FieldKind::Checkbox | FieldKind::Radio => {
                     t.forms.toggle(&page.forms, f.form, f.field);
                 }
+                // No drop-down list: a click chooses the next option (wrapping round).
+                FieldKind::Select => {
+                    t.forms.step_select(&page.forms, f.form, f.field, 1);
+                }
                 _ => {}
             }
             return false;
@@ -344,6 +348,7 @@ impl Desktop {
                                             | FieldKind::PushButton
                                             | FieldKind::Checkbox
                                             | FieldKind::Radio
+                                            | FieldKind::Select
                                     )
                                 })
                     })

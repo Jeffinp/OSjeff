@@ -212,9 +212,9 @@ a seguir, em ordem, com critério de aceite para cada item, está em [`docs/ROAD
 - **Drivers para hardware real**: placa de rede de PC (`e1000`, `rtl8139`), e o primeiro boot num computador
   físico com medição de quadro.
 - **Aceleração gráfica** por GPU, depois de enviar à tela só o que mudou.
-- **Isolamento por processo** (ring 3) e **vários usuários**.
+- **Isolamento por processo** (ring 3): contas e login já existem, mas apps e serviços ainda rodam no anel 0.
 - **Reiniciar e limpar threads de serviço** que falham; *fuel* retomável para apps WebAssembly.
-- **HTTPS completo**: revogação, HSTS; no navegador, POST, `<select>`/`<textarea>`, JPEG/GIF.
+- **HTTPS completo**: revogação, HSTS; no navegador, JPEG progressivo e reuso de conexão (POST, `<select>`, `<textarea>`, GIF e JPEG já funcionam).
 
 ---
 

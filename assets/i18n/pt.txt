@@ -1174,7 +1174,6 @@ web.notice.bookmark_removed = Favorito removido
 web.notice.bookmark_none = Nada para guardar aqui
 web.notice.link_bad = Esse link não pode ser aberto
 web.notice.copied = Endereço copiado
-web.form.post = Formulários POST não são suportados.
 web.form.too_long = Formulário grande demais para enviar.
 web.form.invalid = Formulário inválido.
 web.form.bad_action = O endereço do formulário não é válido

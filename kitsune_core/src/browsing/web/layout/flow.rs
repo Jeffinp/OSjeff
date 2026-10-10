@@ -71,7 +71,7 @@ pub(super) fn inline_element<'a>(
             image_element(p, el, c);
             return y;
         }
-        "input" | "button" => {
+        "input" | "button" | "select" | "textarea" => {
             if collect_control(p, el, c) {
                 return y;
             }
@@ -143,17 +143,46 @@ pub(super) fn image_element(p: &mut Painter, el: &Element, c: &Computed) {
     });
 }
 
-/// Register the form control `el` (an `<input>` or `<button>`) in the current
+/// Register the form control `el` (an `<input>`, `<button>`, `<select>` or `<textarea>`) in the current
 /// form and queue its box. Returns `true` when the element was consumed (a
 /// control, or something to skip), `false` to let it render as ordinary content.
 pub(super) fn collect_control(p: &mut Painter, el: &Element, c: &Computed) -> bool {
     let attr = |n: &str| el.attrs.get(n).map(String::as_str);
     let ty = attr("type").unwrap_or("").trim().to_ascii_lowercase();
     let name = decode_attr(attr("name").unwrap_or(""));
-    let value = decode_attr(attr("value").unwrap_or(""));
+    let mut value = decode_attr(attr("value").unwrap_or(""));
+    let mut options = Vec::new();
+    let mut selected = 0;
+    let mut rows = 0;
     let placeholder = fold_display(&decode_attr(attr("placeholder").unwrap_or("")));
     let checked = el.attrs.contains_key("checked");
-    let (kind, label, chars) = if el.tag == "button" {
+    let (kind, label, chars) = if el.tag == "select" {
+        selected = collect_options(&el.children, &mut options).unwrap_or(0);
+        let widest = options
+            .iter()
+            .map(|o| o.label.chars().count())
+            .max()
+            .unwrap_or(0);
+        (FieldKind::Select, String::new(), widest.clamp(6, 40))
+    } else if el.tag == "textarea" {
+        let n = |name: &str, default: usize, max: usize| {
+            attr(name)
+                .and_then(|s| s.trim().parse::<usize>().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(default)
+                .min(max)
+        };
+        rows = n("rows", 2, 12);
+        // The text between the tags is the initial value; one line break right after the
+        // opening tag is not part of it.
+        let t = text_content(&el.children);
+        let t = t
+            .strip_prefix("\r\n")
+            .or_else(|| t.strip_prefix('\n'))
+            .unwrap_or(&t);
+        value = t.replace('\r', "");
+        (FieldKind::TextArea, String::new(), n("cols", 20, 80).max(8))
+    } else if el.tag == "button" {
         match ty.as_str() {
             "" | "submit" => {
                 let t = fold_display(text_content(&el.children).trim());
@@ -217,6 +246,9 @@ pub(super) fn collect_control(p: &mut Painter, el: &Element, c: &Computed) -> bo
         label: label.clone(),
         checked,
         placeholder,
+        options,
+        selected,
+        rows,
     });
     if kind != FieldKind::Hidden {
         let st = p.style(c);
@@ -226,6 +258,7 @@ pub(super) fn collect_control(p: &mut Painter, el: &Element, c: &Computed) -> bo
                 field,
                 kind,
                 chars,
+                rows,
                 label,
             },
             st,
@@ -233,6 +266,37 @@ pub(super) fn collect_control(p: &mut Painter, el: &Element, c: &Computed) -> bo
         });
     }
     true
+}
+
+/// The `<option>`s under a `<select>` (also inside `<optgroup>`; an option that was never
+/// closed holds the ones after it, which the parser already ends). Returns the index of the
+/// first one marked `selected`.
+fn collect_options(
+    nodes: &[crate::browsing::web::dom::Node],
+    out: &mut Vec<crate::browsing::web::form::SelectOption>,
+) -> Option<usize> {
+    use crate::browsing::web::dom::Node;
+    let mut chosen = None;
+    for n in nodes {
+        let Node::Element(e) = n else { continue };
+        if out.len() >= crate::browsing::web::form::MAX_OPTIONS {
+            break;
+        }
+        if e.tag == "option" {
+            let label = fold_display(text_content(&e.children).trim());
+            let value = match e.attrs.get("value") {
+                Some(v) => decode_attr(v),
+                None => label.clone(),
+            };
+            if e.attrs.contains_key("selected") && chosen.is_none() {
+                chosen = Some(out.len());
+            }
+            out.push(crate::browsing::web::form::SelectOption { value, label });
+        } else if let Some(i) = collect_options(&e.children, out) {
+            chosen = chosen.or(Some(i));
+        }
+    }
+    chosen
 }
 
 /// Resolve a margin or padding side against the container width.

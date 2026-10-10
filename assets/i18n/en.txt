@@ -1174,7 +1174,6 @@ web.notice.bookmark_removed = Bookmark removed
 web.notice.bookmark_none = Nothing to save here
 web.notice.link_bad = That link cannot be opened
 web.notice.copied = Address copied
-web.form.post = POST forms are not supported.
 web.form.too_long = The form is too large to send.
 web.form.invalid = Invalid form.
 web.form.bad_action = The form address is not valid

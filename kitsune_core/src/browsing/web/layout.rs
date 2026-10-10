@@ -120,6 +120,9 @@ pub struct FieldBox {
     pub size: u16,
     /// Inset of the text from the box's left edge.
     pub pad_x: i32,
+    /// Height of one line of a `<textarea>` and the inset of its text from the top edge.
+    pub line_h: i32,
+    pub pad_y: i32,
 }
 
 /// A laid-out page: a flat display list plus the total content height (for
@@ -432,6 +435,8 @@ enum Obj {
         kind: FieldKind,
         /// Width in characters (text controls).
         chars: usize,
+        /// Visible lines (`<textarea>`).
+        rows: usize,
         label: String,
     },
 }

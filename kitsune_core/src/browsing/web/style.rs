@@ -26,7 +26,7 @@ table{display:table}
 tr{display:table-row}
 td,th{display:table-cell}
 thead,tbody,tfoot{display:table-row-group}
-script,style,head,title,meta,link,select,option,textarea,datalist,template,noembed,svg,canvas,video,audio,iframe,object,embed,map,area,param,source,track,base,dialog,col,colgroup{display:none}
+script,style,head,title,meta,link,option,datalist,template,noembed,svg,canvas,video,audio,iframe,object,embed,map,area,param,source,track,base,dialog,col,colgroup{display:none}
 html{color:#1d1d1f;font-size:16px;line-height:1.5}
 body{margin:8px}
 h1,h2,h3,h4,h5,h6{font-weight:bold;line-height:1.25}
@@ -244,8 +244,9 @@ impl Computed {
 
 fn default_display(tag: &str) -> Disp {
     match tag {
-        "script" | "style" | "head" | "title" | "meta" | "link" | "select" | "option"
-        | "textarea" | "datalist" => Disp::None,
+        "script" | "style" | "head" | "title" | "meta" | "link" | "option" | "datalist" => {
+            Disp::None
+        }
         _ => Disp::Inline,
     }
 }

@@ -300,7 +300,8 @@ impl Desktop {
         self.browser_close_tab(id, i);
     }
 
-    /// Submit form `form` (Enter in a field, or a button): navigate to the GET URL, or say why not.
+    /// Submit form `form` (Enter in a field, or a button): navigate (GET) or send the body (POST),
+    /// or say why not.
     pub(crate) fn browser_submit_form(
         &mut self,
         id: WindowId,
@@ -314,11 +315,15 @@ impl Desktop {
         let Some(page) = &t.page else {
             return;
         };
-        match t.forms.target(&page.forms, form, submitter) {
-            Ok(href) => {
+        match t.forms.submission(&page.forms, form, submitter) {
+            Ok(sub) => {
                 t.forms.blur();
                 t.browser.set_bar_focus(false);
-                if !t.browser.open_link(href.as_bytes()) {
+                let ok = match sub.body {
+                    Some(body) => t.browser.open_post(sub.href.as_bytes(), body.into_bytes()),
+                    None => t.browser.open_link(sub.href.as_bytes()),
+                };
+                if !ok {
                     b.say(t!("web.form.bad_action"));
                 }
             }

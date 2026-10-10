@@ -12,13 +12,14 @@ impl Net {
         path: &str,
         port: u16,
         cap: usize,
+        body: Option<&[u8]>,
     ) -> Result<Fetched, FailReason> {
         let ip = self.resolve_or_fail(host)?;
         self.connect(ip, port)?;
 
         // Request.
         let mut req = Vec::new();
-        build_request(&mut req, host, path, port, false);
+        build_request(&mut req, host, path, port, false, body);
         {
             let s = self.sockets.get_mut::<tcp::Socket>(self.tcp);
             if s.send_slice(&req).is_err() {
@@ -115,6 +116,7 @@ impl Net {
         port: u16,
         allow_insecure: bool,
         cap: usize,
+        body: Option<&[u8]>,
     ) -> Result<(Fetched, Conn), FailReason> {
         // No handshake without a seeded generator: wait (bounded) for 128 credited bits first, and
         // refuse rather than draw the client random and the ephemeral key from a weak generator.
@@ -205,7 +207,7 @@ impl Net {
         // Request (HTTP/1.1 with Connection: close; chunked and gzip responses are
         // decoded by `browser::page_body`).
         let mut req = Vec::new();
-        build_request(&mut req, host, path, port, true);
+        build_request(&mut req, host, path, port, true, body);
         use embedded_io::Write as _;
         if tls.write_all(&req).is_err() || tls.flush().is_err() {
             self.abort_conn();
@@ -257,15 +259,23 @@ impl Net {
     }
 }
 
-/// Build an HTTP/1.1 GET request asking for the language of the interface (the request itself
+/// Build an HTTP/1.1 request (GET, or POST with `body`) asking for the language of the interface (the request itself
 /// is `kitsune_core::browser::build_get_request`; shared by the plain and TLS paths).
-fn build_request(req: &mut Vec<u8>, host: &str, path: &str, port: u16, tls: bool) {
-    kitsune_core::browser::build_get_request(
+fn build_request(
+    req: &mut Vec<u8>,
+    host: &str,
+    path: &str,
+    port: u16,
+    tls: bool,
+    body: Option<&[u8]>,
+) {
+    kitsune_core::browser::build_request(
         req,
         kitsune_core::i18n::lang(),
         host,
         path,
         port,
         tls,
+        body,
     );
 }

@@ -212,9 +212,9 @@ next, in order, with an acceptance criterion for each item, is in [`docs/ROADMAP
 - **Real-hardware drivers**: a PC network card (`e1000`, `rtl8139`), and the first boot on a physical computer with
   frame-cost measurement.
 - **GPU acceleration**, after sending only what changed to the screen.
-- **Per-process isolation** (ring 3) and **multiple users**.
+- **Per-process isolation** (ring 3): accounts and login exist, but apps and services still run in ring 0.
 - **Restarting and cleaning up service threads** that fail; resumable fuel for WebAssembly apps.
-- **Complete HTTPS**: revocation, HSTS; in the browser, POST, `<select>`/`<textarea>`, JPEG/GIF.
+- **Complete HTTPS**: revocation, HSTS; in the browser, progressive JPEG and connection reuse (POST, `<select>`, `<textarea>`, GIF and JPEG already work).
 
 ---
 
