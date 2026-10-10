@@ -60,7 +60,23 @@ use kitsune_core::hw::ata::{
     parse_identify, usable_sectors,
 };
 
-const SPIN: u32 = 1_000_000; // bounded poll budget
+/// Bounded poll budget: see `kitsune_core::hw::ata::poll_exhausted` (iterations AND wall time).
+struct Budget(u64);
+
+impl Budget {
+    fn new() -> Self {
+        Self(crate::netd::now_us())
+    }
+
+    fn spent(&self, iterations: u32) -> bool {
+        let elapsed = if iterations >= kitsune_core::hw::ata::POLL_ITERS {
+            crate::netd::now_us().saturating_sub(self.0)
+        } else {
+            0
+        };
+        kitsune_core::hw::ata::poll_exhausted(iterations, elapsed)
+    }
+}
 
 /// While polling for a long time, hand the CPU to other threads this often.
 const YIELD_EVERY: u32 = 1024;
@@ -112,7 +128,9 @@ fn settle() {
 /// Poll the status register until `done` accepts a sample. `coop` lets other
 /// threads run while we wait (with interrupts off `yield_now` is a no-op).
 fn wait(coop: bool, done: impl Fn(Status) -> Option<Result<(), Fail>>) -> Result<(), Fail> {
-    for i in 0..SPIN {
+    let budget = Budget::new();
+    let mut i = 0u32;
+    while !budget.spent(i) {
         let st = classify_status(inb(REG_STATUS));
         if st == Status::Floating {
             return Err(Fail::Absent);
@@ -123,6 +141,7 @@ fn wait(coop: bool, done: impl Fn(Status) -> Option<Result<(), Fail>>) -> Result
         if coop && i % YIELD_EVERY == YIELD_EVERY - 1 {
             crate::sched::yield_now();
         }
+        i += 1;
     }
     Err(Fail::Timeout)
 }
@@ -216,6 +235,9 @@ fn settle_result(r: Result<(), Fail>) -> Result<(), Fail> {
         Ok(()) => FAILS.store(0, Ordering::Relaxed),
         Err(f) => {
             let n = FAILS.fetch_add(1, Ordering::Relaxed) + 1;
+            if n == MAX_FAILS {
+                DEAD_SINCE_US.store(crate::netd::now_us(), Ordering::Relaxed);
+            }
             crate::klog!(
                 Warn,
                 "ata: transfer failed ({:?}), {} consecutive{}",
@@ -235,8 +257,24 @@ fn settle_result(r: Result<(), Fail>) -> Result<(), Fail> {
     r
 }
 
+/// When the controller was declared dead (monotonic microseconds), for the periodic retry.
+static DEAD_SINCE_US: AtomicU64 = AtomicU64::new(0);
+
+/// Is the controller declared dead *and* not yet due for another attempt? After
+/// `DEAD_RETRY_US` one attempt is let through (the failure counter is set one below the limit, so
+/// a single failure declares it dead again and a success clears it).
 fn dead() -> bool {
-    FAILS.load(Ordering::Relaxed) >= MAX_FAILS
+    if FAILS.load(Ordering::Relaxed) < MAX_FAILS {
+        return false;
+    }
+    let now = crate::netd::now_us();
+    if kitsune_core::hw::ata::dead_retry_due(DEAD_SINCE_US.load(Ordering::Relaxed), now) {
+        DEAD_SINCE_US.store(now, Ordering::Relaxed);
+        FAILS.store(MAX_FAILS - 1, Ordering::Relaxed);
+        crate::klog!(Info, "ata: trying the controller again");
+        return false;
+    }
+    true
 }
 
 /// Read `buf` (a multiple of 512 bytes) starting at `lba`, sliced into commands of
@@ -373,7 +411,9 @@ impl BlockDevice for AtaDisk {
 
 /// Bounded wait for BSY to clear on an arbitrary channel's status port.
 fn wait_bsy_at(status: u16) -> bool {
-    for _ in 0..SPIN {
+    let budget = Budget::new();
+    let mut i = 0u32;
+    while !budget.spent(i) {
         let s = inb(status);
         if s == 0xFF {
             return false;
@@ -381,6 +421,7 @@ fn wait_bsy_at(status: u16) -> bool {
         if s & SR_BSY == 0 {
             return true;
         }
+        i += 1;
     }
     false
 }
@@ -418,7 +459,10 @@ pub fn identify(base: u16, ctrl: u16, slave: bool) -> Option<DiskInfo> {
     }
     // Wait for DRQ (or error).
     let mut ok = false;
-    for _ in 0..SPIN {
+    let budget = Budget::new();
+    let mut i = 0u32;
+    while !budget.spent(i) {
+        i += 1;
         let s = inb(status);
         if s & SR_ERR != 0 || s == 0xFF {
             return None;

@@ -153,6 +153,32 @@ pub fn classify_status(s: u8) -> Status {
     }
 }
 
+/// Poll iterations after which a wait may give up (the lower bound of the budget).
+pub const POLL_ITERS: u32 = 1_000_000;
+/// Hard cap on poll iterations: a wait never spins longer than this even if the clock does not move.
+pub const POLL_ITERS_HARD: u32 = POLL_ITERS * 40;
+/// Wall time (microseconds) a wait must also have used before it gives up.
+pub const POLL_MIN_US: u64 = 3_000_000;
+
+/// Has a status poll used up its budget? It gives up only when it has polled at least
+/// [`POLL_ITERS`] times **and** at least [`POLL_MIN_US`] of real time passed, so a drive that is slow
+/// in wall time (the emulator's I/O thread starved by a busy host, a spinning-up disk) is not
+/// declared dead just because the CPU polled fast. [`POLL_ITERS_HARD`] bounds the wait when the
+/// clock does not advance (interrupts masked before the TSC is calibrated).
+pub fn poll_exhausted(iterations: u32, elapsed_us: u64) -> bool {
+    iterations >= POLL_ITERS_HARD || (iterations >= POLL_ITERS && elapsed_us >= POLL_MIN_US)
+}
+
+/// How long a controller declared dead stays dead before one new attempt is allowed (microseconds).
+pub const DEAD_RETRY_US: u64 = 10_000_000;
+
+/// May a controller declared dead at `dead_since_us` be tried again at `now_us`? A burst of failures
+/// (a stalled emulator, a disk that spun down) must not turn the volume read-only for the rest of the
+/// session; one attempt every [`DEAD_RETRY_US`] is cheap, and a failing attempt re-declares it dead.
+pub fn dead_retry_due(dead_since_us: u64, now_us: u64) -> bool {
+    now_us.saturating_sub(dead_since_us) >= DEAD_RETRY_US
+}
+
 /// Sectors the driver may address on a drive that identified itself with
 /// `identified` sectors (capped at the LBA28 limit).
 pub fn usable_sectors(identified: u64) -> u64 {

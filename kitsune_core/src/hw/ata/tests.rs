@@ -266,3 +266,28 @@ fn lba28_register_encoding() {
     // Bits above 28 are dropped, never leak into the drive-select bits.
     assert_eq!(lba28_regs(0xF000_0001), [0xE0, 0x01, 0, 0]);
 }
+
+#[test]
+fn poll_budget_needs_both_iterations_and_time() {
+    use super::{POLL_ITERS, POLL_ITERS_HARD, POLL_MIN_US, poll_exhausted};
+    // Few iterations: never exhausted, however much time passed.
+    assert!(!poll_exhausted(10, POLL_MIN_US * 10));
+    // Many iterations but little time (a fast CPU polling a slow drive): keep waiting.
+    assert!(!poll_exhausted(POLL_ITERS, 0));
+    assert!(!poll_exhausted(POLL_ITERS * 5, POLL_MIN_US - 1));
+    // Both spent: give up.
+    assert!(poll_exhausted(POLL_ITERS, POLL_MIN_US));
+    // The clock stopped (elapsed stays 0): the hard cap ends the wait.
+    assert!(!poll_exhausted(POLL_ITERS_HARD - 1, 0));
+    assert!(poll_exhausted(POLL_ITERS_HARD, 0));
+}
+
+#[test]
+fn a_dead_controller_is_retried_after_the_window() {
+    use super::{DEAD_RETRY_US, dead_retry_due};
+    assert!(!dead_retry_due(1_000, 1_000));
+    assert!(!dead_retry_due(1_000, 1_000 + DEAD_RETRY_US - 1));
+    assert!(dead_retry_due(1_000, 1_000 + DEAD_RETRY_US));
+    // A clock that went backwards never makes it due.
+    assert!(!dead_retry_due(5_000_000_000, 1));
+}

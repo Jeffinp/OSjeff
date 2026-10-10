@@ -4,6 +4,15 @@ Uma seção por marco, do mais novo para o mais antigo. O Kitsune (antes OSjeff;
 seção) não tem releases versionadas; as seções são marcos na `master`. As seções anteriores ao
 renomeio mantêm o nome da época.
 
+## 2026-10 — Disco: limite de tempo e nova tentativa
+
+- O driver ATA desistia por **contagem de leituras do registrador de estado**: numa máquina carregada
+  (a thread de E/S do emulador sem CPU) a CPU lia rápido demais e declarava o disco morto, e o volume
+  ficava somente leitura (`ata: transfer failed (Timeout)`). Agora uma espera só se esgota depois de
+  **1 milhão de leituras e de 3 s de tempo real** (limite duro de 40 milhões se o relógio não anda), e um
+  controlador declarado morto recebe **uma nova tentativa a cada 10 s** em vez de ficar morto para sempre.
+  A política é pura e testada (`kitsune_core::hw::ata::{poll_exhausted, dead_retry_due}`).
+
 ## 2026-10 — Dependências e edição 2024 nos apps
 
 - **Edição 2024 do Rust em todos os crates**: o SDK e os apps (`wasm-apps/*`, `examples/*`) estavam na
