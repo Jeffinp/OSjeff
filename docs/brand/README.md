@@ -56,8 +56,8 @@ em 16 px as facetas escuras das orelhas se fundem às claras. A tabela está em 
 
 ## O que não fazer
 
-- **Nunca enrolar a raposa num globo, num círculo ou numa órbita**, e nunca estilizá-la, nomeá-la
-  ou posicioná-la como logotipo de navegador. O navegador do sistema se chama só Navegador.
+- **Nunca enrolar a raposa num globo, num círculo ou numa órbita**: ela identifica o sistema, não
+  um app. O navegador do sistema se chama só Navegador.
 - Não usar a palavra "Fox" no nome de nada (veja `NAMING.md`).
 - Não recolorir a versão colorida; para uma cor só, use a silhueta (`kitsune-mono.svg`) na cor
   do contexto, em contraste suficiente com o fundo.

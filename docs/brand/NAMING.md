@@ -17,12 +17,12 @@ de compatibilidade listados abaixo.
 
 - Escreva **Kitsune**, com K maiúsculo e o resto em minúsculas. Em texto corrido e em código o nome é
   sempre uma palavra só: nada de "KitSune", "Kit-Sune" nem "KITSUNE" fora de títulos em caixa alta.
-- **Sem "Fox" no nome.** Nada de "Kitsune Fox", "FoxOS" ou derivados: a raposa é o mascote, não faz parte
-  do nome, e "Fox" lembra produtos de terceiros. Nomes de componentes seguem a mesma regra.
+- **Sem "Fox" no nome.** Nada de "Kitsune Fox", "FoxOS" ou derivados: a raposa é o mascote e não faz parte
+  do nome. Nomes de componentes seguem a mesma regra.
 - Nome de pacote e de arquivo em minúsculas: `kitsune_core`, `kitsune-bios.img`, `/etc/kitsune.conf`,
   `kitsune://sobre`, nome de máquina `kitsune`.
-- A marca é a raposa **sozinha** (veja `README.md` desta pasta); ela nunca é estilizada como logotipo de
-  navegador. O navegador do sistema se chama só "Navegador" / "Browser".
+- A marca é a raposa **sozinha** (veja `README.md` desta pasta); ela identifica o sistema, não um app.
+  O navegador do sistema se chama só "Navegador" / "Browser".
 
 ## Compatibilidade com o nome antigo
 
