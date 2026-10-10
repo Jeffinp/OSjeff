@@ -46,6 +46,18 @@ pub struct Sandbox {
 impl Sandbox {
     /// A sandbox for app `id`. `None` when `id` is not a valid app id.
     pub fn new(perm: FsPerm, id: &str, quota_bytes: u64, max_fds: usize) -> Option<Sandbox> {
+        Sandbox::with_home(perm, id, quota_bytes, max_fds, "/home")
+    }
+
+    /// [`Sandbox::new`] for a signed-in user: `fs=home` apps see `home` (that user's folder)
+    /// as their `/` instead of the whole of `/home`.
+    pub fn with_home(
+        perm: FsPerm,
+        id: &str,
+        quota_bytes: u64,
+        max_fds: usize,
+        home: &str,
+    ) -> Option<Sandbox> {
         if !appmanifest::valid_id(id) {
             return None;
         }
@@ -56,7 +68,7 @@ impl Sandbox {
                 s.push_str(id);
                 s
             }
-            FsPerm::Home => String::from("/home"),
+            FsPerm::Home => String::from(home),
         };
         let mut fds = Vec::new();
         fds.resize_with(max_fds.clamp(1, 64), || None);

@@ -3,6 +3,7 @@
 //! draws and routes the mouse through these rectangles so they cannot disagree.
 
 use crate::windowing::window::Rect;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 pub const TITLE_H: i32 = crate::windowing::window::TITLE_H;
@@ -263,27 +264,42 @@ impl PickLay {
     }
 }
 
-/// The sidebar places of the sheet: label key (look it up with [`place_label`]) and folder.
-pub const PLACES: [(&str, &str); 4] = [
-    (crate::tk!("files.place.home"), "/home"),
-    (crate::tk!("files.place.documents"), "/Documentos"),
-    (crate::tk!("files.place.images"), "/Imagens"),
-    (crate::tk!("files.place.disk"), "/"),
+/// The sidebar places of the sheet: label keys (look one up with [`place_label`]); the folders are
+/// [`place_dir`].
+pub const PLACES: [&str; 4] = [
+    crate::tk!("files.place.home"),
+    crate::tk!("files.place.documents"),
+    crate::tk!("files.place.images"),
+    crate::tk!("files.place.disk"),
 ];
+
+/// The folder of sidebar place `i`: the signed-in user's home and the two folders in it, then the
+/// root of the volume.
+pub fn place_dir(i: usize) -> String {
+    use crate::apps::fileman::Place;
+    let p = match i {
+        0 => Place::Home,
+        1 => Place::Documents,
+        2 => Place::Images,
+        _ => Place::Disk,
+    };
+    String::from_utf8_lossy(&p.path()).into_owned()
+}
 
 /// The label of sidebar place `i` in the language in effect.
 pub fn place_label(i: usize) -> &'static str {
-    PLACES.get(i).map_or("", |(key, _)| crate::i18n::tr(key))
+    PLACES.get(i).map_or("", |key| crate::i18n::tr(key))
 }
 
 /// The place that holds `dir` (the sheet highlights it), if any: the deepest match.
 pub fn place_of(dir: &str) -> Option<usize> {
     let mut best: Option<(usize, usize)> = None;
-    for (i, (_, p)) in PLACES.iter().enumerate() {
-        let inside = if *p == "/" {
+    for i in 0..PLACES.len() {
+        let p = place_dir(i);
+        let inside = if p == "/" {
             dir == "/"
         } else {
-            dir == *p || (dir.starts_with(p) && dir.as_bytes().get(p.len()) == Some(&b'/'))
+            dir == p || (dir.starts_with(p.as_str()) && dir.as_bytes().get(p.len()) == Some(&b'/'))
         };
         if inside && best.is_none_or(|(_, l)| p.len() > l) {
             best = Some((i, p.len()));

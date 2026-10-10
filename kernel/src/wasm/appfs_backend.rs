@@ -43,7 +43,7 @@ fn now() -> u64 {
 pub(crate) fn with<R>(f: impl FnOnce(&mut dyn AppFs) -> R) -> Result<R, FsError> {
     let t = now();
     let mut mutated = false;
-    let r = vfs::with_backend(|be| {
+    let r = vfs::root::with_backend(|be| {
         let mut fs = VolumeFs::new(be, t);
         let r = f(&mut fs);
         mutated = fs.mutated();
@@ -52,7 +52,7 @@ pub(crate) fn with<R>(f: impl FnOnce(&mut dyn AppFs) -> R) -> Result<R, FsError>
     .map_err(|_| FsError::Io);
     if mutated {
         // Lets the file manager notice that an app changed files.
-        vfs::touch();
+        vfs::root::touch();
     }
     r
 }

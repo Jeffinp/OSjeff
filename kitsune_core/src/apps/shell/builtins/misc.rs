@@ -131,6 +131,21 @@ pub(super) fn stat(cx: &mut CmdCtx<'_>) -> i32 {
                 let size = i64::try_from(s.size).unwrap_or(i64::MAX);
                 let line = i18n::tr_fmt(key, &[("path", Arg::Str(p)), ("size", Arg::Int(size))]);
                 cx.println(&line);
+                if let Some(m) = cx.fs.meta(p) {
+                    let owner = cx.sys.user_name(m.uid).unwrap_or_else(|| m.uid.to_string());
+                    let group = cx
+                        .sys
+                        .group_name(m.gid)
+                        .unwrap_or_else(|| m.gid.to_string());
+                    let l = t!(
+                        "sh.stat.owner",
+                        owner = owner.as_str(),
+                        group = group.as_str(),
+                        mode = crate::security::perm::mode_string(m.mode).as_str(),
+                        octal = alloc::format!("{:04o}", m.mode).as_str()
+                    );
+                    cx.println(&l);
+                }
             }
             Err(e) => {
                 let msg = t!("sh.err.cannot_stat", path = p.as_str(), why = e.message());

@@ -17,15 +17,16 @@ pub enum Place {
 }
 
 impl Place {
-    /// The location the place opens.
-    pub fn path(self) -> &'static [u8] {
+    /// The location the place opens. Home and the two folders in it follow the signed-in user
+    /// (`storage::homes::current_home`).
+    pub fn path(self) -> Vec<u8> {
         match self {
-            Place::Home => b"/home",
-            Place::Documents => b"/Documentos",
-            Place::Images => b"/Imagens",
-            Place::Apps => APPS_PATH,
-            Place::Trash => TRASH_PATH,
-            Place::Disk => b"/",
+            Place::Home => crate::storage::homes::current_home(),
+            Place::Documents => vfs::join(&crate::storage::homes::current_home(), b"Documentos"),
+            Place::Images => vfs::join(&crate::storage::homes::current_home(), b"Imagens"),
+            Place::Apps => APPS_PATH.to_vec(),
+            Place::Trash => TRASH_PATH.to_vec(),
+            Place::Disk => b"/".to_vec(),
         }
     }
 
@@ -44,8 +45,10 @@ impl Place {
         if cwd == APPS_PATH {
             return Place::Apps;
         }
-        for p in [Place::Home, Place::Documents, Place::Images] {
+        // The deepest favourite first: Documents and Images live inside Home.
+        for p in [Place::Documents, Place::Images, Place::Home] {
             let base = p.path();
+            let base = base.as_slice();
             if cwd == base || (cwd.starts_with(base) && cwd.get(base.len()) == Some(&b'/')) {
                 return p;
             }

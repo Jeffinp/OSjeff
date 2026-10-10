@@ -221,6 +221,16 @@ pub(crate) use input::Special;
 pub(crate) use kit::widgets::*;
 use kit::{appui, ui};
 pub use services::shellhost::{worker as shell_worker, worker2 as shell_worker2};
+
+/// The signed-in user's home folder (`/home` before anyone signs in).
+pub fn accounts_home() -> alloc::vec::Vec<u8> {
+    services::accounts::home()
+}
+
+/// Load the account database and sign in the lone no-password user (once, after the storage).
+pub fn init_accounts() {
+    services::accounts::init();
+}
 pub(crate) use services::sysstore::*;
 pub(crate) use services::vfs;
 pub(crate) use windows::drag::{Drag, DragMode};

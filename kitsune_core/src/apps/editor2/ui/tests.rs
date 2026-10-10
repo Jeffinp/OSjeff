@@ -191,12 +191,12 @@ fn picker_hits() {
 #[test]
 fn places_hold_their_subfolders() {
     assert_eq!(place_of("/"), Some(3));
-    assert_eq!(place_of("/Documentos"), Some(1));
-    assert_eq!(place_of("/Documentos/a/b"), Some(1));
-    assert_eq!(place_of("/DocumentosX"), None);
+    assert_eq!(place_of("/home/Documentos"), Some(1));
+    assert_eq!(place_of("/home/Documentos/a/b"), Some(1));
+    assert_eq!(place_of("/home/DocumentosX"), Some(0));
     assert_eq!(place_of("/home"), Some(0));
     assert_eq!(place_of("/home/x"), Some(0));
-    assert_eq!(place_of("/Imagens/ferias"), Some(2));
+    assert_eq!(place_of("/home/Imagens/ferias"), Some(2));
     assert_eq!(place_of("/outra"), None);
     assert_eq!(place_of(""), None);
 }

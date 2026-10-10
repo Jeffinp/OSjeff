@@ -4,16 +4,15 @@ use crate::desktop::services::vfs;
 use crate::desktop::*;
 use kitsune_core::shell::fs::{DirEntry, FsErr, FsUsage, Kind as FsKind, ShellFs, Stat};
 
-/// The shell's view of the VFS. Holds only the working directory.
+/// The shell's view of the VFS. Holds only the working directory (empty until the first `cd`:
+/// then it is the signed-in user's home, which the shell thread cannot know yet when it starts).
 pub(crate) struct VfsFs {
     cwd: String,
 }
 
 impl VfsFs {
     pub(crate) fn new() -> Self {
-        Self {
-            cwd: String::from("/"),
-        }
+        Self { cwd: String::new() }
     }
 }
 
@@ -45,7 +44,15 @@ fn kind_of(k: vfs::EntryKind) -> FsKind {
 
 impl ShellFs for VfsFs {
     fn cwd(&self) -> String {
-        self.cwd.clone()
+        if !self.cwd.is_empty() {
+            return self.cwd.clone();
+        }
+        let home = crate::desktop::accounts_home();
+        if vfs::exists(&home) {
+            String::from_utf8_lossy(&home).into_owned()
+        } else {
+            String::from("/")
+        }
     }
 
     fn set_cwd(&mut self, path: &str) -> Result<(), FsErr> {
@@ -129,6 +136,28 @@ impl ShellFs for VfsFs {
             vfs::remove(b.as_bytes()).map_err(map_err)?;
         }
         vfs::rename_path(a.as_bytes(), b.as_bytes()).map_err(map_err)
+    }
+
+    fn meta(&self, path: &str) -> Option<kitsune_core::shell::fs::FileMeta> {
+        let i = vfs::stat(self.resolve(path).as_bytes()).ok()?;
+        Some(kitsune_core::shell::fs::FileMeta {
+            uid: i.uid,
+            gid: i.gid,
+            mode: i.mode,
+        })
+    }
+
+    fn set_owner(
+        &mut self,
+        path: &str,
+        uid: Option<u32>,
+        gid: Option<u32>,
+        mode: Option<u16>,
+    ) -> Result<(), FsErr> {
+        let abs = self.resolve(path);
+        vfs::with_backend(|b| b.set_owner(abs.as_bytes(), uid, gid, mode))
+            .map_err(map_err)?
+            .map_err(map_err)
     }
 
     fn usage(&self) -> FsUsage {

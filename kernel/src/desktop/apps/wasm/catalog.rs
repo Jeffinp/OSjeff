@@ -110,7 +110,7 @@ impl Desktop {
     /// install it when it is new (the installer refuses a bad manifest or quota, see the
     /// serial log) and run it.
     pub(crate) fn open_wasm_path(&mut self, path: &[u8]) {
-        let Ok(bytes) = vfs::read_file(path) else {
+        let Ok(bytes) = vfs::root::read_file(path) else {
             return;
         };
         let manifest = match appinstall::check(&bytes) {

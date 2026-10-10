@@ -172,8 +172,9 @@ fn ensure_ram() {
     }
 }
 
-/// Run `f` on the active volume.
-fn with<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
+/// Run `f` on the active volume with full rights: for the system's own files (settings, logs,
+/// the app store, the account database), never for what a user asked for.
+fn with_sys<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
     if storage::is_v3() {
         return storage::with_fs(|fs| f(fs)).ok_or(VfsError::Busy);
     }
@@ -185,140 +186,174 @@ fn with<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
     }
 }
 
-/// Run `f` on the active volume without marking it modified (for read-only
-/// walks such as the file manager's reload). `f` gets the [`Backend`].
-pub fn with_backend<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
-    with(f)
+/// Run `f` on the active volume as the signed-in user: every operation goes through
+/// [`Secured`](kitsune_core::secured::Secured) with the session's credentials. Before an account
+/// exists (early boot) there is no session and the call has full rights.
+fn with_user<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
+    let cred = super::accounts::cred();
+    with_sys(|be| match cred {
+        Some(c) => {
+            let mut s =
+                kitsune_core::secured::Secured::new(be, c, kitsune_core::secured::DEFAULT_UMASK);
+            f(&mut s)
+        }
+        None => f(be),
+    })
 }
 
-/// Run a mutating `f` and mark the filesystem as touched.
-fn with_mut<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
-    let r = with(f);
+fn mut_sys<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
+    let r = with_sys(f);
     touched();
     r
 }
 
-pub fn read_file(path: &[u8]) -> Result<Vec<u8>> {
-    with(|b| b.read_file(path))?
+fn mut_user<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
+    let r = with_user(f);
+    touched();
+    r
 }
 
-pub fn write_file(path: &[u8], data: &[u8]) -> Result<()> {
-    with_mut(|b| b.write_file(path, data, now()))?
-}
-
-pub fn append(path: &[u8], data: &[u8]) -> Result<()> {
-    with_mut(|b| {
-        if b.stat(path).is_err() {
-            b.create(path, now())?;
-        }
-        b.append(path, data, now())
-    })?
-}
-
-/// Read up to `len` bytes of `path` starting at `off` (a prefix of a big file).
-pub fn read_range(path: &[u8], off: u64, len: usize) -> Result<Vec<u8>> {
-    with(|b| {
-        let mut buf = alloc::vec![0u8; len];
-        let n = b.read_at(path, off, &mut buf)?;
-        buf.truncate(n);
-        Ok(buf)
-    })?
-}
-
-/// A name based on `base` that is free in folder `dir` (`Nova pasta (2)`).
-pub fn unique_name_in(dir: &[u8], base: &[u8]) -> Vec<u8> {
-    with(|b| core_vfs::unique_name(base, |n| core_vfs::exists(b, &join(dir, n))))
-        .unwrap_or_else(|_| base.to_vec())
-}
-
-pub fn list(dir: &[u8]) -> Result<Vec<Entry>> {
-    with(|b| core_vfs::list(b, dir))?
-}
-
-pub fn stat(path: &[u8]) -> Result<Info> {
-    with(|b| b.stat(path))?
-}
-
-pub fn exists(path: &[u8]) -> bool {
-    with(|b| core_vfs::exists(b, path)).unwrap_or(false)
-}
-
-pub fn statfs() -> Usage {
-    with(|b| b.usage()).unwrap_or_default()
-}
-
-pub fn mkdir(path: &[u8]) -> Result<()> {
-    with_mut(|b| b.mkdir(path, now()))?
-}
-
-pub fn new_file(dir: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-    with_mut(|b| core_vfs::new_file(b, dir, name, now()))?
-}
-
-pub fn new_folder(dir: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-    with_mut(|b| core_vfs::new_folder(b, dir, name, now()))?
-}
-
-pub fn rename(path: &[u8], new_name: &[u8]) -> Result<Vec<u8>> {
-    with_mut(|b| core_vfs::rename_in(b, path, new_name, now()))?
-}
-
-pub fn rename_path(from: &[u8], to: &[u8]) -> Result<()> {
-    with_mut(|b| b.rename(from, to, now()))?
-}
-
-pub fn remove(path: &[u8]) -> Result<()> {
-    with_mut(|b| core_vfs::remove(b, path, now()))?
-}
-
-pub fn purge(path: &[u8]) -> Result<()> {
-    with_mut(|b| core_vfs::purge(b, path))?
-}
-
-pub fn trash_list() -> Result<Vec<TrashItem>> {
-    with(|b| b.trash_list())?
-}
-
-pub fn restore(id: &[u8]) -> Result<Vec<u8>> {
-    with_mut(|b| b.trash_restore(id, now()))?
-}
-
-pub fn trash_purge(id: &[u8]) -> Result<()> {
-    with_mut(|b| b.trash_purge(id))?
-}
-
-pub fn empty_trash() -> Result<()> {
-    with_mut(|b| b.empty_trash())?
-}
-
-pub fn move_to(sources: &[Vec<u8>], dest: &[u8]) -> MoveReport {
-    match with_mut(|b| core_vfs::move_to(b, sources, dest, now())) {
-        Ok(r) => r,
-        Err(e) => MoveReport {
-            moved: Vec::new(),
-            error: Some(e),
-        },
+macro_rules! vfs_api {
+    ($with:ident, $with_mut:ident) => {
+    /// Run `f` on the active volume without marking it modified (for read-only
+    /// walks such as the file manager's reload). `f` gets the [`Backend`].
+    pub fn with_backend<R>(f: impl FnOnce(&mut dyn Backend) -> R) -> Result<R> {
+        $with(f)
     }
+
+    pub fn read_file(path: &[u8]) -> Result<Vec<u8>> {
+        $with(|b| b.read_file(path))?
+    }
+
+    pub fn write_file(path: &[u8], data: &[u8]) -> Result<()> {
+        $with_mut(|b| b.write_file(path, data, now()))?
+    }
+
+    pub fn append(path: &[u8], data: &[u8]) -> Result<()> {
+        $with_mut(|b| {
+            if b.stat(path).is_err() {
+                b.create(path, now())?;
+            }
+            b.append(path, data, now())
+        })?
+    }
+
+    /// Read up to `len` bytes of `path` starting at `off` (a prefix of a big file).
+    pub fn read_range(path: &[u8], off: u64, len: usize) -> Result<Vec<u8>> {
+        $with(|b| {
+            let mut buf = alloc::vec![0u8; len];
+            let n = b.read_at(path, off, &mut buf)?;
+            buf.truncate(n);
+            Ok(buf)
+        })?
+    }
+
+    /// A name based on `base` that is free in folder `dir` (`Nova pasta (2)`).
+    pub fn unique_name_in(dir: &[u8], base: &[u8]) -> Vec<u8> {
+        $with(|b| core_vfs::unique_name(base, |n| core_vfs::exists(b, &join(dir, n))))
+            .unwrap_or_else(|_| base.to_vec())
+    }
+
+    pub fn list(dir: &[u8]) -> Result<Vec<Entry>> {
+        $with(|b| core_vfs::list(b, dir))?
+    }
+
+    pub fn stat(path: &[u8]) -> Result<Info> {
+        $with(|b| b.stat(path))?
+    }
+
+    pub fn exists(path: &[u8]) -> bool {
+        $with(|b| core_vfs::exists(b, path)).unwrap_or(false)
+    }
+
+    pub fn statfs() -> Usage {
+        $with(|b| b.usage()).unwrap_or_default()
+    }
+
+    pub fn mkdir(path: &[u8]) -> Result<()> {
+        $with_mut(|b| b.mkdir(path, now()))?
+    }
+
+    pub fn new_file(dir: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        $with_mut(|b| core_vfs::new_file(b, dir, name, now()))?
+    }
+
+    pub fn new_folder(dir: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        $with_mut(|b| core_vfs::new_folder(b, dir, name, now()))?
+    }
+
+    pub fn rename(path: &[u8], new_name: &[u8]) -> Result<Vec<u8>> {
+        $with_mut(|b| core_vfs::rename_in(b, path, new_name, now()))?
+    }
+
+    pub fn rename_path(from: &[u8], to: &[u8]) -> Result<()> {
+        $with_mut(|b| b.rename(from, to, now()))?
+    }
+
+    pub fn remove(path: &[u8]) -> Result<()> {
+        $with_mut(|b| core_vfs::remove(b, path, now()))?
+    }
+
+    pub fn purge(path: &[u8]) -> Result<()> {
+        $with_mut(|b| core_vfs::purge(b, path))?
+    }
+
+    pub fn trash_list() -> Result<Vec<TrashItem>> {
+        $with(|b| b.trash_list())?
+    }
+
+    pub fn restore(id: &[u8]) -> Result<Vec<u8>> {
+        $with_mut(|b| b.trash_restore(id, now()))?
+    }
+
+    pub fn trash_purge(id: &[u8]) -> Result<()> {
+        $with_mut(|b| b.trash_purge(id))?
+    }
+
+    pub fn empty_trash() -> Result<()> {
+        $with_mut(|b| b.empty_trash())?
+    }
+
+    pub fn move_to(sources: &[Vec<u8>], dest: &[u8]) -> MoveReport {
+        match $with_mut(|b| core_vfs::move_to(b, sources, dest, now())) {
+            Ok(r) => r,
+            Err(e) => MoveReport {
+                moved: Vec::new(),
+                error: Some(e),
+            },
+        }
+    }
+
+    /// Plan a recursive copy of `sources` into the folder `dest`.
+    pub fn copy_plan(sources: &[Vec<u8>], dest: &[u8]) -> Result<CopyJob> {
+        $with(|b| CopyJob::plan(b, sources, dest))?
+    }
+
+    /// Copy up to `budget` bytes. An error ends the job (the partial file is removed).
+    pub fn copy_step(job: &mut CopyJob, budget: usize) -> Result<Progress> {
+        $with_mut(|b| job.step(b, budget, now()))?
+    }
+
+    /// Cancel: delete the half-written file; finished copies stay.
+    pub fn copy_abort(job: &mut CopyJob) {
+        let _ = $with_mut(|b| job.abort(b));
+    }
+
+    /// Copy `sources` into `dest` and wait for it; returns the new paths.
+    pub fn copy(sources: &[Vec<u8>], dest: &[u8]) -> Result<Vec<Vec<u8>>> {
+        let mut job = copy_plan(sources, dest)?;
+        while copy_step(&mut job, core_vfs::COPY_CHUNK * 4)? == Progress::Running {}
+        Ok(job.results().to_vec())
+    }
+    };
 }
 
-/// Plan a recursive copy of `sources` into the folder `dest`.
-pub fn copy_plan(sources: &[Vec<u8>], dest: &[u8]) -> Result<CopyJob> {
-    with(|b| CopyJob::plan(b, sources, dest))?
-}
+vfs_api!(with_user, mut_user);
 
-/// Copy up to `budget` bytes. An error ends the job (the partial file is removed).
-pub fn copy_step(job: &mut CopyJob, budget: usize) -> Result<Progress> {
-    with_mut(|b| job.step(b, budget, now()))?
-}
-
-/// Cancel: delete the half-written file; finished copies stay.
-pub fn copy_abort(job: &mut CopyJob) {
-    let _ = with_mut(|b| job.abort(b));
-}
-
-/// Copy `sources` into `dest` and wait for it; returns the new paths.
-pub fn copy(sources: &[Vec<u8>], dest: &[u8]) -> Result<Vec<Vec<u8>>> {
-    let mut job = copy_plan(sources, dest)?;
-    while copy_step(&mut job, core_vfs::COPY_CHUNK * 4)? == Progress::Running {}
-    Ok(job.results().to_vec())
+/// The same calls with full rights, for the system's own files (settings, logs, the app store, the
+/// account database): the user's permissions do not apply to them.
+pub mod root {
+    pub use super::touch;
+    use super::*;
+    vfs_api!(with_sys, mut_sys);
 }

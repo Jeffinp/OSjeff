@@ -234,11 +234,12 @@ impl Desktop {
 
     /// Open a sidebar place; a favourite folder that does not exist yet is created.
     pub(crate) fn files_go_place(&mut self, id: WindowId, p: Place) {
-        if p.is_folder() && !vfs::exists(p.path()) {
-            let _ = vfs::mkdir(p.path());
+        let path = p.path();
+        if p.is_folder() && !vfs::exists(&path) {
+            let _ = vfs::mkdir(&path);
             self.fs_changed();
         }
-        self.files_go(id, p.path());
+        self.files_go(id, &path);
     }
 
     /// When window `id` is on the Apps place, fill its rows from the catalog.

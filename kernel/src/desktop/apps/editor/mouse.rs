@@ -108,7 +108,7 @@ impl Desktop {
             return;
         }
         if let Some(i) = lay.place_at(px, py) {
-            picker_go(&mut picker, eui::PLACES[i].1);
+            picker_go(&mut picker, &eui::place_dir(i));
             self.set_modal(id, Some(rebuild(picker)));
             return;
         }

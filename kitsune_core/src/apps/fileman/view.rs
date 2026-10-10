@@ -44,14 +44,19 @@ impl Default for FileView {
 impl FileView {
     /// A view at the root (call [`refresh`](Self::refresh) to fill it).
     pub fn new() -> Self {
+        Self::at(b"/")
+    }
+
+    /// A view at `path` (call [`refresh`](Self::refresh) to fill it).
+    pub fn at(path: &[u8]) -> Self {
         FileView {
-            cwd: b"/".to_vec(),
+            cwd: path.to_vec(),
             rows: Vec::new(),
             all: Vec::new(),
             filter: Vec::new(),
             sort: Sort::DEFAULT,
             sel: Selection::new(),
-            history: History::new(b"/"),
+            history: History::new(path),
             truncated: false,
             nav_gen: 0,
         }

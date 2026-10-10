@@ -38,12 +38,19 @@ pub(crate) fn modified_label(t: u64) -> String {
 
 /// The label of a crumb: the well-known folders take their name in the language in effect.
 fn crumb_label(c: &Crumb) -> String {
-    match &c.path[..] {
-        b"/home" => String::from(t!("files.place.home")),
-        b"/Documentos" => String::from(t!("files.place.documents")),
-        b"/Imagens" => String::from(t!("files.place.images")),
-        _ => String::from_utf8_lossy(&c.label).into_owned(),
+    use fileman::Place;
+    // The well-known folders of whoever is signed in; the `home` folder of /home/<name> reads
+    // "Início" whoever's it is, as the sidebar does.
+    if c.path == Place::Home.path() {
+        return String::from(t!("files.place.home"));
     }
+    if c.path == Place::Documents.path() {
+        return String::from(t!("files.place.documents"));
+    }
+    if c.path == Place::Images.path() {
+        return String::from(t!("files.place.images"));
+    }
+    String::from_utf8_lossy(&c.label).into_owned()
 }
 
 /// `label: value` line of the information sheet.

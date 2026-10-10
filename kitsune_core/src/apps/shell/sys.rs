@@ -55,6 +55,27 @@ pub struct ProcInfo {
     pub mem_bytes: u64,
 }
 
+/// Who is signed in, for `whoami` and `id`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Identity {
+    pub name: String,
+    pub uid: u32,
+    pub gid: u32,
+    pub gname: String,
+    /// Every group the user is in (primary included), with names.
+    pub groups: Vec<(u32, String)>,
+    pub admin: bool,
+}
+
+/// One account for `users`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct UserEntry {
+    pub name: String,
+    pub uid: u32,
+    pub full_name: String,
+    pub admin: bool,
+}
+
 /// Outcome of a `ping`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct PingStats {
@@ -198,6 +219,40 @@ pub trait SysInfo {
         false
     }
 
+    /// The signed-in user (`whoami`, `id`, `groups`); `None` when the system has no accounts.
+    fn identity(&self) -> Option<Identity> {
+        None
+    }
+
+    /// Every account (`users`).
+    fn user_list(&self) -> Vec<UserEntry> {
+        Vec::new()
+    }
+
+    /// The uid of user `name`, for `chown`.
+    fn lookup_user(&self, name: &str) -> Option<u32> {
+        let _ = name;
+        None
+    }
+
+    /// The gid of group `name`, for `chown` and `chgrp`.
+    fn lookup_group(&self, name: &str) -> Option<u32> {
+        let _ = name;
+        None
+    }
+
+    /// The name of uid `uid`, for `ls -l`.
+    fn user_name(&self, uid: u32) -> Option<String> {
+        let _ = uid;
+        None
+    }
+
+    /// The name of gid `gid`, for `ls -l`.
+    fn group_name(&self, gid: u32) -> Option<String> {
+        let _ = gid;
+        None
+    }
+
     /// Wait `ms` milliseconds (`sleep`). The shell already caps the value with
     /// [`crate::apps::shell::Limits::max_sleep_ms`].
     fn sleep_ms(&mut self, _ms: u64) {}
@@ -230,6 +285,11 @@ pub struct MockSys {
     pub web: Vec<(String, HttpResponse)>,
     pub fetched: Vec<String>,
     pub net: Option<NetInfo>,
+    /// Who `whoami`/`id` report (`None` = no accounts).
+    pub who: Option<Identity>,
+    /// Accounts for `users`, `chown` and `ls -l` (name, uid); groups are (name, gid).
+    pub people: Vec<UserEntry>,
+    pub group_list: Vec<(String, u32)>,
     /// `interrupted` turns true after this many polls (`None` = never).
     pub interrupt_after: Option<u32>,
     polls: core::cell::Cell<u32>,
@@ -274,6 +334,9 @@ impl Default for MockSys {
             web: Vec::new(),
             fetched: Vec::new(),
             net: None,
+            who: None,
+            people: Vec::new(),
+            group_list: Vec::new(),
             interrupt_after: None,
             polls: core::cell::Cell::new(0),
         }
@@ -352,6 +415,42 @@ impl SysInfo for MockSys {
 
     fn net_info(&self) -> Option<NetInfo> {
         self.net.clone()
+    }
+
+    fn identity(&self) -> Option<Identity> {
+        self.who.clone()
+    }
+
+    fn user_list(&self) -> Vec<UserEntry> {
+        self.people.clone()
+    }
+
+    fn lookup_user(&self, name: &str) -> Option<u32> {
+        self.people.iter().find(|u| u.name == name).map(|u| u.uid)
+    }
+
+    fn lookup_group(&self, name: &str) -> Option<u32> {
+        self.group_list
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, g)| *g)
+    }
+
+    fn user_name(&self, uid: u32) -> Option<String> {
+        if uid == 0 {
+            return Some(String::from("root"));
+        }
+        self.people
+            .iter()
+            .find(|u| u.uid == uid)
+            .map(|u| u.name.clone())
+    }
+
+    fn group_name(&self, gid: u32) -> Option<String> {
+        self.group_list
+            .iter()
+            .find(|(_, g)| *g == gid)
+            .map(|(n, _)| n.clone())
     }
 
     fn interrupted(&self) -> bool {

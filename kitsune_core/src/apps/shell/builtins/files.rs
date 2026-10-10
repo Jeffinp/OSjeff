@@ -2,6 +2,33 @@
 
 use super::*;
 
+/// One line of `ls`: the name (with `/` after a folder under `-F`) or, under `-l`, the long form:
+/// kind, permissions, owner, group and size when the filesystem has owners, else kind and size.
+fn render(
+    cx: &CmdCtx<'_>,
+    long: bool,
+    classify: bool,
+    name: &str,
+    kind: Kind,
+    size: u64,
+    full: &str,
+) -> String {
+    let suffix = if classify && kind == Kind::Dir {
+        "/"
+    } else {
+        ""
+    };
+    if long {
+        if let Some(meta) = cx.fs.meta(full) {
+            return long_line(cx, meta, kind, size, name, suffix);
+        }
+        let t = if kind == Kind::Dir { 'd' } else { '-' };
+        format!("{t} {size:>8} {name}{suffix}\n")
+    } else {
+        format!("{name}{suffix}\n")
+    }
+}
+
 pub(super) fn ls(cx: &mut CmdCtx<'_>) -> i32 {
     let Some(o) = parse_opts(cx, "aFl1", "", None) else {
         return 2;
@@ -16,19 +43,6 @@ pub(super) fn ls(cx: &mut CmdCtx<'_>) -> i32 {
     let many = targets.len() > 1;
     let mut status = 0;
     let mut first = true;
-    let render = |name: &str, kind: Kind, size: u64| -> String {
-        let suffix = if classify && kind == Kind::Dir {
-            "/"
-        } else {
-            ""
-        };
-        if long {
-            let t = if kind == Kind::Dir { 'd' } else { '-' };
-            format!("{t} {size:>8} {name}{suffix}\n")
-        } else {
-            format!("{name}{suffix}\n")
-        }
-    };
     for t in &targets {
         let st = match cx.fs.stat(t) {
             Ok(s) => s,
@@ -40,7 +54,15 @@ pub(super) fn ls(cx: &mut CmdCtx<'_>) -> i32 {
             }
         };
         if st.kind == Kind::File {
-            let s = render(t, Kind::File, st.size);
+            let s = render(
+                cx,
+                long,
+                classify,
+                t,
+                Kind::File,
+                st.size,
+                &cx.fs.resolve(t),
+            );
             cx.print(&s);
             continue;
         }
@@ -61,8 +83,12 @@ pub(super) fn ls(cx: &mut CmdCtx<'_>) -> i32 {
         }
         first = false;
         if all {
-            cx.print(&render(".", Kind::Dir, 0));
-            cx.print(&render("..", Kind::Dir, 0));
+            let here = cx.fs.resolve(t);
+            let up = cx.fs.resolve(&format!("{t}/.."));
+            let s1 = render(cx, long, classify, ".", Kind::Dir, 0, &here);
+            cx.print(&s1);
+            let s2 = render(cx, long, classify, "..", Kind::Dir, 0, &up);
+            cx.print(&s2);
         }
         for e in entries {
             if !all && e.name.starts_with('.') {
@@ -71,7 +97,8 @@ pub(super) fn ls(cx: &mut CmdCtx<'_>) -> i32 {
             if cx.full() {
                 break;
             }
-            let s = render(&e.name, e.kind, e.size);
+            let full = join(&cx.fs.resolve(t), &e.name);
+            let s = render(cx, long, classify, &e.name, e.kind, e.size, &full);
             cx.print(&s);
         }
     }

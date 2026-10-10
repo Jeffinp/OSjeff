@@ -22,8 +22,14 @@ pub(super) fn build_runtime(i: usize) -> Result<Box<Runtime>, Why> {
     let module = Module::new(&engine, &wasm[..])
         .map_err(|e| Why::with(tk!("apps.why.bad_module"), alloc::format!("{e}")))?;
     let mut state = HostState::with_limits(guest_limits(quotas.mem_bytes));
-    let sandbox = Sandbox::new(manifest.fs, &manifest.id, quotas.disk_bytes, quotas.max_fds)
-        .ok_or_else(|| Why::new(tk!("apps.why.bad_id")))?;
+    let sandbox = Sandbox::with_home(
+        manifest.fs,
+        &manifest.id,
+        quotas.disk_bytes,
+        quotas.max_fds,
+        &String::from_utf8_lossy(&crate::desktop::accounts_home()),
+    )
+    .ok_or_else(|| Why::new(tk!("apps.why.bad_id")))?;
     let mono = crate::interrupts::ticks() * 4;
     state.v2 = Some(Box::new(abi2::V2::new(
         &manifest.id,

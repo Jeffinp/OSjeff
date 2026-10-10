@@ -99,7 +99,7 @@ impl Desktop {
         d.op = None;
         if let Some(dest) = dest {
             let target = match &dest {
-                Ok(p) => DropTarget::Folder(p),
+                Ok(p) => DropTarget::Folder(alloc::borrow::Cow::Borrowed(p.as_slice())),
                 Err(()) => DropTarget::Trash,
             };
             d.op = ui::plan_drop(&d.sources, target, copy);

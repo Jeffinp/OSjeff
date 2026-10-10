@@ -11,10 +11,10 @@ pub enum DropOp {
 }
 
 /// Where the pointer is while dragging items.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum DropTarget<'a> {
     /// A folder (absolute path).
-    Folder(&'a [u8]),
+    Folder(alloc::borrow::Cow<'a, [u8]>),
     /// The bin.
     Trash,
     /// Nothing that accepts a drop.
@@ -26,7 +26,7 @@ pub fn place_target(p: Place) -> DropTarget<'static> {
     match p {
         Place::Trash => DropTarget::Trash,
         Place::Apps => DropTarget::None,
-        other => DropTarget::Folder(other.path()),
+        other => DropTarget::Folder(alloc::borrow::Cow::Owned(other.path())),
     }
 }
 
@@ -64,7 +64,7 @@ pub fn plan_drop(sources: &[Vec<u8>], target: DropTarget<'_>, copy: bool) -> Opt
         DropTarget::Folder(dest) => {
             // A copy into the folder the items already live in would duplicate them, which
             // the paste command does; a drop is for going somewhere else.
-            can_drop_into(sources, dest).then_some(if copy { DropOp::Copy } else { DropOp::Move })
+            can_drop_into(sources, &dest).then_some(if copy { DropOp::Copy } else { DropOp::Move })
         }
         DropTarget::None => None,
     }

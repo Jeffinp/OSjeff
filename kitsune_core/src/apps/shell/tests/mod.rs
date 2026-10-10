@@ -90,6 +90,7 @@ fn on_small_stack(kib: usize, f: impl FnOnce() + Send + 'static) {
         .unwrap();
 }
 
+mod accounts;
 mod i18n;
 mod net;
 

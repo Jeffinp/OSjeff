@@ -31,6 +31,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "format",
             "i18n",
             "platform",
+            "security",
             "storage",
             "system",
             "ui",

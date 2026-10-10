@@ -296,6 +296,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ATA driver can yield to the other threads between sectors.
     storage::init();
     trace::mark("storage init done");
+    desktop::init_accounts();
+    trace::mark("accounts init done");
 
     bringup::init_text_engine(tsc_khz);
     trace::mark("ui text engine ready");

@@ -137,7 +137,15 @@ pub(crate) struct FilesState {
 impl FilesState {
     pub(crate) fn new() -> Self {
         FilesState {
-            view: kitsune_core::fileman::FileView::new(),
+            // A new window opens in the signed-in user's home when it exists, else the root.
+            view: {
+                let home = crate::desktop::accounts_home();
+                if crate::desktop::services::vfs::exists(&home) {
+                    kitsune_core::fileman::FileView::at(&home)
+                } else {
+                    kitsune_core::fileman::FileView::new()
+                }
+            },
             mode: kitsune_core::fileman::ui::ViewMode::List,
             preview_open: false,
             preview: None,

@@ -93,6 +93,41 @@ fn fail_err(r: kitsune_core::browser::FailReason) -> SysErr {
 }
 
 impl SysInfo for KSys {
+    fn identity(&self) -> Option<kitsune_core::shell::sys::Identity> {
+        crate::desktop::services::accounts::identity()
+    }
+
+    fn user_list(&self) -> Vec<kitsune_core::shell::sys::UserEntry> {
+        crate::desktop::services::accounts::users()
+            .into_iter()
+            .map(|u| kitsune_core::shell::sys::UserEntry {
+                name: u.name,
+                uid: u.uid,
+                full_name: u.full_name,
+                admin: u.admin,
+            })
+            .collect()
+    }
+
+    fn lookup_user(&self, name: &str) -> Option<u32> {
+        if name == "root" {
+            return Some(0);
+        }
+        crate::desktop::services::accounts::lookup_user(name)
+    }
+
+    fn lookup_group(&self, name: &str) -> Option<u32> {
+        crate::desktop::services::accounts::lookup_group(name)
+    }
+
+    fn user_name(&self, uid: u32) -> Option<String> {
+        Some(crate::desktop::services::accounts::user_name(uid))
+    }
+
+    fn group_name(&self, gid: u32) -> Option<String> {
+        Some(crate::desktop::services::accounts::group_name(gid))
+    }
+
     fn now(&self) -> DateTime {
         // The SNTP-corrected clock when the network confirmed it, else the RTC value read at
         // boot and advanced by the timer; shifted to the zone the settings app chose. (The RTC

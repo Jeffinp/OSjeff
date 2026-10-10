@@ -67,6 +67,15 @@ pub struct Stat {
     pub size: u64,
 }
 
+/// Owner, group and permission bits of a file ([`ShellFs::meta`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct FileMeta {
+    pub uid: u32,
+    pub gid: u32,
+    /// `rwx` bits and the sticky bit (`0o1777` at most).
+    pub mode: u16,
+}
+
 /// One directory entry from [`ShellFs::list`].
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct DirEntry {
@@ -141,6 +150,26 @@ pub trait ShellFs {
     fn usage(&self) -> FsUsage {
         FsUsage::default()
     }
+
+    /// Owner, group and mode of `path`; `None` when this filesystem has none (then `ls -l` and
+    /// `stat` show only the kind and the size).
+    fn meta(&self, path: &str) -> Option<FileMeta> {
+        let _ = path;
+        None
+    }
+
+    /// Change owner, group and/or mode (`None` = leave as is). Who may is the filesystem's call
+    /// (it answers [`FsErr::PermissionDenied`]).
+    fn set_owner(
+        &mut self,
+        path: &str,
+        uid: Option<u32>,
+        gid: Option<u32>,
+        mode: Option<u16>,
+    ) -> Result<(), FsErr> {
+        let _ = (path, uid, gid, mode);
+        Err(FsErr::ReadOnly)
+    }
 }
 
 /// Resolve `path` against `cwd` into an absolute path without `.`, `..` or
@@ -206,6 +235,7 @@ enum Node {
 #[derive(Clone)]
 pub struct MemFs {
     nodes: BTreeMap<String, Node>,
+    meta: BTreeMap<String, FileMeta>,
     cwd: String,
     /// Maximum number of files plus directories (excluding `/`).
     pub max_nodes: usize,
@@ -229,6 +259,7 @@ impl MemFs {
         nodes.insert("/".to_string(), Node::Dir);
         Self {
             nodes,
+            meta: BTreeMap::new(),
             cwd: "/".to_string(),
             max_nodes: 4096,
             max_file: 16 * 1024 * 1024,
@@ -250,6 +281,12 @@ impl MemFs {
     /// Builder helper: create a file (and nothing else).
     pub fn with_file(mut self, path: &str, data: &[u8]) -> Self {
         let _ = self.write(path, data);
+        self
+    }
+
+    /// Builder helper: record owner, group and mode of an existing path.
+    pub fn with_meta(mut self, path: &str, uid: u32, gid: u32, mode: u16) -> Self {
+        let _ = self.set_owner(path, Some(uid), Some(gid), Some(mode));
         self
     }
 
@@ -496,6 +533,42 @@ impl ShellFs for MemFs {
             }
         }
         u
+    }
+
+    /// Only what [`ShellFs::set_owner`] (or [`MemFs::with_meta`]) recorded: a plain `MemFs` has no
+    /// owners, which keeps the plain `ls -l` format.
+    fn meta(&self, path: &str) -> Option<FileMeta> {
+        self.meta.get(&self.resolve(path)).copied()
+    }
+
+    fn set_owner(
+        &mut self,
+        path: &str,
+        uid: Option<u32>,
+        gid: Option<u32>,
+        mode: Option<u16>,
+    ) -> Result<(), FsErr> {
+        let abs = self.resolve(path);
+        let is_dir = match self.nodes.get(&abs) {
+            None => return Err(FsErr::NotFound),
+            Some(Node::Dir) => true,
+            Some(Node::File(_)) => false,
+        };
+        let m = self.meta.entry(abs).or_insert(FileMeta {
+            uid: 0,
+            gid: 0,
+            mode: if is_dir { 0o755 } else { 0o644 },
+        });
+        if let Some(u) = uid {
+            m.uid = u;
+        }
+        if let Some(g) = gid {
+            m.gid = g;
+        }
+        if let Some(md) = mode {
+            m.mode = md & 0o1777;
+        }
+        Ok(())
     }
 }
 

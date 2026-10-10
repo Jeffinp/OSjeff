@@ -66,7 +66,7 @@ flat `crate::gfx` path used inside the crate all fail.
 | `ui` | `format`, `i18n`, `windowing` | wallpaper decoding; chrome is drawn around `Rect`/taskbar geometry |
 | `windowing` | `format`, `i18n`, `ui` | style tokens and motion; substring search |
 | `system` | `format`, `hw`, `i18n`, `ui`, `windowing` | settings use style/wallpaper, notify uses window geometry |
-| `apps` | `format`, `i18n`, `platform`, `storage`, `system`, `ui`, `windowing` | app logic sits on top; nothing depends on `apps` |
+| `apps` | `format`, `i18n`, `platform`, `security`, `storage`, `system`, `ui`, `windowing` | app logic sits on top; nothing depends on `apps` |
 
 The only mutual dependency between groups is `ui <-> windowing` (`anim`, `chrome`, `layout`, `widgets`,
 `cursor` use `window::Rect` and the taskbar geometry; `window` uses `style`, `winman` uses `anim`).

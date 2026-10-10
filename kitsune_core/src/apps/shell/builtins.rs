@@ -15,12 +15,16 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+mod accounts;
 mod conditions;
 mod files;
 mod misc;
 mod session;
 mod system;
 mod text;
+#[cfg(test)]
+pub(crate) use accounts::apply_mode;
+use accounts::*;
 use conditions::*;
 use files::*;
 use misc::*;
@@ -30,8 +34,15 @@ use text::*;
 
 /// Register every standard builtin into `r`.
 pub fn register_all(r: &mut Registry) {
-    let table: [(&str, &'static str, BuiltinFn); 48] = [
+    let table: [(&str, &'static str, BuiltinFn); 55] = [
         ("help", tk!("sh.help.help"), help),
+        ("whoami", tk!("sh.whoami.help"), whoami),
+        ("id", tk!("sh.id.help"), id),
+        ("groups", tk!("sh.groups.help"), groups),
+        ("users", tk!("sh.users.help"), users),
+        ("chmod", tk!("sh.chmod.help"), chmod),
+        ("chown", tk!("sh.chown.help"), chown),
+        ("chgrp", tk!("sh.chgrp.help"), chgrp),
         ("ls", tk!("sh.ls.help"), ls),
         ("cd", tk!("sh.cd.help"), cd),
         ("pwd", tk!("sh.pwd.help"), pwd),

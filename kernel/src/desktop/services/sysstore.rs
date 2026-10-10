@@ -11,6 +11,7 @@ use kitsune_core::sysif::{
 };
 
 use crate::desktop::services::vfs::{self, VfsError};
+use vfs::root as sysvfs;
 
 /// Largest file a `LogSink` writes: a longer dump keeps its newest whole lines.
 const MAX_LOG_FILE: usize = 256 * 1024;
@@ -31,8 +32,8 @@ fn map_err(e: VfsError) -> SinkError {
 
 /// Ensure `dir` (a top-level folder) exists.
 fn ensure_dir(dir: &[u8]) {
-    if !vfs::exists(dir) {
-        let _ = vfs::mkdir(dir);
+    if !sysvfs::exists(dir) {
+        let _ = sysvfs::mkdir(dir);
     }
 }
 
@@ -47,7 +48,7 @@ impl LogSink for VfsSink {
         ensure_dir(b"/var");
         ensure_dir(b"/var/log");
         let path = vfs::join(b"/var/log", name);
-        vfs::write_file(&path, body).map_err(map_err)?;
+        sysvfs::write_file(&path, body).map_err(map_err)?;
         if cut {
             Err(SinkError::Truncated { kept: body.len() })
         } else {
@@ -68,7 +69,7 @@ impl DiskUsage for VfsUsage {
     }
 
     fn usage(&self) -> DiskUsageInfo {
-        let u = vfs::statfs();
+        let u = sysvfs::statfs();
         DiskUsageInfo {
             total_bytes: Some(u.total),
             used_bytes: Some(u.used()),
@@ -104,17 +105,17 @@ struct VfsFiles;
 
 impl ConfFiles for VfsFiles {
     fn read(&mut self, path: &[u8]) -> Option<Vec<u8>> {
-        vfs::read_file(path).ok()
+        sysvfs::read_file(path).ok()
     }
 
     fn write(&mut self, path: &[u8], data: &[u8]) -> Result<(), SinkError> {
         ensure_dir(b"/etc");
-        vfs::write_file(path, data).map_err(map_err)
+        sysvfs::write_file(path, data).map_err(map_err)
     }
 
     fn remove(&mut self, path: &[u8]) {
-        if vfs::exists(path) {
-            let _ = vfs::purge(path);
+        if sysvfs::exists(path) {
+            let _ = sysvfs::purge(path);
         }
     }
 }
@@ -133,5 +134,5 @@ impl SettingsStore for VfsStore {
 /// root as the settings page and older settings files store it), if it exists and is
 /// a file.
 pub(crate) fn read_path(path: &[u8]) -> Option<Vec<u8>> {
-    vfs::read_file(&kitsune_core::settings::absolute_path(path)).ok()
+    sysvfs::read_file(&kitsune_core::settings::absolute_path(path)).ok()
 }

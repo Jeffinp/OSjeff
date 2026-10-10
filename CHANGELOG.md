@@ -20,7 +20,17 @@ renomeio mantêm o nome da época.
   reinício, tabelas de 16 bits) no navegador, no Imagens e no papel de parede. O JPEG foi conferido contra o
   libjpeg-turbo em 12 imagens (diferença máxima de 3 níveis por canal); progressivo, CMYK e 12 bits dizem
   "não suportado" em vez de mostrar uma imagem errada. Fuzz `image_decode` ganhou os modos GIF e JPEG.
-- O kernel ainda **não** usa essas peças (não há login): o plano em fases está em
+- **Contas no kernel** (primeira etapa): no primeiro boot cria `/etc/accounts` com o administrador `kitsune`
+  sem senha, que entra sozinho (a área de trabalho abre como antes) e **adota** tudo o que já estava no disco
+  (`/Documentos`, `/Imagens`, arquivos soltos e o `/home` antigo vão para `/home/kitsune`; o topo do disco
+  fica só com as pastas do sistema, do `root`). Todo o acesso do usuário aos arquivos (Arquivos, Editor,
+  Terminal, Imagens) passa por `Secured` com as permissões de quem entrou; configurações, registros, apps e
+  a base de contas usam o acesso do sistema. Os lugares do Arquivos (Início, Documentos, Imagens) e a pasta
+  inicial do Terminal e dos apps `fs=home` seguem o usuário. Terminal: `whoami`, `id`, `groups`, `users`,
+  `chmod` (octal e simbólico, `-R`), `chown`, `chgrp`, `ls -l` e `stat` com dono, grupo e modo. Verificado em
+  QEMU: um `chmod 000` impede o `cat`, e criar algo em `/` é recusado. Ainda sem tela de login nem página
+  Usuários nos Ajustes.
+- (histórico) O kernel não usava essas peças ainda (não havia login): o plano em fases está em
   [`docs/design/usuarios-seguranca.md`](docs/design/usuarios-seguranca.md) e o de compatibilidade em
   [`docs/design/compatibilidade.md`](docs/design/compatibilidade.md); o roadmap foi atualizado.
 
