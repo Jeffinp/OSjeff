@@ -1,5 +1,5 @@
 # W8: several instances of the same app keep their own state.
-# 3 terminals + 2 editors with different text, then the Task Manager lists them
+# 3 terminals + 2 editors with different text, then Tarefas lists them
 # (shell, shell 2, shell 3, editor, editor 2) and ends `shell 3` with DEL.
 source "$(dirname "$0")/../lib.sh"
 wait_first_frame
@@ -24,7 +24,7 @@ goto 700 122; click; sleep 0.5
 typew "!!"; sleep 0.5
 shot w8_editor1_kept
 
-# Task Manager: select `shell 3` (row 4) and end it
+# Tarefas: select `shell 3` (row 4) and end it
 dock 613; click; sleep 2
 for i in 1 2 3 4; do key down; sleep 0.25; done
 shot w8_taskmgr_before

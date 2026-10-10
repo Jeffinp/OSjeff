@@ -170,7 +170,7 @@ impl Desktop {
         }
     }
 
-    /// A Ctrl chord from the menu bar for browser window `id`.
+    /// A Ctrl chord from the panel for browser window `id`.
     pub(crate) fn browser_ctrl_chord(&mut self, id: WindowId, c: char) {
         if c.is_ascii() {
             self.browser_ctrl_key(id, Key::Char(c as u8), false);

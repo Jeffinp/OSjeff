@@ -1,5 +1,5 @@
 # W8: 30+ windows without a panic. Ctrl+N 30 times (the table caps at 32, so
-# the last opens are refused), the Task Manager lists them all (and scrolls),
+# the last opens are refused), Tarefas lists them all (and scrolls),
 # then DEL ends every instance.
 source "$(dirname "$0")/../lib.sh"
 wait_first_frame

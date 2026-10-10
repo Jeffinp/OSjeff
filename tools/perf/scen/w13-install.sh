@@ -1,5 +1,5 @@
 # W13 proof (c): install / remove an app from the Files "Apps" place and watch the
-# Start panel follow (the Apps place returned in W18; see also w18-apps.sh). `A` opens
+# Apps launcher follow (the Apps place returned in W18; see also w18-apps.sh). `A` opens
 # it. Rows are in name order (Notas, Ola, Pintura, Plasma, Relogio, Snake); a removed
 # app stays in the list as "nao instalado".
 source "$(dirname "$0")/../lib.sh"

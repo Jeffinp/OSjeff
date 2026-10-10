@@ -81,7 +81,7 @@ impl Desktop {
         }
     }
 
-    /// Dock-click semantics: focus (restoring if minimized) the most recently
+    /// Taskbar-click semantics: focus (restoring if minimized) the most recently
     /// used window of `kind`, or open one when there is none.
     pub(crate) fn launch(&mut self, kind: Kind) -> Option<WindowId> {
         if kind == Kind::WasmApp {

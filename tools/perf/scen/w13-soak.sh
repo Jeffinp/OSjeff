@@ -1,9 +1,9 @@
 # W13 proof (d): open/close soak of WASM apps. 100 rounds of "Ola" (hello) and
-# "Pintura" (paint, 1 MiB bitmap + two surfaces) opened from the Start panel and
+# "Pintura" (paint, 1 MiB bitmap + two surfaces) opened from the Apps launcher and
 # closed with the title-bar button. Build with --features perf-trace and compare
 # the serial `[trace]   heap used=` lines (tools/perf/w8-heap.sh): the heap must
 # not drift, which also proves the Store, surfaces and descriptors are freed.
-# The Start panel has more rows than fit: `End` scrolls it to the bottom, where Ola is
+# The Apps launcher has more rows than fit: `End` scrolls it to the bottom, where Ola is
 # row 6 and Pintura row 7 (W18: the apps now come from the disk volume, so every open
 # also reads /apps/<id>.wasm).
 # Window outer sizes: hello 408x296, paint 528x400, both at (240,130): the close

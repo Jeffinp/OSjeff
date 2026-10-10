@@ -1,4 +1,4 @@
-# W23: Arquivos (Finder-inspired file manager): list, icons, preview, search, selection, drag and
+# W23: Arquivos (file manager): list, icons, preview, search, selection, drag and
 # drop, rename, menus, sheets, empty states. Needs a prepared disk (FS_IMG) with /Imagens/*.png,
 # /Documentos, /Projetos, /big.bin, /leiame.txt and /etc/kitsune.conf (appearance=light|dark);
 # see docs/TESTING.md, "Arquivos e Imagens (W23)".

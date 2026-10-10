@@ -1,4 +1,4 @@
-# Notepad with files (ABI v2, `fs=own`): its files live in `/data/notes/`, which
+# Notes app with files (ABI v2, `fs=own`): its files live in `/data/notes/`, which
 # the host maps to the app's own `/`. Also the demonstration that the sandbox
 # refuses `..` (Ctrl+T).
 [package]

@@ -6,7 +6,7 @@ impl Desktop {
     /// A mouse-wheel step (`dz` > 0 = wheel toward the user = scroll down). As on desktop
     /// systems the window *under the pointer* gets it, focused or not, and the wheel does not
     /// change focus. Returns whether anything changed (the caller repaints). Ignored while a menu,
-    /// the start panel or the Alt+Tab switcher is up, or a window is being dragged.
+    /// the Apps launcher or the Alt+Tab switcher is up, or a window is being dragged.
     pub fn handle_wheel(&mut self, dz: i32) -> bool {
         if dz != 0 && self.shell.apps.is_some() {
             return self.shell_wheel(dz);

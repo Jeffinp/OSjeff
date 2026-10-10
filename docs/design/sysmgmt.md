@@ -1,6 +1,6 @@
 # Gerenciamento do sistema: log, monitor, configurações e notificações
 
-Frente W14, refeita na W25: o Monitor de recursos e o Gerenciador de tarefas viraram um app só, **Tarefas**; o visualizador de log é o **Registro**; as Configurações são os **Ajustes**; a Calculadora e os banners ganharam o visual novo. A aparência e os números da W25 estão em `docs/design/ui-macos.md`, seção 11, e nas seções marcadas "W25" abaixo; o resto descreve a W14 e continua valendo para a lógica.
+Frente W14, refeita na W25: o monitor de recursos e o gerenciador de processos viraram um app só, **Tarefas**; o visualizador de log é o **Registro**; as Configurações são os **Ajustes**; a Calculadora e os banners ganharam o visual novo. A aparência e os números da W25 estão em `docs/design/ui-design.md`, seção 11, e nas seções marcadas "W25" abaixo; o resto descreve a W14 e continua valendo para a lógica.
 
 Frente W14. Quatro ferramentas que um SO precisa, no padrão do resto do projeto: a
 lógica pura e testada em `kitsune_core`, a cola de hardware no `kernel`, prova em QEMU
@@ -71,7 +71,7 @@ barra de rolagem que some. Trabalha numa cópia (snapshot) do anel, renovada a c
 visível mostra no máximo as linhas que cabem, então um anel cheio (64 KiB, ~770 linhas de teste) custa o mesmo
 que um vazio. O visualizador antigo (botão de nível, caixa de busca, linhas de 18 px, painel escuro) foi substituído.
 
-## 2. Tarefas (W25; reúne o Monitor de recursos e o Gerenciador de tarefas)
+## 2. Tarefas (W25; reúne o monitor de recursos e o gerenciador de processos)
 
 Cinco abas: **CPU**, **Memória**, **Disco**, **Rede** e **Processos**. A amostragem é **uma vez por
 segundo**, no tique de relógio do laço do compositor (`Desktop::sample_system`): algumas operações
@@ -201,7 +201,7 @@ ponteiro está sobre ele e uma linha fina na base que diminui até o fim; o temp
 `Toasts::set_lifetime_secs`, cada banner leva o seu). Enquanto há banner o compositor pede quadros (um por segundo com
 *reduzir movimento*).
 
-`kitsune_core::notify::Toasts`: no máximo 3 visíveis (4 s cada por padrão) empilhadas abaixo da barra de menus,
+`kitsune_core::notify::Toasts`: no máximo 3 visíveis (4 s cada por padrão) empilhadas abaixo do painel superior,
 fila de 8, uma repetição de mensagem visível só reinicia o tempo e incrementa um contador
 (`x3`), clique fecha. O compositor desenha direto no framebuffer depois do quadro
 (restaurando o fundo a partir do `back`, como o HUD) **só enquanto há toast na tela ou
@@ -276,7 +276,7 @@ Tempo de parede por quadro, em µs:
 | abrir/fechar a calculadora: `AnimDamage` / `AnimRebuild` | 14,8 / 26,5 ms | 13,5 / 24,6 ms |
 | abrir/fechar: `Settle` | 10,8 ms | 10,2 ms |
 | CPU ocupada, abrir/fechar | 5,39 % | 5,42 % |
-| Task Manager aberto, tique do relógio (`Clock`) | 5,7 ms | 4,8 ms |
+| Tarefas aberto, tique do relógio (`Clock`) | 5,7 ms | 4,8 ms |
 
 Nada regrediu além do ruído. O desktop ocioso ainda faz **só** o repaint local do relógio
 por segundo; o custo novo por segundo no laço (amostragem do monitor, duas leituras
@@ -284,9 +284,9 @@ atômicas dos toasts, uma do log) não aparece no tempo de quadro e some na porc
 CPU ocupada (0,7 a 0,8 % nas duas versões). A caixa de relógio 12/24 h e o fuso em minutos
 usam um átomo e um `format_clock` por repaint.
 
-Com o **Monitor aberto** a janela é "viva" como o Task Manager: o tique de 1 s recompõe
-a cena e a repinta (`Clock`, **9,5 ms** por segundo, ~1 % da CPU; o Task Manager custa 4,8
-ms por ser menor). Janelas vivas: Task Manager, Monitor, Configurações e Log.
+Com o **Monitor aberto** a janela é "viva" como a Tarefas: o tique de 1 s recompõe
+a cena e a repinta (`Clock`, **9,5 ms** por segundo, ~1 % da CPU; a Tarefas custa 4,8
+ms por ser menor). Janelas vivas: Tarefas, Monitor, Configurações e Log.
 `tools/perf/scen/w14-perfmon.sh` reproduz a medida.
 
 ## 8. Fora do escopo / limitações

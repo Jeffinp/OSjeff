@@ -1,6 +1,6 @@
 # W13 proof (a): open notes + paint + clock + snake at the same time from the Start
 # panel (the installed-apps list), arrange them, type into notes, draw in paint,
-# steer snake, and take screenshots. Row n of the start panel is at
+# steer snake, and take screenshots. Row n of the Apps launcher is at
 # y = DOCKY - 529 + 38 n; WASM windows cascade from (240,130) by 28 px each.
 source "$(dirname "$0")/../lib.sh"
 srow() { echo $(( DOCKY - 529 + 38 * $1 )); }

@@ -282,7 +282,7 @@ impl Rect {
     }
 
     /// Clamp a proposed top-left so the title bar stays on a `sw × sh` screen and
-    /// below the menu bar.
+    /// below the panel.
     pub fn clamped_pos(&self, sw: i32, sh: i32) -> (i32, i32) {
         let x = self.x.clamp(0, (sw - self.w).max(0));
         let y = self.y.clamp(MENUBAR_H, (sh - TITLE_H).max(MENUBAR_H));

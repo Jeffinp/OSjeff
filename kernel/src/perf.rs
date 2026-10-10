@@ -45,7 +45,7 @@ impl Perf {
         (self.0.fps, self.0.frame_us, self.0.max_us)
     }
 
-    /// Screen rect of the HUD panel (top-left, under the menu bar).
+    /// Screen rect of the HUD panel (top-left, under the panel).
     pub fn rect(_width: i32) -> kitsune_core::Rect {
         kitsune_core::Rect::new(
             12,

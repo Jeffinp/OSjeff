@@ -19,7 +19,7 @@
 //! after `hlt`, so that is safe. All of this state is plain atomics, so the ISR
 //! (IF=0, never allocates) and thread code can share it without locks.
 //!
-//! The Task Manager's per-thread "CPU" counts only the timer ticks that found
+//! Tarefas's per-thread "CPU" counts only the timer ticks that found
 //! the thread *running* (`IDLE` marks the ones spent in `hlt`).
 //!
 //! # Dead threads
@@ -86,7 +86,7 @@ impl FxArea {
     }
 }
 
-/// Index of the running thread (read by the Task Manager).
+/// Index of the running thread (read by Tarefas).
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
 /// Timer ticks that found each thread slot *running* (not parked in `hlt`).
 static TICKS: [AtomicU64; MAX_THREADS] = [const { AtomicU64::new(0) }; MAX_THREADS];
@@ -526,7 +526,7 @@ pub fn idle(has_work: impl Fn() -> bool) {
     }
 }
 
-// ---- introspection for the Task Manager ----
+// ---- introspection for Tarefas ----
 
 /// Index of the thread that is running right now (timer-ISR attribution).
 pub fn current() -> usize {
@@ -547,7 +547,7 @@ pub fn thread_name(i: usize) -> &'static str {
         .map_or("", |t| t.name)
 }
 
-/// `true` if the thread in slot `i` died (shown as DEAD in the Task Manager).
+/// `true` if the thread in slot `i` died (shown as DEAD in Tarefas).
 pub fn thread_dead(i: usize) -> bool {
     is_dead(i)
 }

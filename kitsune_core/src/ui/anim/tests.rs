@@ -9,7 +9,7 @@ fn bezier_endpoints_and_monotonic() {
     for c in [
         curves::ENTER,
         curves::EXIT,
-        curves::GENIE,
+        curves::SWOOP,
         curves::STANDARD,
         curves::LINEAR,
     ] {

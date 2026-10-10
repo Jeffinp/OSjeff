@@ -134,7 +134,7 @@ impl Desktop {
 
     // ---- commands ----
 
-    /// The window the menu bar acts on: the focused one.
+    /// The window the panel acts on: the focused one.
     pub(super) fn target_window(&self) -> Option<(WindowId, Kind)> {
         let id = self.focused()?;
         Some((id, self.kind_of(id)?))

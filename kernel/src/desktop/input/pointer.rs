@@ -70,7 +70,7 @@ impl Desktop {
             self.client_dirty = Some(id);
         }
 
-        // Moving over an open menu / start panel updates the hover highlight,
+        // Moving over an open menu / Apps launcher updates the hover highlight,
         // but it is NOT a full-scene change: the compositor repaints only the
         // overlay's rectangle on `cursor_moved` (see the overlay path in the
         // main loop), so we deliberately do not set `scene` here.

@@ -1,9 +1,10 @@
 # Compilar e rodar
 
-Este guia leva do `git clone` a um desktop Kitsune na tela, em Linux, WSL, macOS
-(só QEMU) ou Windows. Todos os comandos foram executados de verdade nesta árvore.
+Este guia leva do `git clone` a um desktop Kitsune na tela. O que ele pede do **host** (a
+máquina em que você compila e roda o QEMU) está na seção 1; o Kitsune em si não depende de
+nenhum sistema do host. Todos os comandos foram executados de verdade nesta árvore.
 
-## 1. Pré-requisitos
+## 1. Requisitos do host
 
 | O quê | Para quê | Observação |
 |---|---|---|
@@ -33,7 +34,7 @@ o bootloader); as seguintes ~25 s.
 
 ## 3. Rodar
 
-### Linux / WSL / macOS
+### Hosts com shell POSIX (Linux, WSL, macOS)
 
 ```bash
 tools/run.sh            # BIOS, janela do QEMU
@@ -62,7 +63,7 @@ Visual Studio Build Tools se o instalador pedir) e o QEMU em `C:\Program Files\q
 volta ao WSL). O `rust-toolchain.toml` baixa o nightly fixado sozinho. Este caminho ainda não
 foi exercitado em uma máquina Windows real: se falhar, o WSL continua sendo o caminho testado.
 
-### Windows (aceleração WHPX)
+### Windows com aceleração (WHPX)
 
 ```powershell
 .\run.ps1              # compila no WSL e roda com WHPX
@@ -92,7 +93,7 @@ Para mandar teclas e mouse enquanto roda:
 A imagem embute os apps `clock`, `notes`, `paint` e `snake` (em `wasm-apps/`;
 `kernel/build.rs` compila todos para
 `wasm32-unknown-unknown`) e os instala em `/apps` no primeiro boot, sem sobrescrever
-os que já existem. (Os exemplos `hello`, `plasma` e `nettest`, em `wasm-apps/examples/`, continuam compiláveis mas não vêm na imagem.) Eles aparecem no Painel Iniciar (com ícone e nome) e no Gerenciador
+os que já existem. (Os exemplos `hello`, `plasma` e `nettest`, em `wasm-apps/examples/`, continuam compiláveis mas não vêm na imagem.) Eles aparecem no launcher Apps (com ícone e nome) e no Gerenciador
 de arquivos (vista **Apps**: `Enter` abre, `I` instala, `Del` remove). O ícone "W" do dock
 abre o `snake`. Detalhes: [`docs/design/apps.md`](design/apps.md).
 
@@ -171,7 +172,7 @@ Um app é **um arquivo `.wasm`**: o código mais uma seção `kitsune.manifest` 
 
 5. **Embuta na imagem**: acrescente `"meuapp"` em `BUNDLED_APPS` de `kernel/build.rs` e rode
    `cargo build --release -p os`. No primeiro boot ele é instalado em `/apps/meuapp.wasm`
-   e aparece no Painel Iniciar. Dados do app (`fs=own`) ficam em `/data/meuapp/`.
+   e aparece no launcher Apps. Dados do app (`fs=own`) ficam em `/data/meuapp/`.
 
 Regras do jogo: entrada por `on_key(code, mods)`, `on_text`, `on_pointer`, `on_resize`,
 `on_tick`, `on_close`; desenho por `Canvas` (`fill_rect`, `text`, `blit_rgba`, `png`);

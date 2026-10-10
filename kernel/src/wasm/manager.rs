@@ -299,7 +299,7 @@ pub fn close(id: AppId) {
     wake_worker();
 }
 
-/// Restart an app: new `Store` from the same package (Task Manager, `R`).
+/// Restart an app: new `Store` from the same package (Tarefas, `R`).
 pub fn restart(id: AppId) {
     with(|slots| {
         if let Some(s) = slot_of(slots, id)
@@ -444,9 +444,9 @@ pub fn clip_generation() -> u64 {
     CLIP_GEN.load(Ordering::Acquire)
 }
 
-// ---------------------------------------------------------------- status (Task Manager, desktop)
+// ---------------------------------------------------------------- status (Tarefas, desktop)
 
-/// A snapshot of one app for the Task Manager.
+/// A snapshot of one app for Tarefas.
 pub struct Status {
     pub id: AppId,
     pub app_id: String,

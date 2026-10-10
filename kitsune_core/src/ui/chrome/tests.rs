@@ -107,7 +107,7 @@ fn menu_geometry_sizes_to_content_and_stays_on_screen() {
             .iter()
             .all(|r| r.x >= g.rect.x && r.right() <= g.rect.right())
     );
-    // Near the corner it shifts back inside; never under the menu bar.
+    // Near the corner it shifts back inside; never under the panel.
     let c = menu_geom(&rows, (1270, 715), 1280, 720);
     assert!(c.rect.right() <= 1276 && c.rect.bottom() <= 716);
     let top = menu_geom(&rows, (100, 0), 1280, 720);

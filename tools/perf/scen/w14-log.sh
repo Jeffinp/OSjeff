@@ -1,6 +1,6 @@
-# W14: the system-log viewer. Opens it from the start panel (it has no dock icon),
+# W14: the system-log viewer. Opens it from the Apps launcher (it has no dock icon),
 # takes a shot of the boot events, then types a search and cycles the level filter.
-# Start panel (10 apps + 2 power rows): the app rows are 38 px high from the panel
+# Apps launcher (10 apps + 2 power rows): the app rows are 38 px high from the panel
 # top; the log viewer is row 9 (index in Kind::ALL).
 source "$(dirname "$0")/../lib.sh"
 wait_first_frame

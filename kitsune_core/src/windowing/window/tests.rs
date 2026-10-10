@@ -228,7 +228,7 @@ fn resized_stays_on_screen() {
     assert_eq!(big.right(), 1280);
     assert_eq!(big.bottom(), 720);
     let nw = r.resized(ResizeEdge::NW, (-5000, -5000), (100, 100), SCREEN);
-    // The top edge stops under the menu bar.
+    // The top edge stops under the panel.
     assert_eq!((nw.x, nw.y), (0, MENUBAR_H));
     assert_eq!((nw.right(), nw.bottom()), (500, 400));
 }

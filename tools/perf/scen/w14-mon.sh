@@ -2,7 +2,7 @@
 # panel (it has no dock icon), looks at the process list, sorts it, lets the
 # graphs fill while a temporary build hook generates load (a burning thread, a
 # heap wave, network traffic), and shows the Performance and Sistema tabs.
-# Start panel (9 apps + 2 power rows): app rows are 38 px high from the panel top.
+# Apps launcher (9 apps + 2 power rows): app rows are 38 px high from the panel top.
 source "$(dirname "$0")/../lib.sh"
 wait_first_frame
 sleep 2

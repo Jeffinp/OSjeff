@@ -1,6 +1,6 @@
 //! Design tokens: the colour palettes of the light and dark appearance, resolved
 //! from the user's setting, and the size/radius/spacing constants of the design
-//! system (`docs/design/ui-macos.md`).
+//! system (`docs/design/ui-design.md`).
 //!
 //! Colours are straight ARGB (`0xAARRGGBB`); opaque ones have alpha `FF`. The
 //! kernel's `theme` module wraps these in `Color` values; nothing here touches
@@ -88,13 +88,13 @@ pub struct Palette {
     /// Over the blurred wallpaper.
     pub menubar_tint: u32,
     pub dock_tint: u32,
-    /// Hairline around the dock and the menu bar's bottom edge.
+    /// Hairline around the dock and the panel's bottom edge.
     pub glass_edge: u32,
     pub menu_tint: u32,
     pub field_bg: u32,
     pub control_bg: u32,
     pub control_border: u32,
-    /// Text on the menu bar and the dock labels.
+    /// Text on the panel and the dock labels.
     pub bar_text: u32,
     /// Grey traffic lights of an unfocused window.
     pub light_inactive: u32,

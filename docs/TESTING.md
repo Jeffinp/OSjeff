@@ -403,7 +403,7 @@ QEMU sem aceleração **não** representa hardware real. Compare proporções.
 | `cargo build --release -p os --features perf-trace` | estatísticas por segundo na serial (`[trace]`): custo por etapa de render, ISR, alocações, latência de entrada |
 | `tools/perf/run.sh`, `ab.sh`, `cmp.sh` | cenários scriptados (mouse/teclas pelo monitor do QEMU), A/B intercalado, `-icount` para razões estáveis |
 | `tools/perf/scen/w8-*.sh`, `w8-heap.sh` | window manager: várias instâncias (`w8-multi`), maximizar/minimizar/Alt+Tab/redimensionar (`w8-wm`), 30+ janelas (`w8-stress`), soak de abrir/fechar 100x com a ocupação exata do heap (`w8-soak` + `w8-heap.sh`, build `perf-trace`) |
-| `tools/perf/scen/w13-*.sh` | plataforma de apps: quatro apps ao mesmo tempo (`w13-apps`), app hostil (`w13-hostile`, só com o gancho temporário descrito abaixo), instalar/remover pelo Files (`w13-install`), CPU por app no Gerenciador de tarefas (`w13-cpu`), soak de abrir/fechar apps 100x (`w13-soak` + `w8-heap.sh`, build `perf-trace`) |
+| `tools/perf/scen/w13-*.sh` | plataforma de apps: quatro apps ao mesmo tempo (`w13-apps`), app hostil (`w13-hostile`, só com o gancho temporário descrito abaixo), instalar/remover pelo Files (`w13-install`), CPU por app no app Tarefas (`w13-cpu`), soak de abrir/fechar apps 100x (`w13-soak` + `w8-heap.sh`, build `perf-trace`) |
 | `cd bench && cargo bench` | microbenchmarks no host (criterion), crate fora do workspace |
 
 Os marcos de boot (`[trace] boot + N ms`) saem na serial em qualquer build.
@@ -446,8 +446,8 @@ antes = árvore no início do trabalho, mesmos cenários):
 | ocioso (CPU por segundo) | 0 + um tique de relógio de 0,33 ms | 0 + um tique de 0,35 ms |
 | arrastar a janela (quadro de dano) | 2,32 ms | 3,67 ms |
 | abrir e fechar uma janela (quadro de animação) | 11,3 ms | 4,1 ms |
-| Apps (antes, painel iniciar): quadro de hover | 5,05 ms | 0,64 ms |
-| Apps (antes, painel iniciar): quadro que abre | 14,0 ms | 34,3 ms |
+| Apps: quadro de hover | 5,05 ms | 0,64 ms |
+| Apps: quadro que abre | 14,0 ms | 34,3 ms |
 | barra de apps varrida pelo ponteiro (ampliação) | n/a | 2,98 ms por quadro |
 | texto, 48 caracteres | 283 672 ciclos (fonte 8x8) | 39 550 ciclos (13 px, vetorial) |
 | retângulo arredondado 512x320, cheio | 874 120 ciclos | 1 113 396 ciclos (AA) |

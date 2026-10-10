@@ -4,7 +4,7 @@
 #   1 infinite loop   2 memory.grow far past the quota   3 invalid pointer
 #   4 open("../../etc/x")   5 open descriptors up to the ceiling (run after 6)
 #   6 read another app's files   7 net_http_get without permission
-# The start panel lists "Hostil" first among the apps (row 7), then Notas (8),
+# The Apps launcher lists "Hostil" first among the apps (row 7), then Notas (8),
 # Ola, Pintura, Plasma, Relogio, Snake.
 source "$(dirname "$0")/../lib.sh"
 srow() { echo $(( DOCKY - 529 + 38 * $1 )); }
@@ -31,7 +31,7 @@ goto 746 201; click; sleep 1
 dock 451; click; sleep 0.6; goto 440 "$(srow 7)"; click; sleep 2
 for k in 2 4 6 5 7; do key $k; sleep 0.8; done
 shot b3-survivor
-# the others still run: type in notes, look at the Task Manager
+# the others still run: type in notes, look at Tarefas
 dock 613; click; sleep 1.5
 shot b4-taskmgr
 sleep 3

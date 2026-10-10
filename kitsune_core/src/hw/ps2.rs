@@ -41,7 +41,7 @@ pub enum MouseMode {
 impl MouseMode {
     /// The mode for the answer to "get device id" after the magic sequence.
     /// `None` (no answer in time) and every id other than 3 mean [`Basic`]:
-    /// id 4 (Explorer, 5 buttons) is not negotiated, and a mouse that kept
+    /// id 4 (5 buttons) is not negotiated, and a mouse that kept
     /// answering 0 simply has no wheel.
     ///
     /// [`Basic`]: MouseMode::Basic

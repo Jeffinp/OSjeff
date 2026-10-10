@@ -20,7 +20,7 @@ pub enum Icon {
     Brand,
     /// The fox with its crown of tails (boot splash, About).
     Halo,
-    Launchpad,
+    Apps,
     Terminal,
     Editor,
     TaskMgr,
@@ -37,7 +37,7 @@ pub enum Icon {
 impl Icon {
     fn id(self) -> IconId {
         match self {
-            Icon::Brand | Icon::Launchpad => IconId::Brand,
+            Icon::Brand | Icon::Apps => IconId::Brand,
             Icon::Halo => IconId::Halo,
             Icon::Terminal => IconId::Terminal,
             Icon::Editor => IconId::Notes,

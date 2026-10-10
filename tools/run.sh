@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Linux/macOS counterpart of run.ps1: build the image and boot it in QEMU.
+# Shell counterpart of run.ps1 (for hosts with a POSIX shell): build the image and boot it in QEMU.
 #
 #   tools/run.sh [bios|uefi] [-- extra qemu args]
 #

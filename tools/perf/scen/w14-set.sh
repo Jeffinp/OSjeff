@@ -1,4 +1,4 @@
-# W14: the settings app. Opens it from the start panel, then changes the wallpaper
+# W14: the settings app. Opens it from the Apps launcher, then changes the wallpaper
 # (a built-in gradient, then an image file on the disk), the accent colour, the
 # clock format, the time zone and the date/time, and the keyboard layout (typing
 # ç and accented letters with ABNT2), taking a shot after each.

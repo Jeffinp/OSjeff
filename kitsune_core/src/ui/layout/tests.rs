@@ -310,7 +310,7 @@ fn browser_chrome_survives_tiny_windows() {
     assert_eq!(c.content.h, 0); // negative height clamps to empty
 }
 
-// ---- start panel ----
+// ---- Apps launcher ----
 
 // ---- file manager ----
 

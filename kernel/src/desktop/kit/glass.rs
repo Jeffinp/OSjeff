@@ -1,6 +1,6 @@
 //! Translucent "glass" surfaces: a blurred copy of what is behind a panel (taken
 //! when the panel opens and kept until it closes), a tint over it and a hairline
-//! edge. This is how menus, popovers, Spotlight, Launchpad, toasts and the dock
+//! edge. This is how menus, popovers, Busca, Apps, toasts and the taskbar
 //! get their look without any per-frame blur.
 
 // Toolkit: parts of this API are consumed by the chrome, the rest is for the apps (wave 2).

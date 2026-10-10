@@ -1,7 +1,7 @@
 //! Toast notifications: the pure model behind the corner overlay.
 //!
 //! [`Toasts`] shows at most [`MAX_VISIBLE`] banners stacked down from the top-right
-//! corner (under the menu bar), each for [`LIFETIME_MS`]; more wait in a short queue and take a slot as
+//! corner (under the panel), each for [`LIFETIME_MS`]; more wait in a short queue and take a slot as
 //! soon as one frees up. A repeat of a message already on screen only restarts
 //! its timer and bumps a counter, so a loop that logs the same warning cannot
 //! flood the desktop. A click on a toast dismisses it.

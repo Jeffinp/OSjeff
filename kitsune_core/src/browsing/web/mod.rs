@@ -1,5 +1,4 @@
-//! A minimal HTML + CSS rendering engine (box model), inspired by Matt
-//! Brubeck's "robinson" toy engine. Pure and `alloc`-only, so the whole
+//! A minimal HTML + CSS rendering engine (box model). Pure and `alloc`-only, so the whole
 //! pipeline is unit-tested on the host.
 //!
 //! Pipeline: HTML bytes -> DOM tree -> (user-agent + page CSS) -> styled tree ->

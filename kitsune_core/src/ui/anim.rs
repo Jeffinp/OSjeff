@@ -114,8 +114,8 @@ pub mod curves {
     pub const ENTER: Bezier = Bezier::new(0.2, 0.8, 0.2, 1.0);
     /// Accelerating exit.
     pub const EXIT: Bezier = Bezier::new(0.4, 0.0, 1.0, 1.0);
-    /// Genie-lite: fast departure, soft landing.
-    pub const GENIE: Bezier = Bezier::new(0.3, 0.7, 0.2, 1.0);
+    /// Fast departure, soft landing.
+    pub const SWOOP: Bezier = Bezier::new(0.3, 0.7, 0.2, 1.0);
     /// Plain ease in/out.
     pub const STANDARD: Bezier = Bezier::new(0.4, 0.0, 0.2, 1.0);
     pub const LINEAR: Bezier = Bezier::new(0.0, 0.0, 1.0, 1.0);
@@ -439,8 +439,8 @@ impl Anim {
         match (self.phase, self.flavor) {
             (Phase::Opening, Flavor::Pop | Flavor::Slide(_)) => curves::ENTER.ease(p),
             (Phase::Closing, Flavor::Pop | Flavor::Slide(_)) => 1.0 - curves::EXIT.ease(p),
-            (Phase::Opening, Flavor::Dock) => curves::GENIE.ease(p),
-            (Phase::Closing, Flavor::Dock) => 1.0 - curves::GENIE.ease(1.0 - (1.0 - p)),
+            (Phase::Opening, Flavor::Dock) => curves::SWOOP.ease(p),
+            (Phase::Closing, Flavor::Dock) => 1.0 - curves::SWOOP.ease(1.0 - (1.0 - p)),
         }
     }
 

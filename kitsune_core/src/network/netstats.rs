@@ -6,7 +6,7 @@
 //! next to the packet counters. There is one interface today, so the kernel
 //! keeps one `static NetStats`.
 //!
-//! Counter meaning (Linux `ip -s link` terms):
+//! Counter meaning:
 //! * `tx_errors`: the driver failed to send (no free descriptor, device hung).
 //! * `tx_dropped`: a frame was refused before the device (longer than the MTU).
 //! * `rx_errors`: a frame the device delivered but the driver found malformed

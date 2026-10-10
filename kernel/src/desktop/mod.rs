@@ -1,5 +1,5 @@
 //! Desktop compositor: window manager, app rendering, open/close animations,
-//! and a process table surfaced through a Task Manager app.
+//! and a process table surfaced through a Tarefas app.
 //!
 //! All non-trivial logic (terminal, editor, keymap, window geometry, easing,
 //! process table, the dynamic window table) lives in `kitsune_core` and is

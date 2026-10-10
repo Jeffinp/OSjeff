@@ -1,7 +1,6 @@
 //! ChaCha20 DRBG with fast key erasure.
 //!
-//! Construction (Bernstein's "fast-key-erasure RNG", also what Linux's `random.c`
-//! and OpenBSD's `arc4random` do): the state is one 256-bit key. Every call to
+//! Construction (Bernstein's "fast-key-erasure RNG"): the state is one 256-bit key. Every call to
 //! [`Drbg::fill`] expands that key into keystream with ChaCha20 (nonce 0, block
 //! counter 0..), uses the first 32 bytes as the **next key** and hands out the
 //! rest. The old key is overwritten before the output leaves the function, so

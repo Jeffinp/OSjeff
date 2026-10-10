@@ -4,7 +4,7 @@
 //!
 //! Pure integer layout shared by the kernel's drawing code and its hit testing so the two can
 //! never disagree. All sizes follow the 4 px grid of the design spec
-//! (`docs/design/ui-identity.md`, tokens in `docs/design/ui-macos.md`).
+//! (`docs/design/ui-identity.md`, tokens in `docs/design/ui-design.md`).
 
 use crate::windowing::window::Rect;
 use alloc::vec::Vec;
@@ -142,7 +142,7 @@ pub struct MenuGeom {
 }
 
 /// Lay a menu out with its top-left near `anchor`, kept fully on a `sw x sh`
-/// screen and below the menu bar.
+/// screen and below the panel.
 pub fn menu_geom(rows: &[MenuRow], anchor: (i32, i32), sw: i32, sh: i32) -> MenuGeom {
     let mut w = MENU_MIN_W;
     let mut h = 2 * MENU_PAD_Y;
@@ -299,7 +299,7 @@ pub fn launcher_recent_at(g: &LaunchGrid, x: i32, y: i32) -> Option<usize> {
     g.recents.iter().position(|r| r.contains(x, y))
 }
 
-// ------------------------------------------------------------------ Spotlight
+// ------------------------------------------------------------------ Busca
 
 pub const SPOT_W: i32 = 640;
 pub const SPOT_FIELD_H: i32 = 56;
@@ -313,7 +313,7 @@ pub struct SpotGeom {
     pub rows: Vec<Rect>,
 }
 
-/// Spotlight with `n` result rows (at most [`SPOT_MAX_ROWS`] are shown).
+/// Busca with `n` result rows (at most [`SPOT_MAX_ROWS`] are shown).
 pub fn spotlight_geom(sw: i32, sh: i32, n: usize) -> SpotGeom {
     let n = n.min(SPOT_MAX_ROWS) as i32;
     let results_h = if n > 0 { n * SPOT_ROW_H + 16 } else { 0 };
@@ -492,7 +492,7 @@ pub const CENTRE_ROWS: usize = 4;
 pub const CENTRE_ROW_H: i32 = 48;
 
 /// Rectangles inside the calendar and notification centre popover `r`: notifications at the
-/// left (GNOME's arrangement), the calendar at the right.
+/// left, the calendar at the right.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CentreGeom {
     /// Big weekday and the date line under it.
@@ -563,7 +563,7 @@ pub const TOAST_H: i32 = 68;
 pub const TOAST_GAP: i32 = 8;
 pub const TOAST_MARGIN: i32 = 12;
 
-/// Rectangle of the `i`-th (0 = newest, topmost) banner: top-right, under the menu bar.
+/// Rectangle of the `i`-th (0 = newest, topmost) banner: top-right, under the panel.
 pub fn toast_rect(i: usize, sw: i32) -> Rect {
     Rect::new(
         sw - TOAST_W - TOAST_MARGIN,

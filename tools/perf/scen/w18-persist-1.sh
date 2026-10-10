@@ -1,5 +1,5 @@
 # W18 proof (a), boot 1: an installed app writes a file to its own persistent
-# sandbox (/data/notes). Notas (the Start panel, scrolled to the end) saves a note with Ctrl+S;
+# sandbox (/data/notes). Notas (the Apps launcher, scrolled to the end) saves a note with Ctrl+S;
 # Files then shows it at /data/notes. Boot 2 (w18-persist-2.sh) reuses the same disk
 # image: FS_IMG=<outdir of boot 1>/fs.img.
 source "$(dirname "$0")/../lib.sh"

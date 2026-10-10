@@ -272,7 +272,7 @@ com eixo Z); qualquer outra resposta mantém o pacote de 3 bytes (`ps2: mouse id
 na serial). `Event::Mouse` ganhou `dz` (positivo = roda para o usuário = rolar para baixo; o
 `mouse_move 0 0 <dz>` do monitor do QEMU tem o **sinal invertido**: `-1` rola para baixo). O
 desktop entrega a rolagem à **janela sob o ponteiro**, focada ou não, sem mudar o foco:
-Navegador rola 3 linhas por passo, Gerenciador de tarefas e Arquivos movem a seleção, Editor
+Navegador rola 3 linhas por passo, Tarefas e Arquivos movem a seleção, Editor
 move o cursor 3 linhas; Terminal e Calculadora não têm o que rolar.
 
 ### 8.5 Provas (QEMU, BIOS e UEFI)
@@ -281,7 +281,7 @@ move o cursor 3 linhas; Terminal e Calculadora não têm o que rolar.
 |---|---|
 | página local com PNG pequeno e grande (1400x900, reduzido para 864x555), PNG sem atributos, BMP, JPEG (caixa "formato não suportado"), `data:`, imagem como link e uma quebrada (404) | serial `img: ... -> 1400x900 (shown 864x555)`, `img: ... failed: Unsupported`; `docs/img/browser-images.png`, `browser-images-errors.png` |
 | formulário GET com acentos, campo oculto e um formulário POST | o servidor recebe `q=caf%C3%A9+a%C3%A7%C3%A3o&nome=Jos%C3%A9&origem=kitsune%2F%C3%A7%C3%A3o` e responde `q = [café ação] (12 bytes UTF-8)`; `browser-form.png`, `browser-form-result.png` |
-| roda: `mouse_move 0 0 -1` repetido | o navegador rola; sobre uma janela **não focada** rola ela e o foco fica onde estava; Task Manager e Arquivos movem a seleção; com a negociação desligada (gancho temporário) a serial diz `id 0` e o mouse continua movendo e clicando, sem roda |
+| roda: `mouse_move 0 0 -1` repetido | o navegador rola; sobre uma janela **não focada** rola ela e o foco fica onde estava; Tarefas e Arquivos movem a seleção; com a negociação desligada (gancho temporário) a serial diz `id 0` e o mouse continua movendo e clicando, sem roda |
 | favoritos, sugestões, busca na página, zoom, seleção e cópia | `browser-suggest.png`, `browser-find.png` |
 | 100 navegações com imagens novas (`perf-trace`) | heap: primeiro 327 KiB, platô de 8,4 MiB, sem deriva (`tools/perf/w8-heap.sh`) |
 | desktop ocioso | `tools/verify-boot.sh`: 0 pixels de diferença contra a baseline, BIOS e UEFI |

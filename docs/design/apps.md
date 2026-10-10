@@ -285,12 +285,12 @@ compositor, o navegador e o resto do sistema seguem. Retomar a chamada de forma 
   o usuário peça "remover com dados"). Nada é instalado parcialmente (grava em nome
   temporário e renomeia).
 * O catálogo (`AppCatalog`, em memória, reconstruído ao instalar/remover) guarda id, nome,
-  versão, ícone decodificado em 24x24 e o manifesto. O **Painel Iniciar** lista os apps
+  versão, ícone decodificado em 24x24 e o manifesto. O launcher **Apps** lista os apps
   instalados abaixo dos apps do sistema, com ícone e nome, e **rola** quando são muitos (até 11
   linhas; setas Cima/Baixo/Home/End com o painel aberto, ou clique na barra à direita). O menu
   de contexto da área de trabalho continua listando só os apps do sistema.
-* **Dock e boot idênticos:** a dock continua com os 7 ícones atuais e o ícone "WASM" abre o app
-  padrão (`snake`), como hoje. Como o Painel Iniciar só aparece aberto, o desktop do boot
+* **Barra e boot idênticos:** a barra de tarefas continua com os 7 ícones atuais e o ícone "WASM" abre o app
+  padrão (`snake`), como hoje. Como o launcher Apps só aparece aberto, o desktop do boot
   fica pixel a pixel igual à linha de base (`tools/verify-boot.sh`, 0 pixels).
 * **Primeiro boot:** a imagem embute os apps `clock`, `notes`, `paint` e `snake` e `appinstall::seed_once` instala os que faltam em `/apps`, sem sobrescrever
   o que o usuário já tem. Com o volume persistente cada pacote embutido é oferecido **uma vez**:

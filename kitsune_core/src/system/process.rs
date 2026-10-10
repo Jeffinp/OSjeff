@@ -4,7 +4,7 @@
 //! A "process" here is a bookkeeping entry (name, state, uptime), not an address
 //! space: the kernel, the compositor, and each app window. Preemption happens
 //! between *kernel threads* (see `kernel/src/sched.rs`), which this table does not
-//! model. The Task Manager app views and controls this table; the table
+//! model. The Tarefas app views and controls this table; the table
 //! itself is pure logic and fully unit-tested.
 
 use alloc::vec::Vec;
@@ -151,7 +151,7 @@ impl ProcessTable {
             .count()
     }
 
-    // ---- selection (Task Manager cursor) ----
+    // ---- selection (Tarefas cursor) ----
 
     pub fn selected(&self) -> usize {
         self.selected

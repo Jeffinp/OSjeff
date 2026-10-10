@@ -1,5 +1,5 @@
 //! Window snapping: which part of the work area a window fills when it is dragged
-//! to a screen edge (Windows 11 / KDE style: top = maximise, left and right = halves,
+//! to a screen edge (top = maximise, left and right = halves,
 //! corners = quarters) and what the `Alt+arrow` keys do next from the current state.
 //!
 //! Pure integer geometry. The kernel decides *when* (pointer position during a drag,
@@ -131,7 +131,7 @@ pub fn zone_rect_min(zone: SnapZone, work: Rect, min_w: i32, min_h: i32) -> Rect
 }
 
 /// What `Alt+arrow` does for a window that is `current` (`None` = free, `Some(Maximize)` =
-/// maximised, otherwise snapped). The moves follow the Windows 11 ones: sideways toggles between
+/// maximised, otherwise snapped). The moves: sideways toggles between
 /// the halves and the free state, up goes towards maximised, down towards free and then minimised.
 pub fn key_action(current: Option<SnapZone>, key: Arrow) -> SnapAct {
     use SnapAct::{Minimize, Restore, Stay, Zone};

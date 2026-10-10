@@ -1,4 +1,4 @@
-//! Windows BMP decoder and encoder.
+//! BMP decoder and encoder.
 //!
 //! # Decoding
 //!

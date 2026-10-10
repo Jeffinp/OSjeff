@@ -1,5 +1,5 @@
 # W18 proof (b): the Files "Apps" place. A (or the sidebar entry) opens it; Down moves,
-# Del removes the selected app (the Start panel follows), I installs it again, a
+# Del removes the selected app (the Apps launcher follows), I installs it again, a
 # right click offers Abrir / Remover / Propriedades (the manifest and permissions),
 # Enter on an uninstalled bundled package installs and runs it. Rows are in name
 # order: Notas, Ola, Pintura, Plasma, Relogio, Snake.

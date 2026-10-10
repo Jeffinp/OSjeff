@@ -102,7 +102,7 @@ fn geometry_stacks_down_from_the_top_right() {
     let r0 = Toasts::rect(0, SW, SH);
     let r1 = Toasts::rect(1, SW, SH);
     assert_eq!(r0.right() + crate::ui::chrome::TOAST_MARGIN, SW);
-    // Under the menu bar, the next one below with a gap.
+    // Under the panel, the next one below with a gap.
     assert!(r0.y > crate::ui::style::MENUBAR_H);
     assert_eq!(r0.bottom() + GAP, r1.y);
     let mut t = Toasts::new();

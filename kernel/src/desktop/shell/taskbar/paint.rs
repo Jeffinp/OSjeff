@@ -56,7 +56,7 @@ impl Desktop {
         if hot(Hit::Apps) || self.shell.apps.as_ref().is_some_and(|a| !a.closing) {
             ui::fill_token(c, l.apps.inflated(3), 10, p.hover);
         }
-        icons::blit(c, Icon::Launchpad, l.apps.x, l.apps.y, tb::ICON, 256);
+        icons::blit(c, Icon::Apps, l.apps.x, l.apps.y, tb::ICON, 256);
         // The sliver.
         let sl = Rect::new(
             l.sliver.x + 3,

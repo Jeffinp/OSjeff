@@ -283,7 +283,7 @@ que decide entre **matar só a thread** e **parar a máquina** com `crash::die`.
 `kitsune_core::schedule::next_runnable` (que nunca devolve uma thread morta), faz `fxrstor`
 da próxima e salta para o contexto salvo dela com `resume_context` (`switch.s`),
 **abandonando a pilha atual** (que pode ser a esgotada, ou a IST do #PF). Efeitos
-visíveis: o Gerenciador de tarefas mostra `DEAD` no lugar dos ticks; o navegador mostra
+visíveis: o app Tarefas mostra `DEAD` no lugar dos ticks; o navegador mostra
 `FailReason::WorkerDied` ("O carregador de paginas falhou"); a janela WASM mostra "App WASM
 encerrado". O canário violado também mata a thread, a partir da própria ISR do timer.
 
@@ -608,7 +608,7 @@ ganchos somem); saem como linhas `[trace]` na serial, lidas por `tools/perf/`.
 
 ### 6.5 A interface: texto, primitivas, movimento e o shell
 
-O desenho da interface (`docs/design/ui-macos.md` tem os tokens e a API de widgets) se apoia
+O desenho da interface (`docs/design/ui-design.md` tem os tokens e a API de widgets) se apoia
 em quatro peças puras no `kitsune_core`, testadas no host, e em cola fina no kernel. O `f32`
 do kernel é emulado em software (o alvo não tem SSE): todo trabalho por pixel é inteiro ou
 ponto fixo (24.8 na cobertura, Q16/Q8 nas contas); `f32` só guarda o estado de animação por
@@ -814,10 +814,10 @@ Cada app guarda o estado **na instância**; o desenho acompanha o retângulo da 
 
 - **App WASM:** §10.
 - **Tarefas, Ajustes e Registro** (no overlay Apps e na Busca; Tarefas e Ajustes também na barra de apps): monitor
-  de atividade com abas CPU/Memória/Disco/Rede/Processos (reúne o antigo Gerenciador de tarefas e o Monitor de
-  recursos), janela de ajustes (aparência, papel de parede, barra de apps, teclado ABNT2, data e hora com lista de
+  de atividade com abas CPU/Memória/Disco/Rede/Processos (reúne o antigo monitor de recursos e o gerenciador
+  de processos), janela de ajustes (aparência, papel de parede, barra de apps, teclado ABNT2, data e hora com lista de
   fusos, rede, disco, energia, sobre) e visualizador do log do kernel (`klog`), mais as notificações em banner.
-  Detalhes, formatos e traits de integração: `docs/design/sysmgmt.md`; aparência: `docs/design/ui-macos.md`,
+  Detalhes, formatos e traits de integração: `docs/design/sysmgmt.md`; aparência: `docs/design/ui-design.md`,
   seção 11.
 
 ### 7.4 Como registrar um app novo
@@ -1114,7 +1114,7 @@ handshake P-256 do cliente.
 `Browser::loaded_with(Conn::Verified, ..)`: o `fetcher` devolve `Conn::Verified` apenas
 depois da cadeia e da assinatura do handshake verificadas.
 
-`kitsune_core::web` é um motor de caixas no estilo "robinson": HTML para DOM, CSS (agente
+`kitsune_core::web` é um motor de caixas próprio: HTML para DOM, CSS (agente
 de usuário mais `<style>`), árvore estilizada, layout de blocos com fluxo inline, lista
 de comandos de desenho que o kernel rasteriza. **Não é um navegador de padrões**: sem
 flexbox, grid, float nem JavaScript; do seletor complexo só vale o composto mais
@@ -1249,7 +1249,7 @@ descartada), `Exited` (`exit`/`proc_exit`), `Crashed`. **Término real e isolame
 falta de combustível, trap, ponteiro inválido e falha de carga encerram **só aquela instância**:
 a `Store` (memória linear, descritores) é destruída na hora e a janela mostra "O app encerrou:
 <motivo>" até fechar. Fechar a janela manda `on_close` (uma chamada para salvar) e depois mata a
-instância; o Gerenciador de tarefas (`DEL` fecha, `R` reinicia) lista cada app com estado, CPU
+instância; o app Tarefas (`DEL` fecha, `R` reinicia) lista cada app com estado, CPU
 (tempo de relógio das fatias, medido com o TSC) e memória. Se a **thread** `appd` morrer (pânico
 ou falha de CPU dentro do `wasmi`, §3.4), todos os apps morrem juntos e não há reinício
 automático: é a mesma TCB de antes.

@@ -1,4 +1,4 @@
-//! Desktop geometry: dock, context menu, start panel, calculator keypad,
+//! Desktop geometry: taskbar, context menu, Apps launcher, calculator keypad,
 //! browser chrome and file-manager hit zones.
 //!
 //! Pure integer layout shared by the kernel's drawing code and its hit-testing,
