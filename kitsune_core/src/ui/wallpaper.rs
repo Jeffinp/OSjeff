@@ -414,6 +414,12 @@ pub fn check_source(bytes: &[u8]) -> Result<(), WallpaperError> {
                 _ => return Err(WallpaperError::TooBigImage),
             }
         }
+        Some(Format::Gif) => crate::format::gif::peek_dims(bytes)
+            .map(|(w, h)| (w as u64, h as u64))
+            .ok_or(WallpaperError::TooBigImage)?,
+        Some(Format::Jpeg) => crate::format::jpeg::peek_dims(bytes)
+            .map(|(w, h)| (w as u64, h as u64))
+            .ok_or(WallpaperError::TooBigImage)?,
         Some(Format::Ppm) => return Ok(()),
     };
     if dims.0.saturating_mul(dims.1) > MAX_SRC_PIXELS {

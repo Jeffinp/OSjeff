@@ -155,6 +155,7 @@ pub struct Stat {
     pub mtime: u64,
     pub mode: u16,
     pub uid: u32,
+    pub gid: u32,
     pub nlink: u32,
     /// Allocated data blocks (4 KiB each; holes excluded).
     pub blocks: u32,

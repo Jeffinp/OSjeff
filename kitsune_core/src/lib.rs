@@ -20,6 +20,7 @@ pub mod hw;
 pub mod i18n;
 pub mod network;
 pub mod platform;
+pub mod security;
 pub mod storage;
 pub mod system;
 #[cfg(test)]
@@ -37,7 +38,8 @@ pub use browsing::{browser, redirect, web};
 pub use format::{base64, bmp, deflate, gzip, image, inflate, png, ppm, search, unixtime};
 pub use network::{dns, icmp, lease, net, netstats, sntp, tlsverify, x509};
 pub use platform::{appabi, appfs, appinstall, appmanifest, appnet, wasmsec};
-pub use storage::{blockcache, blockdev, fs, fs3, vfs};
+pub use security::{account, password, perm, session};
+pub use storage::{blockcache, blockdev, fs, fs3, secured, vfs};
 pub use system::{
     clipboard, entropy, heap, input, keymap, klog, notify, paging, process, rng, schedule,
     settings, sysif, sysmon,

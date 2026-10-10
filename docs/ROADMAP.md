@@ -58,12 +58,23 @@ Rodar as regressões de `fuzz/regressions/` no CI e campanhas longas; fuzz do `s
 via harness próprio; modelo do alocador sob Miri.
 *Aceite:* um job de CI que falha se uma entrada de regressão voltar a travar.
 
-### 8. Isolamento por processo (ring 3) e vários usuários
-Processos de usuário com espaços de endereçamento próprios, permissões de arquivo e contas. É o passo que leva
-a fronteira entre apps e kernel do WebAssembly com limites para o hardware. Custo estimado: 22 a 33 dias de um
-desenvolvedor para o MVP de um processo, 50 a 75 com os apps portados ([ADR](audit/adr-isolamento.md)).
-*Aceite:* um app nativo com falha de memória não derruba o kernel nem os outros apps.
+### 8. Usuários, permissões e isolamento por processo
+Em três fases (ver [`design/usuarios-seguranca.md`](design/usuarios-seguranca.md)): **(1)** contas, senhas com PBKDF2,
+dono/grupo/modo nos arquivos, login e bloqueio de tela, sem ring 3; **(2)** assinatura de pacotes `.wasm`, HTTPS completo
+e volume criptografado; **(3)** processos em ring 3, que levam a fronteira entre apps e kernel do WebAssembly com limites
+para o hardware. Custo estimado da fase 3: 22 a 33 dias de um desenvolvedor para o MVP de um processo, 50 a 75 com os
+apps portados ([ADR](audit/adr-isolamento.md)).
+*Estado:* o modelo de contas, as regras de permissão, o `gid` no inode e o adaptador `Secured` do VFS já existem e são
+testados no host; falta ligá-los ao kernel (login, Ajustes > Usuários, Terminal).
+*Aceite:* a fase 1 prova, com testes, que um usuário não lê nem apaga o arquivo de outro; a fase 3, que um app nativo
+com falha de memória não derruba o kernel nem os outros apps.
 
-### 9. Mais adiante: SMP, USB e som
+### 9. Compatibilidade: apps, web e formatos
+SDK documentado e WASI sobre o OJFS; GIF e JPEG, POST, `<textarea>` e `<select>`, ZIP e codificações de texto
+(ver [`design/compatibilidade.md`](design/compatibilidade.md)).
+*Aceite:* uma página com GIF e JPEG mostra as imagens; um formulário POST envia e recebe a resposta; um programa em
+Rust compilado para WASI roda no Terminal.
+
+### 10. Mais adiante: SMP, USB e som
 Vários núcleos (APIC), prioridades no scheduler, USB (teclado, mouse e armazenamento) e áudio.
 *Aceite:* cada um com sua prova (o desktop usa mais de um núcleo; um teclado USB funciona).

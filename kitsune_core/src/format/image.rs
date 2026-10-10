@@ -50,6 +50,8 @@ pub enum ImageError {
     OutOfBounds,
     /// The allocator refused the request.
     OutOfMemory,
+    /// The format can be read but not written.
+    Unsupported,
 }
 
 impl fmt::Display for ImageError {
@@ -60,6 +62,7 @@ impl fmt::Display for ImageError {
             ImageError::BadBuffer => "buffer length is wrong for the dimensions",
             ImageError::OutOfBounds => "rectangle is outside the image",
             ImageError::OutOfMemory => "out of memory",
+            ImageError::Unsupported => "this format cannot be written",
         })
     }
 }
@@ -379,6 +382,10 @@ pub enum Format {
     Bmp,
     /// Netpbm `P3`/`P6`.
     Ppm,
+    /// GIF (the first frame; read only).
+    Gif,
+    /// JPEG, baseline and extended sequential (read only).
+    Jpeg,
 }
 
 impl Format {
@@ -388,6 +395,8 @@ impl Format {
             Format::Png => "png",
             Format::Bmp => "bmp",
             Format::Ppm => "ppm",
+            Format::Gif => "gif",
+            Format::Jpeg => "jpeg",
         }
     }
 }
@@ -400,6 +409,10 @@ pub fn detect(bytes: &[u8]) -> Option<Format> {
         Some(Format::Png)
     } else if bytes.starts_with(b"BM") {
         Some(Format::Bmp)
+    } else if crate::format::gif::is_gif(bytes) {
+        Some(Format::Gif)
+    } else if crate::format::jpeg::is_jpeg(bytes) {
+        Some(Format::Jpeg)
     } else if bytes.len() >= 3
         && bytes[0] == b'P'
         && matches!(bytes[1], b'3' | b'6')
@@ -419,6 +432,8 @@ pub enum DecodeError {
     Png(crate::format::png::PngError),
     Bmp(crate::format::bmp::BmpError),
     Ppm(crate::format::ppm::PpmError),
+    Gif(crate::format::gif::GifError),
+    Jpeg(crate::format::jpeg::JpegError),
 }
 
 impl From<crate::format::png::PngError> for DecodeError {
@@ -439,6 +454,18 @@ impl From<crate::format::ppm::PpmError> for DecodeError {
     }
 }
 
+impl From<crate::format::gif::GifError> for DecodeError {
+    fn from(e: crate::format::gif::GifError) -> Self {
+        DecodeError::Gif(e)
+    }
+}
+
+impl From<crate::format::jpeg::JpegError> for DecodeError {
+    fn from(e: crate::format::jpeg::JpegError) -> Self {
+        DecodeError::Jpeg(e)
+    }
+}
+
 impl fmt::Display for DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -446,16 +473,20 @@ impl fmt::Display for DecodeError {
             DecodeError::Png(e) => write!(f, "png: {e}"),
             DecodeError::Bmp(e) => write!(f, "bmp: {e}"),
             DecodeError::Ppm(e) => write!(f, "ppm: {e}"),
+            DecodeError::Gif(e) => write!(f, "gif: {e}"),
+            DecodeError::Jpeg(e) => write!(f, "jpeg: {e}"),
         }
     }
 }
 
-/// Decodes a PNG, BMP or PPM file, picked by its signature.
+/// Decodes a PNG, BMP, PPM, GIF (first frame) or JPEG (baseline) file, picked by its signature.
 pub fn decode(bytes: &[u8]) -> Result<Image, DecodeError> {
     match detect(bytes) {
         Some(Format::Png) => Ok(crate::format::png::decode(bytes)?),
         Some(Format::Bmp) => Ok(crate::format::bmp::decode(bytes)?),
         Some(Format::Ppm) => Ok(crate::format::ppm::decode(bytes)?),
+        Some(Format::Gif) => Ok(crate::format::gif::decode(bytes)?),
+        Some(Format::Jpeg) => Ok(crate::format::jpeg::decode(bytes)?),
         None => Err(DecodeError::UnknownFormat),
     }
 }
@@ -468,6 +499,7 @@ pub fn encode(img: &Image, format: Format) -> Result<Vec<u8>, ImageError> {
         Format::Bmp if img.is_opaque() => crate::format::bmp::encode_24(img, 0),
         Format::Bmp => crate::format::bmp::encode_32(img),
         Format::Ppm => crate::format::ppm::encode_p6(img, 0),
+        Format::Gif | Format::Jpeg => Err(ImageError::Unsupported),
     }
 }
 

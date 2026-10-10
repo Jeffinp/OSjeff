@@ -44,14 +44,8 @@ fn bmp_and_ppm_decode() {
 }
 
 #[test]
-fn jpeg_gif_webp_svg_are_unsupported() {
-    for sig in [
-        &b"\xFF\xD8\xFF\xE0\0\x10JFIF"[..],
-        b"GIF89a....",
-        b"RIFF\0\0\0\0WEBPVP8 ",
-        b"<svg xmlns=",
-        b"",
-    ] {
+fn webp_svg_and_empty_are_unsupported() {
+    for sig in [&b"RIFF\0\0\0\0WEBPVP8 "[..], b"<svg xmlns=", b""] {
         assert_eq!(decode_for_page(sig, 100).err(), Some(ImgFail::Unsupported));
     }
 }
@@ -124,7 +118,8 @@ fn data_uri_decodes_a_png() {
 fn data_uri_errors() {
     assert_eq!(
         decode_data_uri("data:image/jpeg;base64,/9j/4AAQ", 100).err(),
-        Some(ImgFail::Unsupported)
+        Some(ImgFail::Failed),
+        "a JPEG header with nothing after it is damaged, not unsupported"
     );
     assert_eq!(
         decode_data_uri("data:image/png;base64,!!!!", 100).err(),
@@ -388,4 +383,45 @@ fn finish_of_an_unknown_key_is_ignored() {
     let mut c = ImageCache::new();
     c.finish("nope", Ok(loaded(5, 5)));
     assert!(c.is_empty());
+}
+
+#[test]
+fn gif_and_jpeg_pages_decode() {
+    let jpg = include_bytes!("../../../format/jpeg/testdata/s420.jpg");
+    let l = decode_for_page(jpg, 100).unwrap();
+    assert_eq!((l.orig_w, l.orig_h), (37, 21));
+    assert!(l.img.is_opaque());
+    assert_eq!(peek_dims(jpg), Some((37, 21)));
+    // The 1x1 transparent GIF: transparent pixels are flattened onto the page background.
+    let gif = [
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0xff, 0xff,
+        0xff, 0x00, 0x00, 0x00, 0x21, 0xf9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00,
+        0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b,
+    ];
+    let l = decode_for_page(&gif, 100).unwrap();
+    assert_eq!((l.orig_w, l.orig_h), (1, 1));
+    assert!(l.img.is_opaque());
+}
+
+#[test]
+fn progressive_and_cmyk_jpeg_are_unsupported_not_failed() {
+    for jpg in [
+        &include_bytes!("../../../format/jpeg/testdata/progressive.jpg")[..],
+        &include_bytes!("../../../format/jpeg/testdata/cmyk.jpg")[..],
+    ] {
+        assert_eq!(decode_for_page(jpg, 100).err(), Some(ImgFail::Unsupported));
+    }
+}
+
+#[test]
+fn damaged_gif_and_jpeg_fail_cleanly() {
+    let jpg = include_bytes!("../../../format/jpeg/testdata/s420.jpg");
+    assert_eq!(
+        decode_for_page(&jpg[..30], 100).err(),
+        Some(ImgFail::Failed)
+    );
+    assert_eq!(
+        decode_for_page(b"GIF89a\x01", 100).err(),
+        Some(ImgFail::Failed)
+    );
 }

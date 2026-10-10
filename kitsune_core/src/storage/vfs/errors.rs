@@ -31,6 +31,8 @@ pub enum VfsError {
     Corrupt,
     /// The user cancelled a long operation.
     Cancelled,
+    /// The account is not allowed to do this (`security::perm`).
+    PermissionDenied,
 }
 
 impl VfsError {
@@ -55,6 +57,7 @@ impl VfsError {
             VfsError::Io => crate::t!("files.err.io"),
             VfsError::Corrupt => crate::t!("files.err.corrupt"),
             VfsError::Cancelled => crate::t!("files.err.cancelled"),
+            VfsError::PermissionDenied => crate::t!("files.err.permission"),
         }
     }
 }

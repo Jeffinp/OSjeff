@@ -48,6 +48,10 @@ pub struct Info {
     pub mtime: u64,
     /// Allocated 4 KiB blocks.
     pub blocks: u32,
+    /// Owner, group and permission bits (see `security::perm`).
+    pub uid: u32,
+    pub gid: u32,
+    pub mode: u16,
 }
 
 impl From<Stat> for Info {
@@ -58,6 +62,9 @@ impl From<Stat> for Info {
             ctime: s.ctime,
             mtime: s.mtime,
             blocks: s.blocks,
+            uid: s.uid,
+            gid: s.gid,
+            mode: s.mode,
         }
     }
 }

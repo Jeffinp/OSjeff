@@ -33,6 +33,15 @@ pub trait Backend {
     fn trash_purge(&mut self, id: &[u8]) -> Result<()>;
     fn empty_trash(&mut self) -> Result<()>;
     fn usage(&mut self) -> Usage;
+    /// Change the owner, group and/or permission bits (`None` = leave as is). Access control is
+    /// the caller's job (`security::perm`, `Secured`).
+    fn set_owner(
+        &mut self,
+        path: &[u8],
+        uid: Option<u32>,
+        gid: Option<u32>,
+        mode: Option<u16>,
+    ) -> Result<()>;
 }
 
 impl<D: BlockDevice> Backend for Fs3<D> {
@@ -107,5 +116,14 @@ impl<D: BlockDevice> Backend for Fs3<D> {
     }
     fn usage(&mut self) -> Usage {
         Fs3::statfs(self).into()
+    }
+    fn set_owner(
+        &mut self,
+        path: &[u8],
+        uid: Option<u32>,
+        gid: Option<u32>,
+        mode: Option<u16>,
+    ) -> Result<()> {
+        Ok(Fs3::set_owner(self, path, uid, gid, mode)?)
     }
 }

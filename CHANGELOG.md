@@ -4,6 +4,26 @@ Uma seção por marco, do mais novo para o mais antigo. O Kitsune (antes OSjeff;
 seção) não tem releases versionadas; as seções são marcos na `master`. As seções anteriores ao
 renomeio mantêm o nome da época.
 
+## 2026-10 — Contas e permissões (base), plano de segurança e compatibilidade
+
+- Novo grupo `security` no `kitsune_core`: contas (`account`: usuários, grupos, banco de dados em texto
+  validado), senhas com **PBKDF2-HMAC-SHA-256** e sal (`password`, vetores do RFC 4231 e do PBKDF2),
+  regras de permissão `rwx` com *sticky* (`perm`) e limitação de tentativas de login e bloqueio por
+  inatividade (`session`).
+- OJFS v3 guarda o **grupo** no inode (campo que estava sempre zerado: discos antigos continuam
+  válidos, com grupo 0); o VFS ganhou `set_owner` (chmod/chown) e `stat` devolve dono, grupo e modo.
+- `storage::secured::Secured`: adaptador do VFS que impõe as permissões de um usuário (busca nas pastas
+  acima, leitura, escrita, criação com dono e `umask`, remoção e renomeio com *sticky*, lixeira por
+  usuário). 16 testes no host; fuzz `security_db`.
+- **GIF** (primeiro quadro, LZW, paleta local e global, entrelaçado, transparência) e **JPEG** (*baseline*
+  e sequencial estendido de 8 bits: cinza e YCbCr, subamostragens 4:4:4, 4:2:2, 4:4:0 e 4:2:0, intervalos de
+  reinício, tabelas de 16 bits) no navegador, no Imagens e no papel de parede. O JPEG foi conferido contra o
+  libjpeg-turbo em 12 imagens (diferença máxima de 3 níveis por canal); progressivo, CMYK e 12 bits dizem
+  "não suportado" em vez de mostrar uma imagem errada. Fuzz `image_decode` ganhou os modos GIF e JPEG.
+- O kernel ainda **não** usa essas peças (não há login): o plano em fases está em
+  [`docs/design/usuarios-seguranca.md`](docs/design/usuarios-seguranca.md) e o de compatibilidade em
+  [`docs/design/compatibilidade.md`](docs/design/compatibilidade.md); o roadmap foi atualizado.
+
 ## 2026-10 — Hardware, dívida técnica
 
 - **Vídeo:** `tools/gpu-matrix.sh` inicia a imagem em cada adaptador de vídeo que o QEMU emula (BIOS e

@@ -138,8 +138,10 @@ O handshake **só começa** com pelo menos 128 bits de entropia creditados; sem 
   a NIC de um PC comum.
 
 ### 3.5 Dados
-- Não há criptografia, permissões nem usuários no OJFS. O disco dedicado é tratado
-  como confiável depois de validado.
+- O OJFS guarda dono, grupo e modo em cada inode e o VFS sabe impô-los (`storage::secured`, testado
+  no host e com fuzz de `security::*`), mas **o kernel ainda não usa esse adaptador**: não há login, e
+  tudo roda como `root`. Não há criptografia do disco. O disco dedicado é tratado como confiável
+  depois de validado. O plano e a ordem estão em [`design/usuarios-seguranca.md`](design/usuarios-seguranca.md).
 
 ### 3.6 Apps: dados persistentes e rede (W18)
 Os apps passaram a ter **superfície persistente** (o disco) e **superfície de rede real**.

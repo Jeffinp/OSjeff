@@ -19,6 +19,11 @@ mod detect_decode {
     fn detects_each_format_by_signature() {
         assert_eq!(detect(b"\x89PNG\r\n\x1a\n...."), Some(Format::Png));
         assert_eq!(detect(b"BM\x00\x00"), Some(Format::Bmp));
+        assert_eq!(detect(b"GIF89a"), Some(Format::Gif));
+        assert_eq!(detect(b"GIF87a...."), Some(Format::Gif));
+        assert_eq!(detect(b"\xFF\xD8\xFF\xE0\0\x10JFIF"), Some(Format::Jpeg));
+        assert_eq!(Format::Gif.name(), "gif");
+        assert_eq!(Format::Jpeg.name(), "jpeg");
         assert_eq!(detect(b"P6\n1 1\n255\n"), Some(Format::Ppm));
         assert_eq!(detect(b"P3 1 1 255 0 0 0"), Some(Format::Ppm));
         assert_eq!(detect(b"P3#c\n"), Some(Format::Ppm));
@@ -39,8 +44,8 @@ mod detect_decode {
             b"P1 1 1\n0",
             b"P5\n",
             b"P6x",
-            b"GIF89a",
-            b"\xFF\xD8\xFF\xE0",
+            b"GIF88a",
+            b"\xFF\xD8",
             b"RIFF....WEBP",
             b"\x89PN",
             b"bm",

@@ -354,7 +354,7 @@ fn decode_errors_have_friendly_messages() {
     let e = crate::format::image::decode(b"not an image").unwrap_err();
     let m = decode_error_message(&e);
     assert_eq!(m[0], "Formato não reconhecido");
-    assert!(m[1].contains("PNG, BMP e PPM"));
+    assert!(m[1].contains("PNG, JPEG, GIF, BMP e PPM"));
     let e = crate::format::image::decode(b"\x89PNG\r\n\x1a\ngarbage").unwrap_err();
     let m = decode_error_message(&e);
     assert!(m[1].contains("PNG") && !m[0].is_empty());
@@ -543,7 +543,7 @@ fn viewer_texts_in_english() {
     let e = crate::format::image::decode(b"not an image").unwrap_err();
     let m = decode_error_message(&e);
     assert_eq!(m[0], "Unrecognized format");
-    assert!(m[1].contains("PNG, BMP and PPM"), "{}", m[1]);
+    assert!(m[1].contains("PNG, JPEG, GIF, BMP and PPM"), "{}", m[1]);
     let e = crate::format::image::decode(b"BM\0\0\0").unwrap_err();
     let m = decode_error_message(&e);
     assert_eq!(m[0], "Could not open the image");

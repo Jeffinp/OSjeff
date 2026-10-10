@@ -29,6 +29,7 @@ fn map_err(e: vfs::VfsError) -> FsErr {
         V::InvalidName | V::InvalidPath | V::InvalidMove => FsErr::InvalidPath,
         V::NameTooLong => FsErr::NameTooLong,
         V::Reserved => FsErr::ReadOnly,
+        V::PermissionDenied => FsErr::PermissionDenied,
         V::NoSpace | V::NoInodes => FsErr::NoSpace,
         V::TooBig => FsErr::TooBig,
         V::Busy | V::Unavailable | V::Io | V::Corrupt | V::Cancelled => FsErr::Io,

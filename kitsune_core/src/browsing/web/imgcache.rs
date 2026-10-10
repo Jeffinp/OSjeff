@@ -144,6 +144,8 @@ pub fn peek_dims(bytes: &[u8]) -> Option<(usize, usize)> {
                 Some((w.unsigned_abs() as usize, h.unsigned_abs() as usize))
             }
         }
+        Format::Gif => crate::format::gif::peek_dims(bytes),
+        Format::Jpeg => crate::format::jpeg::peek_dims(bytes),
         Format::Ppm => {
             let mut pos = 2;
             let mut nums = [0usize; 2];
@@ -192,7 +194,13 @@ pub fn decode_for_page(body: &[u8], fit_w: usize) -> Result<Loaded, ImgFail> {
     if w.checked_mul(h).is_none_or(|n| n > MAX_DECODE_PIXELS) {
         return Err(ImgFail::TooBig);
     }
-    let img = image::decode(body).map_err(|_| ImgFail::Failed)?;
+    let img = image::decode(body).map_err(|e| match e {
+        // A progressive or CMYK JPEG is a real picture we cannot show yet: say "unsupported".
+        image::DecodeError::Jpeg(crate::format::jpeg::JpegError::Unsupported(_)) => {
+            ImgFail::Unsupported
+        }
+        _ => ImgFail::Failed,
+    })?;
     let (ow, oh) = (img.width(), img.height());
     let fit_w = fit_w.clamp(16, 4096);
     let mut img = if ow > fit_w {

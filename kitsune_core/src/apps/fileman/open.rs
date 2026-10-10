@@ -24,7 +24,7 @@ pub fn extension(name: &[u8]) -> Vec<u8> {
 /// Classify a file by its name.
 pub fn classify(name: &[u8]) -> FileClass {
     match &extension(name)[..] {
-        b"png" | b"bmp" | b"ppm" => FileClass::Image,
+        b"png" | b"bmp" | b"ppm" | b"gif" | b"jpg" | b"jpeg" => FileClass::Image,
         b"wasm" => FileClass::Wasm,
         b"txt" | b"md" | b"rs" | b"c" | b"h" | b"toml" | b"json" | b"log" | b"ini" | b"cfg"
         | b"csv" | b"html" | b"htm" | b"css" | b"js" | b"sh" | b"py" | b"yml" | b"yaml"

@@ -152,6 +152,7 @@ impl<D: BlockDevice> Fs3<D> {
             mtime: n.mtime,
             mode: n.mode,
             uid: n.uid,
+            gid: n.gid,
             nlink: n.nlink,
             blocks: n.nblocks,
             parent: n.parent,
@@ -266,6 +267,33 @@ impl<D: BlockDevice> Fs3<D> {
         check_name(&p.name)?;
         p.check_mutable()?;
         self.txn(|fs| fs.new_node(p.dir, &p.name, Kind::Dir, now))
+    }
+
+    /// Change the owner, the group and/or the permission bits (`mode & 0o1777`) of the item at
+    /// `path`. The modification time is left alone. Who may do this is the caller's business
+    /// (`security::perm`).
+    pub fn set_owner<P: AsRef<[u8]> + ?Sized>(
+        &mut self,
+        path: &P,
+        uid: Option<u32>,
+        gid: Option<u32>,
+        mode: Option<u16>,
+    ) -> Result<(), FsError> {
+        self.ready()?;
+        let ino = self.lookup(path)?;
+        self.txn(|fs| {
+            let mut n = fs.read_inode(ino)?;
+            if let Some(u) = uid {
+                n.uid = u;
+            }
+            if let Some(g) = gid {
+                n.gid = g;
+            }
+            if let Some(m) = mode {
+                n.mode = m & 0o1777;
+            }
+            fs.write_inode(ino, &n)
+        })
     }
 
     /// List a directory in storage order. `.trash` is hidden at the root.

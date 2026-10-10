@@ -23,6 +23,7 @@ pub enum FsErr {
     NameTooLong,
     InvalidPath,
     ReadOnly,
+    PermissionDenied,
     Io,
 }
 
@@ -40,6 +41,7 @@ impl FsErr {
             FsErr::NameTooLong => tk!("sh.fs.name_long"),
             FsErr::InvalidPath => tk!("sh.fs.bad_path"),
             FsErr::ReadOnly => tk!("sh.fs.read_only"),
+            FsErr::PermissionDenied => tk!("sh.fs.permission"),
             FsErr::Io => tk!("sh.fs.io"),
         }
     }

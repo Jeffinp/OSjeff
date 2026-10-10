@@ -17,6 +17,9 @@ pub const MAX_NAME: usize = 255;
 pub const FLAG_TRASHED: u8 = 1;
 
 const OFF_TRASH_NAME: usize = 224;
+/// Owner group. Sits after the longest possible trash name (224 + 255 = 479), in bytes older
+/// builds always left zero, so a disk written before groups existed reads as group 0.
+const OFF_GID: usize = 484;
 const OFF_INLINE: usize = 80;
 
 /// What an inode is.
@@ -80,6 +83,7 @@ pub struct Inode {
     pub flags: u8,
     pub mode: u16,
     pub uid: u32,
+    pub gid: u32,
     pub nlink: u32,
     pub size: u64,
     pub ctime: u64,
@@ -106,6 +110,7 @@ impl Inode {
             flags: 0,
             mode: if kind == Kind::Dir { 0o755 } else { 0o644 },
             uid: 0,
+            gid: 0,
             nlink: 1,
             size: 0,
             ctime: now,
@@ -131,6 +136,7 @@ impl Inode {
         b[5] = self.flags;
         b[6..8].copy_from_slice(&self.mode.to_le_bytes());
         wr32(b, 8, self.uid);
+        wr32(b, OFF_GID, self.gid);
         wr32(b, 12, self.nlink);
         wr64(b, 16, self.size);
         wr64(b, 24, self.ctime);
@@ -178,6 +184,7 @@ impl Inode {
             flags,
             mode: u16::from_le_bytes([b[6], b[7]]),
             uid: rd32(b, 8),
+            gid: rd32(b, OFF_GID),
             nlink: rd32(b, 12),
             size: rd64(b, 16),
             ctime: rd64(b, 24),

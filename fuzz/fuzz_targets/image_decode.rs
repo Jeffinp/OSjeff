@@ -15,6 +15,9 @@
 //! * `mode & 3 == 3`: `bytes` after a `BM` signature are decoded as a BMP,
 //!   with the pixel offset patched to a plausible value so headers, palettes,
 //!   bit masks and RLE streams are exercised.
+//! * `mode & 7 == 4` / `5`: `bytes` after a `GIF89a` / `FF D8 FF` signature, so the GIF
+//!   (LZW, palettes, interlace) and JPEG (Huffman, restart, IDCT) decoders get structure.
+//!   (`mode & 7 == 6, 7` are raw like 0.)
 //!
 //! Always: `inflate`/`zlib_decompress` on the raw bytes with a small
 //! `max_output`, and the streaming `Inflater` with a tiny buffer.
@@ -273,8 +276,18 @@ fuzz_target!(|data: &[u8]| {
     assert!(total <= 1 << 16);
 
     // ---- build the picture bytes according to the mode ----
-    let picture: Vec<u8> = match mode & 3 {
-        0 => bytes.to_vec(),
+    let picture: Vec<u8> = match mode & 7 {
+        0 | 6 | 7 => bytes.to_vec(),
+        4 => {
+            let mut v = if bytes.starts_with(b"GIF8") { Vec::new() } else { b"GIF89a".to_vec() };
+            v.extend_from_slice(bytes);
+            v
+        }
+        5 => {
+            let mut v = if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) { Vec::new() } else { vec![0xFF, 0xD8, 0xFF] };
+            v.extend_from_slice(bytes);
+            v
+        }
         1 => {
             let mut v = if bytes.starts_with(&SIG) { Vec::new() } else { SIG.to_vec() };
             v.extend_from_slice(bytes);
@@ -301,6 +314,13 @@ fuzz_target!(|data: &[u8]| {
     // ---- decode, then use the result ----
     let _ = image::detect(&picture);
     let _ = png::read_header(&picture);
+    // A GIF or JPEG may legitimately claim up to MAX_PIXELS from a few bytes; as for the RLE
+    // BMP, that limit is covered by unit tests and would only make the fuzzer memset.
+    let claimed = kitsune_core::format::gif::peek_dims(&picture)
+        .or_else(|| kitsune_core::format::jpeg::peek_dims(&picture));
+    if claimed.is_some_and(|(w, h)| w * h > 1 << 20) {
+        return;
+    }
     if big_rle_bmp(&picture) {
         // A run-length BMP may legitimately claim up to MAX_PIXELS (64 MiB of
         // zeroed pixels) from a few bytes; that limit is covered by unit tests

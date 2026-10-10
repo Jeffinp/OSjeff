@@ -10,7 +10,8 @@ the dependency rules of the core.
 kitsune_core/src/            pure no_std logic, host-tested (forbid(unsafe_code))
   ui/         drawing and visual identity: gfx raster | ttf glyph fontcache textlayout | iconart appart
               brand pointer cursor | anim | style | widgets chrome layout | wallpaper
-  storage/    blockdev blockcache | fs (OJFS v2) fs3 (OJFS v3) | vfs
+  security/   account password | perm | session                        (users, passwords, permissions)
+  storage/    blockdev blockcache | fs (OJFS v2) fs3 (OJFS v3) | vfs secured
   network/    net dns icmp sntp lease netstats | x509 tlsverify
   browsing/   web (HTML/CSS/layout engine) | browser (model: tabs, history, errors) | redirect
   format/     base64 | inflate deflate gzip | png bmp ppm image | unixtime | search
@@ -57,7 +58,8 @@ flat `crate::gfx` path used inside the crate all fail.
 | `format` | nothing | leaf: codecs and small utilities |
 | `hw` | `network`, `storage` | drivers implement the block-device and MAC types |
 | `i18n` | `hw` | locale formatting reads the RTC types |
-| `storage` | nothing | never knows drawing, windows, network or apps |
+| `security` | nothing | leaf: accounts, password hashing and permission rules take everything as arguments |
+| `storage` | `security` | `secured` enforces the permission rules; storage never knows drawing, windows, network or apps |
 | `network` | `format` | Unix time for certificate dates |
 | `browsing` | `format`, `i18n`, `network`, `ui` | decoders, TLS, redirects, motion preference |
 | `platform` | `browsing`, `format`, `i18n`, `storage` | HTTP response parsing, manifests, app volume |

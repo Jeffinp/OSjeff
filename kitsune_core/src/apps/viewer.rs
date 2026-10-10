@@ -397,6 +397,8 @@ pub fn info_rows(
             Some(Format::Png) => "PNG",
             Some(Format::Bmp) => "BMP",
             Some(Format::Ppm) => "PPM",
+            Some(Format::Gif) => "GIF",
+            Some(Format::Jpeg) => "JPEG",
             None => "—",
         }),
     ));
@@ -437,6 +439,12 @@ pub fn decode_error_message(e: &DecodeError) -> [String; 2] {
         DecodeError::Png(_) => (crate::t!("viewer.err.cannot_open"), kind("PNG")),
         DecodeError::Bmp(_) => (crate::t!("viewer.err.cannot_open"), kind("BMP")),
         DecodeError::Ppm(_) => (crate::t!("viewer.err.cannot_open"), kind("PPM")),
+        DecodeError::Gif(_) => (crate::t!("viewer.err.cannot_open"), kind("GIF")),
+        DecodeError::Jpeg(crate::format::jpeg::JpegError::Unsupported(_)) => (
+            crate::t!("viewer.err.cannot_open"),
+            String::from(crate::t!("viewer.err.jpeg_unsupported")),
+        ),
+        DecodeError::Jpeg(_) => (crate::t!("viewer.err.cannot_open"), kind("JPEG")),
     };
     [String::from(head), detail]
 }
@@ -446,6 +454,7 @@ pub fn image_error_message(e: ImageError) -> &'static str {
     match e {
         ImageError::TooLarge => crate::t!("viewer.err.too_large"),
         ImageError::OutOfMemory => crate::t!("viewer.err.no_memory"),
+        ImageError::Unsupported => crate::t!("viewer.err.cannot_write"),
         ImageError::ZeroSize | ImageError::BadBuffer | ImageError::OutOfBounds => {
             crate::t!("viewer.err.invalid")
         }

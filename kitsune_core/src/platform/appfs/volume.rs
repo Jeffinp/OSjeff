@@ -69,7 +69,7 @@ fn map(e: VfsError) -> FsError {
         VfsError::IsDir => FsError::IsDir,
         VfsError::NotEmpty => FsError::NotEmpty,
         VfsError::NoSpace | VfsError::NoInodes | VfsError::TooBig => FsError::NoSpace,
-        VfsError::Reserved => FsError::Perm,
+        VfsError::Reserved | VfsError::PermissionDenied => FsError::Perm,
         VfsError::InvalidName
         | VfsError::NameTooLong
         | VfsError::InvalidPath
