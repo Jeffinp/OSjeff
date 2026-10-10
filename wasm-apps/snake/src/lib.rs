@@ -212,7 +212,7 @@ pub extern "C" fn render() {
 // Package manifest (a custom wasm section, see docs/design/apps.md): one file = one app.
 #[used]
 #[unsafe(link_section = "kitsune.manifest")]
-static MANIFEST: [u8; 133] = *b"id=snake\nname=Snake\nname.pt=Cobrinha\nname.en=Snake\nversion=1.0.0\nabi=1\nmem_mib=4\nfuel_frame=20000000\nwin_w=692\nwin_h=414\nresizable=0\n";
+static MANIFEST: [u8; 133] = *b"id=snake\nname=Snake\nname.pt=Cobrinha\nname.en=Snake\nversion=1.0.1\nabi=1\nmem_mib=4\nfuel_frame=20000000\nwin_w=692\nwin_h=414\nresizable=0\n";
 #[used]
 #[unsafe(link_section = "kitsune.icon")]
 static ICON: [u8; include_bytes!("../icon.png").len()] = *include_bytes!("../icon.png");

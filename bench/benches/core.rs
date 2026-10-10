@@ -1,7 +1,10 @@
 //! Hot pure-logic functions of `kitsune_core`, on the host.
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use kitsune_core::editor2::Editor;
 use kitsune_core::heap::{adjust_request, fit_region};
-use kitsune_core::{Calc, Editor, Key, Keymap, Terminal, Time, browser, fs, net, web};
+use kitsune_core::shell::{Host, MemFs, MockSys, Shell};
+use kitsune_core::system::input::{KeyCode, KeyEvent, Mods};
+use kitsune_core::{Calc, Clipboard, Key, Keymap, browser, fs, net, web};
 
 /// First-fit scan over a sorted free list of `n` small holes with the big
 /// region last — the worst case of the kernel allocator's `find_region`.
@@ -28,25 +31,27 @@ fn bench_heap(c: &mut Criterion) {
 
 fn bench_terminal(c: &mut Criterion) {
     let mut g = c.benchmark_group("terminal");
-    let t = Time {
-        h: 12,
-        m: 34,
-        s: 56,
-    };
-    g.bench_function("type_help_enter", |b| {
+    g.bench_function("run_help", |b| {
+        let (mut fs, mut sys) = (MemFs::new(), MockSys::default());
+        let mut sh = Shell::new();
         b.iter(|| {
-            let mut term = Terminal::new();
-            for &ch in b"help" {
-                term.on_key(Key::Char(ch), t);
-            }
-            black_box(term.on_key(Key::Enter, t))
+            let mut h = Host {
+                fs: &mut fs,
+                sys: &mut sys,
+            };
+            black_box(sh.run_line("help", &mut h))
         })
     });
-    g.bench_function("scrollback_flood_100_lines", |b| {
-        let mut term = Terminal::new();
+    g.bench_function("echo_flood_100_lines", |b| {
+        let (mut fs, mut sys) = (MemFs::new(), MockSys::default());
+        let mut sh = Shell::new();
         b.iter(|| {
             for _ in 0..100 {
-                term.println(black_box(b"a fairly long line of terminal output text!!"));
+                let mut h = Host {
+                    fs: &mut fs,
+                    sys: &mut sys,
+                };
+                black_box(sh.run_line("echo a fairly long line of terminal output text!!", &mut h));
             }
         })
     });
@@ -58,14 +63,16 @@ fn bench_editor_calc_keymap(c: &mut Criterion) {
     g.bench_function("editor_type_600_chars", |b| {
         b.iter(|| {
             let mut e = Editor::new();
+            let mut clip = Clipboard::new();
             for i in 0..600u32 {
-                if i % 40 == 39 {
-                    e.on_key(Key::Enter);
+                let code = if i % 40 == 39 {
+                    KeyCode::Enter
                 } else {
-                    e.on_key(Key::Char(b'a' + (i % 26) as u8));
-                }
+                    KeyCode::Char((b'a' + (i % 26) as u8) as char)
+                };
+                e.handle_key(KeyEvent::new(code, Mods::NONE), &mut clip);
             }
-            black_box(e.rows())
+            black_box(e.line_count())
         })
     });
     g.bench_function("calc_expression", |b| {

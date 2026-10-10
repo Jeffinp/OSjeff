@@ -220,3 +220,32 @@ fn manifest_lines_show_every_permission() {
     m.fs = FsPerm::Home;
     assert!(apps::manifest_lines(&m).join("\n").contains("/home"));
 }
+
+#[test]
+fn manifest_lines_name_the_app_in_the_language_in_effect() {
+    let mut m = crate::platform::appmanifest::Manifest::legacy("clock", "Clock");
+    m.names = alloc::vec![
+        (
+            alloc::string::String::from("pt"),
+            alloc::string::String::from("Relógio")
+        ),
+        (
+            alloc::string::String::from("en"),
+            alloc::string::String::from("Clock")
+        ),
+    ];
+    {
+        let _pt = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::Pt);
+        assert!(
+            apps::manifest_lines(&m)
+                .join("\n")
+                .contains("Relógio (clock)")
+        );
+    }
+    let _en = crate::i18n::testlang::LangGuard::new(crate::i18n::Lang::En);
+    assert!(
+        apps::manifest_lines(&m)
+            .join("\n")
+            .contains("Clock (clock)")
+    );
+}

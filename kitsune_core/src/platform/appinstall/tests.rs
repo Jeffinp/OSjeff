@@ -416,3 +416,34 @@ fn install_errors_read_in_both_languages() {
         "an app with this id is already installed"
     );
 }
+
+fn app_v(id: &str, name: &str, version: &str) -> Vec<u8> {
+    pkg(&alloc::format!("id={id}\nname={name}\nversion={version}\n"))
+}
+
+#[test]
+fn seed_once_upgrades_an_older_installed_copy_and_keeps_a_newer_one() {
+    let mut f = fs();
+    let v1 = app_v("alpha", "Alpha", "1.0.0");
+    assert_eq!(seed_once(&mut f, &[&v1]), 1);
+    // The next build bundles 1.1.0 under a better name: the installed copy is replaced.
+    let v2 = app_v("alpha", "Alfa", "1.1.0");
+    assert_eq!(seed_once(&mut f, &[&v2]), 1);
+    assert_eq!(read_package(&mut f, "alpha").unwrap(), v2);
+    // Same version again: nothing to do.
+    assert_eq!(seed_once(&mut f, &[&v2]), 0);
+    // An older bundle never downgrades what is installed.
+    assert_eq!(seed_once(&mut f, &[&v1]), 0);
+    assert_eq!(read_package(&mut f, "alpha").unwrap(), v2);
+}
+
+#[test]
+fn seed_once_does_not_resurrect_a_removed_app_when_upgrading() {
+    let mut f = fs();
+    let v1 = app_v("alpha", "Alpha", "1.0.0");
+    assert_eq!(seed_once(&mut f, &[&v1]), 1);
+    remove(&mut f, "alpha").unwrap();
+    let v2 = app_v("alpha", "Alfa", "1.1.0");
+    assert_eq!(seed_once(&mut f, &[&v2]), 0);
+    assert!(!is_installed(&mut f, "alpha"));
+}

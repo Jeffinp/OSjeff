@@ -3,6 +3,22 @@
 //! frozen copy of the pre-audit versions for A/B comparison.
 #![allow(dead_code, clippy::all)]
 
+extern crate alloc;
+
+/// Stand-in for `kernel::sync` (only `RacyCell`; the kernel's locks need the scheduler).
+pub mod sync {
+    pub struct RacyCell<T>(core::cell::UnsafeCell<T>);
+    unsafe impl<T> Sync for RacyCell<T> {}
+    impl<T> RacyCell<T> {
+        pub const fn new(value: T) -> Self {
+            Self(core::cell::UnsafeCell::new(value))
+        }
+        pub const fn get(&self) -> *mut T {
+            self.0.get()
+        }
+    }
+}
+
 /// Stand-in for `kernel::trace` (measurement hooks compile to nothing).
 pub mod trace {
     pub const ON: bool = false;

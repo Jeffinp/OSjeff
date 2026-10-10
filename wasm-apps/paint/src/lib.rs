@@ -10,7 +10,7 @@ use core::fmt::Write;
 use kitsune_sdk::*;
 
 manifest!(
-    "id=paint\nname=Paint\nname.pt=Pintura\nname.en=Paint\nversion=1.0.0\nabi=2\nfs=own\ndisk_kib=1024\nmax_fds=2\nwin_w=500\nwin_h=372\nwin_min_w=500\nwin_min_h=372\nresizable=0\nmem_mib=4\n"
+    "id=paint\nname=Paint\nname.pt=Pintura\nname.en=Paint\nversion=1.0.1\nabi=2\nfs=own\ndisk_kib=1024\nmax_fds=2\nwin_w=500\nwin_h=372\nwin_min_w=500\nwin_min_h=372\nresizable=0\nmem_mib=4\n"
 );
 icon!(include_bytes!("../icon.png"));
 

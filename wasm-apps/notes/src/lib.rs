@@ -12,7 +12,7 @@ use core::fmt::Write;
 use kitsune_sdk::*;
 
 manifest!(
-    "id=notes\nname=Notes\nname.pt=Notas\nname.en=Notes\nversion=1.0.0\nabi=2\nfs=own\ndisk_kib=64\nmax_fds=4\nwin_w=520\nwin_h=300\nwin_min_w=360\nwin_min_h=220\nmem_mib=2\n"
+    "id=notes\nname=Notes\nname.pt=Notas\nname.en=Notes\nversion=1.1.0\nabi=2\nfs=own\ndisk_kib=64\nmax_fds=4\nwin_w=520\nwin_h=300\nwin_min_w=360\nwin_min_h=220\nmem_mib=2\n"
 );
 icon!(include_bytes!("../icon.png"));
 
@@ -70,28 +70,67 @@ impl Notes {
     }
 
     fn insert(&mut self, b: u8) {
-        if self.len < CAP {
-            self.buf.copy_within(self.cur..self.len, self.cur + 1);
-            self.buf[self.cur] = b;
-            self.cur += 1;
-            self.len += 1;
+        self.insert_bytes(&[b]);
+    }
+
+    /// Insert a whole UTF-8 sequence at the cursor (all of it or nothing).
+    fn insert_bytes(&mut self, bytes: &[u8]) {
+        let n = bytes.len();
+        if self.len + n <= CAP {
+            self.buf.copy_within(self.cur..self.len, self.cur + n);
+            self.buf[self.cur..self.cur + n].copy_from_slice(bytes);
+            self.cur += n;
+            self.len += n;
             self.dirty = true;
         }
     }
 
+    /// Is `pos` inside a multi-byte character (on a continuation byte)?
+    fn is_cont(&self, pos: usize) -> bool {
+        pos < self.len && self.buf[pos] & 0xC0 == 0x80
+    }
+
+    /// Start of the character that ends at `pos`.
+    fn prev_boundary(&self, mut pos: usize) -> usize {
+        pos = pos.saturating_sub(1);
+        while pos > 0 && self.is_cont(pos) {
+            pos -= 1;
+        }
+        pos
+    }
+
+    /// End of the character that starts at `pos`.
+    fn next_boundary(&self, mut pos: usize) -> usize {
+        pos = (pos + 1).min(self.len);
+        while self.is_cont(pos) {
+            pos += 1;
+        }
+        pos
+    }
+
+    /// Move `pos` back to the start of the character it falls in.
+    fn snap(&self, mut pos: usize) -> usize {
+        while pos > 0 && self.is_cont(pos) {
+            pos -= 1;
+        }
+        pos
+    }
+
     fn backspace(&mut self) {
         if self.cur > 0 {
-            self.buf.copy_within(self.cur..self.len, self.cur - 1);
-            self.cur -= 1;
-            self.len -= 1;
+            let from = self.prev_boundary(self.cur);
+            self.buf.copy_within(self.cur..self.len, from);
+            self.len -= self.cur - from;
+            self.cur = from;
             self.dirty = true;
         }
     }
 
     fn delete(&mut self) {
         if self.cur < self.len {
-            self.buf.copy_within(self.cur + 1..self.len, self.cur);
-            self.len -= 1;
+            let to = self.next_boundary(self.cur);
+            self.buf.copy_within(to..self.len, self.cur);
+            self.len -= to - self.cur;
             self.dirty = true;
         }
     }
@@ -118,7 +157,7 @@ impl Notes {
         }
         let col = self.cur - ls;
         let ps = self.line_start(ls - 1);
-        self.cur = (ps + col).min(ls - 1);
+        self.cur = self.snap((ps + col).min(ls - 1));
     }
 
     fn down(&mut self) {
@@ -128,7 +167,7 @@ impl Notes {
         }
         let col = self.cur - self.line_start(self.cur);
         let ns = le + 1;
-        self.cur = (ns + col).min(self.line_end(ns));
+        self.cur = self.snap((ns + col).min(self.line_end(ns)));
     }
 
     fn save(&mut self) {
@@ -279,8 +318,12 @@ impl App for Notes {
     }
 
     fn on_text(&mut self, ch: u32) {
-        if self.focus == Focus::Editor && (0x20..0x7F).contains(&ch) {
-            self.insert(ch as u8);
+        if self.focus != Focus::Editor || ch == 0x7F {
+            return;
+        }
+        if let Some(c) = char::from_u32(ch).filter(|c| !c.is_control()) {
+            let mut b = [0u8; 4];
+            self.insert_bytes(c.encode_utf8(&mut b).as_bytes());
         }
     }
 
@@ -314,8 +357,8 @@ impl App for Notes {
                 8 => self.backspace(),
                 127 => self.delete(),
                 10 => self.insert(b'\n'),
-                KEY_LEFT => self.cur = self.cur.saturating_sub(1),
-                KEY_RIGHT => self.cur = (self.cur + 1).min(self.len),
+                KEY_LEFT => self.cur = self.prev_boundary(self.cur),
+                KEY_RIGHT => self.cur = self.next_boundary(self.cur),
                 KEY_UP => self.up(),
                 KEY_DOWN => self.down(),
                 KEY_HOME => self.cur = self.line_start(self.cur),
@@ -381,6 +424,15 @@ impl App for Notes {
         let (mut col, mut row, mut from) = (0i32, 0i32, 0usize);
         let mut cursor_at = (ex, 42);
         for i in 0..=self.len {
+            // Columns count characters, not bytes: continuation bytes take no cell and a wrap
+            // never lands inside a character.
+            let starts_char = !self.is_cont(i);
+            if starts_char && i < self.len && self.buf[i] != b'\n' && col >= cols {
+                draw_line(c, &self.buf, from, i, ex, 42 + row * 12, max_y);
+                row += 1;
+                col = 0;
+                from = i;
+            }
             if i == self.cur {
                 cursor_at = (ex + col * 6, 42 + row * 12);
             }
@@ -395,12 +447,8 @@ impl App for Notes {
                 from = i + 1;
                 continue;
             }
-            col += 1;
-            if col >= cols {
-                draw_line(c, &self.buf, from, i + 1, ex, 42 + row * 12, max_y);
-                row += 1;
-                col = 0;
-                from = i + 1;
+            if starts_char {
+                col += 1;
             }
         }
         if self.focus == Focus::Editor {

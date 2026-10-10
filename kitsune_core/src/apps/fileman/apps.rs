@@ -109,7 +109,7 @@ pub fn manifest_lines(m: &Manifest) -> Vec<String> {
     alloc::vec![
         crate::t!(
             "files.app.line.app",
-            name = m.name.as_str(),
+            name = m.display_name(),
             id = m.id.as_str()
         ),
         crate::t!(

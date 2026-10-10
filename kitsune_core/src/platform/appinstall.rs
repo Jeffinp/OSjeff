@@ -314,12 +314,39 @@ fn write_seeded(fs: &mut dyn AppFs, ids: &[String]) -> Result<(), FsError> {
     write_all(fs, SEEDED, text.as_bytes())
 }
 
+/// Replace the installed copy of `m.id` with `pkg` when that copy is older. The new bytes are
+/// written to a temporary file first, so a failed write leaves the old package in place.
+fn upgrade_if_older(fs: &mut dyn AppFs, pkg: &[u8], m: &Manifest) -> bool {
+    let Ok(old) = read_package(fs, &m.id) else {
+        return false;
+    };
+    match check(&old) {
+        Ok(o) if o.version < m.version => {}
+        _ => return false,
+    }
+    let _ = fs.remove(TMP);
+    if fs.create(TMP).is_err() {
+        return false;
+    }
+    // The temporary copy is complete before the old package goes; `rename` does not replace.
+    let ok = write_all(fs, TMP, pkg).is_ok()
+        && fs.remove(&package_path(&m.id)).is_ok()
+        && fs.rename(TMP, &package_path(&m.id)).is_ok();
+    if !ok {
+        let _ = fs.remove(TMP);
+    }
+    ok
+}
+
 /// Seeding for a volume that **persists**: each bundled package is offered once,
 /// ever. A marker (`/apps/.seeded`, the ids already offered) keeps a package the
 /// user removed from coming back at the next boot, while a package that is new in
 /// this build of the OS (not in the marker) is still installed. A package that
 /// fails for a transient reason (no space) is not marked, so it is retried.
-/// Returns how many were installed now.
+/// A package already offered whose installed copy is **older** than the bundled one
+/// (same id, lower version) is upgraded in place, so a disk formatted by an earlier
+/// build gets the current names and fixes; a newer or equal copy is left alone.
+/// Returns how many were installed or upgraded now.
 pub fn seed_once(fs: &mut dyn AppFs, bundled: &[&[u8]]) -> usize {
     if fs.mkdir_all(APPS_DIR).is_err() {
         return 0;
@@ -330,6 +357,9 @@ pub fn seed_once(fs: &mut dyn AppFs, bundled: &[&[u8]]) -> usize {
     for pkg in bundled {
         let Ok(m) = check(pkg) else { continue };
         if seen.contains(&m.id) {
+            if upgrade_if_older(fs, pkg, &m) {
+                installed += 1;
+            }
             continue;
         }
         match install(fs, pkg) {
